@@ -85,6 +85,7 @@ pub fn StateMachineType(
 
         pub fn reset(state_machine: *StateMachine) void {
             state_machine.forest.reset();
+
             state_machine.* = .{
                 .options = state_machine.options,
                 .forest = state_machine.forest,

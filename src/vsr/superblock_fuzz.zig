@@ -233,7 +233,7 @@ const Environment = struct {
         // faults for pending writes) and clear the read/write queues.
         env.superblock_verify.storage.copy(env.superblock.storage);
         env.superblock_verify.storage.reset();
-        env.superblock_verify.client_sessions.clear();
+        env.superblock_verify.client_sessions.reset();
         env.superblock_verify.open(verify_callback, &env.context_verify);
 
         env.pending_verify = true;

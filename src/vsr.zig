@@ -35,11 +35,11 @@ pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
-pub const SyncStage = @import("vsr/sync.zig").SyncStage;
-pub const SyncTargetCandidate = @import("vsr/sync.zig").SyncTargetCandidate;
-pub const SyncTarget = @import("vsr/sync.zig").SyncTarget;
-pub const SyncTargetQuorum = @import("vsr/sync.zig").SyncTargetQuorum;
-pub const SyncTrailer = @import("vsr/sync.zig").SyncTrailer;
+pub const SyncStage = @import("vsr/sync.zig").Stage;
+pub const SyncTarget = @import("vsr/sync.zig").Target;
+pub const SyncTargetCandidate = @import("vsr/sync.zig").TargetCandidate;
+pub const SyncTargetQuorum = @import("vsr/sync.zig").TargetQuorum;
+pub const SyncTrailer = @import("vsr/sync.zig").Trailer;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
@@ -251,8 +251,8 @@ pub const Header = extern struct {
     /// reordered through a view change never repeat the same IV for the same encryption key.
     ///
     /// * A `prepare_ok` sets this to the checkpoint id. (TODO(Big headers): Use a separate field.)
-    /// * A `commit` sets this to its checkpoint id. (Possibly uncanonical.)
-    /// * A `ping` sets this to its checkpoint id. (Possibly uncanonical.)
+    /// * A `commit` sets this to the checkpoint id. (Possibly uncanonical.)
+    /// * A `ping` sets this to the checkpoint id. (Possibly uncanonical.)
     /// * A `request_sync_manifest` sets this to the requested checkpoint id.
     /// * A `request_sync_free_set` sets this to the requested checkpoint id.
     /// * A `request_sync_client_sessions` sets this to the requested checkpoint id.

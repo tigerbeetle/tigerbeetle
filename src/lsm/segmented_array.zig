@@ -165,6 +165,8 @@ fn SegmentedArrayType(
                 .nodes = array.nodes,
                 .indexes = array.indexes,
             };
+
+            if (options.verify) array.verify();
         }
 
         pub fn verify(array: Self) void {

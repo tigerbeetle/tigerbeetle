@@ -148,6 +148,7 @@ pub fn PostedGrooveType(comptime Storage: type, value_count_max: usize) type {
 
         pub fn reset(groove: *PostedGroove) void {
             groove.tree.reset();
+
             groove.prefetch_ids.clearRetainingCapacity();
             groove.prefetch_objects.clearRetainingCapacity();
 

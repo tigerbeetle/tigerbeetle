@@ -86,6 +86,8 @@ pub fn ManifestLevelType(
         pub fn deinit(level: *Self, allocator: mem.Allocator, node_pool: *NodePool) void {
             level.keys.deinit(allocator, node_pool);
             level.tables.deinit(allocator, node_pool);
+
+            level.* = undefined;
         }
 
         pub fn reset(level: *Self) void {

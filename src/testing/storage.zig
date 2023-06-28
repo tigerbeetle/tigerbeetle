@@ -124,8 +124,11 @@ pub const Storage = struct {
 
     pub const NextTick = struct {
         next: ?*NextTick = null,
+        source: NextTickSource,
         callback: fn (next_tick: *NextTick) void,
     };
+
+    pub const NextTickSource = enum { lsm, vsr };
 
     allocator: mem.Allocator,
 
@@ -147,8 +150,7 @@ pub const Storage = struct {
     writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
 
     ticks: u64 = 0,
-    next_tick_queue_lsm: FIFO(NextTick) = .{ .name = "storage_next_tick_lsm" },
-    next_tick_queue_vsr: FIFO(NextTick) = .{ .name = "storage_next_tick_vsr" },
+    next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(options.write_latency_mean >= options.write_latency_min);
@@ -198,11 +200,10 @@ pub const Storage = struct {
     /// Cancel any currently in-progress reads/writes.
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
-        log.debug("Reset: {} pending reads, {} pending writes, {};{} pending next_ticks", .{
+        log.debug("Reset: {} pending reads, {} pending writes, {} pending next_ticks", .{
             storage.reads.len,
             storage.writes.len,
-            storage.next_tick_queue_lsm.count,
-            storage.next_tick_queue_vsr.count,
+            storage.next_tick_queue.count,
         });
         while (storage.writes.peek()) |_| {
             const write = storage.writes.remove();
@@ -216,8 +217,7 @@ pub const Storage = struct {
         assert(storage.writes.len == 0);
 
         storage.reads.len = 0;
-        storage.next_tick_queue_lsm.reset();
-        storage.next_tick_queue_vsr.reset();
+        storage.next_tick_queue.reset();
     }
 
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
@@ -273,35 +273,32 @@ pub const Storage = struct {
         }
 
         // Process the queues in a single loop, since their callbacks may append to each other.
-        while (storage.next_tick_queue_lsm.count > 0 or
-            storage.next_tick_queue_vsr.count > 0)
-        {
-            if (storage.next_tick_queue_lsm.pop()) |next_tick| {
-                next_tick.callback(next_tick);
-            }
-
-            if (storage.next_tick_queue_vsr.pop()) |next_tick| {
-                next_tick.callback(next_tick);
-            }
+        while (storage.next_tick_queue.pop()) |next_tick| {
+            next_tick.callback(next_tick);
         }
     }
 
     pub fn on_next_tick(
         storage: *Storage,
-        source: enum { lsm, vsr },
+        source: NextTickSource,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
-        next_tick.* = .{ .callback = callback };
+        next_tick.* = .{
+            .source = source,
+            .callback = callback,
+        };
 
-        switch (source) {
-            .lsm => storage.next_tick_queue_lsm.push(next_tick),
-            .vsr => storage.next_tick_queue_vsr.push(next_tick),
-        }
+        storage.next_tick_queue.push(next_tick);
     }
 
     pub fn reset_next_tick_lsm(storage: *Storage) void {
-        storage.next_tick_queue_lsm.reset();
+        var next_tick_iterator = storage.next_tick_queue;
+        storage.next_tick_queue.reset();
+
+        while (next_tick_iterator.pop()) |next_tick| {
+            if (next_tick.source != .lsm) storage.next_tick_queue.push(next_tick);
+        }
     }
 
     /// * Verifies that the read fits within the target sector.
@@ -572,7 +569,7 @@ pub const Storage = struct {
         }
 
         if (assert_failed) {
-            panic("Pending io in zone: {}", .{zone});
+            panic("Pending reads in zone: {}", .{zone});
         }
     }
 
@@ -588,7 +585,7 @@ pub const Storage = struct {
         }
 
         if (assert_failed) {
-            panic("Pending io in zone: {}", .{zone});
+            panic("Pending writes in zone: {}", .{zone});
         }
     }
 };

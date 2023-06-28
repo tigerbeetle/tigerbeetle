@@ -303,8 +303,13 @@ pub fn StateMachineType(
         }
 
         // TODO Reset here and in LSM should clean up (i.e. end) tracer spans.
+        // tracer.end() requires an event be passed in. We will need an additional tracer.end
+        // function that doesn't require the explicit event be passed in. The Trace should store the
+        // event so that it knows what event should be ending during reset() (and deinit(), maybe).
+        // Then the original tracer.end() can assert that the two events match.
         pub fn reset(self: *StateMachine) void {
             self.forest.reset();
+
             self.* = .{
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,

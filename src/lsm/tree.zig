@@ -233,13 +233,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
             assert(tree.tracer_slot == null);
 
-            tree.compaction_table_immutable.deinit(allocator);
             for (tree.compaction_table) |*compaction| compaction.deinit(allocator);
+            tree.compaction_table_immutable.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
-            tree.table_mutable.deinit(allocator);
-            tree.table_immutable.deinit(allocator);
             tree.manifest.deinit(allocator);
+            tree.table_immutable.deinit(allocator);
+            tree.table_mutable.deinit(allocator);
 
             if (tree.values_cache) |cache| {
                 cache.deinit(allocator);
@@ -250,10 +250,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
         pub fn reset(tree: *Tree) void {
             tree.table_mutable.reset();
             tree.table_immutable.clear();
-            if (tree.values_cache) |cache| cache.reset();
             tree.manifest.reset();
+
             tree.compaction_table_immutable.reset();
             for (tree.compaction_table) |*compaction| compaction.reset();
+
+            if (tree.values_cache) |cache| cache.reset();
 
             tree.* = .{
                 .grid = tree.grid,

@@ -18,7 +18,6 @@ const StateMachineType = switch (state_machine) {
 
 const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
-const Replica = @import("testing/cluster.zig").Replica;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
 const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
@@ -641,7 +640,7 @@ pub const Simulator = struct {
             recoverable_count += @boolToInt(simulator.cluster.replica_health[i] == .up and
                 !replica.standby() and
                 replica.status != .recovering_head and
-                replica.sync_stage == .none);
+                replica.sync_stage == .not_syncing);
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -659,7 +658,7 @@ pub const Simulator = struct {
 
                     recoverable_count -= @boolToInt(!replica.standby() and
                         replica.status != .recovering_head and
-                        replica.sync_stage == .none);
+                        replica.sync_stage == .not_syncing);
 
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);
@@ -710,10 +709,10 @@ pub const Simulator = struct {
         replica_storage.faulty = fault;
         simulator.cluster.restart_replica(replica_index) catch unreachable;
 
-        const replica = &simulator.cluster.replicas[replica_index];
+        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
         if (replica.status == .recovering_head) {
-            // Even with faults disabled, a replica that was syncing before its crashed
-            // (or just recently finished syncing before it crash) may wind up in
+            // Even with faults disabled, a replica that was syncing before it crashed
+            // (or just recently finished syncing before it crashed) may wind up in
             // status=recovering_head.
             assert(fault or replica.op < replica.op_checkpoint());
         }
