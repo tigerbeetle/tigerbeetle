@@ -292,6 +292,8 @@ pub fn main() !void {
             output.warn("no liveness, core replicas cannot view-change", .{});
         } else if (simulator.core_missing_prepare()) |header| {
             output.warn("no liveness, op={} is not available in core", .{header.op});
+        } else if (simulator.core_missing_blocks()) |blocks| {
+            output.warn("no liveness, {} blocks are not available in core", .{blocks});
         } else {
             output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
             simulator.cluster.log_cluster();
@@ -520,6 +522,39 @@ pub const Simulator = struct {
         }
 
         return missing_header;
+    }
+
+    /// Check whether the cluster is stuck because the entire core is missing the same block[s].
+    pub fn core_missing_blocks(simulator: *const Simulator) ?usize {
+        assert(simulator.core.count() > 0);
+
+        var missing_block_count: ?usize = null;
+        var missing_block_xor: ?u128 = null;
+
+        for (simulator.cluster.replicas) |replica| {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                var fault_xor: u128 = 0;
+                var fault_iterator = replica.grid.read_faulty_queue.peek();
+                while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
+                    fault_xor ^= faulty_read.checksum;
+                }
+
+                if (missing_block_count) |_| {
+                    assert(missing_block_count.? == replica.grid.read_faulty_queue.count);
+                    assert(missing_block_xor.? == fault_xor);
+                } else {
+                    missing_block_count = replica.grid.read_faulty_queue.count;
+                    missing_block_xor = fault_xor;
+                }
+            }
+        }
+
+        if (missing_block_count.? == 0) {
+            return null;
+        } else {
+            assert(missing_block_xor.? != 0);
+            return missing_block_count;
+        }
     }
 
     fn on_cluster_reply(
