@@ -289,6 +289,8 @@ pub fn main() !void {
     } else {
         if (simulator.core_missing_primary()) {
             stdx.unimplemented("repair requires reachable primary");
+        } else if (simulator.core_missing_quorum()) {
+            output.warn("no liveness, core replicas cannot view-change", .{});
         } else if (simulator.core_missing_prepare()) |header| {
             output.warn("no liveness, op={} is not available in core", .{header.op});
         } else {
@@ -457,6 +459,28 @@ pub const Simulator = struct {
             }
         }
         return false;
+    }
+
+    /// The core contains at least a view-change quorum of replicas. But if one or more of those
+    /// replicas are in status=recovering_head (due to corruption or state sync), then that may be
+    /// insufficient.
+    pub fn core_missing_quorum(simulator: *const Simulator) bool {
+        assert(simulator.core.count() > 0);
+
+        var core_replicas: usize = 0;
+        var core_recovering_head: usize = 0;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                core_replicas += 1;
+                core_recovering_head += @boolToInt(replica.status == .recovering_head);
+            }
+        }
+
+        if (core_recovering_head == 0) return false;
+
+        const quorums = vsr.quorums(simulator.options.cluster.replica_count);
+        assert(quorums.view_change > core_replicas - core_recovering_head);
+        return true;
     }
 
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
