@@ -468,6 +468,9 @@ pub const Simulator = struct {
     /// The core contains at least a view-change quorum of replicas. But if one or more of those
     /// replicas are in status=recovering_head (due to corruption or state sync), then that may be
     /// insufficient.
+    /// TODO: State sync can trigger recovering_head without any crashes, and we should be able to
+    /// recover in that case.
+    /// (See https://github.com/tigerbeetledb/tigerbeetle/pull/933#discussion_r1245440623)
     pub fn core_missing_quorum(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 
