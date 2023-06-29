@@ -153,10 +153,14 @@ abstract class Request<TResponse extends Batch> {
         }
     }
 
+    // Unused: Used by unit tests.
+    @SuppressWarnings("unused")
     void setReplyBuffer(byte[] buffer) {
         this.replyBuffer = buffer;
     }
 
+    // Unused: Used by the JNI side.
+    @SuppressWarnings("unused")
     byte getOperation() {
         return this.operation.value;
     }

@@ -120,14 +120,15 @@ const ReflectionHelper = struct {
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
 
-        var buffer_obj = env.getField(.object, this_obj, request_send_buffer_field_id) orelse return null;
+        var buffer_obj = env.getField(.object, this_obj, request_send_buffer_field_id) orelse
+            return null;
         defer env.deleteReference(.local, buffer_obj);
 
         var buffer_len = env.getField(.long, this_obj, request_send_buffer_len_field_id);
-        var address = env.getDirectBufferAddress(buffer_obj);
+        var buffer: []u8 = env.getDirectBufferAddress(buffer_obj);
 
         // The buffer can be larger than the actual message content,
-        return address[0..@intCast(usize, buffer_len)];
+        return buffer[0..@intCast(usize, buffer_len)];
     }
 
     pub fn set_reply_buffer(env: *jui.JNIEnv, this_obj: jui.jobject, reply: []const u8) void {
