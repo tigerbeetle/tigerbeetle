@@ -455,19 +455,7 @@ public class BlockingRequestTest {
     }
 
     private static NativeClient getDummyClient() {
-        var client = NativeClient.initEcho(0, "3000", 1);;
-
-        try {
-            // Calling close() to avoid the native client
-            // trying to release the dummy packet pointer.
-            client.close();
-        } catch (Exception any) {
-            // Converting into an unchecked exception
-            // to not have to use try..catch blocks.
-            throw new IllegalStateException(any);
-        }
-
-        return client;
+        return NativeClient.initEcho(0, "3000", 1);
     }
 
     private class CallbackSimulator<T extends Batch> extends Thread {
