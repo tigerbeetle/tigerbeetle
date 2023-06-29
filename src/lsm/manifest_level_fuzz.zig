@@ -4,7 +4,7 @@
 //!
 //! Applies operations to both the ManifestLevel and a separate table buffer to ensure the tables in
 //! both match up along the way. Sporadic usage similar to Manifest/Tree is applied to make sure it
-//! covers a good amount of positive space. 
+//! covers a good amount of positive space.
 //!
 //! Under various interleavings (those not common during normal usage but still allowed), tables are
 //! inserted and eventually either have their snapshot_max updated to the current snapshot or
@@ -55,7 +55,6 @@ inline fn tombstone(value: *const Value) bool {
     return value.tombstone;
 }
 
-const TableInfo = @import("manifest.zig").TableInfoType(Table);
 const Table = @import("table.zig").TableType(
     Key,
     Value,
@@ -87,7 +86,10 @@ pub fn main() !void {
     const fuzz_ops = try generate_fuzz_ops(random, table_count_max, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
-    try EnvironmentType(table_count_max, node_size).run_fuzz_ops(random, fuzz_ops);
+    const Environment = EnvironmentType(@as(u32, table_count_max), node_size);
+    var env = try Environment.init(random);
+    try env.run_fuzz_ops(fuzz_ops);
+    try env.deinit();
 }
 
 const FuzzOpTag = std.meta.Tag(FuzzOp);
@@ -224,20 +226,20 @@ const GenerateContext = struct {
     }
 };
 
-fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type {
+pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type {
     return struct {
         const Environment = @This();
 
         const TableBuffer = std.ArrayList(TableInfo);
         const NodePool = @import("node_pool.zig").NodePool(node_size, @alignOf(TableInfo));
-        const ManifestLevel = @import("manifest_level.zig").ManifestLevelType(
+        pub const ManifestLevel = @import("manifest_level.zig").ManifestLevelType(
             NodePool,
             Key,
             TableInfo,
             compare_keys,
             table_count_max,
         );
-
+        pub const TableInfo = @import("manifest.zig").TableInfoType(Table);
         pool: NodePool,
         level: ManifestLevel,
         buffer: TableBuffer,
@@ -245,26 +247,36 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
         random: std.rand.Random,
         snapshot: u64,
 
-        pub fn run_fuzz_ops(random: std.rand.Random, fuzz_ops: []const FuzzOp) !void {
+        pub fn init(random: std.rand.Random) !Environment {
             var env: Environment = undefined;
 
             const node_pool_size = ManifestLevel.Keys.node_count_max +
                 ManifestLevel.Tables.node_count_max;
             env.pool = try NodePool.init(allocator, node_pool_size);
-            defer env.pool.deinit(allocator);
+            errdefer env.pool.deinit(allocator);
 
             env.level = try ManifestLevel.init(allocator);
-            defer env.level.deinit(allocator, &env.pool);
+            errdefer env.level.deinit(allocator, &env.pool);
 
             env.buffer = TableBuffer.init(allocator);
-            defer env.buffer.deinit();
+            errdefer env.buffer.deinit();
 
             env.tables = TableBuffer.init(allocator);
-            defer env.tables.deinit();
+            errdefer env.tables.deinit();
 
             env.random = random;
             env.snapshot = 1; // the first snapshot is reserved.
+            return env;
+        }
 
+        pub fn deinit(env: *Environment) !void {
+            env.tables.deinit();
+            env.buffer.deinit();
+            env.level.deinit(allocator, &env.pool);
+            env.pool.deinit(allocator);
+        }
+
+        pub fn run_fuzz_ops(env: *Environment, fuzz_ops: []const FuzzOp) !void {
             for (fuzz_ops) |fuzz_op, op_index| {
                 log.debug("Running fuzz_ops[{}/{}] == {}", .{ op_index, fuzz_ops.len, fuzz_op });
                 switch (fuzz_op) {
@@ -277,7 +289,7 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
             }
         }
 
-        fn insert_tables(env: *Environment, amount: usize) !void {
+        pub fn insert_tables(env: *Environment, amount: usize) !void {
             assert(amount > 0);
             assert(env.buffer.items.len == 0);
 
@@ -385,10 +397,16 @@ fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) type 
                 const env_table = env.find_exact(level_table);
                 assert(level_table.equal(env_table));
 
-                env.level.set_snapshot_max(env.snapshot, env_table);
-                assert(env_table.snapshot_max == env.snapshot);
-                assert(!env_table.visible(lsm.snapshot_latest));
-                assert(env_table.visible(env.snapshot));
+                env.level.set_snapshot_max(env.snapshot, .{
+                    .table_info = @intToPtr(*TableInfo, @ptrToInt(level_table)),
+                    .generation = env.level.generation,
+                });
+                // This is required to keep the table in the fuzzer's environment consistent with
+                // the table in the ManifestLevel.
+                env_table.snapshot_max = env.snapshot;
+                assert(level_table.snapshot_max == env.snapshot);
+                assert(!level_table.visible(lsm.snapshot_latest));
+                assert(level_table.visible(env.snapshot));
 
                 update_amount -= 1;
                 if (update_amount == 0) break;

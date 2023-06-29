@@ -678,16 +678,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(values_count > 0);
 
             const level_b: u8 = 0;
-            const range = tree.manifest.compaction_range(
-                level_b,
+            const range_b = tree.manifest.immutable_table_compaction_range(
                 tree.table_immutable.key_min(),
                 tree.table_immutable.key_max(),
             );
 
-            assert(range.table_count >= 1);
-            assert(range.table_count <= compaction_tables_input_max);
-            assert(compare_keys(range.key_min, tree.table_immutable.key_min()) != .gt);
-            assert(compare_keys(range.key_max, tree.table_immutable.key_max()) != .lt);
+            assert(range_b.table_count >= 1);
+            assert(range_b.table_count <= compaction_tables_input_max);
+            assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
+            assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);
+            assert(range_b.table_count == range_b.tables.len + 1);
+
 
             log.debug(tree_name ++
                 ": compacting immutable table to level 0 " ++
@@ -695,7 +696,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.table_immutable.values.len,
                 tree.table_immutable.snapshot_min,
                 op_min,
-                range.table_count,
+                range_b.table_count,
             });
 
             tree.compaction_io_pending += 1;
@@ -705,7 +706,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .op_min = op_min,
                 .table_info_a = .{ .immutable = tree.table_immutable.values },
                 .level_b = level_b,
-                .range_b = range,
+                .range_b = range_b,
                 .callback = compact_table_finish,
             });
         }
@@ -720,16 +721,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
 
             // Do not start compaction if level A does not require compaction.
             const table_range = tree.manifest.compaction_table(context.level_a) orelse return;
-            const table = table_range.table;
+            const table_a = table_range.table_a.table_info;
+            const range_b = table_range.range_b;
 
-            assert(table_range.range.table_count >= 1);
-            assert(table_range.range.table_count <= compaction_tables_input_max);
-            assert(compare_keys(table.key_min, table.key_max) != .gt);
-            assert(compare_keys(table_range.range.key_min, table.key_min) != .gt);
-            assert(compare_keys(table_range.range.key_max, table.key_max) != .lt);
+            assert(range_b.table_count >= 1);
+            assert(range_b.table_count <= compaction_tables_input_max);
+            assert(compare_keys(table_a.key_min, table_a.key_max) != .gt);
+            assert(compare_keys(range_b.key_min, table_a.key_min) != .gt);
+            assert(compare_keys(range_b.key_max, table_a.key_max) != .lt);
 
             log.debug(tree_name ++ ": compacting {d} tables from level {d} to level {d}", .{
-                table_range.range.table_count,
+                range_b.table_count,
                 context.level_a,
                 context.level_b,
             });
@@ -739,9 +741,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 .grid = tree.grid,
                 .tree = tree,
                 .op_min = op_min,
-                .table_info_a = .{ .disk = table_range.table },
+                .table_info_a = .{ .disk = table_range.table_a },
                 .level_b = context.level_b,
-                .range_b = table_range.range,
+                .range_b = range_b,
                 .callback = compact_table_finish,
             });
         }
