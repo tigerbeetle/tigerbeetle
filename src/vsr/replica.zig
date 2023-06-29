@@ -1878,8 +1878,15 @@ pub fn ReplicaType(
                         prepare_checksum,
                         message.header.replica,
                     );
+                    return;
                 }
             }
+
+            log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
+                self.replica,
+                op,
+                checksum,
+            });
         }
 
         fn on_request_prepare_read(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
@@ -6384,19 +6391,19 @@ pub fn ReplicaType(
 
                 const dvc_headers = message_body_as_view_headers(dvc);
                 const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                const dvc_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
                 for (dvc_headers.slice) |*header, i| {
-                    log.debug(
-                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={} type={s}",
-                        .{
-                            self.replica,
-                            context,
-                            dvc.header.replica,
-                            header.op,
-                            header.checksum,
-                            dvc_nacks.isSet(i),
-                            @tagName(vsr.Headers.dvc_header_type(header)),
-                        },
-                    );
+                    log.debug("{}: {s}: dvc: header: " ++
+                        "replica={} op={} checksum={} nack={} present={} type={s}", .{
+                        self.replica,
+                        context,
+                        dvc.header.replica,
+                        header.op,
+                        header.checksum,
+                        dvc_nacks.isSet(i),
+                        dvc_present.isSet(i),
+                        @tagName(vsr.Headers.dvc_header_type(header)),
+                    });
                 }
             }
         }
