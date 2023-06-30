@@ -683,9 +683,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.table_immutable.key_max(),
             );
 
-            // range_b.tables holds references to the tables in Level B that intersect
-            // with the optimal compaction table in Level A. We add 1 to account for the optimal
-            // compaction table.
+            // +1 to count the input table from level A.
             assert(range_b.tables.len + 1 <= compaction_tables_input_max);
             assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);

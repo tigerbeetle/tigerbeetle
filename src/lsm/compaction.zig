@@ -256,10 +256,6 @@ pub fn CompactionType(
                 @src(),
             );
 
-            // context.range_b.tables holds references to the tables in Level B that intersect
-            // with the optimal compaction table in Level A. The move-table optimization can
-            // be applied if the optimal compaction table in Level A does not intersect with any
-            // table in Level B.
             const move_table =
                 context.table_info_a == .disk and
                 context.range_b.tables.len == 0;
@@ -279,7 +275,7 @@ pub fn CompactionType(
             const grid_reservation = if (move_table)
                 null
             else
-                // We add 1 to account for the optimal compaction table from Level A.
+                // +1 to count the input table from level A.
                 context.grid.reserve(
                     (context.range_b.tables.len + 1) * Table.block_count_max,
                 ).?;
