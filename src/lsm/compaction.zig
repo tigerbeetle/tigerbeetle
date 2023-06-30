@@ -47,7 +47,7 @@ const alloc_block = @import("grid.zig").alloc_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
-const LevelDataIteratorType = @import("level_data_iterator.zig").LevelDataIteratorType;
+const LevelTableValueBlockIteratorType = @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
@@ -65,7 +65,7 @@ pub fn CompactionType(
         const Manifest = ManifestType(Table, Storage);
         const CompactionRange = Manifest.CompactionRange;
         const TableDataIterator = TableDataIteratorType(Storage);
-        const LevelDataIterator = LevelDataIteratorType(Table, Storage);
+        const LevelTableValueBlockIterator = LevelTableValueBlockIteratorType(Table, Storage);
 
         const Key = Table.Key;
         const Value = Table.Value;
@@ -73,9 +73,11 @@ pub fn CompactionType(
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
+        const TableInfoReference = Manifest.TableInfoReference;
+
         pub const TableInfoA = union(enum) {
             immutable: []const Value,
-            disk: TableInfo,
+            disk: TableInfoReference,
         };
 
         pub const Context = struct {
@@ -105,8 +107,9 @@ pub fn CompactionType(
 
         // Allocated during `init`.
         iterator_a: TableDataIterator,
-        iterator_b: LevelDataIterator,
+        iterator_b: LevelTableValueBlockIterator,
         index_block_a: BlockPtr,
+        index_block_b: BlockPtr,
         data_blocks: [2]BlockPtr,
         table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
@@ -116,8 +119,6 @@ pub fn CompactionType(
         manifest_entries: std.BoundedArray(struct {
             operation: enum {
                 insert_to_level_b,
-                update_in_level_a,
-                update_in_level_b,
                 move_to_level_b,
             },
             table: TableInfo,
@@ -125,8 +126,6 @@ pub fn CompactionType(
             // Worst-case manifest updates:
             // See docs/internals/lsm.md "Compaction Table Overlap" for more detail.
             var count = 0;
-            count += 1; // Update the input table from level A.
-            count += constants.lsm_growth_factor; // Update the input tables from level B.
             count += constants.lsm_growth_factor + 1; // Insert the output tables to level B.
             // (In the move-table case, only a single TableInfo is inserted, and none are updated.)
             break :manifest_entries_max count;
@@ -135,6 +134,10 @@ pub fn CompactionType(
         // Passed by `start`.
         context: Context,
 
+        // Whether this compaction will use the move-table optimization.
+        // Specifically, this field is set to True if the optimal compaction
+        // table in level A can simply be moved to level B.
+        move_table: bool,
         grid_reservation: ?Grid.Reservation,
         drop_tombstones: bool,
 
@@ -166,14 +169,17 @@ pub fn CompactionType(
         iterator_tracer_slot: ?tracer.SpanStart,
 
         pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
-            var iterator_a = try TableDataIterator.init(allocator);
-            errdefer iterator_a.deinit(allocator);
+            var iterator_a = try TableDataIterator.init();
+            errdefer iterator_a.deinit();
 
-            var iterator_b = try LevelDataIterator.init(allocator);
-            errdefer iterator_b.deinit(allocator);
+            var iterator_b = try LevelTableValueBlockIterator.init();
+            errdefer iterator_b.deinit();
 
             const index_block_a = try alloc_block(allocator);
             errdefer allocator.free(index_block_a);
+
+            const index_block_b = try alloc_block(allocator);
+            errdefer allocator.free(index_block_b);
 
             var data_blocks: [2]Grid.BlockPtr = undefined;
 
@@ -192,6 +198,7 @@ pub fn CompactionType(
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
                 .index_block_a = index_block_a,
+                .index_block_b = index_block_b,
                 .data_blocks = data_blocks,
                 .table_builder = table_builder,
 
@@ -203,7 +210,7 @@ pub fn CompactionType(
 
                 .input_state = .remaining,
                 .state = .idle,
-
+                .move_table = undefined,
                 .tracer_slot = null,
                 .iterator_tracer_slot = null,
             };
@@ -213,8 +220,9 @@ pub fn CompactionType(
             compaction.table_builder.deinit(allocator);
             for (compaction.data_blocks) |data_block| allocator.free(data_block);
             allocator.free(compaction.index_block_a);
-            compaction.iterator_b.deinit(allocator);
-            compaction.iterator_a.deinit(allocator);
+            allocator.free(compaction.index_block_b);
+            compaction.iterator_b.deinit();
+            compaction.iterator_a.deinit();
         }
 
         pub fn reset(compaction: *Compaction) void {
@@ -248,7 +256,7 @@ pub fn CompactionType(
                 @src(),
             );
 
-            const can_move_table =
+            const move_table =
                 context.table_info_a == .disk and
                 context.range_b.table_count == 1;
 
@@ -264,7 +272,7 @@ pub fn CompactionType(
             // TODO(Compaction Pacing): Reserve smaller increments, at the start of each beat.
             // (And likewise release the reservation at the end of each beat, instead of at the
             // end of each half-bar).
-            const grid_reservation = if (can_move_table)
+            const grid_reservation = if (move_table)
                 null
             else
                 context.grid.reserve(
@@ -285,6 +293,7 @@ pub fn CompactionType(
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
                 .index_block_a = compaction.index_block_a,
+                .index_block_b = compaction.index_block_b,
                 .data_blocks = compaction.data_blocks,
                 .table_builder = compaction.table_builder,
 
@@ -299,9 +308,10 @@ pub fn CompactionType(
 
                 .tracer_slot = compaction.tracer_slot,
                 .iterator_tracer_slot = compaction.iterator_tracer_slot,
+                .move_table = move_table,
             };
 
-            if (can_move_table) {
+            if (move_table) {
                 // If we can just move the table, don't bother with compaction.
 
                 log.debug(
@@ -310,7 +320,7 @@ pub fn CompactionType(
                 );
 
                 const snapshot_max = snapshot_max_for_table_input(context.op_min);
-                const table_a = &context.table_info_a.disk;
+                const table_a = context.table_info_a.disk.table_info;
                 assert(table_a.snapshot_max >= snapshot_max);
 
                 compaction.manifest_entries.appendAssumeCapacity(.{
@@ -330,11 +340,10 @@ pub fn CompactionType(
 
                 compaction.iterator_b.start(.{
                     .grid = context.grid,
-                    .manifest = &context.tree.manifest,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .key_min = context.range_b.key_min,
-                    .key_max = context.range_b.key_max,
+                    .tables = context.range_b.tables,
+                    .index_block = compaction.index_block_b,
                 });
 
                 switch (context.table_info_a) {
@@ -342,13 +351,13 @@ pub fn CompactionType(
                         compaction.values_in[0] = values;
                         compaction.loop_start();
                     },
-                    .disk => |table_info| {
+                    .disk => |table_ref| {
                         compaction.state = .iterator_init_a;
                         compaction.context.grid.read_block(
                             on_iterator_init_a,
                             &compaction.read,
-                            table_info.address,
-                            table_info.checksum,
+                            table_ref.table_info.address,
+                            table_ref.table_info.checksum,
                             .index,
                         );
                     },
@@ -368,7 +377,7 @@ pub fn CompactionType(
                 .addresses = Table.index_data_addresses_used(compaction.index_block_a),
                 .checksums = Table.index_data_checksums_used(compaction.index_block_a),
             });
-
+            compaction.release_table_blocks(compaction.index_block_a);
             compaction.state = .compacting;
             compaction.loop_start();
         }
@@ -410,22 +419,20 @@ pub fn CompactionType(
             }
         }
 
-        fn on_index_block(
-            iterator_b: *LevelDataIterator,
-            table_info: TableInfo,
-            index_block: BlockPtrConst,
-        ) void {
+        fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
+            compaction.release_table_blocks(compaction.index_block_b);
+        }
 
-            // Tables that we've compacted should become invisible at the end of this half-bar.
-            compaction.manifest_entries.appendAssumeCapacity(.{
-                .operation = .update_in_level_b,
-                .table = table_info,
-            });
-
+        // TODO: Support for LSM snapshots would require us to only remove blocks
+        // that are invisible.
+        fn release_table_blocks(compaction: *Compaction, index_block: BlockPtrConst) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
-            // This is safe; iterator_b makes a copy of the block before calling us.
+            // This is safe; compaction.index_block_b holds a copy of the index block for a
+            // table in Level B. Additionally, compaction.index_block_a holds
+            // a copy of the index block for the Level A table being compacted.
+
             const grid = compaction.context.grid;
             for (Table.index_data_addresses_used(index_block)) |address| {
                 grid.release(address);
@@ -433,7 +440,7 @@ pub fn CompactionType(
             for (Table.index_filter_addresses_used(index_block)) |address| {
                 grid.release(address);
             }
-            grid.release(Table.index_block_address(index_block));
+            grid.release(Table.block_address(index_block));
         }
 
         fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
@@ -442,7 +449,7 @@ pub fn CompactionType(
             compaction.iterator_next(data_block);
         }
 
-        fn iterator_next_b(iterator_b: *LevelDataIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_b(iterator_b: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.iterator_next(data_block);
@@ -770,17 +777,6 @@ pub fn CompactionType(
                     compaction.context.grid.on_next_tick(loop_on_next_tick, &compaction.next_tick);
                 },
                 .exhausted => {
-                    // Mark the level_a table as invisible if it was provided;
-                    // it has been merged into level_b.
-                    // TODO: Release the grid blocks associated with level_a as well
-                    switch (compaction.context.table_info_a) {
-                        .immutable => {},
-                        .disk => |table| compaction.manifest_entries.appendAssumeCapacity(.{
-                            .operation = .update_in_level_a,
-                            .table = table,
-                        }),
-                    }
-
                     compaction.state = .next_tick;
                     compaction.context.grid.on_next_tick(done_on_next_tick, &compaction.next_tick);
                 },
@@ -816,7 +812,6 @@ pub fn CompactionType(
 
         pub fn apply_to_manifest(compaction: *Compaction) void {
             assert(compaction.state == .tables_writing_done);
-
             compaction.state = .applied_to_manifest;
 
             // Each compaction's manifest (log) updates are deferred to the end of the last
@@ -826,12 +821,38 @@ pub fn CompactionType(
             const manifest = &compaction.context.tree.manifest;
             const level_b = compaction.context.level_b;
             const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
+
+            // Update snapshot_max only if table in level A has been compacted
+            // with tables from level B. If no compaction is required, i.e.
+            // if a table in level A can simply be moved to level B, we needn't
+            // update snapshot_max.
+            // This update MUST be done before insert_table() and move_table()
+            // since it directly uses pointers to the ManifestLevel tables to
+            // perform updates. Calling insert_table() and move_table() before
+            // this update will cause these pointers to become invalid.
+            if (!compaction.move_table) {
+                switch (compaction.context.table_info_a) {
+                    .immutable => {},
+                    .disk => |table_info| {
+                        manifest.update_table(level_b - 1, snapshot_max, table_info);
+                    },
+                }
+                for (compaction.context.range_b.tables.slice()) |table| {
+                    manifest.update_table(level_b, snapshot_max, table);
+                }
+            }
+
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
-                    .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
-                    .update_in_level_a => manifest.update_table(level_b - 1, snapshot_max, &entry.table),
-                    .update_in_level_b => manifest.update_table(level_b, snapshot_max, &entry.table),
-                    .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
+                    .insert_to_level_b => manifest.insert_table(
+                        level_b,
+                        &entry.table,
+                    ),
+                    .move_to_level_b => manifest.move_table(
+                        level_b - 1,
+                        level_b,
+                        &entry.table,
+                    ),
                 }
             }
         }

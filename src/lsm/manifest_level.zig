@@ -38,6 +38,22 @@ pub fn ManifestLevelType(
 
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
+        pub const TableInfoReference = struct { table_info: *TableInfo, generation: u32 };
+
+        pub const LeastOverlapTable = struct {
+            table: TableInfoReference,
+            range: OverlapRange,
+        };
+
+        pub const OverlapRange = struct {
+            /// The minimum key across both levels.
+            key_min: Key,
+            /// The maximum key across both levels.
+            key_max: Key,
+            // References to tables in level B that intersect with the chosen table in level A.
+            tables: std.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
+        };
+
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
@@ -49,6 +65,10 @@ pub fn ManifestLevelType(
         /// The number of tables visible to snapshot_latest.
         /// Used to enforce table_count_max_for_level().
         table_count_visible: u32 = 0,
+
+        /// A monotonically increasing generation number that is used detect invalid internal
+        ///  TableInfo references.
+        generation: u32 = 0,
 
         pub fn init(allocator: mem.Allocator) !Self {
             var keys = try Keys.init(allocator);
@@ -69,56 +89,52 @@ pub fn ManifestLevelType(
         }
 
         /// Inserts the given table into the ManifestLevel.
-        pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
+        pub fn insert_table(
+            level: *Self,
+            node_pool: *NodePool,
+            table: *const TableInfo,
+        ) void {
+            if (constants.verify) {
+                assert(!level.contains(table));
+            }
             assert(level.keys.len() == level.tables.len());
 
             const absolute_index = level.keys.insert_element(node_pool, table.key_max);
             assert(absolute_index < level.keys.len());
+
             level.tables.insert_elements(node_pool, absolute_index, &[_]TableInfo{table.*});
+            if (constants.verify) {
+                assert(level.contains(table));
+            }
 
             if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
+            level.generation +%= 1;
 
             assert(level.keys.len() == level.tables.len());
         }
 
         /// Set snapshot_max for the given table in the ManifestLevel.
-        ///
         /// * The table is mutable so that this function can update its snapshot.
         /// * Asserts that the table currently has snapshot_max of math.maxInt(u64).
         /// * Asserts that the table exists in the manifest.
-        pub fn set_snapshot_max(level: *Self, snapshot: u64, table: *TableInfo) void {
-            assert(snapshot < lsm.snapshot_latest);
-            assert(table.snapshot_max == math.maxInt(u64));
-
+        pub fn set_snapshot_max(level: *Self, snapshot: u64, table_ref: TableInfoReference) void {
+            var table = table_ref.table_info;
             const key_min = table.key_min;
             const key_max = table.key_max;
+            assert(table_ref.generation == level.generation);
+            if (constants.verify) {
+                assert(level.contains(table));
+            }
+            assert(snapshot < lsm.snapshot_latest);
+            assert(table.snapshot_max == math.maxInt(u64));
             assert(compare_keys(key_min, key_max) != .gt);
 
-            var it = level.iterator(
-                .visible,
-                @as(*const [1]u64, &lsm.snapshot_latest),
-                .ascending,
-                KeyRange{ .key_min = key_min, .key_max = key_max },
-            );
-
-            const level_table_const = it.next().?;
-            // This const cast is safe as we know that the memory pointed to is in fact
-            // mutable. That is, the table is not in the .text or .rodata section. We do this
-            // to avoid duplicating the iterator code in order to expose only a const iterator
-            // in the public API.
-            const level_table = @intToPtr(*TableInfo, @ptrToInt(level_table_const));
-            assert(level_table.equal(table));
-            assert(level_table.snapshot_max == math.maxInt(u64));
-
-            level_table.snapshot_max = snapshot;
             table.snapshot_max = snapshot;
-
-            assert(it.next() == null);
             level.table_count_visible -= 1;
         }
 
         /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
-        /// Returns the same, unmodified table passed in to differentiate itself from 
+        /// Returns the same, unmodified table passed in to differentiate itself from
         /// remove_table_invisible and guard against using the wrong function.
         pub fn remove_table_visible(
             level: *Self,
@@ -126,6 +142,7 @@ pub fn ManifestLevelType(
             table: *const TableInfo,
         ) *const TableInfo {
             assert(table.visible(lsm.snapshot_latest));
+
             level.remove_table(node_pool, table);
             level.table_count_visible -= 1;
             return table;
@@ -157,6 +174,7 @@ pub fn ManifestLevelType(
                     level.keys.remove_elements(node_pool, absolute_index, 1);
                     level.tables.remove_elements(node_pool, absolute_index, 1);
                     assert(level.keys.len() == level.tables.len());
+                    level.generation +%= 1;
                     return;
                 }
             }
@@ -206,7 +224,10 @@ pub fn ManifestLevelType(
                     switch (direction) {
                         .ascending => break :blk level.tables.iterator_from_index(0, direction),
                         .descending => {
-                            break :blk level.tables.iterator_from_cursor(level.tables.last(), .descending);
+                            break :blk level.tables.iterator_from_cursor(
+                                level.tables.last(),
+                                .descending,
+                            );
                         },
                     }
                 }
@@ -376,7 +397,6 @@ pub fn ManifestLevelType(
         /// The function is only used for verification; it is not performance-critical.
         pub fn contains(level: Self, table: *const TableInfo) bool {
             assert(constants.verify);
-
             var level_tables = level.iterator(.visible, &.{
                 table.snapshot_min,
             }, .ascending, KeyRange{
@@ -387,6 +407,194 @@ pub fn ManifestLevelType(
                 if (level_table.equal(table)) return true;
             }
             return false;
+        }
+
+        /// Given two levels (where A is the level on which this function
+        /// is invoked and B is the other level), finds a table in Level A that
+        /// overlaps with the least number of tables in Level B.
+        ///
+        /// * Exits early if it finds a table that doesn't overlap with any
+        ///   tables in the second level.
+        pub fn table_with_least_overlap(
+            level_a: *const Self,
+            level_b: *const Self,
+            snapshot: u64,
+            max_overlapping_tables: usize,
+        ) ?LeastOverlapTable {
+            assert(max_overlapping_tables <= constants.lsm_growth_factor);
+
+            var optimal: ?LeastOverlapTable = null;
+            const snapshots = [1]u64{snapshot};
+            var iterations: usize = 0;
+            var it = level_a.iterator(
+                .visible,
+                &snapshots,
+                .ascending,
+                null, // All visible tables in the level therefore no KeyRange filter.
+            );
+
+            while (it.next()) |table| {
+                iterations += 1;
+
+                const range = level_b.tables_overlapping_with_key_range(
+                    table.key_min,
+                    table.key_max,
+                    snapshot,
+                    max_overlapping_tables,
+                ) orelse continue;
+                if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
+                    optimal = LeastOverlapTable{
+                        .table = TableInfoReference{
+                            .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
+                            .generation = level_a.generation,
+                        },
+                        .range = range,
+                    };
+                }
+                // If the table can be moved directly between levels then that is already optimal.
+                if (optimal.?.range.tables.len == 0) break;
+            }
+            assert(iterations > 0);
+            assert(iterations == level_a.table_count_visible or
+                optimal.?.range.tables.len == 0);
+
+            return optimal.?;
+        }
+
+        /// Returns the next table in the range, after `key_exclusive` if provided.
+        ///
+        /// * The table returned is visible to `snapshot`.
+        pub fn next_table(self: *const Self, parameters: struct {
+            snapshot: u64,
+            key_min: Key,
+            key_max: Key,
+            key_exclusive: ?Key,
+            direction: Direction,
+        }) ?*const TableInfo {
+            const key_min = parameters.key_min;
+            const key_max = parameters.key_max;
+            const key_exclusive = parameters.key_exclusive;
+            const direction = parameters.direction;
+            const snapshot = parameters.snapshot;
+            const snapshots = [_]u64{snapshot};
+
+            assert(compare_keys(key_min, key_max) != .gt);
+
+            if (key_exclusive == null) {
+                return self.iterator(
+                    .visible,
+                    &snapshots,
+                    direction,
+                    KeyRange{ .key_min = key_min, .key_max = key_max },
+                ).next();
+            }
+
+            assert(compare_keys(key_exclusive.?, key_min) != .lt);
+            assert(compare_keys(key_exclusive.?, key_max) != .gt);
+
+            const key_min_exclusive = if (direction == .ascending) key_exclusive.? else key_min;
+            const key_max_exclusive = if (direction == .descending) key_exclusive.? else key_max;
+            assert(compare_keys(key_min_exclusive, key_max_exclusive) != .gt);
+
+            var it = self.iterator(
+                .visible,
+                &snapshots,
+                direction,
+                KeyRange{ .key_min = key_min_exclusive, .key_max = key_max_exclusive },
+            );
+
+            while (it.next()) |table| {
+                assert(table.visible(snapshot));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, key_min_exclusive) != .lt);
+                assert(compare_keys(table.key_min, key_max_exclusive) != .gt);
+
+                // These conditions are required to avoid iterating over the same
+                // table twice. This is because the invoker sets key_exclusive to the
+                // key_max or key_max of the previous table returned by this function,
+                // based on the direction of iteration (ascending/descending).
+                // key_exclusive is then set as KeyRange.key_min or KeyRange.key_max for the next
+                // ManifestLevel query. This query would return the same table again,
+                // so it needs to be skipped.
+                const next = switch (direction) {
+                    .ascending => compare_keys(table.key_min, key_exclusive.?) == .gt,
+                    .descending => compare_keys(table.key_max, key_exclusive.?) == .lt,
+                };
+                if (next) return table;
+            }
+
+            return null;
+        }
+
+        /// Returns the smallest visible range of tables in the given level
+        /// that overlap with the given range: [key_min, key_max], or null
+        /// if the number of tables that intersect with the range is > max_overlapping_tables.
+        ///
+        /// The range keys are guaranteed to encompass all the relevant level A and level B tables:
+        ///   range.key_min = min(a.key_min, b.key_min)
+        ///   range.key_max = max(a.key_max, b.key_max)
+        ///
+        /// This last invariant is critical to ensuring that tombstones are dropped correctly.
+        ///
+        /// * Assumption: Currently, we only support a maximum of lsm_growth_factor
+        ///   overlapping tables. This is because OverlapRange.tables is a
+        ///   BoundedArray of size lsm_growth_factor. This works with our current
+        ///   compaction strategy that is guaranteed to choose a table with that
+        ///   intersects with <= lsm_growth_factor tables in the next level.
+        pub fn tables_overlapping_with_key_range(
+            level: *const Self,
+            key_min: Key,
+            key_max: Key,
+            snapshot: u64,
+            max_overlapping_tables: usize,
+        ) ?OverlapRange {
+            assert(max_overlapping_tables <= constants.lsm_growth_factor);
+
+            var range = OverlapRange{
+                .key_min = key_min,
+                .key_max = key_max,
+                .tables = .{ .buffer = undefined },
+            };
+            const snapshots = [1]u64{snapshot};
+            var it = level.iterator(
+                .visible,
+                &snapshots,
+                .ascending,
+                KeyRange{ .key_min = range.key_min, .key_max = range.key_max },
+            );
+
+            while (it.next()) |table| {
+                assert(table.visible(lsm.snapshot_latest));
+                assert(compare_keys(table.key_min, table.key_max) != .gt);
+                assert(compare_keys(table.key_max, range.key_min) != .lt);
+                assert(compare_keys(table.key_min, range.key_max) != .gt);
+
+                // The first iterated table.key_min/max may overlap range.key_min/max entirely.
+                if (compare_keys(table.key_min, range.key_min) == .lt) {
+                    range.key_min = table.key_min;
+                }
+
+                // Thereafter, iterated tables may/may not extend the range in ascending order.
+                if (compare_keys(table.key_max, range.key_max) == .gt) {
+                    range.key_max = table.key_max;
+                }
+                // This const cast is safe as we know that the memory pointed to is in fact
+                // mutable. That is, the table is not in the .text or .rodata section.
+                if (range.tables.len < max_overlapping_tables) {
+                    var table_info_reference = TableInfoReference{
+                        .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
+                        .generation = level.generation,
+                    };
+                    range.tables.appendAssumeCapacity(table_info_reference);
+                } else {
+                    return null;
+                }
+            }
+            assert(compare_keys(range.key_min, range.key_max) != .gt);
+            assert(compare_keys(range.key_min, key_min) != .gt);
+            assert(compare_keys(range.key_max, key_max) != .lt);
+
+            return range;
         }
     };
 }
@@ -673,7 +881,24 @@ pub fn TestContext(
             const snapshot = context.take_snapshot();
 
             for (context.reference.items[index..][0..count]) |*table| {
-                context.level.set_snapshot_max(snapshot, table);
+                const cursor_start = context.level.iterator_start(
+                    table.key_min,
+                    table.key_min,
+                    .ascending,
+                ).?;
+                var absolute_index = context.level.keys.absolute_index_for_cursor(cursor_start);
+
+                var it = context.level.tables.iterator_from_index(absolute_index, .ascending);
+                while (it.next()) |level_table| {
+                    if (level_table.equal(table)) {
+                        context.level.set_snapshot_max(snapshot, .{
+                            .table_info = @intToPtr(*TableInfo, @ptrToInt(level_table)),
+                            .generation = context.level.generation,
+                        });
+                        table.snapshot_max = snapshot;
+                        break;
+                    }
+                }
             }
 
             for (context.snapshot_tables.slice()) |tables| {

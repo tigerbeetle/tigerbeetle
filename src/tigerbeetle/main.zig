@@ -61,7 +61,13 @@ pub fn main() !void {
 const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
 const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
 
-const Command = struct {
+const Command = struct 
+
+
+       {
+
+
+
     dir_fd: os.fd_t,
     fd: os.fd_t,
     io: IO,
