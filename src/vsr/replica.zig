@@ -3518,9 +3518,17 @@ pub fn ReplicaType(
                         nacks.set(i);
                     }
 
-                    if (journal_header != null and journal_header.?.checksum == header.checksum and
-                        !faulty)
+                    // Presence bit: the prepare is on disk, is being written to disk, or is cached
+                    // in memory. These conditions mirror logic in `on_request_prepare` and imply
+                    // that we can help the new primary to repair this prepare.
+                    if ((self.journal.prepare_inhabited[slot.index] and
+                        self.journal.prepare_checksums[slot.index] == header.checksum) or
+                        self.journal.writing(header.op, header.checksum) or
+                        self.pipeline_prepare_by_op_and_checksum(header.op, header.checksum) != null)
                     {
+                        if (journal_header != null) {
+                            assert(journal_header.?.checksum == header.checksum);
+                        }
                         maybe(nacks.isSet(i));
                         present.set(i);
                     }
@@ -7497,21 +7505,22 @@ const DVCQuorum = struct {
 
                 const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 const header_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
+
+                if (vsr.Headers.dvc_header_type(header) == .valid and
+                    header_present.isSet(header_index) and
+                    header_canonical != null and header_canonical.?.checksum == header.checksum)
+                {
+                    copies += 1;
+                }
+
                 if (header_nacks.isSet(header_index)) {
+                    // The op is nacked explicitly.
                     nacks += 1;
-                } else if (header_canonical) |expect| {
-                    if (vsr.Headers.dvc_header_type(header) == .valid) {
-                        if (expect.checksum == header.checksum) {
-                            if (header_present.isSet(header_index)) {
-                                copies += 1;
-                            }
-                        } else {
-                            // The replica's prepare is available, but for a different header.
-                            nacks += 1;
-                        }
-                    } else {
-                        // The replica's prepare is faulty, with an unknown header.
-                    }
+                } else if (vsr.Headers.dvc_header_type(header) == .valid and
+                    header_canonical != null and header_canonical.?.checksum != header.checksum)
+                {
+                    // The op is nacked implicitly, because the replica has a different header.
+                    nacks += 1;
                 }
             }
 
