@@ -795,9 +795,9 @@ pub const Header = extern struct {
         assert(self.command == .block);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.view != 0) return "view != 0";
         if (self.op == 0) return "op == 0"; // address ≠ 0
+        if (self.commit != 0) return "commit != 0";
         if (self.replica != 0) return "replica != 0";
         if (self.operation == .reserved) return "operation == .reserved";
         return null;
