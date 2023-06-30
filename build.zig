@@ -607,8 +607,9 @@ fn go_client(
         // We don't need the linux-gnu builds.
         if (comptime !std.mem.endsWith(u8, platform[0], "linux-gnu")) {
             const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
+            var b_isolated = builder_platform(b, platform[0]);
 
-            const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+            const lib = b_isolated.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
             lib.setMainPkgPath("src");
             lib.setTarget(cross_target);
             lib.setBuildMode(mode);
@@ -650,8 +651,9 @@ fn java_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_platform(b, platform[0]);
 
-        const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
+        const lib = b_isolated.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
         lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform[0]);
@@ -694,8 +696,9 @@ fn dotnet_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_platform(b, platform[0]);
 
-        const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        const lib = b_isolated.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.setOutputDir("src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native");
         lib.setTarget(cross_target);
@@ -737,11 +740,12 @@ fn node_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_platform(b, platform[0]);
 
         if (cross_target.os_tag.? == .windows) {
             // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
         } else {
-            const lib = b.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
+            const lib = b_isolated.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
             lib.setMainPkgPath("src");
             lib.setOutputDir("src/clients/node/dist/bin/" ++ platform[0]);
 
@@ -791,8 +795,9 @@ fn c_client(
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
-        const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
-        const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+        var b_isolated = builder_platform(b, platform[0]);
+        const shared_lib = b_isolated.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        const static_lib = b_isolated.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
         static_lib.bundle_compiler_rt = true;
         static_lib.pie = true;
 
@@ -960,4 +965,22 @@ fn client_docs(
     client_docs_build.dependOn(&install_step.step);
 
     maybe_execute(b, allocator, client_docs_build, "client_docs");
+}
+
+/// Creates a new isolated build, with separated cache dirs for each platform.
+/// https://github.com/ziglang/zig/issues/9711#issuecomment-1090071087
+/// Note, this builder leaks memory, since there is no way to deinit it.
+fn builder_platform(
+    b: *std.build.Builder,
+    comptime platform: []const u8,
+) *std.build.Builder {
+    const cache_root = b.pathJoin(&.{ b.cache_root, platform });
+    const global_cache_root = b.pathJoin(&.{ b.global_cache_root, platform });
+    return std.build.Builder.create(
+        b.allocator,
+        b.zig_exe,
+        b.build_root,
+        cache_root,
+        global_cache_root,
+    ) catch unreachable;
 }
