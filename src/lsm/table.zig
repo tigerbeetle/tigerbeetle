@@ -67,7 +67,8 @@ const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 /// │ […]u8{0}                     │ padding (to end of block)
 ///
 /// Filter block schema:
-/// │ vsr.Header │ operation=BlockType.filter
+/// │ vsr.Header │ operation=BlockType.filter,
+/// │            │ context=TableFilterSchema.context
 /// │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 /// │            │   `filter_data_block_count_max` data blocks.
 ///
@@ -246,15 +247,9 @@ pub fn TableType(
             .data_block_count_max = data_block_count_max,
         });
 
-        pub const filter = struct {
-            pub const data_block_count_max = layout.filter_data_block_count_max;
-
-            const filter_offset = @sizeOf(vsr.Header);
-            const filter_size = block_size - filter_offset;
-
-            const padding_offset = filter_offset + filter_size;
-            const padding_size = block_size - padding_offset;
-        };
+        const filter = TableFilterSchema.init(.{
+            .data_block_count_max = layout.filter_data_block_count_max,
+        });
 
         pub const data = struct {
             const key_count = layout.block_key_count;
@@ -507,7 +502,7 @@ pub fn TableType(
 
                 if (constants.verify) {
                     if (builder.data_blocks_in_filter == 0) {
-                        assert(stdx.zeroed(filter_block_filter(builder.filter_block)));
+                        assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
                     }
                 }
 
@@ -517,7 +512,7 @@ pub fn TableType(
 
                 const values = values_max[0..builder.value_count];
 
-                const filter_bytes = filter_block_filter(builder.filter_block);
+                const filter_bytes = filter.block_filter(builder.filter_block);
                 for (values) |*value| {
                     const key = key_from_value(value);
                     const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
@@ -622,6 +617,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
                 header.* = .{
                     .cluster = options.cluster,
+                    .context = @bitCast(u128, TableFilterSchema.Context{
+                        .data_block_count_max = data_block_count_max,
+                    }),
                     .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
@@ -791,14 +789,6 @@ pub fn TableType(
             const address = header.op;
             assert(address > 0);
             return address;
-        }
-
-        pub inline fn filter_block_filter(filter_block: BlockPtr) []u8 {
-            return filter_block[filter.filter_offset..][0..filter.filter_size];
-        }
-
-        pub inline fn filter_block_filter_const(filter_block: BlockPtrConst) []const u8 {
-            return filter_block[filter.filter_offset..][0..filter.filter_size];
         }
 
         pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
@@ -1090,6 +1080,71 @@ pub const TableIndexSchema = struct {
         assert(value > 0);
         assert(value <= index.data_block_count_max);
         return value;
+    }
+};
+
+pub const TableFilterSchema = struct {
+    /// Stored in every filter block's header's `context` field.
+    const Context = extern struct {
+        data_block_count_max: u32,
+        reserved: [12]u8 = [_]u8{0} ** 12,
+
+        comptime {
+            assert(@sizeOf(Context) == @sizeOf(u128));
+            assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
+        }
+    };
+
+    /// The number of data blocks summarized by a single filter block.
+    data_block_count_max: u32,
+
+    filter_offset: u32,
+    filter_size: u32,
+    padding_offset: u32,
+    padding_size: u32,
+
+    fn init(parameters: Context) TableFilterSchema {
+        assert(parameters.data_block_count_max > 0);
+        assert(stdx.zeroed(&parameters.reserved));
+
+        const filter_offset = @sizeOf(vsr.Header);
+        const filter_size = block_size - filter_offset;
+        assert(filter_size == block_body_size);
+
+        const padding_offset = filter_offset + filter_size;
+        const padding_size = block_size - padding_offset;
+        assert(padding_size == 0);
+
+        return .{
+            .data_block_count_max = parameters.data_block_count_max,
+            .filter_offset = filter_offset,
+            .filter_size = filter_size,
+            .padding_offset = padding_offset,
+            .padding_size = padding_size,
+        };
+    }
+
+    pub fn from_filter_block(filter_block: BlockPtrConst) TableFilterSchema {
+        const header = mem.bytesAsValue(vsr.Header, filter_block[0..@sizeOf(vsr.Header)]);
+        assert(header.command == .block);
+        assert(BlockType.from(header.operation) == .filter);
+        assert(header.op > 0);
+
+        return TableFilterSchema.init(@bitCast(Context, header.context));
+    }
+
+    pub inline fn block_filter(
+        filter: *const TableFilterSchema,
+        filter_block: BlockPtr,
+    ) []u8 {
+        return filter_block[filter.filter_offset..][0..filter.filter_size];
+    }
+
+    pub inline fn block_filter_const(
+        filter: *const TableFilterSchema,
+        filter_block: BlockPtrConst,
+    ) []const u8 {
+        return filter_block[filter.filter_offset..][0..filter.filter_size];
     }
 };
 
