@@ -43,7 +43,7 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
-const alloc_block = @import("grid.zig").alloc_block;
+const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
@@ -175,18 +175,18 @@ pub fn CompactionType(
             var iterator_b = try LevelTableValueBlockIterator.init();
             errdefer iterator_b.deinit();
 
-            const index_block_a = try alloc_block(allocator);
+            const index_block_a = try allocate_block(allocator);
             errdefer allocator.free(index_block_a);
 
-            const index_block_b = try alloc_block(allocator);
+            const index_block_b = try allocate_block(allocator);
             errdefer allocator.free(index_block_b);
 
             var data_blocks: [2]Grid.BlockPtr = undefined;
 
-            data_blocks[0] = try alloc_block(allocator);
+            data_blocks[0] = try allocate_block(allocator);
             errdefer allocator.free(data_blocks[0]);
 
-            data_blocks[1] = try alloc_block(allocator);
+            data_blocks[1] = try allocate_block(allocator);
             errdefer allocator.free(data_blocks[1]);
 
             var table_builder = try Table.Builder.init(allocator);

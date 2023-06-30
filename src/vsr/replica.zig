@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
-const alloc_block = @import("../lsm/grid.zig").alloc_block;
+const allocate_block = @import("../lsm/grid.zig").allocate_block;
 const GridType = @import("../lsm/grid.zig").GridType;
 const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
@@ -753,7 +753,7 @@ pub fn ReplicaType(
 
             for (self.grid_write_blocks) |*block, i| {
                 errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
-                block.* = try alloc_block(allocator);
+                block.* = try allocate_block(allocator);
             }
             errdefer for (self.grid_write_blocks) |b| allocator.free(b);
 
