@@ -127,8 +127,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         };
 
         pub const CompactionRange = struct {
-            /// The total number of tables in the compaction across both levels, always at least 1.
-            table_count: usize,
             /// The minimum key across both levels.
             key_min: Key,
             /// The maximum key across both levels.
@@ -443,10 +441,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             const compaction_table_range = CompactionTableRange{
                 .table_a = least_overlap_table.table,
                 .range_b = CompactionRange{
-                    // The range.table_count includes the input table from
-                    // level A represented by key_min/max. Thus, range.table_count=1
-                    // means that the table may be moved directly between levels.
-                    .table_count = least_overlap_table.range.tables.len + 1,
                     .key_min = least_overlap_table.range.key_min,
                     .key_max = least_overlap_table.range.key_max,
                     .tables = least_overlap_table.range.tables,
@@ -481,10 +475,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(compare_keys(range.key_max, key_max) != .lt);
 
             return .{
-                // The range.table_count includes the input table from
-                // level A represented by key_min/max. Thus, range.table_count=1
-                // means that the table may be moved directly between levels.
-                .table_count = range.tables.len + 1,
                 .key_min = range.key_min,
                 .key_max = range.key_max,
                 .tables = range.tables,
@@ -498,7 +488,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             range: CompactionRange,
         ) bool {
             assert(level_b < constants.lsm_levels);
-            assert(range.table_count > 0);
             assert(compare_keys(range.key_min, range.key_max) != .gt);
 
             var level_c: u8 = level_b + 1;

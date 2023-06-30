@@ -258,7 +258,7 @@ pub fn CompactionType(
 
             const move_table =
                 context.table_info_a == .disk and
-                context.range_b.table_count == 1;
+                context.range_b.tables.len == 0;
 
             // Reserve enough blocks to write our output tables in the worst case, where:
             // - no tombstones are dropped,
@@ -275,8 +275,9 @@ pub fn CompactionType(
             const grid_reservation = if (move_table)
                 null
             else
+                // +1 to count the input table from level A.
                 context.grid.reserve(
-                    context.range_b.table_count * Table.block_count_max,
+                    (context.range_b.tables.len + 1) * Table.block_count_max,
                 ).?;
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
