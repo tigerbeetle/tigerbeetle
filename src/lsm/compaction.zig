@@ -256,9 +256,13 @@ pub fn CompactionType(
                 @src(),
             );
 
+            // context.range_b.tables holds references to the tables in Level B that intersect
+            // with the optimal compaction table in Level A. The move-table optimization can
+            // be applied if the optimal compaction table in Level A does not intersect with any
+            // table in Level B.
             const move_table =
                 context.table_info_a == .disk and
-                context.range_b.table_count == 1;
+                context.range_b.tables.len == 0;
 
             // Reserve enough blocks to write our output tables in the worst case, where:
             // - no tombstones are dropped,
@@ -275,8 +279,9 @@ pub fn CompactionType(
             const grid_reservation = if (move_table)
                 null
             else
+                // We add 1 to account for the optimal compaction table from Level A.
                 context.grid.reserve(
-                    context.range_b.table_count * Table.block_count_max,
+                    (context.range_b.tables.len + 1) * Table.block_count_max,
                 ).?;
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.

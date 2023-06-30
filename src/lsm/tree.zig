@@ -683,11 +683,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.table_immutable.key_max(),
             );
 
-            assert(range_b.table_count >= 1);
-            assert(range_b.table_count <= compaction_tables_input_max);
+            // range_b.tables holds references to the tables in Level B that intersect
+            // with the optimal compaction table in Level A. We add 1 to account for the optimal
+            // compaction table.
+            assert(range_b.tables.len + 1 <= compaction_tables_input_max);
             assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);
-            assert(range_b.table_count == range_b.tables.len + 1);
 
 
             log.debug(tree_name ++
@@ -696,7 +697,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 tree.table_immutable.values.len,
                 tree.table_immutable.snapshot_min,
                 op_min,
-                range_b.table_count,
+                range_b.tables.len + 1,
             });
 
             tree.compaction_io_pending += 1;
@@ -724,14 +725,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             const table_a = table_range.table_a.table_info;
             const range_b = table_range.range_b;
 
-            assert(range_b.table_count >= 1);
-            assert(range_b.table_count <= compaction_tables_input_max);
+            assert(range_b.tables.len + 1 <= compaction_tables_input_max);
             assert(compare_keys(table_a.key_min, table_a.key_max) != .gt);
             assert(compare_keys(range_b.key_min, table_a.key_min) != .gt);
             assert(compare_keys(range_b.key_max, table_a.key_max) != .lt);
 
             log.debug(tree_name ++ ": compacting {d} tables from level {d} to level {d}", .{
-                range_b.table_count,
+                range_b.tables.len + 1,
                 context.level_a,
                 context.level_b,
             });
@@ -755,7 +755,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 });
             } else {
                 log.debug(tree_name ++ ": compacted {d} tables from level {d} to level {d}", .{
-                    compaction.context.range_b.table_count,
+                    compaction.context.range_b.tables.len + 1,
                     compaction.context.level_b - 1,
                     compaction.context.level_b,
                 });
