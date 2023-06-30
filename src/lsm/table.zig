@@ -73,7 +73,9 @@ const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 /// │            │   `filter_data_block_count_max` data blocks.
 ///
 /// Data block schema:
-/// │ vsr.Header               │ operation=BlockType.data
+/// │ vsr.Header               │ operation=BlockType.data,
+/// │                          │ context=TableDataSchema.context,
+/// │                          │ request=values_count
 /// │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
 /// │ [≤value_count_max]Value  │ At least one value (no empty tables).
 /// │ […]u8{0}                 │ padding (to end of block)
@@ -251,19 +253,12 @@ pub fn TableType(
             .data_block_count_max = layout.filter_data_block_count_max,
         });
 
-        pub const data = struct {
-            const key_count = layout.block_key_count;
-            pub const block_value_count_max = layout.block_value_count_max;
-
-            const key_layout_offset = @sizeOf(vsr.Header);
-            const key_layout_size = layout.block_key_layout_size;
-
-            const values_offset = key_layout_offset + key_layout_size;
-            const values_size = block_value_count_max * value_size;
-
-            const padding_offset = values_offset + values_size;
-            const padding_size = block_size - padding_offset;
-        };
+        pub const data = TableDataSchema.init(.{
+            .key_count = layout.block_key_count,
+            .key_layout_size = layout.block_key_layout_size,
+            .value_count_max = layout.block_value_count_max,
+            .value_size = value_size,
+        });
 
         const compile_log_layout = false;
         comptime {
@@ -340,7 +335,7 @@ pub fn TableType(
                         filter.padding_size,
 
                         data.key_count,
-                        data.block_value_count_max,
+                        data.value_count_max,
                         data.key_layout_offset,
                         data.key_layout_size,
                         data.values_offset,
@@ -363,7 +358,7 @@ pub fn TableType(
 
             const filter_bytes_per_key = 2;
             assert(filter_block_count_max * filter.filter_size >=
-                data_block_count_max * data.block_value_count_max * filter_bytes_per_key);
+                data_block_count_max * data.value_count_max * filter_bytes_per_key);
 
             assert(index.size == @sizeOf(vsr.Header) +
                 data_block_count_max * (key_size + address_size + checksum_size) +
@@ -398,13 +393,13 @@ pub fn TableType(
                 assert(data.values_offset == data.key_layout_offset);
             }
 
-            assert(data.block_value_count_max > 0);
-            assert(data.block_value_count_max >= data.key_count);
-            assert(@divExact(data.values_size, value_size) == data.block_value_count_max);
+            assert(data.value_count_max > 0);
+            assert(data.value_count_max >= data.key_count);
+            assert(@divExact(data.values_size, value_size) == data.value_count_max);
             assert(data.values_offset % constants.cache_line_size == 0);
             // You can have any size value you want, as long as it fits
             // neatly into the CPU cache lines :)
-            assert((data.block_value_count_max * value_size) % constants.cache_line_size == 0);
+            assert((data.value_count_max * value_size) % constants.cache_line_size == 0);
 
             assert(data.padding_size >= 0);
             assert(block_size == @sizeOf(vsr.Header) + data.key_layout_size +
@@ -479,13 +474,13 @@ pub fn TableType(
             }
 
             pub fn data_block_empty(builder: *const Builder) bool {
-                assert(builder.value_count <= data.block_value_count_max);
+                assert(builder.value_count <= data.value_count_max);
                 return builder.value_count == 0;
             }
 
             pub fn data_block_full(builder: *const Builder) bool {
-                assert(builder.value_count <= data.block_value_count_max);
-                return builder.value_count == data.block_value_count_max;
+                assert(builder.value_count <= data.value_count_max);
+                return builder.value_count == data.value_count_max;
             }
 
             const DataFinishOptions = struct {
@@ -508,7 +503,7 @@ pub fn TableType(
 
                 const block = builder.data_block;
                 const values_max = Table.data_block_values(block);
-                assert(values_max.len == data.block_value_count_max);
+                assert(values_max.len == data.value_count_max);
 
                 const values = values_max[0..builder.value_count];
 
@@ -538,7 +533,7 @@ pub fn TableType(
                     );
                     const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                    const e = eytzinger(data.key_count, data.block_value_count_max);
+                    const e = eytzinger(data.key_count, data.value_count_max);
                     e.layout_from_keys_or_values(
                         Key,
                         Value,
@@ -558,8 +553,14 @@ pub fn TableType(
 
                 header.* = .{
                     .cluster = options.cluster,
+                    .context = @bitCast(u128, TableDataSchema.Context{
+                        .key_count = data.key_count,
+                        .key_layout_size = data.key_layout_size,
+                        .value_count_max = data.value_count_max,
+                        .value_size = value_size,
+                    }),
                     .op = options.address,
-                    .request = @intCast(u32, values.len),
+                    .request = builder.value_count,
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
                     .operation = BlockType.data.operation(),
@@ -765,23 +766,11 @@ pub fn TableType(
         }
 
         pub inline fn data_block_values(data_block: BlockPtr) []Value {
-            return mem.bytesAsSlice(
-                Value,
-                data_block[data.values_offset..][0..data.values_size],
-            );
+            return mem.bytesAsSlice(Value, data.block_values_bytes(data_block));
         }
 
         pub inline fn data_block_values_used(data_block: BlockPtrConst) []const Value {
-            const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
-            // TODO we should be able to cross-check this with the header size
-            // for more safety.
-            const used = @intCast(u32, header.request);
-            assert(used <= data.block_value_count_max);
-            const slice = mem.bytesAsSlice(
-                Value,
-                data_block[data.values_offset..][0..data.values_size],
-            );
-            return slice[0..used];
+            return mem.bytesAsSlice(Value, data.block_values_used_bytes(data_block));
         }
 
         pub inline fn block_address(block: BlockPtrConst) u64 {
@@ -802,7 +791,7 @@ pub fn TableType(
                 );
                 const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                const e = eytzinger(data.key_count, data.block_value_count_max);
+                const e = eytzinger(data.key_count, data.value_count_max);
                 break :blk e.search_values(
                     Key,
                     Value,
@@ -1145,6 +1134,106 @@ pub const TableFilterSchema = struct {
         filter_block: BlockPtrConst,
     ) []const u8 {
         return filter_block[filter.filter_offset..][0..filter.filter_size];
+    }
+};
+
+pub const TableDataSchema = struct {
+    /// Stored in every data block's header's `context` field.
+    const Context = extern struct {
+        key_count: u32,
+        key_layout_size: u32,
+        value_count_max: u32,
+        value_size: u32,
+
+        comptime {
+            assert(@sizeOf(Context) == @sizeOf(u128));
+            assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
+        }
+    };
+
+    // The number of keys in the Eytzinger layout per data block.
+    key_count: u32,
+    // @sizeOf(Table.Value)
+    value_size: u32,
+    // The maximum number of values in a data block.
+    value_count_max: u32,
+
+    key_layout_offset: u32,
+    // The number of bytes used by the keys in the data block.
+    key_layout_size: u32,
+
+    values_offset: u32,
+    values_size: u32,
+
+    padding_offset: u32,
+    padding_size: u32,
+
+    fn init(parameters: Context) TableDataSchema {
+        assert(parameters.value_count_max > 0);
+        assert(parameters.value_size > 0);
+        assert(std.math.isPowerOfTwo(parameters.value_size));
+
+        const key_count = parameters.key_count;
+        const value_count_max = parameters.value_count_max;
+
+        const key_layout_offset = @sizeOf(vsr.Header);
+        const key_layout_size = parameters.key_layout_size;
+
+        const values_offset = key_layout_offset + key_layout_size;
+        const values_size = parameters.value_count_max * parameters.value_size;
+
+        const padding_offset = values_offset + values_size;
+        const padding_size = block_size - padding_offset;
+
+        return .{
+            .key_count = key_count,
+            .value_size = parameters.value_size,
+            .value_count_max = value_count_max,
+            .key_layout_offset = key_layout_offset,
+            .key_layout_size = key_layout_size,
+            .values_offset = values_offset,
+            .values_size = values_size,
+            .padding_offset = padding_offset,
+            .padding_size = padding_size,
+        };
+    }
+
+    pub fn from_data_block(data_block: BlockPtrConst) TableDataSchema {
+        const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
+        assert(header.command == .block);
+        assert(BlockType.from(header.operation) == .data);
+        assert(header.op > 0);
+
+        return TableDataSchema.init(@bitCast(Context, header.context));
+    }
+
+    pub inline fn block_values_bytes(
+        schema: *const TableDataSchema,
+        data_block: BlockPtr,
+    ) []align(16) u8 {
+        return data_block[schema.values_offset..][0..schema.values_size];
+    }
+
+    pub inline fn block_values_bytes_const(
+        schema: *const TableDataSchema,
+        data_block: BlockPtrConst,
+    ) []align(16) const u8 {
+        return data_block[schema.values_offset..][0..schema.values_size];
+    }
+
+    pub inline fn block_values_used_bytes(
+        schema: *const TableDataSchema,
+        data_block: BlockPtrConst,
+    ) []align(16) const u8 {
+        const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
+        // TODO we should be able to cross-check this with the header size
+        // for more safety.
+        const used_values = @intCast(u32, header.request);
+        assert(used_values > 0);
+        assert(used_values <= schema.value_count_max);
+
+        const used_bytes = used_values * schema.value_size;
+        return schema.block_values_bytes_const(data_block)[0..used_bytes];
     }
 };
 
