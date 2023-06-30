@@ -607,7 +607,7 @@ fn go_client(
         // We don't need the linux-gnu builds.
         if (comptime !std.mem.endsWith(u8, platform[0], "linux-gnu")) {
             const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
-            var b_isolated = builder_platform(b, platform[0]);
+            var b_isolated = builder_with_isolated_cache(b, cross_target);
 
             const lib = b_isolated.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
             lib.setMainPkgPath("src");
@@ -651,7 +651,7 @@ fn java_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_platform(b, platform[0]);
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
         const lib = b_isolated.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
@@ -696,7 +696,7 @@ fn dotnet_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_platform(b, platform[0]);
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
         const lib = b_isolated.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
@@ -740,7 +740,7 @@ fn node_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
-        var b_isolated = builder_platform(b, platform[0]);
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
         if (cross_target.os_tag.? == .windows) {
             // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
@@ -794,8 +794,8 @@ fn c_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
-        var b_isolated = builder_platform(b, platform[0]);
         const shared_lib = b_isolated.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         const static_lib = b_isolated.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
         static_lib.bundle_compiler_rt = true;
@@ -967,15 +967,38 @@ fn client_docs(
     maybe_execute(b, allocator, client_docs_build, "client_docs");
 }
 
-/// Creates a new isolated build, with separated cache dirs for each platform.
-/// https://github.com/ziglang/zig/issues/9711#issuecomment-1090071087
-/// Note, this builder leaks memory, since there is no way to deinit it.
-fn builder_platform(
+/// Creates a new Builder, with isolated cache for each platform.
+/// Hit some issues with the build cache between cross compilations:
+/// - From Linux, it runs fine.
+/// - From Windows it fails on libc "invalid object".
+/// - From MacOS, similar to https://github.com/ziglang/zig/issues/9711#issuecomment-1090071087.
+/// Workarround: Just setting different cache folders for each platform.
+fn builder_with_isolated_cache(
     b: *std.build.Builder,
-    comptime platform: []const u8,
+    target: CrossTarget,
 ) *std.build.Builder {
-    const cache_root = b.pathJoin(&.{ b.cache_root, platform });
-    const global_cache_root = b.pathJoin(&.{ b.global_cache_root, platform });
+    // This workaround isn't necessary when cross-compiling from Linux.
+    if (builtin.os.tag == .linux) return b;
+
+    // If not cross-compiling, we can return the current *Builder in order
+    // to reuse the same cache from other artifacts.
+    if (target.cpu_arch.? == builtin.cpu.arch and
+        target.os_tag.? == builtin.os.tag)
+        return b;
+
+    // Generating isolated cache and global_cache dirs for each cpu/os:
+    const cache_root = b.pathJoin(&.{
+        b.cache_root,
+        @tagName(target.cpu_arch.?),
+        @tagName(target.os_tag.?),
+    });
+    const global_cache_root = b.pathJoin(&.{
+        b.global_cache_root,
+        @tagName(target.cpu_arch.?),
+        @tagName(target.os_tag.?),
+    });
+
+    // Note, this builder leaks memory, since there is no way to deinit it.
     return std.build.Builder.create(
         b.allocator,
         b.zig_exe,
