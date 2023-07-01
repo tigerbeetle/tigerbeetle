@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const ManifestType = @import("manifest.zig").ManifestType;
-const alloc_block = @import("grid.zig").alloc_block;
+const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 

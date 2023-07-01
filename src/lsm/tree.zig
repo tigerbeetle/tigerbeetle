@@ -688,7 +688,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
             assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);
 
-
             log.debug(tree_name ++
                 ": compacting immutable table to level 0 " ++
                 "(values.len={d} snapshot_min={d} compaction.op_min={d} table_count={d})", .{
