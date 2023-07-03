@@ -555,6 +555,10 @@ fn link_tracer_backend(
                 exe.linkSystemLibrary("dbghelp");
                 exe.linkSystemLibrary("ws2_32");
             }
+
+            // We might need to clone Tracy, if it doesn't exist
+            const git_clone = exe.builder.addSystemCommand(&.{ "sh", "-c", "test -d tools/tracy || (cd tools && git clone -b v0.9.1 https://github.com/wolfpld/tracy.git)" });
+            exe.step.dependOn(&git_clone.step);
         },
     }
 }
