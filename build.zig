@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
 const Mode = std.builtin.Mode;
+const file_or_directory_exists = @import("src/clients/shutil.zig").file_or_directory_exists;
 
 const config = @import("./src/config.zig");
 
@@ -557,9 +558,10 @@ fn link_tracer_backend(
             }
 
             // We might need to clone Tracy, if it doesn't exist
-            const git_clone = exe.builder.addSystemCommand(&.{ "sh", "-c", "test -d tools/tracy ||" ++
-                " (cd tools && git clone -b v0.9.1 https://github.com/wolfpld/tracy.git)" });
-            exe.step.dependOn(&git_clone.step);
+            if (!file_or_directory_exists("tools/tracy")) {
+                const git_clone = exe.builder.addSystemCommand(&.{ "git", "clone", "-b", "v0.9.1", "https://github.com/wolfpld/tracy.git", "tools/tracy" });
+                exe.step.dependOn(&git_clone.step);
+            }
         },
     }
 }
@@ -654,10 +656,13 @@ fn java_client(
     const bindings_step = bindings.run();
 
     // We might need to clone JUI, if it doesn't exist
-    const git_clone = b.addSystemCommand(&.{ "sh", "-c", "test -d src/clients/java/lib/jui ||" ++
-        " (cd src/clients/java/ && mkdir -p lib && cd lib && git clone https://github.com/zig-java/jui.git &&" ++
-        " cd jui && git checkout 1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8)" });
-    bindings_step.step.dependOn(&git_clone.step);
+    if (!file_or_directory_exists("src/clients/java/lib/jui")) {
+        const git_clone = b.addSystemCommand(&.{ "git", "clone", "https://github.com/zig-java/jui.git", "src/clients/java/lib/jui" });
+        const git_checkout = b.addSystemCommand(&.{ "git", "-C", "src/clients/java/lib/jui", "checkout", "1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8" });
+
+        git_checkout.step.dependOn(&git_clone.step);
+        bindings_step.step.dependOn(&git_checkout.step);
+    }
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;

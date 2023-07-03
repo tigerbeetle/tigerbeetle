@@ -219,10 +219,11 @@ pub fn binary_filename(arena: *std.heap.ArenaAllocator, parts: []const []const u
     return file_name.items;
 }
 
-pub fn file_or_directory_exists(arena: *std.heap.ArenaAllocator, f_or_d: []const u8) bool {
-    _ = std.fs.cwd().realpathAlloc(arena.allocator(), f_or_d) catch {
+pub fn file_or_directory_exists(f_or_d: []const u8) bool {
+    var file = std.fs.cwd().openFile(f_or_d, .{}) catch {
         return false;
     };
+    file.close();
 
     return true;
 }
