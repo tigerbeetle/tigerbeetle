@@ -11,7 +11,7 @@ fn go_current_commit_post_install_hook(
     root: []const u8,
 ) !void {
     try std.os.chdir(root);
-    if (!file_or_directory_exists(arena, "src/clients/go/pkg/native/x86_64-linux")) {
+    if (!file_or_directory_exists("src/clients/go/pkg/native/x86_64-linux")) {
         try run(arena, &[_][]const u8{
             try script_filename(arena, &[_][]const u8{ "scripts", "build" }),
             "go_client",
