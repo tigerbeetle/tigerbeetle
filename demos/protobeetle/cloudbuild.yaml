@@ -1,9 +1,0 @@
-steps:
-  - id: 'build tiger-beetle'
-    name: 'gcr.io/cloud-builders/gcloud'
-    args: ['builds', 'submit', '--config=cloudbuild-tiger-beetle.yaml', '--substitutions=SHORT_SHA=$SHORT_SHA']
-    waitFor: ['-'] #start in parallel
-  - id: 'build fast-ml-api-adapter'
-    name: 'gcr.io/cloud-builders/gcloud'
-    args: ['builds', 'submit', '--config=cloudbuild-fast-ml-api-adapter.yaml', '--substitutions=SHORT_SHA=$SHORT_SHA']
-    waitFor: ['-'] # start in parallel
