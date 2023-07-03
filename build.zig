@@ -557,7 +557,8 @@ fn link_tracer_backend(
             }
 
             // We might need to clone Tracy, if it doesn't exist
-            const git_clone = exe.builder.addSystemCommand(&.{ "sh", "-c", "test -d tools/tracy || (cd tools && git clone -b v0.9.1 https://github.com/wolfpld/tracy.git)" });
+            const git_clone = exe.builder.addSystemCommand(&.{ "sh", "-c", "test -d tools/tracy ||" ++
+                " (cd tools && git clone -b v0.9.1 https://github.com/wolfpld/tracy.git)" });
             exe.step.dependOn(&git_clone.step);
         },
     }
@@ -653,7 +654,9 @@ fn java_client(
     const bindings_step = bindings.run();
 
     // We might need to clone JUI, if it doesn't exist
-    const git_clone = b.addSystemCommand(&.{ "sh", "-c", "test -d src/clients/java/lib/jui || (cd src/clients/java/ && mkdir -p lib && cd lib && git clone https://github.com/zig-java/jui.git && cd jui && git checkout 1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8)" });
+    const git_clone = b.addSystemCommand(&.{ "sh", "-c", "test -d src/clients/java/lib/jui ||" ++
+        " (cd src/clients/java/ && mkdir -p lib && cd lib && git clone https://github.com/zig-java/jui.git &&" ++
+        " cd jui && git checkout 1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8)" });
     bindings_step.step.dependOn(&git_clone.step);
 
     inline for (platforms) |platform| {
