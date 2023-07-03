@@ -652,6 +652,10 @@ fn java_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
+    // We might need to clone JUI, if it doesn't exist
+    const git_clone = b.addSystemCommand(&.{ "sh", "-c", "test -d src/clients/java/lib/jui || (cd src/clients/java/ && mkdir -p lib && cd lib && git clone https://github.com/zig-java/jui.git && cd jui && git checkout 1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8)" });
+    bindings_step.step.dependOn(&git_clone.step);
+
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
