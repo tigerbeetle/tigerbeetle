@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.ProcessBuilder.Redirect;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -1358,10 +1359,25 @@ public class IntegrationTest {
                 throw new Exception("Format failed. " + error);
             }
 
-            this.process = Runtime.getRuntime()
-                    .exec(new String[] {exe, "start", "--addresses=" + TB_PORT, TB_FILE});
+            this.process = new ProcessBuilder()
+                    .command(new String[] {exe, "start", "--addresses=" + TB_PORT, TB_FILE})
+                    .redirectError(Redirect.PIPE).start();
+
             if (process.waitFor(100, TimeUnit.MILLISECONDS))
                 throw new Exception("Start server failed");
+
+            process.onExit().whenCompleteAsync((process, exception) -> {
+                // Diagnose cases when the server crashes.
+                final var stream = process.getErrorStream();
+                if (stream != null) {
+                    final var content = new BufferedReader(new InputStreamReader(stream)).lines()
+                            .collect(Collectors.joining("\n"));
+                    System.out.println(content);
+                }
+
+                System.out.printf("TigerBeetle server exited with code %d\n\n",
+                        process.exitValue());
+            });
         }
 
         @Override
