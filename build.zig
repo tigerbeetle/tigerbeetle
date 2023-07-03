@@ -6,6 +6,10 @@ const file_or_directory_exists = @import("src/clients/shutil.zig").file_or_direc
 
 const config = @import("./src/config.zig");
 
+// We need to ensure we only add a clone dependency once.
+var git_clone_tracy = false;
+var git_clone_jui = false;
+
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
@@ -558,9 +562,10 @@ fn link_tracer_backend(
             }
 
             // We might need to clone Tracy, if it doesn't exist
-            if (!file_or_directory_exists("tools/tracy")) {
+            if (!file_or_directory_exists("tools/tracy") and !git_clone_tracy) {
                 const git_clone = exe.builder.addSystemCommand(&.{ "git", "clone", "-b", "v0.9.1", "https://github.com/wolfpld/tracy.git", "tools/tracy" });
                 exe.step.dependOn(&git_clone.step);
+                git_clone_tracy = true;
             }
         },
     }
@@ -656,12 +661,14 @@ fn java_client(
     const bindings_step = bindings.run();
 
     // We might need to clone JUI, if it doesn't exist
-    if (!file_or_directory_exists("src/clients/java/lib/jui")) {
+    if (!file_or_directory_exists("src/clients/java/lib/jui") and !git_clone_jui) {
         const git_clone = b.addSystemCommand(&.{ "git", "clone", "https://github.com/zig-java/jui.git", "src/clients/java/lib/jui" });
         const git_checkout = b.addSystemCommand(&.{ "git", "-C", "src/clients/java/lib/jui", "checkout", "1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8" });
 
         git_checkout.step.dependOn(&git_clone.step);
         bindings_step.step.dependOn(&git_checkout.step);
+
+        git_clone_jui = true;
     }
 
     inline for (platforms) |platform| {
