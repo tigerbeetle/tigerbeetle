@@ -220,8 +220,14 @@ pub fn binary_filename(arena: *std.heap.ArenaAllocator, parts: []const []const u
 }
 
 pub fn file_or_directory_exists(f_or_d: []const u8) bool {
-    var file = std.fs.cwd().openFile(f_or_d, .{}) catch {
-        return false;
+    var file = std.fs.cwd().openFile(f_or_d, .{}) catch |err| {
+        switch (err) {
+            error.FileNotFound => return false,
+            else => std.debug.panic(
+                "unexpected error while checking file_or_directory_exists({s}): {s}",
+                .{ f_or_d, @errorName(err) },
+            ),
+        }
     };
     file.close();
 
