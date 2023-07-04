@@ -105,7 +105,7 @@ git checkout ${var.git_ref}
 
 cmd="./zig/zig build benchmark -Dcpu=x86_64_v3+aes -Drelease-safe=true -- --account-count 10000 --transfer-count 10000000 --transfer-count-per-second 1000000 --addresses ${var.addresses} --statsd true --print-batch-timings true"
 echo "TigerBeetle Benchmark Command: ${cmd}"
-$cmd
+timeout -s KILL 3400 $cmd
 
 # Ensure time for results to have shipped
 sleep 10
