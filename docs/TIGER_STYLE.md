@@ -138,7 +138,7 @@ Beyond these rules:
 
 * Don't forget to say how. For example, when writing a test, think of writing a description at the top to explain the goal and methodology of the test, to help your reader get up to speed, or to skip over sections, without forcing them to dive in.
 
-* Comments are sentences, with a space after the slash, with a capital letter and a full stop, or a colon if they relate to something that follows. Comments after the end of a line can be phrases, with no punctuation.
+* Comments are sentences, with a space after the slash, with a capital letter and a full stop, or a colon if they relate to something that follows. Comments are well-written prose describing the code, not just scribblings in the margin. Comments after the end of a line _can_ be phrases, with no punctuation.
 
 ### Cache invalidation
 
