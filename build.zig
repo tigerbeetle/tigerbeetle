@@ -13,13 +13,11 @@ var git_clone_jui = false;
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
 
     const options = b.addOptions();
 
     // The "tigerbeetle version" command includes the build-time commit hash.
-    if (git_commit(allocator)) |commit| {
+   if (git_commit(b.allocator)) |commit| {
         options.addOption(?[]const u8, "git_commit", commit[0..]);
     } else {
         options.addOption(?[]const u8, "git_commit", null);
@@ -28,7 +26,7 @@ pub fn build(b: *std.build.Builder) void {
     options.addOption(
         ?[]const u8,
         "git_tag",
-        if (git_tag(allocator)) |tag| tag.constSlice() else null,
+        if (git_tag(b.allocator)) |tag| tag.constSlice() else null,
     );
 
     options.addOption(
@@ -295,19 +293,19 @@ pub fn build(b: *std.build.Builder) void {
             tracer_backend,
         );
         run_with_tb(
-            allocator,
+            b.allocator,
             b,
             mode,
             target,
         );
         client_integration(
-            allocator,
+            b.allocator,
             b,
             mode,
             target,
         );
         client_docs(
-            allocator,
+            b.allocator,
             b,
             mode,
             target,
