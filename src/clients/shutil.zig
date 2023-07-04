@@ -219,10 +219,18 @@ pub fn binary_filename(arena: *std.heap.ArenaAllocator, parts: []const []const u
     return file_name.items;
 }
 
-pub fn file_or_directory_exists(arena: *std.heap.ArenaAllocator, f_or_d: []const u8) bool {
-    _ = std.fs.cwd().realpathAlloc(arena.allocator(), f_or_d) catch {
-        return false;
+pub fn file_or_directory_exists(f_or_d: []const u8) bool {
+    var file = std.fs.cwd().openFile(f_or_d, .{}) catch |err| {
+        switch (err) {
+            error.FileNotFound => return false,
+            error.IsDir => return true,
+            else => std.debug.panic(
+                "unexpected error while checking file_or_directory_exists({s}): {s}",
+                .{ f_or_d, @errorName(err) },
+            ),
+        }
     };
+    file.close();
 
     return true;
 }
