@@ -663,11 +663,7 @@ fn java_client(
     // We might need to clone JUI, if it doesn't exist
     if (!file_or_directory_exists("src/clients/java/lib/jui") and !git_clone_jui) {
         const git_clone = b.addSystemCommand(&.{ "git", "clone", "-b", "zig-0.9.1", "https://github.com/zig-java/jui.git", "src/clients/java/lib/jui" });
-        const git_checkout = b.addSystemCommand(&.{ "git", "-C", "src/clients/java/lib/jui", "checkout", "1c694427dd3b6d0f2b8423fd1648dbd49bc6d8e8" });
-
-        git_checkout.step.dependOn(&git_clone.step);
-        bindings_step.step.dependOn(&git_checkout.step);
-
+        bindings_step.step.dependOn(&git_clone.step);
         git_clone_jui = true;
     }
 
