@@ -223,6 +223,7 @@ pub fn file_or_directory_exists(f_or_d: []const u8) bool {
     var file = std.fs.cwd().openFile(f_or_d, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => return false,
+            error.IsDir => return true,
             else => std.debug.panic(
                 "unexpected error while checking file_or_directory_exists({s}): {s}",
                 .{ f_or_d, @errorName(err) },
