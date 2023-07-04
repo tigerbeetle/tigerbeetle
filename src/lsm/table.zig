@@ -486,6 +486,20 @@ pub fn TableType(
             pub fn data_block_values(builder: *Builder) []Value {
                 return Table.data_block_values(builder.data_block);
             }
+            pub fn data_block_values_append(builder: *Builder, values: []const Value) usize {
+                const data_block_value_count = builder.value_count;
+                var data_block_values_ = builder.data_block_values();
+                const len = @minimum(values.len, data_block_values_.len - data_block_value_count);
+                assert(len > 0);
+                stdx.copy_disjoint(
+                    .exact,
+                    Value,
+                    data_block_values_[data_block_value_count..][0..len],
+                    values[0..len],
+                );
+                builder.value_count += @intCast(u32, len);
+                return len;
+            }
 
             pub fn data_block_empty(builder: *const Builder) bool {
                 assert(builder.value_count <= data.block_value_count_max);
@@ -733,7 +747,6 @@ pub fn TableType(
             );
             return slice[0..index_data_blocks_used(index_block)];
         }
-
         pub inline fn index_data_checksums(index_block: BlockPtr) []u128 {
             return mem.bytesAsSlice(
                 u128,

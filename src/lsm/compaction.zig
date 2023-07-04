@@ -498,7 +498,7 @@ pub fn CompactionType(
 
         fn compact(compaction: *Compaction) void {
             assert(compaction.state == .compacting);
-            assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
+            assert(!compaction.table_builder.data_block_full());
 
             const values_in = compaction.values_in;
 
@@ -540,73 +540,54 @@ pub fn CompactionType(
         fn copy(compaction: *Compaction, input_level: InputLevel) void {
             assert(compaction.state == .compacting);
             assert(compaction.values_in[@enumToInt(input_level) +% 1].len == 0);
-            assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
+            assert(!compaction.table_builder.data_block_full());
 
             const values_in = compaction.values_in[@enumToInt(input_level)];
-            const values_out = compaction.table_builder.data_block_values();
-            var values_out_index = compaction.table_builder.value_count;
-
             assert(values_in.len > 0);
-
-            const len = @minimum(values_in.len, values_out.len - values_out_index);
-            assert(len > 0);
-            stdx.copy_disjoint(
-                .exact,
-                Value,
-                values_out[values_out_index..][0..len],
-                values_in[0..len],
-            );
-
+            const len = compaction.table_builder.data_block_values_append(values_in);
             compaction.values_in[@enumToInt(input_level)] = values_in[len..];
-            compaction.table_builder.value_count += @intCast(u32, len);
         }
 
         fn copy_drop_tombstones(compaction: *Compaction) void {
             assert(compaction.state == .compacting);
             assert(compaction.values_in[1].len == 0);
-            assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
+            assert(!compaction.table_builder.data_block_full());
 
             // Copy variables locally to ensure a tight loop.
             const values_in_a = compaction.values_in[0];
-            const values_out = compaction.table_builder.data_block_values();
             var values_in_a_index: usize = 0;
-            var values_out_index = compaction.table_builder.value_count;
 
             // Merge as many values as possible.
             while (values_in_a_index < values_in_a.len and
-                values_out_index < values_out.len)
+                !compaction.table_builder.data_block_full())
             {
                 const value_a = &values_in_a[values_in_a_index];
                 values_in_a_index += 1;
                 if (tombstone(value_a)) {
                     continue;
                 }
-                values_out[values_out_index] = value_a.*;
-                values_out_index += 1;
+                _ = compaction.table_builder.data_block_values_append(&[_]Value{value_a.*});
             }
 
             // Copy variables back out.
             compaction.values_in[0] = values_in_a[values_in_a_index..];
-            compaction.table_builder.value_count = values_out_index;
         }
 
         fn merge(compaction: *Compaction) void {
             assert(compaction.values_in[0].len > 0);
             assert(compaction.values_in[1].len > 0);
-            assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
+            assert(!compaction.table_builder.data_block_full());
 
             // Copy variables locally to ensure a tight loop.
             const values_in_a = compaction.values_in[0];
             const values_in_b = compaction.values_in[1];
-            const values_out = compaction.table_builder.data_block_values();
             var values_in_a_index: usize = 0;
             var values_in_b_index: usize = 0;
-            var values_out_index = compaction.table_builder.value_count;
 
             // Merge as many values as possible.
             while (values_in_a_index < values_in_a.len and
                 values_in_b_index < values_in_b.len and
-                values_out_index < values_out.len)
+                !compaction.table_builder.data_block_full())
             {
                 const value_a = &values_in_a[values_in_a_index];
                 const value_b = &values_in_b[values_in_b_index];
@@ -618,13 +599,11 @@ pub fn CompactionType(
                         {
                             continue;
                         }
-                        values_out[values_out_index] = value_a.*;
-                        values_out_index += 1;
+                        _ = compaction.table_builder.data_block_values_append(&[_]Value{value_a.*});
                     },
                     .gt => {
                         values_in_b_index += 1;
-                        values_out[values_out_index] = value_b.*;
-                        values_out_index += 1;
+                        _ = compaction.table_builder.data_block_values_append(&[_]Value{value_b.*});
                     },
                     .eq => {
                         values_in_a_index += 1;
@@ -643,8 +622,7 @@ pub fn CompactionType(
                                 continue;
                             }
                         }
-                        values_out[values_out_index] = value_a.*;
-                        values_out_index += 1;
+                        _ = compaction.table_builder.data_block_values_append(&[_]Value{value_a.*});
                     },
                 }
             }
@@ -652,7 +630,6 @@ pub fn CompactionType(
             // Copy variables back out.
             compaction.values_in[0] = values_in_a[values_in_a_index..];
             compaction.values_in[1] = values_in_b[values_in_b_index..];
-            compaction.table_builder.value_count = values_out_index;
         }
 
         fn write_blocks(compaction: *Compaction) void {
