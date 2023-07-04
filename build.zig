@@ -561,7 +561,7 @@ fn link_tracer_backend(
                 exe.linkSystemLibrary("ws2_32");
             }
 
-            // We might need to clone Tracy, if it doesn't exist
+            // We might need to clone Tracy, if it doesn't exist.
             if (!file_or_directory_exists("tools/tracy") and !git_clone_tracy) {
                 const git_clone = exe.builder.addSystemCommand(&.{ "git", "clone", "-b", "v0.9.1", "https://github.com/wolfpld/tracy.git", "tools/tracy" });
                 exe.step.dependOn(&git_clone.step);
@@ -660,7 +660,7 @@ fn java_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // We might need to clone JUI, if it doesn't exist
+    // We might need to clone JUI, if it doesn't exist.
     if (!file_or_directory_exists("src/clients/java/lib/jui") and !git_clone_jui) {
         const git_clone = b.addSystemCommand(&.{ "git", "clone", "-b", "zig-0.9.1", "https://github.com/zig-java/jui.git", "src/clients/java/lib/jui" });
         bindings_step.step.dependOn(&git_clone.step);
