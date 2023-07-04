@@ -13,7 +13,7 @@ public class BlockingRequestTest {
     @Test
     public void testCreateAccountsRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(1);
         batch.add();
 
@@ -24,7 +24,7 @@ public class BlockingRequestTest {
     @Test
     public void testCreateTransfersRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -35,7 +35,7 @@ public class BlockingRequestTest {
     @Test
     public void testLookupAccountsRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
@@ -46,7 +46,7 @@ public class BlockingRequestTest {
     @Test
     public void testLookupTransfersRequestConstructor() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
@@ -67,7 +67,7 @@ public class BlockingRequestTest {
     @Test(expected = NullPointerException.class)
     public void testConstructorWithBatchNull() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         BlockingRequest.createAccounts(client, null);
         assert false;
     }
@@ -75,7 +75,7 @@ public class BlockingRequestTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroCapacityBatch() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(0);
 
         BlockingRequest.createAccounts(client, batch);
@@ -85,7 +85,7 @@ public class BlockingRequestTest {
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorWithZeroItemsBatch() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(1);
 
         BlockingRequest.createAccounts(client, batch);
@@ -95,19 +95,16 @@ public class BlockingRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidOperation() throws RequestException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
         var request = BlockingRequest.createTransfers(client, batch);
 
-        var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
-
         assertFalse(request.isDone());
 
         // Invalid operation, should be CREATE_TRANSFERS
-        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, dummyBuffer, 1,
-                PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -118,19 +115,18 @@ public class BlockingRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithUnknownOperation() throws RequestException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
         final byte UNKNOWN = 99;
         var request = new BlockingRequest<CreateTransferResultBatch>(client,
                 Operations.CREATE_TRANSFERS, batch);
-        var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
 
         assertFalse(request.isDone());
 
         // Unknown operation
-        request.endRequest(UNKNOWN, dummyBuffer, 1, PacketStatus.Ok.value);
+        request.endRequest(UNKNOWN, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -141,7 +137,7 @@ public class BlockingRequestTest {
     @Test
     public void testEndRequestWithNullBuffer() throws RequestException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -149,8 +145,7 @@ public class BlockingRequestTest {
 
         assertFalse(request.isDone());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, null, 1,
-                PacketStatus.Ok.value);
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -161,41 +156,17 @@ public class BlockingRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithInvalidBufferSize() throws RequestException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
         var request = BlockingRequest.createTransfers(client, batch);
-        var invalidBuffer =
-                ByteBuffer.allocateDirect((CreateTransferResultBatch.Struct.SIZE * 2) - 1);
+        var invalidBuffer = ByteBuffer.allocate((CreateTransferResultBatch.Struct.SIZE * 2) - 1);
 
         assertFalse(request.isDone());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, invalidBuffer, 1,
-                PacketStatus.Ok.value);
-
-        assertTrue(request.isDone());
-
-        request.waitForResult();
-        assert false;
-    }
-
-    @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidPacket() throws RequestException {
-
-        var client = NativeClient.initEcho(0, "3000", 1);
-        var batch = new TransferBatch(1);
-        batch.add();
-
-
-        var request = BlockingRequest.createTransfers(client, batch);
-        var dummyBuffer = ByteBuffer.allocateDirect(TransferBatch.Struct.SIZE);
-        // Packet is a long representing a pointer, cannot be zero
-        final long NULL = 0;
-
-        assertFalse(request.isDone());
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, dummyBuffer, NULL,
-                PacketStatus.Ok.value);
+        request.setReplyBuffer(invalidBuffer.array());
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -206,7 +177,7 @@ public class BlockingRequestTest {
     @Test(expected = AssertionError.class)
     public void testGetResultBeforeEndRequest() throws RequestException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -221,7 +192,7 @@ public class BlockingRequestTest {
     @Test
     public void testEndRequestWithRequestException() {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
 
@@ -229,10 +200,10 @@ public class BlockingRequestTest {
 
         assertFalse(request.isDone());
 
-        var dummyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE);
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, dummyBuffer, 1,
+        var dummyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE);
+        request.setReplyBuffer(dummyBuffer.array());
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value,
                 PacketStatus.TooMuchData.value);
-
 
         assertTrue(request.isDone());
 
@@ -247,19 +218,19 @@ public class BlockingRequestTest {
     @Test(expected = AssertionError.class)
     public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests()
             throws RequestException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
 
         // A batch with only 1 item
         var batch = new AccountBatch(1);
         batch.add();
 
         // A reply with 2 items, while the batch had only 1 item
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateAccountResultBatch.Struct.SIZE * 2)
+        var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
         var request = BlockingRequest.createAccounts(client, batch);
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         request.waitForResult();
@@ -267,28 +238,28 @@ public class BlockingRequestTest {
 
     @Test(expected = AssertionError.class)
     public void testEndRequestTwice() throws RequestException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
 
         // A batch with only 1 item
         var batch = new AccountBatch(1);
         batch.add();
 
         // A reply with 2 items, while the batch had only 1 item
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateAccountResultBatch.Struct.SIZE)
+        var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE)
                 .order(ByteOrder.LITTLE_ENDIAN);
 
         var request = BlockingRequest.createAccounts(client, batch);
         assertFalse(request.isDone());
 
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(1, result.getLength());
 
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
 
@@ -298,7 +269,7 @@ public class BlockingRequestTest {
 
     @Test
     public void testCreateAccountEndRequest() throws RequestException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new AccountBatch(2);
         batch.add();
         batch.add();
@@ -306,15 +277,15 @@ public class BlockingRequestTest {
         var request = BlockingRequest.createAccounts(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateAccountResultBatch.Struct.SIZE * 2)
+        var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
         dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.ordinal());
         dummyReplyBuffer.putInt(1);
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.ordinal());
 
-        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -331,7 +302,7 @@ public class BlockingRequestTest {
 
     @Test
     public void testCreateTransferEndRequest() throws RequestException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new TransferBatch(2);
         batch.add();
         batch.add();
@@ -339,15 +310,15 @@ public class BlockingRequestTest {
         var request = BlockingRequest.createTransfers(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(CreateTransferResultBatch.Struct.SIZE * 2)
+        var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putInt(0);
         dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.ordinal());
         dummyReplyBuffer.putInt(1);
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.ordinal());
 
-        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -364,7 +335,7 @@ public class BlockingRequestTest {
 
     @Test
     public void testLookupAccountEndRequest() throws RequestException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -372,13 +343,13 @@ public class BlockingRequestTest {
         var request = BlockingRequest.lookupAccounts(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(AccountBatch.Struct.SIZE * 2)
-                .order(ByteOrder.LITTLE_ENDIAN);
+        var dummyReplyBuffer =
+                ByteBuffer.allocate(AccountBatch.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(AccountBatch.Struct.SIZE).putLong(200).putLong(2000);
 
-        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.LOOKUP_ACCOUNTS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -395,7 +366,7 @@ public class BlockingRequestTest {
 
     @Test
     public void testLookupTransferEndRequest() throws RequestException {
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
@@ -403,13 +374,13 @@ public class BlockingRequestTest {
         var request = BlockingRequest.lookupTransfers(client, batch);
 
         // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(TransferBatch.Struct.SIZE * 2)
-                .order(ByteOrder.LITTLE_ENDIAN);
+        var dummyReplyBuffer =
+                ByteBuffer.allocate(TransferBatch.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
-        request.endRequest(Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0),
-                1, PacketStatus.Ok.value);
+        request.setReplyBuffer(dummyReplyBuffer.position(0).array());
+        request.endRequest(Request.Operations.LOOKUP_TRANSFERS.value, PacketStatus.Ok.value);
 
         assertTrue(request.isDone());
         var result = request.waitForResult();
@@ -427,21 +398,21 @@ public class BlockingRequestTest {
     @Test
     public void testSuccessCompletion() throws RequestException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
         batch.add();
 
         // A dummy ByteBuffer simulating some simple reply
-        var dummyReplyBuffer = ByteBuffer.allocateDirect(TransferBatch.Struct.SIZE * 2)
-                .order(ByteOrder.LITTLE_ENDIAN);
+        var dummyReplyBuffer =
+                ByteBuffer.allocate(TransferBatch.Struct.SIZE * 2).order(ByteOrder.LITTLE_ENDIAN);
 
         dummyReplyBuffer.putLong(100).putLong(1000);
         dummyReplyBuffer.position(TransferBatch.Struct.SIZE).putLong(200).putLong(2000);
 
         var callback =
                 new CallbackSimulator<TransferBatch>(BlockingRequest.lookupTransfers(client, batch),
-                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer.position(0), 1,
+                        Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer,
                         PacketStatus.Ok.value, 500);
 
         callback.start();
@@ -462,13 +433,13 @@ public class BlockingRequestTest {
     @Test
     public void testFailedCompletion() throws InterruptedException {
 
-        var client = NativeClient.initEcho(0, "3000", 1);
+        var client = getDummyClient();
         var batch = new IdBatch(1);
         batch.add();
 
         var callback =
                 new CallbackSimulator<TransferBatch>(BlockingRequest.lookupTransfers(client, batch),
-                        Request.Operations.LOOKUP_TRANSFERS.value, null, 1,
+                        Request.Operations.LOOKUP_TRANSFERS.value, null,
                         PacketStatus.TooMuchData.value, 250);
 
         callback.start();
@@ -483,22 +454,24 @@ public class BlockingRequestTest {
 
     }
 
+    private static NativeClient getDummyClient() {
+        return NativeClient.initEcho(0, "3000", 1);
+    }
+
     private class CallbackSimulator<T extends Batch> extends Thread {
 
         public final BlockingRequest<T> request;
         private final byte receivedOperation;
         private final ByteBuffer buffer;
-        private final long packet;
         private final byte status;
         private final int delay;
 
 
         private CallbackSimulator(BlockingRequest<T> request, byte receivedOperation,
-                ByteBuffer buffer, long packet, byte status, int delay) {
+                ByteBuffer buffer, byte status, int delay) {
             this.request = request;
             this.receivedOperation = receivedOperation;
             this.buffer = buffer;
-            this.packet = packet;
             this.status = status;
             this.delay = delay;
         }
@@ -507,7 +480,10 @@ public class BlockingRequestTest {
         public synchronized void run() {
             try {
                 Thread.sleep(delay);
-                request.endRequest(receivedOperation, buffer, packet, status);
+                if (buffer != null) {
+                    request.setReplyBuffer(buffer.array());
+                }
+                request.endRequest(receivedOperation, status);
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
