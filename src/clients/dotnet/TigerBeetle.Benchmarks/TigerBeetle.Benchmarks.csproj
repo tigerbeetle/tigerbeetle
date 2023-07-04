@@ -3,7 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net6.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <UseCurrentRuntimeIdentifier>true</UseCurrentRuntimeIdentifier>
+    <UseCurrentRuntimeIdentifier>false</UseCurrentRuntimeIdentifier>
     <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
   <ItemGroup>
