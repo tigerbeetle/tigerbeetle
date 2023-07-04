@@ -47,14 +47,14 @@ pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8
     var tb_binary = try binary_filename(arena, &[_][]const u8{"tigerbeetle"});
 
     // Build TigerBeetle
-    if (!file_or_directory_exists(arena, tb_binary)) {
+    if (!file_or_directory_exists(tb_binary)) {
         std.debug.print("Building TigerBeetle server\n", .{});
         try run(arena, &[_][]const u8{
             try script_filename(arena, &[_][]const u8{ "scripts", "install" }),
         });
     }
 
-    std.debug.assert(file_or_directory_exists(arena, tb_binary));
+    std.debug.assert(file_or_directory_exists(tb_binary));
 
     var tmpdir = try TmpDir.init(arena);
     defer tmpdir.deinit();

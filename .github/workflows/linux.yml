@@ -145,6 +145,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+          file: tools/docker/Dockerfile
 
       # This is required because we can't load multiple platforms. Instead,
       # just load amd64 for verification below.
@@ -162,6 +163,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
+          file: tools/docker/Dockerfile
 
       # Validate the image
       - if: matrix.debug == 'production'
@@ -192,3 +194,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
+          file: tools/docker/Dockerfile
