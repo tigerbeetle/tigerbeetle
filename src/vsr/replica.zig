@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
-const alloc_block = @import("../lsm/grid.zig").alloc_block;
+const allocate_block = @import("../lsm/grid.zig").allocate_block;
 const GridType = @import("../lsm/grid.zig").GridType;
 const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
@@ -361,10 +361,6 @@ pub fn ReplicaType(
         /// The number of ticks before sending a command=request_blocks.
         /// (grid.read_faulty_queue.count>0)
         grid_repair_message_timeout: Timeout,
-
-        /// Used to provide deterministic entropy to `choose_any_other_replica()`.
-        /// Incremented whenever `choose_any_other_replica()` is called.
-        choose_any_other_replica_ticks: u64 = 0,
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
@@ -757,7 +753,7 @@ pub fn ReplicaType(
 
             for (self.grid_write_blocks) |*block, i| {
                 errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
-                block.* = try alloc_block(allocator);
+                block.* = try allocate_block(allocator);
             }
             errdefer for (self.grid_write_blocks) |b| allocator.free(b);
 
@@ -1878,8 +1874,15 @@ pub fn ReplicaType(
                         prepare_checksum,
                         message.header.replica,
                     );
+                    return;
                 }
             }
+
+            log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
+                self.replica,
+                op,
+                checksum,
+            });
         }
 
         fn on_request_prepare_read(self: *Self, prepare: ?*Message, destination_replica: ?u8) void {
@@ -2700,20 +2703,20 @@ pub fn ReplicaType(
         }
 
         /// Choose a different replica each time if possible (excluding ourself).
+        ///
+        /// Currently this picks the target replica at random instead of doing something like
+        /// round-robin in order to avoid a resonance.
         fn choose_any_other_replica(self: *Self) u8 {
             assert(!self.solo());
+            comptime assert(constants.nodes_max * 2 < std.math.maxInt(u8));
 
-            var count: usize = 0;
-            while (count < self.replica_count) : (count += 1) {
-                self.choose_any_other_replica_ticks += 1;
-                const replica = @mod(
-                    self.replica + self.choose_any_other_replica_ticks,
-                    self.replica_count,
-                );
-                if (replica == self.replica) continue;
-                return @intCast(u8, replica);
-            }
-            unreachable;
+            // Carefully select any replica if we are a standby,
+            // and any different replica if we are active.
+            const pool = if (self.standby()) self.replica_count else self.replica_count - 1;
+            const shift = self.prng.random().intRangeAtMost(u8, 1, pool);
+            const other_replica = @mod(self.replica + shift, self.replica_count);
+            assert(other_replica != self.replica);
+            return other_replica;
         }
 
         fn commit_dispatch(self: *Self, stage_new: CommitStage) void {
@@ -3515,9 +3518,17 @@ pub fn ReplicaType(
                         nacks.set(i);
                     }
 
-                    if (journal_header != null and journal_header.?.checksum == header.checksum and
-                        !faulty)
+                    // Presence bit: the prepare is on disk, is being written to disk, or is cached
+                    // in memory. These conditions mirror logic in `on_request_prepare` and imply
+                    // that we can help the new primary to repair this prepare.
+                    if ((self.journal.prepare_inhabited[slot.index] and
+                        self.journal.prepare_checksums[slot.index] == header.checksum) or
+                        self.journal.writing(header.op, header.checksum) or
+                        self.pipeline_prepare_by_op_and_checksum(header.op, header.checksum) != null)
                     {
+                        if (journal_header != null) {
+                            assert(journal_header.?.checksum == header.checksum);
+                        }
                         maybe(nacks.isSet(i));
                         present.set(i);
                     }
@@ -6384,19 +6395,19 @@ pub fn ReplicaType(
 
                 const dvc_headers = message_body_as_view_headers(dvc);
                 const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
+                const dvc_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
                 for (dvc_headers.slice) |*header, i| {
-                    log.debug(
-                        "{}: {s}: dvc: header: replica={} op={} checksum={} nack={} type={s}",
-                        .{
-                            self.replica,
-                            context,
-                            dvc.header.replica,
-                            header.op,
-                            header.checksum,
-                            dvc_nacks.isSet(i),
-                            @tagName(vsr.Headers.dvc_header_type(header)),
-                        },
-                    );
+                    log.debug("{}: {s}: dvc: header: " ++
+                        "replica={} op={} checksum={} nack={} present={} type={s}", .{
+                        self.replica,
+                        context,
+                        dvc.header.replica,
+                        header.op,
+                        header.checksum,
+                        dvc_nacks.isSet(i),
+                        dvc_present.isSet(i),
+                        @tagName(vsr.Headers.dvc_header_type(header)),
+                    });
                 }
             }
         }
@@ -7494,21 +7505,22 @@ const DVCQuorum = struct {
 
                 const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 const header_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
+
+                if (vsr.Headers.dvc_header_type(header) == .valid and
+                    header_present.isSet(header_index) and
+                    header_canonical != null and header_canonical.?.checksum == header.checksum)
+                {
+                    copies += 1;
+                }
+
                 if (header_nacks.isSet(header_index)) {
+                    // The op is nacked explicitly.
                     nacks += 1;
-                } else if (header_canonical) |expect| {
-                    if (vsr.Headers.dvc_header_type(header) == .valid) {
-                        if (expect.checksum == header.checksum) {
-                            if (header_present.isSet(header_index)) {
-                                copies += 1;
-                            }
-                        } else {
-                            // The replica's prepare is available, but for a different header.
-                            nacks += 1;
-                        }
-                    } else {
-                        // The replica's prepare is faulty, with an unknown header.
-                    }
+                } else if (vsr.Headers.dvc_header_type(header) == .valid and
+                    header_canonical != null and header_canonical.?.checksum != header.checksum)
+                {
+                    // The op is nacked implicitly, because the replica has a different header.
+                    nacks += 1;
                 }
             }
 

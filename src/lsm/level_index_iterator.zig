@@ -89,12 +89,14 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
             // NOTE We must ensure that between calls to `next`,
             //      no changes are made to the manifest that are visible to `it.context.snapshot`.
             const next_table_info = it.context.manifest.next_table(
-                it.context.level,
-                it.context.snapshot,
-                it.context.key_min,
-                it.context.key_max,
-                it.key_exclusive,
-                it.context.direction,
+                .{
+                    .level = it.context.level,
+                    .snapshot = it.context.snapshot,
+                    .key_min = it.context.key_min,
+                    .key_max = it.context.key_max,
+                    .key_exclusive = it.key_exclusive,
+                    .direction = it.context.direction,
+                },
             );
             if (next_table_info) |table_info| {
                 it.key_exclusive = switch (it.context.direction) {

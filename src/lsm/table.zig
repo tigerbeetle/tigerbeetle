@@ -14,7 +14,7 @@ const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const BlockType = @import("grid.zig").BlockType;
-const alloc_block = @import("grid.zig").alloc_block;
+const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 
 pub const TableUsage = enum {
@@ -459,13 +459,13 @@ pub fn TableType(
             data_blocks_in_filter: u32 = 0,
 
             pub fn init(allocator: mem.Allocator) !Builder {
-                const index_block = try alloc_block(allocator);
+                const index_block = try allocate_block(allocator);
                 errdefer allocator.free(index_block);
 
-                const filter_block = try alloc_block(allocator);
+                const filter_block = try allocate_block(allocator);
                 errdefer allocator.free(filter_block);
 
-                const data_block = try alloc_block(allocator);
+                const data_block = try allocate_block(allocator);
                 errdefer allocator.free(data_block);
 
                 return Builder{
@@ -706,13 +706,6 @@ pub fn TableType(
                 return info;
             }
         };
-
-        pub inline fn index_block_address(index_block: BlockPtrConst) u64 {
-            const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-            const address = header.op;
-            assert(address > 0);
-            return address;
-        }
 
         pub inline fn index_data_keys(index_block: BlockPtr) []Key {
             return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
