@@ -50,7 +50,6 @@ final class NativeClient {
     }
 
     public void close() throws Exception {
-
         if (contextHandle != 0L) {
             synchronized (this) {
                 if (contextHandle != 0L) {

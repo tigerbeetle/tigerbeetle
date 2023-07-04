@@ -26,8 +26,9 @@ const ReflectionHelper = struct {
     var initialization_exception_ctor_id: jui.jmethodID = null;
 
     var request_class: jui.jclass = null;
-    var request_buffer_field_id: jui.jfieldID = null;
-    var request_buffer_len_field_id: jui.jfieldID = null;
+    var request_send_buffer_field_id: jui.jfieldID = null;
+    var request_send_buffer_len_field_id: jui.jfieldID = null;
+    var request_reply_buffer_field_id: jui.jfieldID = null;
     var request_operation_method_id: jui.jmethodID = null;
     var request_end_request_method_id: jui.jmethodID = null;
 
@@ -37,8 +38,9 @@ const ReflectionHelper = struct {
         assert(initialization_exception_class == null);
         assert(initialization_exception_ctor_id == null);
         assert(request_class == null);
-        assert(request_buffer_field_id == null);
-        assert(request_buffer_len_field_id == null);
+        assert(request_send_buffer_field_id == null);
+        assert(request_send_buffer_len_field_id == null);
+        assert(request_reply_buffer_field_id == null);
         assert(request_operation_method_id == null);
         assert(request_end_request_method_id == null);
 
@@ -46,17 +48,19 @@ const ReflectionHelper = struct {
         initialization_exception_ctor_id = try env.getMethodId(initialization_exception_class, "<init>", "(I)V");
 
         request_class = find_class(env, "com/tigerbeetle/Request");
-        request_buffer_field_id = try env.getFieldId(request_class, "buffer", "Ljava/nio/ByteBuffer;");
-        request_buffer_len_field_id = try env.getFieldId(request_class, "bufferLen", "J");
+        request_send_buffer_field_id = try env.getFieldId(request_class, "sendBuffer", "Ljava/nio/ByteBuffer;");
+        request_send_buffer_len_field_id = try env.getFieldId(request_class, "sendBufferLen", "J");
+        request_reply_buffer_field_id = try env.getFieldId(request_class, "replyBuffer", "[B");
         request_operation_method_id = try env.getMethodId(request_class, "getOperation", "()B");
-        request_end_request_method_id = try env.getMethodId(request_class, "endRequest", "(BLjava/nio/ByteBuffer;JB)V");
+        request_end_request_method_id = try env.getMethodId(request_class, "endRequest", "(BB)V");
 
         // Asserting we are full initialized:
         assert(initialization_exception_class != null);
         assert(initialization_exception_ctor_id != null);
         assert(request_class != null);
-        assert(request_buffer_field_id != null);
-        assert(request_buffer_len_field_id != null);
+        assert(request_send_buffer_field_id != null);
+        assert(request_send_buffer_len_field_id != null);
+        assert(request_reply_buffer_field_id != null);
         assert(request_operation_method_id != null);
         assert(request_end_request_method_id != null);
     }
@@ -82,8 +86,9 @@ const ReflectionHelper = struct {
         initialization_exception_class = null;
         initialization_exception_ctor_id = null;
         request_class = null;
-        request_buffer_field_id = null;
-        request_buffer_len_field_id = null;
+        request_send_buffer_field_id = null;
+        request_send_buffer_len_field_id = null;
+        request_reply_buffer_field_id = null;
         request_operation_method_id = null;
         request_end_request_method_id = null;
     }
@@ -110,19 +115,58 @@ const ReflectionHelper = struct {
         assert(env.hasPendingException());
     }
 
-    pub fn buffer(env: *jui.JNIEnv, this_obj: jui.jobject) ?[]u8 {
+    pub fn get_send_buffer(env: *jui.JNIEnv, this_obj: jui.jobject) ?[]u8 {
         assert(this_obj != null);
-        assert(request_buffer_field_id != null);
-        assert(request_buffer_len_field_id != null);
+        assert(request_send_buffer_field_id != null);
+        assert(request_send_buffer_len_field_id != null);
 
-        var buffer_obj = env.getField(.object, this_obj, request_buffer_field_id) orelse return null;
+        var buffer_obj = env.getField(.object, this_obj, request_send_buffer_field_id) orelse
+            return null;
         defer env.deleteReference(.local, buffer_obj);
 
-        var buffer_len = env.getField(.long, this_obj, request_buffer_len_field_id);
-        var address = env.getDirectBufferAddress(buffer_obj);
+        var buffer_len = env.getField(.long, this_obj, request_send_buffer_len_field_id);
+        var buffer: []u8 = env.getDirectBufferAddress(buffer_obj);
 
         // The buffer can be larger than the actual message content,
-        return address[0..@intCast(usize, buffer_len)];
+        return buffer[0..@intCast(usize, buffer_len)];
+    }
+
+    pub fn set_reply_buffer(env: *jui.JNIEnv, this_obj: jui.jobject, reply: []const u8) void {
+        assert(this_obj != null);
+        assert(request_reply_buffer_field_id != null);
+        assert(reply.len > 0);
+
+        var reply_buffer_obj = env.newPrimitiveArray(
+            .byte,
+            @intCast(c_int, reply.len),
+        ) catch {
+            // Cannot allocate an array, it's likely the JVM has run out of resources
+            // Printing the buffer size here just to help diagnosing how much memory was required
+            env.describeException();
+            log.err("Unexpected error allocating a new array len={}", .{reply.len});
+            @panic("JNI: Unexpected error creating a new array.");
+        };
+        defer env.deleteReference(.local, reply_buffer_obj);
+
+        env.setPrimitiveArrayRegion(
+            .byte,
+            reply_buffer_obj,
+            0,
+            @intCast(c_int, reply.len),
+            @ptrCast([*]const jui.jbyte, reply.ptr),
+        ) catch {
+            // Since out-of-bounds isn't expected here, we can only panic if it fails.
+            env.describeException();
+            @panic("JNI: Unexpected error copying array.");
+        };
+
+        // Setting the request with the reply.
+        env.setField(
+            .object,
+            this_obj,
+            request_reply_buffer_field_id,
+            reply_buffer_obj,
+        );
     }
 
     pub fn operation(env: *jui.JNIEnv, this_obj: jui.jobject) u8 {
@@ -145,27 +189,15 @@ const ReflectionHelper = struct {
         return @bitCast(u8, value);
     }
 
-    pub fn end_request(env: *jui.JNIEnv, this_obj: jui.jobject, result: ?[]const u8, packet: *tb.tb_packet_t) void {
+    pub fn end_request(
+        env: *jui.JNIEnv,
+        this_obj: jui.jobject,
+        packet_operation: u8,
+        packet_status: tb.tb_packet_status_t,
+    ) void {
         assert(this_obj != null);
         assert(request_class != null);
         assert(request_end_request_method_id != null);
-
-        var buffer_obj: jui.jobject = if (result) |value| blk: {
-            // force casting from []const to *anyopaque
-            // it is ok here, since the ByteBuffer is always used as readonly here
-            var erased = @intToPtr(*anyopaque, @ptrToInt(value.ptr));
-            var local_ref = env.newDirectByteBuffer(erased, value.len) catch {
-                // Cannot allocate a ByteBuffer, it's likely the JVM has run out of resources
-                // Printing the buffer size here just to help diagnosing how much memory was required
-                env.describeException();
-                log.err("Unexpected error allocating a new direct ByteBuffer len={}", .{value.len});
-                @panic("JNI: Unexpected error allocating a new direct ByteBuffer");
-            };
-
-            assert(local_ref != null);
-            break :blk local_ref;
-        } else null;
-        defer if (buffer_obj != null) env.deleteReference(.local, buffer_obj);
 
         env.callNonVirtualMethod(
             .void,
@@ -173,10 +205,8 @@ const ReflectionHelper = struct {
             request_class,
             request_end_request_method_id,
             &[_]jui.jvalue{
-                jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.operation)),
-                jui.jvalue.toJValue(buffer_obj),
-                jui.jvalue.toJValue(@bitCast(jui.jlong, @ptrToInt(packet))),
-                jui.jvalue.toJValue(@bitCast(jui.jbyte, packet.status)),
+                jui.jvalue.toJValue(@bitCast(jui.jbyte, packet_operation)),
+                jui.jvalue.toJValue(@bitCast(jui.jbyte, @enumToInt(packet_status))),
             },
         ) catch {
             // The "endRequest" method isn't expected to throw any exception,
@@ -209,16 +239,28 @@ const JNIContext = struct {
 /// NativeClient implementation.
 const NativeClient = struct {
     /// On JVM loads this library.
-    fn on_load(vm: *jui.JavaVM) !jui.jint {
-        var env = try vm.getEnv(jni_version);
-        try ReflectionHelper.load(env);
+    fn on_load(vm: *jui.JavaVM) jui.jint {
+        var env = vm.getEnv(jni_version) catch |err| {
+            log.err("Unexpected JNI failure calling JavaVM.getEnv {}", .{err});
+            @panic("JNI: Unexpected JNI failure calling JavaVM.getEnv");
+        };
+
+        ReflectionHelper.load(env) catch |err| {
+            env.describeException();
+            log.err("Unexpected JNI failure loading the native module {}", .{err});
+            @panic("JNI: Unexpected JNI failure loading the native module");
+        };
 
         return @bitCast(jui.jint, jni_version);
     }
 
     /// On JVM unloads this library.
-    fn on_unload(vm: *jui.JavaVM) !void {
-        var env = try vm.getEnv(jni_version);
+    fn on_unload(vm: *jui.JavaVM) void {
+        var env = vm.getEnv(jni_version) catch |err| {
+            log.err("Unexpected JNI failure calling JavaVM.getEnv {}", .{err});
+            @panic("JNI: Unexpected JNI failure calling JavaVM.getEnv");
+        };
+
         ReflectionHelper.unload(env);
     }
 
@@ -295,7 +337,7 @@ const NativeClient = struct {
         assert(global_ref != null);
         errdefer env.deleteReference(.global, global_ref);
 
-        var buffer = ReflectionHelper.buffer(env, request_obj) orelse {
+        var send_buffer = ReflectionHelper.get_send_buffer(env, request_obj) orelse {
             // It is unexpected to the buffer be null here
             // The java side must allocate a new buffer prior to invoking "submit".
             @panic("JNI: Request buffer cannot be null");
@@ -308,11 +350,10 @@ const NativeClient = struct {
             assert(acquire_status == .ok);
             packet.operation = ReflectionHelper.operation(env, request_obj);
             packet.user_data = global_ref;
-            packet.data = buffer.ptr;
-            packet.data_size = @intCast(u32, buffer.len);
+            packet.data = send_buffer.ptr;
+            packet.data_size = @intCast(u32, send_buffer.len);
             packet.next = null;
             packet.status = .ok;
-
             tb.submit(context.client, packet);
         } else {
             assert(acquire_status != .ok);
@@ -332,7 +373,6 @@ const NativeClient = struct {
         _ = client;
 
         var context = @intToPtr(*JNIContext, context_ptr);
-        defer context.release_packet(packet);
 
         var env = context.jvm.attachCurrentThreadAsDaemon() catch |err| {
             log.err("Unexpected error attaching the native thread as daemon {}", .{err});
@@ -344,23 +384,40 @@ const NativeClient = struct {
         var request_obj = @ptrCast(jui.jobject, packet.user_data);
         defer env.deleteReference(.global, request_obj);
 
-        var result: ?[]const u8 = if (result_len == 0) null else switch (packet.status) {
-            .ok => if (result_ptr) |ptr| ptr[0..@intCast(usize, result_len)] else null,
-            else => null,
-        };
+        const packet_operation = packet.operation;
+        const packet_status = packet.status;
+        if (result_len > 0) {
+            switch (packet_status) {
+                .ok => if (result_ptr) |ptr| {
+                    // Copying the reply before releasing the packet.
+                    ReflectionHelper.set_reply_buffer(
+                        env,
+                        request_obj,
+                        ptr[0..@intCast(usize, result_len)],
+                    );
+                },
+                else => {},
+            }
+        }
+        context.release_packet(packet);
 
-        ReflectionHelper.end_request(env, request_obj, result, packet);
+        ReflectionHelper.end_request(
+            env,
+            request_obj,
+            packet_operation,
+            packet_status,
+        );
     }
 };
 
 /// Export function using the JNI calling convention.
 const Exports = struct {
     pub fn on_load(vm: *jui.JavaVM) callconv(.C) jui.jint {
-        return jui.wrapErrors(NativeClient.on_load, .{vm});
+        return NativeClient.on_load(vm);
     }
 
     pub fn on_unload(vm: *jui.JavaVM) callconv(.C) void {
-        jui.wrapErrors(NativeClient.on_unload, .{vm});
+        NativeClient.on_unload(vm);
     }
 
     pub fn client_init(
