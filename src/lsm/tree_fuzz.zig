@@ -17,7 +17,7 @@ const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("grid.zig").GridType;
-const alloc_block = @import("grid.zig").alloc_block;
+const allocate_block = @import("grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
@@ -164,7 +164,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             });
             defer env.grid.deinit(allocator);
 
-            env.grid_repair_block = try alloc_block(allocator);
+            env.grid_repair_block = try allocate_block(allocator);
             defer allocator.free(env.grid_repair_block);
 
             env.grid_repair_queue = GridRepairQueue.init(allocator);

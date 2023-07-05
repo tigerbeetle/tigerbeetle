@@ -43,7 +43,7 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("grid.zig").GridType;
-const alloc_block = @import("grid.zig").alloc_block;
+const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
@@ -175,18 +175,18 @@ pub fn CompactionType(
             var iterator_b = try LevelTableValueBlockIterator.init();
             errdefer iterator_b.deinit();
 
-            const index_block_a = try alloc_block(allocator);
+            const index_block_a = try allocate_block(allocator);
             errdefer allocator.free(index_block_a);
 
-            const index_block_b = try alloc_block(allocator);
+            const index_block_b = try allocate_block(allocator);
             errdefer allocator.free(index_block_b);
 
             var data_blocks: [2]Grid.BlockPtr = undefined;
 
-            data_blocks[0] = try alloc_block(allocator);
+            data_blocks[0] = try allocate_block(allocator);
             errdefer allocator.free(data_blocks[0]);
 
-            data_blocks[1] = try alloc_block(allocator);
+            data_blocks[1] = try allocate_block(allocator);
             errdefer allocator.free(data_blocks[1]);
 
             var table_builder = try Table.Builder.init(allocator);
@@ -258,7 +258,7 @@ pub fn CompactionType(
 
             const move_table =
                 context.table_info_a == .disk and
-                context.range_b.table_count == 1;
+                context.range_b.tables.len == 0;
 
             // Reserve enough blocks to write our output tables in the worst case, where:
             // - no tombstones are dropped,
@@ -275,8 +275,9 @@ pub fn CompactionType(
             const grid_reservation = if (move_table)
                 null
             else
+                // +1 to count the input table from level A.
                 context.grid.reserve(
-                    context.range_b.table_count * Table.block_count_max,
+                    (context.range_b.tables.len + 1) * Table.block_count_max,
                 ).?;
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
