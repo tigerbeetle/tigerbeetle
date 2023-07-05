@@ -8,7 +8,6 @@ const config = @import("./src/config.zig");
 
 // We need to ensure we only add a clone dependency once.
 var git_clone_tracy = false;
-var git_clone_jui = false;
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
@@ -17,7 +16,7 @@ pub fn build(b: *std.build.Builder) void {
     const options = b.addOptions();
 
     // The "tigerbeetle version" command includes the build-time commit hash.
-   if (git_commit(b.allocator)) |commit| {
+    if (git_commit(b.allocator)) |commit| {
         options.addOption(?[]const u8, "git_commit", commit[0..]);
     } else {
         options.addOption(?[]const u8, "git_commit", null);
@@ -310,6 +309,7 @@ pub fn build(b: *std.build.Builder) void {
             mode,
             target,
         );
+        jni_tests_run(b, mode);
     }
 
     {
@@ -658,19 +658,11 @@ fn java_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // We might need to clone JUI, if it doesn't exist.
-    if (!file_or_directory_exists("src/clients/java/lib/jui") and !git_clone_jui) {
-        const git_clone = b.addSystemCommand(&.{ "git", "clone", "-b", "zig-0.9.1", "https://github.com/zig-java/jui.git", "src/clients/java/lib/jui" });
-        bindings_step.step.dependOn(&git_clone.step);
-        git_clone_jui = true;
-    }
-
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
 
         const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
-        lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
         lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform[0]);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
@@ -977,4 +969,71 @@ fn client_docs(
     client_docs_build.dependOn(&install_step.step);
 
     maybe_execute(b, allocator, client_docs_build, "client_docs");
+}
+
+// Executes the JNI tests.
+// Requires the Java SDK installed and JAVA_HOME environment variable set.
+fn jni_tests_run(
+    b: *std.build.Builder,
+    mode: Mode,
+) void {
+    var test_step = b.step("test:jni", "Run the JNI tests");
+    const jni_abi = if (builtin.os.tag == .linux) b.option(
+        enum { gnu, musl },
+        "jni-test-abi",
+        "Which ABI the JVM will run the test uses",
+    ) orelse .gnu else {};
+
+    const java_home = b.env_map.get("JAVA_HOME") orelse {
+        const log_step = b.addLog(
+            "JNI tests require the Java SDK installed and JAVA_HOME environment variable set.",
+            .{},
+        );
+        test_step.dependOn(&log_step.step);
+        return;
+    };
+
+    const jni_tests = b.addTest("src/clients/java/src/jni_tests.zig");
+    const libjvm_path = if (builtin.os.tag == .windows) "/lib" else "/lib/server";
+    jni_tests.addLibPath(b.pathJoin(&.{ java_home, libjvm_path }));
+    jni_tests.linkSystemLibrary("jvm");
+    jni_tests.linkLibC();
+    if (builtin.os.tag == .linux) {
+        jni_tests.target.abi = std.meta.stringToEnum(
+            std.Target.Abi,
+            @tagName(jni_abi),
+        );
+    }
+
+    if (builtin.os.tag == .windows) {
+        // On Windows we need to set the DLL directory.
+        const set_dll_directory = struct {
+            pub extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
+        }.SetDllDirectoryA;
+
+        var java_bin_path = std.fs.path.joinZ(
+            b.allocator,
+            &.{ java_home, "\\bin" },
+        ) catch unreachable;
+        defer b.allocator.free(java_bin_path);
+        _ = set_dll_directory(java_bin_path);
+
+        var java_bin_server_path = std.fs.path.joinZ(
+            b.allocator,
+            &.{ java_home, "\\bin\\server" },
+        ) catch unreachable;
+        defer b.allocator.free(java_bin_server_path);
+        _ = set_dll_directory(java_bin_server_path);
+
+        // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
+        // the stack size and causes a SEGV that is handled by Zig's panic handler.
+        // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
+        //
+        // The workarround is run the tests in "ReleaseFast" mode.
+        jni_tests.setBuildMode(.ReleaseFast);
+    } else {
+        jni_tests.setBuildMode(mode);
+    }
+
+    test_step.dependOn(&jni_tests.step);
 }
