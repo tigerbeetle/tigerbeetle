@@ -39,7 +39,7 @@ pub const BlockType = enum(u8) {
 };
 
 // Leave this outside GridType so we can call it from modules that don't know about Storage.
-pub fn alloc_block(
+pub fn allocate_block(
     allocator: mem.Allocator,
 ) !*align(constants.sector_size) [constants.block_size]u8 {
     const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
@@ -184,7 +184,7 @@ pub fn GridType(comptime Storage: type) type {
 
             for (cache_blocks) |*cache_block, i| {
                 errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
-                cache_block.* = try alloc_block(allocator);
+                cache_block.* = try allocate_block(allocator);
             }
             errdefer for (cache_blocks) |block| allocator.free(block);
 
@@ -195,7 +195,7 @@ pub fn GridType(comptime Storage: type) type {
 
             for (&read_iop_blocks) |*read_iop_block, i| {
                 errdefer for (read_iop_blocks[0..i]) |block| allocator.free(block);
-                read_iop_block.* = try alloc_block(allocator);
+                read_iop_block.* = try allocate_block(allocator);
             }
             errdefer for (&read_iop_blocks) |block| allocator.free(block);
 

@@ -288,17 +288,6 @@ $ scripts/benchmark.sh
 
 Read [docs/HACKING.md](docs/HACKING.md).
 
-## Performance Demos
-
-Along the way, we also put together a series of performance demos and sketches to get you comfortable building TigerBeetle, show how low-level code can sometimes be easier than high-level code, help you understand some of the key components within TigerBeetle, and enable back-of-the-envelope calculations to motivate design decisions.
-
-You may be interested in:
-
-* [demos/protobeetle](./demos/protobeetle), how batching changes everything.
-* [demos/bitcast](./demos/bitcast), how Zig makes zero-overhead network deserialization easy, fast and safe.
-* [demos/io_uring](./demos/io_uring), how ring buffers can eliminate kernel syscalls, reduce server hardware requirements by a factor of two, and change the way we think about event loops.
-* [demos/hash_table](./demos/hash_table), how linear probing compares with cuckoo probing, and what we look for in a hash table that needs to scale to millions (and billions) of account transfers.
-
 ## Roadmap
 
 See https://github.com/tigerbeetledb/tigerbeetle/issues/259.

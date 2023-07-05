@@ -4,6 +4,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.lang.ProcessBuilder.Redirect;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -257,11 +258,11 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                // Creating the accounts
+                // Creating the accounts.
                 var createAccountErrors = client.createAccounts(accounts);
                 assertTrue(createAccountErrors.getLength() == 0);
 
-                // Creating a transfer
+                // Creating a transfer.
                 var transfers = new TransferBatch(2);
 
                 transfers.add();
@@ -276,13 +277,13 @@ public class IntegrationTest {
                 var createTransferErrors = client.createTransfers(transfers);
                 assertTrue(createTransferErrors.getLength() == 0);
 
-                // Looking up the accounts
+                // Looking up the accounts.
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
                 accounts.beforeFirst();
 
-                // Asserting the first account for the credit
+                // Asserting the first account for the credit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -292,7 +293,7 @@ public class IntegrationTest {
                 assertEquals(100L, lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
-                // Asserting the second account for the debit
+                // Asserting the second account for the debit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -303,7 +304,7 @@ public class IntegrationTest {
                 assertEquals(100L, lookupAccounts.getDebitsPosted());
 
 
-                // Looking up and asserting the transfer
+                // Looking up and asserting the transfer.
                 var ids = new IdBatch(1);
                 ids.add(transfer1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
@@ -331,14 +332,14 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                // Creating the accounts
+                // Creating the accounts.
                 CompletableFuture<CreateAccountResultBatch> future =
                         client.createAccountsAsync(accounts);
 
                 var createAccountErrors = future.get();
                 assertTrue(createAccountErrors.getLength() == 0);
 
-                // Creating a transfer
+                // Creating a transfer.
                 var transfers = new TransferBatch(2);
 
                 transfers.add();
@@ -354,7 +355,7 @@ public class IntegrationTest {
                 var createTransferErrors = transfersFuture.get();
                 assertTrue(createTransferErrors.getLength() == 0);
 
-                // Looking up the accounts
+                // Looking up the accounts.
                 CompletableFuture<AccountBatch> lookupAccountsFuture =
                         client.lookupAccountsAsync(accountIds);
                 var lookupAccounts = lookupAccountsFuture.get();
@@ -362,7 +363,7 @@ public class IntegrationTest {
 
                 accounts.beforeFirst();
 
-                // Asserting the first account for the credit
+                // Asserting the first account for the credit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -372,7 +373,7 @@ public class IntegrationTest {
                 assertEquals(100L, lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
-                // Asserting the second account for the debit
+                // Asserting the second account for the debit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -382,7 +383,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(100L, lookupAccounts.getDebitsPosted());
 
-                // Looking up and asserting the transfer
+                // Looking up and asserting the transfer.
                 var ids = new IdBatch(1);
                 ids.add(transfer1Id);
 
@@ -442,11 +443,11 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                // Creating the accounts
+                // Creating the accounts.
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
 
-                // Creating a pending transfer
+                // Creating a pending transfer.
                 var transfers = new TransferBatch(1);
                 transfers.add();
 
@@ -462,13 +463,13 @@ public class IntegrationTest {
                 var transferResults = client.createTransfers(transfers);
                 assertTrue(transferResults.getLength() == 0);
 
-                // Looking up the accounts
+                // Looking up the accounts.
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
                 accounts.beforeFirst();
 
-                // Asserting the first account for the pending credit
+                // Asserting the first account for the pending credit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -478,7 +479,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
-                // Asserting the second account for the pending debit
+                // Asserting the second account for the pending debit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -488,7 +489,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
-                // Looking up and asserting the pending transfer
+                // Looking up and asserting the pending transfer.
                 var ids = new IdBatch(1);
                 ids.add(transfer1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
@@ -501,7 +502,7 @@ public class IntegrationTest {
                 assertTransfers(transfers, lookupTransfers);
                 assertNotEquals(0L, lookupTransfers.getTimestamp());
 
-                // Creating a post_pending transfer
+                // Creating a post_pending transfer.
                 var confirmTransfers = new TransferBatch(1);
                 confirmTransfers.add();
                 confirmTransfers.setId(transfer2Id);
@@ -516,13 +517,13 @@ public class IntegrationTest {
                 var postResults = client.createTransfers(confirmTransfers);
                 assertEquals(0, postResults.getLength());
 
-                // Looking up the accounts again for the updated balance
+                // Looking up the accounts again for the updated balance.
                 lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
                 accounts.beforeFirst();
 
-                // Asserting the pending credit was posted for the first account
+                // Asserting the pending credit was posted for the first account.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -533,7 +534,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
 
-                // Asserting the pending debit was posted for the second account
+                // Asserting the pending debit was posted for the second account.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -543,7 +544,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(100L, lookupAccounts.getDebitsPosted());
 
-                // Looking up and asserting the post_pending transfer
+                // Looking up and asserting the post_pending transfer.
                 ids = new IdBatch(1);
                 ids.add(transfer2Id);
                 var lookupVoidTransfers = client.lookupTransfers(ids);
@@ -571,11 +572,11 @@ public class IntegrationTest {
         try (var server = new Server()) {
             try (var client = new Client(0, new String[] {Server.TB_PORT})) {
 
-                // Creating the accounts
+                // Creating the accounts.
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
 
-                // Creating a pending transfer
+                // Creating a pending transfer.
                 var transfers = new TransferBatch(1);
                 transfers.add();
 
@@ -591,13 +592,13 @@ public class IntegrationTest {
                 var transferResults = client.createTransfers(transfers);
                 assertTrue(transferResults.getLength() == 0);
 
-                // Looking up the accounts
+                // Looking up the accounts.
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
                 accounts.beforeFirst();
 
-                // Asserting the first account for the pending credit
+                // Asserting the first account for the pending credit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -607,7 +608,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
-                // Asserting the second account for the pending credit
+                // Asserting the second account for the pending credit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -617,7 +618,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
 
-                // Looking up and asserting the pending transfer
+                // Looking up and asserting the pending transfer.
                 var ids = new IdBatch(1);
                 ids.add(transfer1Id);
                 var lookupTransfers = client.lookupTransfers(ids);
@@ -630,7 +631,7 @@ public class IntegrationTest {
                 assertTransfers(transfers, lookupTransfers);
                 assertNotEquals(0L, lookupTransfers.getTimestamp());
 
-                // Creating a void_pending transfer
+                // Creating a void_pending transfer.
                 var voidTransfers = new TransferBatch(2);
                 voidTransfers.add();
                 voidTransfers.setId(transfer2Id);
@@ -645,13 +646,13 @@ public class IntegrationTest {
                 var voidResults = client.createTransfers(voidTransfers);
                 assertEquals(0, voidResults.getLength());
 
-                // Looking up the accounts again for the updated balance
+                // Looking up the accounts again for the updated balance.
                 lookupAccounts = client.lookupAccounts(accountIds);
                 assertTrue(lookupAccounts.getLength() == 2);
 
                 accounts.beforeFirst();
 
-                // Asserting the pending credit was voided for the first account
+                // Asserting the pending credit was voided for the first account.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -662,7 +663,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
 
-                // Asserting the pending debit was voided for the second account
+                // Asserting the pending debit was voided for the second account.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
@@ -672,7 +673,7 @@ public class IntegrationTest {
                 assertEquals(0L, lookupAccounts.getCreditsPosted());
                 assertEquals(0L, lookupAccounts.getDebitsPosted());
 
-                // Looking up and asserting the void_pending transfer
+                // Looking up and asserting the void_pending transfer.
                 ids = new IdBatch(1);
                 ids.add(transfer2Id);
                 var lookupVoidTransfers = client.lookupTransfers(ids);
@@ -946,9 +947,10 @@ public class IntegrationTest {
     public void testConcurrentTasks() throws Throwable {
 
         try (var server = new Server()) {
-
-            final int tasks_qty = 32;
-            final int max_concurrency = 32;
+            // Defining the concurrency_max equals to tasks_qty
+            // The goal here is to allow to all requests being submitted at once.
+            final int max_concurrency = 100;
+            final int tasks_qty = max_concurrency;
             final var barrier = new CountDownLatch(tasks_qty);
 
             try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
@@ -1159,37 +1161,38 @@ public class IntegrationTest {
      * This test asserts that submit a request after the client was closed will fail with
      * IllegalStateException.
      */
-    @Test(expected = IllegalStateException.class)
+    @Test
     public void testClose() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            // As we call client.close() explicitly,
+            // we don't need to use a try-with-resources block here.
+            var client = new Client(0, new String[] {Server.TB_PORT});
 
-                // Creating the accounts
-                var createAccountErrors = client.createAccounts(accounts);
-                assertTrue(createAccountErrors.getLength() == 0);
+            // Creating accounts.
+            var createAccountErrors = client.createAccounts(accounts);
+            assertTrue(createAccountErrors.getLength() == 0);
 
-                client.close();
+            // Closing the client.
+            client.close();
 
-                // Creating a transfer
-                var transfers = new TransferBatch(2);
+            // Creating a transfer with a closed client.
+            var transfers = new TransferBatch(2);
 
-                transfers.add();
-                transfers.setId(transfer1Id);
-                transfers.setCreditAccountId(account1Id);
-                transfers.setDebitAccountId(account2Id);
-                transfers.setLedger(720);
-                transfers.setCode((short) 1);
-                transfers.setFlags(TransferFlags.NONE);
-                transfers.setAmount(100);
+            transfers.add();
+            transfers.setId(transfer1Id);
+            transfers.setCreditAccountId(account1Id);
+            transfers.setDebitAccountId(account2Id);
+            transfers.setLedger(720);
+            transfers.setCode((short) 1);
+            transfers.setFlags(TransferFlags.NONE);
+            transfers.setAmount(100);
 
-                client.createTransfers(transfers);
-                assert false;
-            } catch (Throwable any) {
-                throw any;
-            }
+            client.createTransfers(transfers);
+            assert false;
+
         } catch (Throwable any) {
-            throw any;
+            assertEquals(IllegalStateException.class, any.getClass());
         }
     }
 
@@ -1201,12 +1204,12 @@ public class IntegrationTest {
     public void testAsyncTasks() throws Throwable {
 
         try (var server = new Server()) {
-
-            // Defining the concurrencyMax greater than tasks_qty
-            // The goal here is to allow to all requests being submitted at once simultaneously
+            // Defining the concurrency_max equals to tasks_qty
+            // The goal here is to allow to all requests being submitted at once.
             final int tasks_qty = 100;
+            final int concurrency_max = tasks_qty;
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT}, tasks_qty)) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT}, concurrency_max)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1224,11 +1227,11 @@ public class IntegrationTest {
                     transfers.setCode((short) 1);
                     transfers.setAmount(100);
 
-                    // Starting async batch
+                    // Starting async batch.
                     tasks[i] = client.createTransfersAsync(transfers);
                 }
 
-                // Wait for all threads
+                // Wait for all threads.
                 for (int i = 0; i < tasks_qty; i++) {
                     @SuppressWarnings("unchecked")
                     final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
@@ -1236,7 +1239,7 @@ public class IntegrationTest {
                     assertEquals(0, result.getLength());
                 }
 
-                // Asserting if all transfers were submitted correctly
+                // Asserting if all transfers were submitted correctly.
                 var lookupAccounts = client.lookupAccounts(accountIds);
                 assertEquals(2, lookupAccounts.getLength());
 
@@ -1357,10 +1360,25 @@ public class IntegrationTest {
                 throw new Exception("Format failed. " + error);
             }
 
-            this.process = Runtime.getRuntime()
-                    .exec(new String[] {exe, "start", "--addresses=" + TB_PORT, TB_FILE});
+            this.process = new ProcessBuilder().command(new String[] {exe, "start",
+                    "--addresses=" + TB_PORT, TB_FILE, "--cache-grid=128MB"})
+                    .redirectError(Redirect.PIPE).start();
+
             if (process.waitFor(100, TimeUnit.MILLISECONDS))
                 throw new Exception("Start server failed");
+
+            process.onExit().whenCompleteAsync((process, exception) -> {
+                // Diagnose cases when the server crashes.
+                final var stream = process.getErrorStream();
+                if (stream != null) {
+                    final var content = new BufferedReader(new InputStreamReader(stream)).lines()
+                            .collect(Collectors.joining("\n"));
+                    System.out.println(content);
+                }
+
+                System.out.printf("TigerBeetle server exited with code %d\n\n",
+                        process.exitValue());
+            });
         }
 
         @Override
