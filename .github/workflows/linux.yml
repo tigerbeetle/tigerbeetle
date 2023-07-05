@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - run: ./scripts/docs_check.sh
+      - run: ./.github/ci/docs_check.sh
 
   test:
     if: inputs.version == ''
@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: ./scripts/test_aof.sh
+      - run: ./.github/ci/test_aof.sh
 
   c_sample:
     if: inputs.version == ''
@@ -167,9 +167,9 @@ jobs:
 
       # Validate the image
       - if: matrix.debug == 'production'
-        run: ./scripts/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-production
+        run: ./.github/ci/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-production
       - if: matrix.debug == 'debug'
-        run: ./scripts/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-debug
+        run: ./.github/ci/confirm_image.sh ${{ steps.docker_load.outputs.imageid }} --want-debug
 
       # Login and publish, if we're in a release
       - if: inputs.version != ''
