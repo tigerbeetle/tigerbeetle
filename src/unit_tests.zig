@@ -51,4 +51,6 @@ test {
     _ = @import("vsr/superblock_quorums.zig");
 
     _ = @import("aof.zig");
+
+    _ = @import("shell.zig");
 }
