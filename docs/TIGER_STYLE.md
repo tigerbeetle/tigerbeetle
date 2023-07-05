@@ -116,7 +116,7 @@ Beyond these rules:
 
 * **Get the nouns and verbs just right.** Great names are the essence of great code, they capture what a thing is or does, and provide a crisp, intuitive mental model. They show that you understand the domain. Take time to find the perfect name, to find nouns and verbs that work together, so that the whole is greater than the sum of its parts.
 
-* Use `snake_case` for function and variable names. The underscore is the closest thing we have as programmers to a space, and helps to separate words and encourage descriptive names.
+* Use `snake_case` for function, variable, and file names. The underscore is the closest thing we have as programmers to a space, and helps to separate words and encourage descriptive names.
 
 * Follow the Zig style guide.
 
