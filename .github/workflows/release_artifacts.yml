@@ -87,6 +87,10 @@ jobs:
           --data-binary @./tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip \
           "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip"
 
+  # Split out the macOS building from the step above, so we can build a universal binary.
+  # This means 2 less binaries (one for debug, one for release) on the release page,
+  # less chance of confusion by a macOS user downloading the wrong arch, and less
+  # to do in a quick start script (no need to detect system arch).
   build_and_upload_binaries_macos:
     needs: version
     strategy:
