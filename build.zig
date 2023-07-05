@@ -986,21 +986,19 @@ fn jni_tests_run(
             b.allocator,
             &.{ java_home, "\\bin" },
         ) catch unreachable;
-        defer b.allocator.free(java_bin_path);
         _ = set_dll_directory(java_bin_path);
 
         var java_bin_server_path = std.fs.path.joinZ(
             b.allocator,
             &.{ java_home, "\\bin\\server" },
         ) catch unreachable;
-        defer b.allocator.free(java_bin_server_path);
         _ = set_dll_directory(java_bin_server_path);
 
         // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
         // the stack size and causes a SEGV that is handled by Zig's panic handler.
         // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
         //
-        // The workarround is run the tests in "ReleaseFast" mode.
+        // The workaround is run the tests in "ReleaseFast" mode.
         jni_tests.setBuildMode(.ReleaseFast);
     } else {
         jni_tests.setBuildMode(mode);
