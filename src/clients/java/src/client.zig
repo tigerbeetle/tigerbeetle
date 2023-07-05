@@ -114,6 +114,15 @@ const NativeClient = struct {
     ) tb.tb_packet_acquire_status_t {
         assert(request_obj != null);
 
+        const operation = ReflectionHelper.get_request_operation(env, request_obj);
+        const send_buffer: []u8 = ReflectionHelper.get_send_buffer_slice(env, request_obj) orelse {
+            ReflectionHelper.assertion_error_throw(
+                env,
+                "Request.sendBuffer is null or invalid",
+            );
+            return undefined;
+        };
+
         var out_packet: ?*tb.tb_packet_t = null;
         const acquire_status = tb.acquire_packet(context.client, &out_packet);
 
@@ -121,11 +130,7 @@ const NativeClient = struct {
             assert(acquire_status == .ok);
 
             // Holds a global reference to prevent GC before the callback.
-            var global_ref = JNIHelper.new_global_reference(env, request_obj);
-            errdefer env.delete_global_ref(global_ref);
-
-            var send_buffer: []u8 = ReflectionHelper.get_send_buffer(env, request_obj);
-            const operation = ReflectionHelper.operation(env, request_obj);
+            const global_ref = JNIHelper.new_global_reference(env, request_obj);
 
             packet.operation = operation;
             packet.user_data = global_ref;
@@ -275,6 +280,7 @@ comptime {
 const ReflectionHelper = struct {
     var initialization_exception_class: jni.JClass = null;
     var initialization_exception_ctor_id: jni.JMethodID = null;
+    var assertion_error_class: jni.JClass = null;
 
     var request_class: jni.JClass = null;
     var request_send_buffer_field_id: jni.JFieldID = null;
@@ -287,6 +293,7 @@ const ReflectionHelper = struct {
         // Asserting we are not initialized yet:
         assert(initialization_exception_class == null);
         assert(initialization_exception_ctor_id == null);
+        assert(assertion_error_class == null);
         assert(request_class == null);
         assert(request_send_buffer_field_id == null);
         assert(request_send_buffer_len_field_id == null);
@@ -303,6 +310,11 @@ const ReflectionHelper = struct {
             initialization_exception_class,
             "<init>",
             "(I)V",
+        );
+
+        assertion_error_class = JNIHelper.find_class(
+            env,
+            "com/tigerbeetle/AssertionError",
         );
 
         request_class = JNIHelper.find_class(
@@ -343,6 +355,7 @@ const ReflectionHelper = struct {
         // Asserting we are full initialized:
         assert(initialization_exception_class != null);
         assert(initialization_exception_ctor_id != null);
+        assert(assertion_error_class != null);
         assert(request_class != null);
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
@@ -375,7 +388,7 @@ const ReflectionHelper = struct {
             &[_]jni.JValue{jni.JValue.to_jvalue(@bitCast(jni.JInt, @enumToInt(status)))},
         ) orelse {
             // It's unexpected here: we did not initialize correctly or the JVM is out of memory.
-            JNIHelper.vm_panic(env, "JNI: Unexpected error creating a new exception.", .{});
+            JNIHelper.vm_panic(env, "Unexpected error creating a new InitializationException.", .{});
         };
         defer env.delete_local_ref(exception);
 
@@ -383,31 +396,41 @@ const ReflectionHelper = struct {
         JNIHelper.check_jni_result(
             env,
             jni_result,
-            "JNI: Unexpected error throwing an exception.",
+            "Unexpected error throwing InitializationException.",
             .{},
         );
 
         assert(env.exception_check() == .jni_true);
     }
 
-    pub fn get_send_buffer(env: *jni.JNIEnv, this_obj: jni.JObject) []u8 {
+    pub fn assertion_error_throw(env: *jni.JNIEnv, message: [:0]const u8) void {
+        assert(assertion_error_class != null);
+
+        const jni_result = env.throw_new(assertion_error_class, message.ptr);
+        JNIHelper.check_jni_result(
+            env,
+            jni_result,
+            "Unexpected error throwing AssertionError.",
+            .{},
+        );
+        assert(env.exception_check() == .jni_true);
+    }
+
+    pub fn get_send_buffer_slice(env: *jni.JNIEnv, this_obj: jni.JObject) ?[]u8 {
         assert(this_obj != null);
         assert(request_send_buffer_field_id != null);
         assert(request_send_buffer_len_field_id != null);
 
-        var buffer_obj = env.get_object_field(this_obj, request_send_buffer_field_id) orelse {
-            // It is unexpected to the buffer be null here
-            // The java side must allocate a new buffer prior to invoking "submit".
-            JNIHelper.vm_panic(env, "Send buffer is null", .{});
-        };
+        var buffer_obj = env.get_object_field(this_obj, request_send_buffer_field_id) orelse
+            return null;
         defer env.delete_local_ref(buffer_obj);
 
-        var direct_buffer: []u8 = JNIHelper.get_direct_buffer(env, buffer_obj) orelse {
-            JNIHelper.vm_panic(env, "Invalid send buffer address", .{});
-        };
+        var direct_buffer: []u8 = JNIHelper.get_direct_buffer(env, buffer_obj) orelse
+            return null;
 
         var buffer_len = env.get_long_field(this_obj, request_send_buffer_len_field_id);
-        assert(buffer_len >= 0 and buffer_len <= direct_buffer.len);
+        if (buffer_len < 0 or buffer_len > direct_buffer.len)
+            return null;
 
         return direct_buffer[0..@intCast(usize, buffer_len)];
     }
@@ -454,7 +477,7 @@ const ReflectionHelper = struct {
         );
     }
 
-    pub fn operation(env: *jni.JNIEnv, this_obj: jni.JObject) u8 {
+    pub fn get_request_operation(env: *jni.JNIEnv, this_obj: jni.JObject) u8 {
         assert(this_obj != null);
         assert(request_class != null);
         assert(request_operation_method_id != null);
