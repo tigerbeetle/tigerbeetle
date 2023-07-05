@@ -278,38 +278,44 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
     if (args_used != args_provided) @compileError("Unused argument");
 }
 
+const Snap = @import("./testing/snaptest.zig").Snap;
+const snap = Snap.snap;
+
 test "shell: expand_argv" {
     const T = struct {
         fn check(
             comptime cmd: []const u8,
             args: anytype,
-            want: []const []const u8,
+            want: Snap,
         ) !void {
             var argv = Argv.init(std.testing.allocator);
             defer argv.deinit();
 
             try expand_argv(&argv, cmd, args);
-
-            try std.testing.expectEqual(argv.items.len, want.len);
-            for (argv.items) |arg_got, i| {
-                const arg_want = want[i];
-                try std.testing.expectEqualStrings(arg_got, arg_want);
-            }
+            try want.diff_json(argv.items);
         }
     };
 
-    try T.check("zig version", .{}, &.{ "zig", "version" });
-    try T.check("  zig  version  ", .{}, &.{ "zig", "version" });
+    try T.check("zig version", .{}, snap(@src(),
+        \\["zig","version"]
+    ));
+    try T.check("  zig  version  ", .{}, snap(@src(),
+        \\["zig","version"]
+    ));
 
     try T.check(
         "zig {version}",
         .{ .version = @as([]const u8, "version") },
-        &.{ "zig", "version" },
+        snap(@src(),
+            \\["zig","version"]
+        ),
     );
 
     try T.check(
         "zig {version}",
         .{ .version = @as([]const []const u8, &.{ "version", "--verbose" }) },
-        &.{ "zig", "version", "--verbose" },
+        snap(@src(),
+            \\["zig","version","--verbose"]
+        ),
     );
 }
