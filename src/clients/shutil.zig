@@ -82,10 +82,7 @@ pub fn shell_wrap(arena: *std.heap.ArenaAllocator, cmd: []const u8) ![]const []c
     if (builtin.os.tag == .windows) {
         try wrapped.append(try std.fmt.allocPrint(
             arena.allocator(),
-            // \\Set-StrictMode -Version 3;
-            // \\$ErrorActionPreference = 'Stop';
-            // \\$PSDefaultParameterValues['*:ErrorAction']='Stop';
-            // \\$LASTEXITCODE = 0;
+            \\Set-PSDebug -Trace 1
             \\
             \\{s}
         ,
@@ -96,13 +93,6 @@ pub fn shell_wrap(arena: *std.heap.ArenaAllocator, cmd: []const u8) ![]const []c
                 ";",
                 "; if(!$?) { Exit $LASTEXITCODE }; ",
             )},
-            // .{try std.mem.replaceOwned(
-            //     u8,
-            //     arena.allocator(),
-            //     cmd,
-            //     "\"",
-            //     "\\\"",
-            // )},
         ));
     } else {
         try wrapped.append(cmd);

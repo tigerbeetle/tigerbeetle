@@ -122,8 +122,6 @@ pub const JavaDocs = Docs{
     .extension = "java",
     .proper_name = "Java",
 
-    .test_linux_docker_image = "alpine",
-
     .test_source_path = "src/main/java/",
 
     .name = "tigerbeetle-java",
@@ -370,12 +368,17 @@ pub const JavaDocs = Docs{
     .create_transfers_errors_documentation = "",
 
     .no_batch_example = 
-    \\for (int i = 0; i < transfers.length; i++) {
+    \\var transferIds = new long[]{100, 101, 102};
+    \\var debitIds = new long[]{1, 2, 3};
+    \\var creditIds = new long[]{4, 5, 6};
+    \\var amounts = new long[]{1000, 29, 11};
+    \\for (int i = 0; i < transferIds.length; i++) {
     \\  TransferBatch batch = new TransferBatch(1);
     \\  batch.add();
-    \\  batch.setId(transfers[i].getId());
-    \\  batch.setDebitAccountId(transfers[i].getDebitAccountId());
-    \\  batch.setCreditAccountId(transfers[i].getCreditAccountId());
+    \\  batch.setId(transferIds[i]);
+    \\  batch.setDebitAccountId(debitIds[i]);
+    \\  batch.setCreditAccountId(creditIds[i]);
+    \\  batch.setAmount(amounts[i]);
     \\
     \\  CreateTransferResultBatch errors = client.createTransfers(batch);
     \\  // error handling omitted
@@ -384,14 +387,15 @@ pub const JavaDocs = Docs{
 
     .batch_example = 
     \\var BATCH_SIZE = 8191;
-    \\for (int i = 0; i < transfers.length; i += BATCH_SIZE) {
+    \\for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
     \\  TransferBatch batch = new TransferBatch(BATCH_SIZE);
     \\
-    \\  for (int j = 0; j < BATCH_SIZE && i + j < transfers.length; j++) {
+    \\  for (int j = 0; j < BATCH_SIZE && i + j < transferIds.length; j++) {
     \\    batch.add();
-    \\    batch.setId(transfers[i + j].getId());
-    \\    batch.setDebitAccountId(transfers[i + j].getDebitAccountId());
-    \\    batch.setCreditAccountId(transfers[i + j].getCreditAccountId());
+    \\    batch.setId(transferIds[i+j]);
+    \\    batch.setDebitAccountId(debitIds[i+j]);
+    \\    batch.setCreditAccountId(creditIds[i+j]);
+    \\    batch.setAmount(amounts[i+j]);
     \\  }
     \\
     \\  CreateTransferResultBatch errors = client.createTransfers(batch);
@@ -497,6 +501,8 @@ pub const JavaDocs = Docs{
     \\
     \\transferErrors = client.createTransfers(transfers);
     ,
+
+    .developer_setup_documentation = "",
 
     .developer_setup_sh_commands = 
     \\cd src/clients/java

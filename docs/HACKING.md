@@ -92,6 +92,7 @@ Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com
 
 Detailed instructions for each client are in their respective README:
 
+* [.NET Development Setup](/src/clients/dotnet#development-setup)
 * [Java Development Setup](/src/clients/java#development-setup)
 * [Go Development Setup](/src/clients/go#development-setup)
 * [Node.js Development Setup](/src/clients/node#development-setup)
