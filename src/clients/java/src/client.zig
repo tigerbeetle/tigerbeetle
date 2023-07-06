@@ -146,7 +146,7 @@ const NativeClient = struct {
         return acquire_status;
     }
 
-    /// Completion callback, aways called from the native thread.
+    /// Completion callback, always called from the native thread.
     fn on_completion(
         context_ptr: usize,
         client: tb.tb_client_t,
@@ -366,10 +366,12 @@ const ReflectionHelper = struct {
 
     pub fn unload(env: *jni.JNIEnv) void {
         env.delete_global_ref(initialization_exception_class);
+        env.delete_global_ref(assertion_error_class);
         env.delete_global_ref(request_class);
 
         initialization_exception_class = null;
         initialization_exception_ctor_id = null;
+        assertion_error_class = null;
         request_class = null;
         request_send_buffer_field_id = null;
         request_send_buffer_len_field_id = null;
@@ -664,12 +666,9 @@ const JNIHelper = struct {
         buffer_obj: jni.JObject,
     ) ?[]u8 {
         var buffer_capacity = env.get_direct_buffer_capacity(buffer_obj);
-        if (buffer_capacity < 0)
-            return null;
+        if (buffer_capacity < 0) return null;
 
-        var buffer_address = env.get_direct_buffer_address(buffer_obj) orelse
-            return null;
-
+        var buffer_address = env.get_direct_buffer_address(buffer_obj) orelse return null;
         return buffer_address[0..@intCast(u32, buffer_capacity)];
     }
 
