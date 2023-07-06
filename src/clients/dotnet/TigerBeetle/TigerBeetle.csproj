@@ -9,15 +9,17 @@
     <AssemblyName>TigerBeetle</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RollForward>LatestMajor</RollForward>
-  </PropertyGroup>
+  </PropertyGroup> 
   <PropertyGroup>
     <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
   </PropertyGroup>
-  <Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'=='Windows'">
-    <Exec Command=".\zig\zig.exe build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)\..\..\..\.." />
-  </Target>
-  <Target Name="BuildZig" BeforeTargets="CoreCompile" Condition="'$(OS)'!='Windows'">
-    <Exec Command="zig/zig build dotnet_client -Drelease-safe" WorkingDirectory="$(ProjectDir)/../../../.." />
+  <Target Name="BuildZig" BeforeTargets="DispatchToInnerBuilds">
+    <Exec Command=".\scripts\build.bat dotnet_client -Drelease-safe"
+          WorkingDirectory="$(MSBuildProjectDirectory)\..\..\..\.."
+          Condition="'$(OS)'=='Windows'"/>
+    <Exec Command="./scripts/build.sh dotnet_client -Drelease-safe"
+          WorkingDirectory="$(MSBuildProjectDirectory)/../../../.."
+          Condition="'$(OS)'!='Windows'"/>
   </Target>
   <ItemGroup>
     <Content Include="runtimes\**\*.so">
