@@ -66,11 +66,6 @@ pub const NodeDocs = Docs{
     .extension = "js",
     .proper_name = "Node.js",
 
-    // Phil: While installing TigerBeetle on Node 14 works, building
-    // (`npm install --include dev`) seems to require a newer Node
-    // version. I've tried this on alpine and debian images and
-    // couldn't get the install to work on either with Node 14.
-    .test_linux_docker_image = "node:16-alpine",
     .test_source_path = "",
 
     .name = "tigerbeetle-node",
@@ -490,6 +485,8 @@ pub const NodeDocs = Docs{
     \\ * ]
     \\ */
     ,
+
+    .developer_setup_documentation = "",
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
