@@ -982,7 +982,7 @@ const ShellcheckStep = struct {
         }
 
         const scripts = try shell.find(.{
-            .where = &.{ "src", "scripts" },
+            .where = &.{ "src", "scripts", ".github" },
             .ends_with = ".sh",
         });
 

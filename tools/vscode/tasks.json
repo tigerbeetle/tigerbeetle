@@ -4,7 +4,7 @@
         {
             "label": "format debug server",
             "type": "shell",
-            "command": "${workspaceFolder}/scripts/format_debug_server.sh",
+            "command": "${workspaceFolder}/tools/vscode/format_debug_server.sh",
             "args": [],
             "problemMatcher": [],
             "group": "build",
