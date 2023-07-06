@@ -7,6 +7,20 @@ const run_shell = @import("../shutil.zig").run_shell;
 const script_filename = @import("../shutil.zig").script_filename;
 const write_shell_newlines_into_single_line = @import("../shutil.zig").write_shell_newlines_into_single_line;
 
+fn current_commit_pre_install_hook(
+    arena: *std.heap.ArenaAllocator,
+    sample_dir: []const u8,
+    _: []const u8,
+) !void {
+    try std.os.chdir(sample_dir);
+    run_shell(arena, "rm *.csproj") catch {
+        // Ok if it doesn't exist.
+    };
+    run_shell(arena, "rm Program.cs") catch {
+        // Ok if it doesn't exist.
+    };
+}
+
 pub const DotnetDocs = Docs{
     .directory = "dotnet",
 
@@ -47,7 +61,7 @@ pub const DotnetDocs = Docs{
     \\Console.WriteLine("SUCCESS");
     ,
 
-    .current_commit_pre_install_hook = null,
+    .current_commit_pre_install_hook = current_commit_pre_install_hook,
     .current_commit_post_install_hook = null,
 
     .install_commands = 
