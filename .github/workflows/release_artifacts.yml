@@ -54,7 +54,7 @@ jobs:
       max-parallel: 2
       matrix:
         debug: ["", "--debug"]
-        target: [aarch64-linux, x86_64-linux, aarch64-macos, x86_64-macos, x86_64-windows]
+        target: [aarch64-linux, x86_64-linux, x86_64-windows]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
@@ -86,6 +86,56 @@ jobs:
           -H "Content-Type: application/zip" \
           --data-binary @./tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip \
           "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-${{ matrix.target }}-${GIT_TAG}${{ matrix.debug }}.zip"
+
+  # Split out the macOS building from the step above, so we can build a universal binary.
+  # This means 2 less binaries (one for debug, one for release) on the release page,
+  # less chance of confusion by a macOS user downloading the wrong arch, and less
+  # to do in a quick start script (no need to detect system arch).
+  build_and_upload_binaries_macos:
+    needs: version
+    strategy:
+      max-parallel: 2
+      matrix:
+        debug: ["", "--debug"]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        # By default, this will do a shallow clone and won't have tags - which we need.
+        # https://github.com/actions/checkout/issues/701
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Build tigerbeetle (aarch64)
+      run: ./scripts/install.sh ${{ matrix.debug }} && mv tigerbeetle tigerbeetle-aarch64
+      env:
+        TARGET: aarch64-macos
+        CPU: baseline+aes+neon
+
+    - name: Build tigerbeetle (x86_64)
+      run: ./scripts/install.sh ${{ matrix.debug }} && mv tigerbeetle tigerbeetle-x86_64
+      env:
+        TARGET: x86_64-macos
+        CPU: x86_64_v3+aes
+
+    - name: Build universal binary
+      run: llvm-lipo tigerbeetle-aarch64 tigerbeetle-x86_64 -create -output tigerbeetle
+    # Use github.sha, not HEAD, so we can't have any race conditions where a new commit gets
+    # pushed before this pipeline runs. When invoked by workflow_call, this will be set to
+    # the value that triggered the parent workflow. Even though technically that's a scheduled
+    # call, GH set it to the last commit on the default branch.
+    - name: Upload on release
+      if: ${{ inputs.dry-run != 'true' }}
+      run: |
+        export GIT_TAG="${{ needs.version.outputs.version }}" && \
+        export RELEASE_ID=`curl -H 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' "https://api.github.com/repos/tigerbeetledb/tigerbeetle/releases/tags/${GIT_TAG}" | jq '.id'` && \
+        export BINARY="tigerbeetle" && \
+        zip -9 tigerbeetle-universal-macos-${GIT_TAG}${{ matrix.debug }}.zip $BINARY && \
+        curl --fail \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "Content-Type: application/zip" \
+          --data-binary @./tigerbeetle-universal-macos-${GIT_TAG}${{ matrix.debug }}.zip \
+          "https://uploads.github.com/repos/tigerbeetledb/tigerbeetle/releases/$RELEASE_ID/assets?name=tigerbeetle-universal-macos-${GIT_TAG}${{ matrix.debug }}.zip"
 
   # Publish all clients and Docker image.
   client-dotnet:
