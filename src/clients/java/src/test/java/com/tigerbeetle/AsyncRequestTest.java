@@ -417,13 +417,15 @@ public class AsyncRequestTest {
         var callback =
                 new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
                         Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer,
-                        PacketStatus.Ok.value, 500);
+                        PacketStatus.Ok.value, 5000);
 
         Future<TransferBatch> future = callback.request.getFuture();
         callback.start();
 
         try {
-            // Should not be ready yet
+            // Our goal is just to test the future timeout.
+            // The timeout is much smaller than the delay,
+            // to avoid flaky results due to thread scheduling.
             future.get(5, TimeUnit.MILLISECONDS);
             assert false;
 
@@ -461,14 +463,17 @@ public class AsyncRequestTest {
         var callback =
                 new CallbackSimulator<TransferBatch>(AsyncRequest.lookupTransfers(client, batch),
                         Request.Operations.LOOKUP_TRANSFERS.value, dummyReplyBuffer,
-                        PacketStatus.Ok.value, 500);
+                        PacketStatus.Ok.value, 5);
 
         Future<TransferBatch> future = callback.request.getFuture();
         callback.start();
 
         try {
 
-            var result = future.get(1000, TimeUnit.MILLISECONDS);
+            // Our goal is just to test the future completion.
+            // The timeout is much bigger than the delay,
+            // to avoid flaky results due to thread scheduling.
+            var result = future.get(5000, TimeUnit.MILLISECONDS);
             assertEquals(2, result.getLength());
 
             assertTrue(result.next());
