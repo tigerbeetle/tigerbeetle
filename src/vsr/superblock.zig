@@ -1722,11 +1722,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             });
         }
 
-        pub fn trailer(
-            superblock: *const SuperBlock,
-            trailer_: enum { manifest, free_set, client_sessions },
-        ) struct {
-            buffer: []const u8,
+        pub fn trailer(superblock: *SuperBlock, trailer_: Trailer) struct {
+            buffer: []align(constants.sector_size) u8,
             size: u32,
             checksum: u128,
         } {
@@ -1795,6 +1792,28 @@ pub const Caller = enum {
             .checkpoint => true,
             .view_change => false,
             .sync => true,
+        };
+    }
+};
+
+pub const Trailer = enum {
+    manifest,
+    free_set,
+    client_sessions,
+
+    pub fn request(trailer: Trailer) vsr.Command {
+        return switch (trailer) {
+            .manifest => .request_sync_manifest,
+            .free_set => .request_sync_free_set,
+            .client_sessions => .request_sync_client_sessions,
+        };
+    }
+
+    pub fn response(trailer: Trailer) vsr.Command {
+        return switch (trailer) {
+            .manifest => .sync_manifest,
+            .free_set => .sync_free_set,
+            .client_sessions => .sync_client_sessions,
         };
     }
 };

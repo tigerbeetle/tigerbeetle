@@ -66,20 +66,24 @@ const CommitStage = enum {
 
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
+    /// Called immediately after a prepare is committed by the state machine.
     commit,
     /// Called immediately after a compaction.
-    compact,
+    compaction_completed,
     /// Called immediately before a checkpoint.
-    checkpoint_start,
+    checkpoint_commenced,
     /// Called immediately after a checkpoint.
     /// Note: The replica may checkpoint without calling this function:
     /// 1. Begin checkpoint.
     /// 2. Write 2/4 SuperBlock copies.
     /// 3. Crash.
     /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
-    checkpoint_done,
-    /// sync_stage changed.
-    sync,
+    checkpoint_completed,
+    /// Either:
+    /// - The primary received an ack from a diverged replica.
+    /// - A replica has learned that it has diverged.
+    checkpoint_divergence_detected: struct { replica: u8 },
+    sync_stage_changed,
 };
 
 const Nonce = u128;
@@ -399,7 +403,7 @@ pub fn ReplicaType(
         /// This allows the replica to attempt WAL/grid repair before falling back, even if it
         /// is lagging behind the primary, to try to avoid unnecessary state sync.
         ///
-        /// Reset any time commit work progresses.
+        /// Reset anytime that commit work progresses.
         /// (status=normal backup)
         repair_sync_timeout: Timeout,
 
@@ -418,11 +422,7 @@ pub fn ReplicaType(
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque = null,
         /// Simulator hooks.
-        test_event_callback: ?fn (replica: *const Self, event: ReplicaEvent) void = null,
-        /// Whether or not to panic if the primary sees an ack from a diverged replica.
-        /// Uses a runtime flag so that this assertion can be disabled when a checkpoint fork
-        /// is deliberately buggified.
-        test_checkpoint_divergence: bool = constants.verify,
+        event_callback: ?fn (replica: *const Self, event: ReplicaEvent) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -1087,12 +1087,12 @@ pub fn ReplicaType(
                 .headers => self.on_headers(message),
                 .request_blocks => self.on_request_blocks(message),
                 .block => self.on_block(message),
-                .request_sync_manifest => self.on_request_sync_manifest(message),
-                .request_sync_free_set => self.on_request_sync_free_set(message),
-                .request_sync_client_sessions => self.on_request_sync_client_sessions(message),
-                .sync_manifest => self.on_sync_manifest(message),
-                .sync_free_set => self.on_sync_free_set(message),
-                .sync_client_sessions => self.on_sync_client_sessions(message),
+                .request_sync_manifest => self.on_request_sync_trailer(message),
+                .request_sync_free_set => self.on_request_sync_trailer(message),
+                .request_sync_client_sessions => self.on_request_sync_trailer(message),
+                .sync_manifest => self.on_sync_trailer(.manifest, message),
+                .sync_free_set => self.on_sync_trailer(.free_set, message),
+                .sync_client_sessions => self.on_sync_trailer(.client_sessions, message),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
@@ -1351,14 +1351,16 @@ pub fn ReplicaType(
                 log.warn("{}: on_prepare_ok: checkpoint_id mismatch " ++
                     "(expect={x:0>32} received={x:0>32} from={} op={})", .{
                     self.replica,
-                    self.superblock.working.checkpoint_id(),
+                    self.checkpoint_id_for_op(prepare.message.header.op).?,
                     checkpoint_id,
                     message.header.replica,
                     message.header.op,
                 });
 
-                if (self.test_checkpoint_divergence) {
-                    @panic("checkpoint_id fork");
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .checkpoint_divergence_detected = .{
+                        .replica = message.header.replica,
+                    } });
                 }
                 return;
             }
@@ -2307,7 +2309,7 @@ pub fn ReplicaType(
             assert(self.grid_repair_message_timeout.ticking);
 
             if (self.grid.canceling != null) {
-                log.debug("{}: on_block: ignoring; grid is cancelling (address={} checksum={}", .{
+                log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={}", .{
                     self.replica,
                     message.header.op,
                     message.header.checksum,
@@ -2376,8 +2378,10 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_sync_manifest(self: *Self, message: *Message) void {
-            assert(message.header.command == .request_sync_manifest);
+        fn on_request_sync_trailer(self: *Self, message: *Message) void {
+            assert(message.header.command == .request_sync_manifest or
+                message.header.command == .request_sync_free_set or
+                message.header.command == .request_sync_client_sessions);
             if (self.ignore_sync_request_message(message)) return;
 
             assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
@@ -2389,131 +2393,68 @@ pub fn ReplicaType(
             });
         }
 
-        fn on_request_sync_free_set(self: *Self, message: *Message) void {
-            assert(message.header.command == .request_sync_free_set);
-            if (self.ignore_sync_request_message(message)) return;
-
-            assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
-            assert(message.header.parent == self.superblock.staging.checkpoint_id());
-
-            self.send_sync_trailer(message.header.command, .{
-                .offset = message.header.request,
-                .replica = message.header.replica,
-            });
-        }
-
-        fn on_request_sync_client_sessions(self: *Self, message: *Message) void {
-            assert(message.header.command == .request_sync_client_sessions);
-            if (self.ignore_sync_request_message(message)) return;
-
-            assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
-            assert(message.header.parent == self.superblock.staging.checkpoint_id());
-
-            self.send_sync_trailer(message.header.command, .{
-                .offset = message.header.request,
-                .replica = message.header.replica,
-            });
-        }
-
-        fn on_sync_manifest(self: *Self, message: *Message) void {
-            assert(message.header.command == .sync_manifest);
+        fn on_sync_trailer(
+            self: *Self,
+            comptime trailer: vsr.SuperBlockTrailer,
+            message: *Message,
+        ) void {
             assert(message.header.replica < self.replica_count);
+            assert(message.header.command == trailer.response());
             if (self.ignore_sync_response_message(message)) return;
 
-            const stage = &self.sync_stage.request_trailers;
+            const stage = &self.sync_stage.requesting_trailers;
             assert(stage.target.checkpoint_id == message.header.parent);
 
-            log.debug("{}: on_sync_manifest: op={} checkpoint_id={x:0>32}", .{
+            log.debug("{}: on_{s}: checkpoint_op={} checkpoint_id={x:0>32}", .{
                 self.replica,
+                @tagName(message.header.command),
                 stage.target.checkpoint_op,
                 stage.target.checkpoint_id,
             });
 
-            const manifest_buffer = stage.manifest.write_chunk(.{
-                .buffer = self.superblock.manifest_buffer,
-                .size = @intCast(u32, message.header.commit),
+            // TODO(256-byte headers): Include both values on all 3 headers to avoid this switch.
+            switch (trailer) {
+                .manifest => {},
+                .free_set => {
+                    assert(stage.previous_checkpoint_id == null or
+                        stage.previous_checkpoint_id.? == message.header.client);
+                    stage.previous_checkpoint_id = message.header.client;
+                },
+                .client_sessions => {
+                    assert(stage.checkpoint_op_checksum == null or
+                        stage.checkpoint_op_checksum.? == message.header.client);
+                    stage.checkpoint_op_checksum = message.header.client;
+                },
+            }
+
+            const target_buffer = self.superblock.trailer(trailer).buffer;
+            const target_size = @intCast(u32, message.header.commit);
+            const progress = stage.trailers.getPtr(trailer).write_chunk(.{
+                .buffer = target_buffer,
+                .size = target_size,
                 .checksum = message.header.context,
             }, .{
                 .chunk = message.body(),
                 .chunk_offset = message.header.request,
-            }) orelse return;
-
-            log.debug("{}: on_sync_manifest: done", .{self.replica});
-
-            self.superblock.manifest.reset();
-            self.superblock.manifest.decode(manifest_buffer);
-
-            if (stage.done()) self.sync_request_trailers_callback();
-        }
-
-        fn on_sync_free_set(self: *Self, message: *Message) void {
-            assert(message.header.command == .sync_free_set);
-            assert(message.header.replica < self.replica_count);
-            if (self.ignore_sync_response_message(message)) return;
-
-            const stage = &self.sync_stage.request_trailers;
-            assert(stage.target.checkpoint_id == message.header.parent);
-            assert(stage.previous_checkpoint_id == null or
-                stage.previous_checkpoint_id.? == message.header.client);
-
-            stage.previous_checkpoint_id = message.header.client;
-
-            log.debug("{}: on_sync_free_set: op={} checkpoint_id={x:0>32}", .{
-                self.replica,
-                stage.target.checkpoint_op,
-                stage.target.checkpoint_id,
             });
 
-            const free_set_buffer = stage.free_set.write_chunk(.{
-                .buffer = self.superblock.free_set_buffer,
-                .size = @intCast(u32, message.header.commit),
-                .checksum = message.header.context,
-            }, .{
-                .chunk = message.body(),
-                .chunk_offset = message.header.request,
-            }) orelse return;
-
-            log.debug("{}: on_sync_free_set: done", .{self.replica});
-
-            self.superblock.free_set.reset();
-            self.superblock.free_set.decode(free_set_buffer);
-
-            if (stage.done()) self.sync_request_trailers_callback();
-        }
-
-        fn on_sync_client_sessions(self: *Self, message: *Message) void {
-            assert(message.header.command == .sync_client_sessions);
-            assert(message.header.replica < self.replica_count);
-            if (self.ignore_sync_response_message(message)) return;
-
-            const stage = &self.sync_stage.request_trailers;
-            assert(stage.target.checkpoint_id == message.header.parent);
-            assert(stage.checkpoint_op_checksum == null or
-                stage.checkpoint_op_checksum.? == message.header.client);
-
-            stage.checkpoint_op_checksum = message.header.client;
-
-            log.debug("{}: on_sync_client_sessions: op={} checkpoint_id={x:0>32}", .{
+            log.debug("{}: on_{s}: {s} ({}/{})", .{
                 self.replica,
-                stage.target.checkpoint_op,
-                stage.target.checkpoint_id,
+                @tagName(message.header.command),
+                @tagName(progress),
+                stage.trailers.get(trailer).offset,
+                target_size,
             });
 
-            const client_sessions_buffer = stage.client_sessions.write_chunk(.{
-                .buffer = self.superblock.client_sessions_buffer,
-                .size = @intCast(u32, message.header.commit),
-                .checksum = message.header.context,
-            }, .{
-                .chunk = message.body(),
-                .chunk_offset = message.header.request,
-            }) orelse return;
+            if (progress == .complete) {
+                @field(self.superblock, @tagName(trailer)).reset();
+                @field(self.superblock, @tagName(trailer)).decode(target_buffer[0..target_size]);
+            }
 
-            log.debug("{}: on_sync_client_sessions: done", .{self.replica});
-
-            self.superblock.client_sessions.reset();
-            self.superblock.client_sessions.decode(client_sessions_buffer);
-
-            if (stage.done()) self.sync_request_trailers_callback();
+            if (stage.done()) {
+                assert(progress == .complete);
+                self.sync_requesting_trailers_callback();
+            }
         }
 
         fn on_ping_timeout(self: *Self) void {
@@ -2860,21 +2801,20 @@ pub fn ReplicaType(
 
             switch (self.sync_stage) {
                 .not_syncing => unreachable,
-                .cancelling_commit,
-                .cancelling_grid,
+                .canceling_commit,
+                .canceling_grid,
                 .requesting_target,
                 .updating_superblock,
                 => return,
 
-                .request_trailers => |*trailers| {
-                    if (!trailers.manifest.done) {
-                        self.send_request_sync_trailer(.request_sync_manifest, trailers.manifest.offset);
-                    }
-                    if (!trailers.free_set.done) {
-                        self.send_request_sync_trailer(.request_sync_free_set, trailers.free_set.offset);
-                    }
-                    if (!trailers.client_sessions.done) {
-                        self.send_request_sync_trailer(.request_sync_client_sessions, trailers.client_sessions.offset);
+                .requesting_trailers => |*stage| {
+                    for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
+                        if (!stage.trailers.get(trailer).done) {
+                            self.send_request_sync_trailer(
+                                trailer.request(),
+                                stage.trailers.get(trailer).offset,
+                            );
+                        }
                     }
                 },
             }
@@ -3084,7 +3024,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (self.sync_stage == .cancelling_commit) {
+            if (self.sync_stage == .canceling_commit) {
                 return self.sync_cancel_commit_callback();
             }
             assert(self.sync_stage == .not_syncing);
@@ -3100,7 +3040,7 @@ pub fn ReplicaType(
                 else => stage_new,
             };
 
-            // Reset the repair-sync timeout any time a commit makes actual progress.
+            // Reset the repair-sync timeout anytime that a commit makes progress.
             if (self.commit_stage != .next_journal and
                 self.commit_stage != .next_pipeline and
                 self.commit_stage != .idle)
@@ -3170,9 +3110,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.sync_stage != .not_syncing) {
-                return;
-            }
+            if (self.sync_stage != .not_syncing) return;
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.commit_stage != .idle) {
@@ -3216,7 +3154,7 @@ pub fn ReplicaType(
             }
 
             // We may receive commit numbers for ops we do not yet have (`commit_max > self.op`):
-            // Even a naive state transfer may fail to correct for this.
+            // Even a naive state sync may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
                 const header = self.journal.header_with_op(op).?;
@@ -3398,7 +3336,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare != null);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
-            // Ensure that the ClientReplies has at least one Write available.
+            // Ensure that ClientReplies has at least one Write available.
             maybe(self.client_replies.writes.available() == 0);
             self.commit_dispatch(.setup_client_replies);
         }
@@ -3458,7 +3396,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
 
-            if (self.test_event_callback) |hook| hook(self, .compact);
+            if (self.event_callback) |hook| hook(self, .compaction_completed);
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -3479,7 +3417,7 @@ pub fn ReplicaType(
                     .checkpoint,
                     @src(),
                 );
-                if (self.test_event_callback) |hook| hook(self, .checkpoint_start);
+                if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
                 assert(self.grid.read_queue.empty());
                 assert(self.grid.read_faulty_queue.empty());
@@ -3568,7 +3506,7 @@ pub fn ReplicaType(
                 .checkpoint,
             );
 
-            if (self.test_event_callback) |hook| hook(self, .checkpoint_done);
+            if (self.event_callback) |hook| hook(self, .checkpoint_completed);
             self.commit_dispatch(.cleanup);
         }
 
@@ -3678,7 +3616,7 @@ pub fn ReplicaType(
             assert(self.commit_min == prepare.header.op);
             if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
 
-            if (self.test_event_callback) |hook| hook(self, .commit);
+            if (self.event_callback) |hook| hook(self, .commit);
 
             reply.header.* = .{
                 .command = .reply,
@@ -4764,7 +4702,7 @@ pub fn ReplicaType(
                 message.header.command == .sync_client_sessions);
             assert(message.header.replica < self.replica_count);
 
-            if (self.sync_stage != .request_trailers) {
+            if (self.sync_stage != .requesting_trailers) {
                 log.debug("{}: on_{s}: ignoring (status={} sync_status={s})", .{
                     self.replica,
                     @tagName(message.header.command),
@@ -4774,7 +4712,7 @@ pub fn ReplicaType(
                 return true;
             }
 
-            const stage = self.sync_stage.request_trailers;
+            const stage = &self.sync_stage.requesting_trailers;
 
             if (message.header.op != stage.target.checkpoint_op) {
                 log.debug("{}: on_{s}: ignoring, wrong op (got={} want={})", .{
@@ -6547,7 +6485,7 @@ pub fn ReplicaType(
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
-                if (self.test_event_callback) |hook| {
+                if (self.event_callback) |hook| {
                     hook(self, .{ .message_sent = message });
                 }
                 self.message_bus.send_message_to_replica(replica, message);
@@ -7057,7 +6995,8 @@ pub fn ReplicaType(
             self.repair_sync_timeout.stop();
 
             if (self.pipeline == .queue) {
-                var queue = self.pipeline.queue;
+                // Convert the pipeline queue into a cache.
+                var queue: PipelineQueue = self.pipeline.queue;
                 self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
                 queue.deinit(self.message_bus.pool);
             }
@@ -7281,25 +7220,25 @@ pub fn ReplicaType(
         /// where v identifies the new view. A replica notices the need for a view change either
         /// based on its own timer, or because it receives a start_view_change or do_view_change
         /// message for a view with a larger number than its own view.
-        fn transition_to_view_change_status(self: *Self, view_new_: u32) void {
+        fn transition_to_view_change_status(self: *Self, view_new_min: u32) void {
             assert(self.status == .normal or
                 self.status == .view_change or
                 self.status == .recovering);
-            assert(view_new_ >= self.log_view);
-            assert(view_new_ >= self.view);
-            assert(view_new_ > self.view or self.status == .recovering);
-            assert(view_new_ > self.log_view);
+            assert(view_new_min >= self.log_view);
+            assert(view_new_min >= self.view);
+            assert(view_new_min > self.view or self.status == .recovering);
+            assert(view_new_min > self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             defer assert(self.view_headers.command == .do_view_change);
 
             const view_new = view: {
                 if (self.sync_stage == .not_syncing or
-                    self.primary_index(view_new_) != self.replica)
+                    self.primary_index(view_new_min) != self.replica)
                 {
-                    break :view view_new_;
+                    break :view view_new_min;
                 } else {
                     // A syncing replica is not eligible to be primary.
-                    break :view view_new_ + 1;
+                    break :view view_new_min + 1;
                 }
             };
 
@@ -7389,7 +7328,7 @@ pub fn ReplicaType(
             }
 
             if (self.pipeline == .queue) {
-                var queue = self.pipeline.queue;
+                var queue: PipelineQueue = self.pipeline.queue;
                 self.pipeline = .{ .cache = PipelineCache.init_from_queue(&queue) };
                 queue.deinit(self.message_bus.pool);
             }
@@ -7464,13 +7403,13 @@ pub fn ReplicaType(
                 .setup_client_replies,
                 .checkpoint_client_replies,
                 .checkpoint_superblock,
-                => self.sync_dispatch(.cancelling_commit),
+                => self.sync_dispatch(.canceling_commit),
 
                 .idle, // (StateMachine.open() may be running.)
                 .prefetch_state_machine,
                 .compact_state_machine,
                 .checkpoint_state_machine,
-                => self.sync_dispatch(.cancelling_grid),
+                => self.sync_dispatch(.canceling_grid),
             }
         }
 
@@ -7491,8 +7430,8 @@ pub fn ReplicaType(
                 .not_syncing => unreachable,
 
                 // Uninterruptible states:
-                .cancelling_commit, // No sync target selected yet.
-                .cancelling_grid, // No sync target selected yet.
+                .canceling_commit, // No sync target selected yet.
+                .canceling_grid, // No sync target selected yet.
                 .updating_superblock, // Hopefully won't need to resync.
                 => return,
 
@@ -7504,12 +7443,12 @@ pub fn ReplicaType(
 
                 // We had a sync target already, but we discovered a newer one.
                 // Re-sync to the new target.
-                .request_trailers => |stage| {
+                .requesting_trailers => |stage| {
                     assert(self.commit_stage == .idle);
                     assert(self.sync_target_max.?.checkpoint_op >= stage.target.checkpoint_op);
                     if (self.sync_target_max.?.checkpoint_op == stage.target.checkpoint_op) return;
 
-                    self.sync_dispatch(.{ .request_trailers = .{
+                    self.sync_dispatch(.{ .requesting_trailers = .{
                         .target = self.sync_target_max.?,
                     } });
                 },
@@ -7537,7 +7476,7 @@ pub fn ReplicaType(
                         target.checkpoint_id,
                         self.sync_target_max.?.checkpoint_id,
                     });
-                    self.sync_stage = .{ .request_trailers = .{ .target = self.sync_target_max.? } };
+                    self.sync_stage = .{ .requesting_trailers = .{ .target = self.sync_target_max.? } };
                 }
             }
 
@@ -7550,7 +7489,7 @@ pub fn ReplicaType(
                         (target.checkpoint_op == self.op_checkpoint() and
                         target.checkpoint_id != self.superblock.working.checkpoint_id()))
                     {
-                        self.sync_stage = .{ .request_trailers = .{ .target = target } };
+                        self.sync_stage = .{ .requesting_trailers = .{ .target = target } };
                     }
                 }
             }
@@ -7572,26 +7511,26 @@ pub fn ReplicaType(
                 });
             }
 
-            if (self.test_event_callback) |hook| hook(self, .sync);
+            if (self.event_callback) |hook| hook(self, .sync_stage_changed);
 
             switch (self.sync_stage) {
                 .not_syncing => {},
-                .cancelling_commit => {}, // Waiting for an uninterruptible commit step.
-                .cancelling_grid => {
+                .canceling_commit => {}, // Waiting for an uninterruptible commit step.
+                .canceling_grid => {
                     self.grid_repair_message_timeout.stop();
                     self.grid.cancel(sync_cancel_grid_callback);
 
                     assert(self.grid.read_faulty_queue.empty());
                 },
                 .requesting_target => {}, // Waiting for a usable sync target.
-                .request_trailers => self.sync_message_timeout.start(),
+                .requesting_trailers => self.sync_message_timeout.start(),
                 .updating_superblock => self.sync_superblock_update(),
             }
         }
 
         fn sync_cancel_commit_callback(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage == .cancelling_commit);
+            assert(self.sync_stage == .canceling_commit);
 
             switch (self.commit_stage) {
                 .idle,
@@ -7614,12 +7553,12 @@ pub fn ReplicaType(
             // between beats.
             // TODO Compaction pacing: If there is no grid IO between beats, we can transition
             // to stage=requesting_target.
-            self.sync_dispatch(.cancelling_grid);
+            self.sync_dispatch(.canceling_grid);
         }
 
         fn sync_cancel_grid_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
-            assert(self.sync_stage == .cancelling_grid);
+            assert(self.sync_stage == .canceling_grid);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_faulty_queue.empty());
 
@@ -7633,6 +7572,8 @@ pub fn ReplicaType(
 
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |grid_read| {
+                assert(grid_read.message.references == 1);
+
                 self.message_bus.unref(grid_read.message);
                 self.grid_reads.release(grid_read);
             }
@@ -7645,9 +7586,9 @@ pub fn ReplicaType(
             self.sync_dispatch(.requesting_target);
         }
 
-        fn sync_request_trailers_callback(self: *Self) void {
+        fn sync_requesting_trailers_callback(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage == .request_trailers);
+            assert(self.sync_stage == .requesting_trailers);
             assert(!self.superblock.updating(.checkpoint));
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
@@ -7659,11 +7600,11 @@ pub fn ReplicaType(
             assert(self.grid_writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
-            const stage = self.sync_stage.request_trailers;
+            const stage = &self.sync_stage.requesting_trailers;
             assert(stage.done());
 
             // TODO(Zig) Use named format specifiers to avoid mixups.
-            log.debug("{}: sync_request_trailers_callback: " ++
+            log.debug("{}: sync_requesting_trailers_callback: " ++
                 "checkpoint_op={} checkpoint_id={x:0>32} " ++
                 "manifest_checksum={x:0>32} " ++
                 "free_set_checksum={x:0>32} " ++
@@ -7671,9 +7612,9 @@ pub fn ReplicaType(
                 self.replica,
                 stage.target.checkpoint_op,
                 stage.target.checkpoint_id,
-                stage.manifest.final.?.checksum,
-                stage.free_set.final.?.checksum,
-                stage.client_sessions.final.?.checksum,
+                stage.trailers.get(.manifest).final.?.checksum,
+                stage.trailers.get(.free_set).final.?.checksum,
+                stage.trailers.get(.client_sessions).final.?.checksum,
             });
 
             self.sync_dispatch(.{ .updating_superblock = .{
@@ -7686,8 +7627,10 @@ pub fn ReplicaType(
         fn sync_superblock_update(self: *Self) void {
             assert(!self.solo());
             assert(self.sync_stage == .updating_superblock);
+            assert(self.sync_message_timeout.ticking);
+            maybe(self.state_machine_opened);
 
-            const stage = self.sync_stage.updating_superblock;
+            const stage = &self.sync_stage.updating_superblock;
 
             self.state_machine_opened = false;
             self.state_machine.reset();
@@ -7713,7 +7656,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
             assert(self.sync_stage == .updating_superblock);
 
-            const stage = self.sync_stage.updating_superblock;
+            const stage = &self.sync_stage.updating_superblock;
 
             assert(self.superblock.working.vsr_state.commit_min == stage.target.checkpoint_op);
             assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
@@ -7727,8 +7670,8 @@ pub fn ReplicaType(
                 self.transition_to_recovering_head();
             }
 
-            self.state_machine.open(state_machine_open_callback);
             self.grid.cache_invalidate();
+            self.state_machine.open(state_machine_open_callback);
             self.sync_dispatch(.not_syncing);
         }
 
@@ -7914,7 +7857,7 @@ pub fn ReplicaType(
             }
 
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
-            if (header.replica == self.replica) return; // Ignore messages from self. (Misdirect).
+            if (header.replica == self.replica) return; // Ignore messages from self (misdirected).
 
             // TODO(256-byte headers) Prepares also need to include a checkpoint id,
             // so that backups cannot diverge by >1 checkpoint when they are (somehow)
@@ -7945,9 +7888,8 @@ pub fn ReplicaType(
 
             const candidate_canonical = canonical: {
                 const candidate_trigger = candidate.checkpoint_op + constants.lsm_batch_multiple;
-                if (header.command == .commit and
-                    header.commit > candidate_trigger)
-                {
+
+                if (header.command == .commit and header.commit > candidate_trigger) {
                     // Normal case: The primary has committed atop the checkpoint.
                     break :canonical true;
                 }
@@ -8044,7 +7986,11 @@ pub fn ReplicaType(
                         candidate.checkpoint_id,
                     });
 
-                    assert(!self.test_checkpoint_divergence);
+                    if (self.event_callback) |hook| {
+                        hook(self, .{ .checkpoint_divergence_detected = .{
+                            .replica = self.replica,
+                        } });
+                    }
                     self.sync_start_from_committing();
                 }
             } else {
@@ -8120,7 +8066,7 @@ pub fn ReplicaType(
             // `read` is *not* a BlockRead.read; we cannot use @fieldParentPtr() on it.
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(!self.grid.read_faulty_queue.empty());
-            assert(self.sync_stage != .cancelling_grid);
+            assert(self.sync_stage != .canceling_grid);
             assert(!self.superblock.free_set.is_free(read.address));
             maybe(self.state_machine_opened);
 
@@ -8206,14 +8152,14 @@ pub fn ReplicaType(
 
         fn send_request_sync_trailer(self: *Self, command: vsr.Command, offset: u32) void {
             assert(!self.solo());
-            assert(self.sync_stage == .request_trailers);
+            assert(self.sync_stage == .requesting_trailers);
             assert(self.sync_message_timeout.ticking);
             assert(command == .request_sync_manifest or
                 command == .request_sync_free_set or
                 command == .request_sync_client_sessions);
             assert(@mod(offset, SyncTrailer.chunk_size_max) == 0);
 
-            const stage = self.sync_stage.request_trailers;
+            const stage = &self.sync_stage.requesting_trailers;
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
