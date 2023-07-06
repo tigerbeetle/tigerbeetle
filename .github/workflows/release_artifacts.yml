@@ -119,7 +119,7 @@ jobs:
         CPU: x86_64_v3+aes
 
     - name: Build universal binary
-      run: llvm-lipo tigerbeetle-aarch64 tigerbeetle-x86_64 -create -output tigerbeetle
+      run: apt-get update -y && apt-get install -y llvm && llvm-lipo tigerbeetle-aarch64 tigerbeetle-x86_64 -create -output tigerbeetle
     # Use github.sha, not HEAD, so we can't have any race conditions where a new commit gets
     # pushed before this pipeline runs. When invoked by workflow_call, this will be set to
     # the value that triggered the parent workflow. Even though technically that's a scheduled
