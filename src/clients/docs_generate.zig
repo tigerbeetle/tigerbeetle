@@ -765,10 +765,8 @@ const Generator = struct {
 
             mw.header(2, "Start the TigerBeetle server");
             mw.paragraph(
-                \\Follow steps in the repo README to start a **single
-                \\server** [from a single
-                \\binary](/README.md#single-binary) or [in a Docker
-                \\container](/README.md#with-docker).
+                \\Follow steps in the repo README to [run
+                \\TigerBeetle](/README.md#running-tigerbeetle).
                 \\
                 \\If you are not running on port `localhost:3000`, set
                 \\the environment variable `TB_ADDRESS` to the full
