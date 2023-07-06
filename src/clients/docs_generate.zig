@@ -726,6 +726,8 @@ const Generator = struct {
             var main_file_name = if (std.mem.eql(u8, language.directory, "go") or
                 std.mem.eql(u8, language.directory, "node"))
                 "main"
+            else if (std.mem.eql(u8, language.directory, "dotnet"))
+                "Program"
             else
                 "Main";
 
