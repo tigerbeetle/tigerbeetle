@@ -986,7 +986,7 @@ namespace TigerBeetle.Tests
         private const string TB_FILE = "dotnet-tests.tigerbeetle";
         private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
         private const string FORMAT = $"format --cluster=0 --replica=0 --replica-count=1 ./" + TB_FILE;
-        private const string START = $"start --addresses=" + TB_PORT + " ./" + TB_FILE;
+        private const string START = $"start --addresses=" + TB_PORT + " --cache-grid=128MB ./" + TB_FILE;
 
         private readonly Process process;
 
