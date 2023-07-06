@@ -142,6 +142,22 @@ pub fn prepare_directory(
     var cmd = std.ArrayList(u8).init(arena.allocator());
     defer cmd.deinit();
 
+    // Some languages (Java) have an additional project file
+    // (pom.xml) they need to have available.
+    if (language.project_file.len > 0) {
+        const project_file = try std.fs.cwd().createFile(
+            try std.fmt.allocPrint(
+                arena.allocator(),
+                "{s}/{s}",
+                .{ dir, language.project_file_name },
+            ),
+            .{ .truncate = true },
+        );
+        defer project_file.close();
+
+        _ = try project_file.write(language.project_file);
+    }
+
     const root = try git_root(arena);
     if (language.current_commit_pre_install_hook) |hook| {
         try hook(arena, dir, root);
@@ -242,21 +258,6 @@ const Generator = struct {
         });
         defer tmp_file.close();
         _ = try tmp_file.write(file);
-
-        // Some languages (Java) have an additional project file
-        // (pom.xml) they need to have available.
-        if (self.language.project_file.len > 0) {
-            const project_file = try std.fs.cwd().createFile(
-                self.sprintf(
-                    "{s}/{s}",
-                    .{ tmp_dir.path, self.language.project_file_name },
-                ),
-                .{ .truncate = true },
-            );
-            defer project_file.close();
-
-            _ = try project_file.write(self.language.project_file);
-        }
 
         const root = try git_root(self.arena);
         try std.os.chdir(root);

@@ -70,8 +70,6 @@ fn go_current_commit_post_install_hook(
         "mod",
         "tidy",
     });
-
-    try run(arena, &[_][]const u8{ "sh", "-c", "ls && pwd" });
 }
 
 pub const GoDocs = Docs{
@@ -125,7 +123,6 @@ pub const GoDocs = Docs{
     \\go get github.com/tigerbeetledb/tigerbeetle-go
     ,
     .build_commands = 
-    \\ls -lah
     \\go mod tidy
     \\go build main.go
     ,
