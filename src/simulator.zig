@@ -294,6 +294,7 @@ pub fn main() !void {
             output.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (simulator.core_missing_blocks()) |blocks| {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
+            unreachable;
         } else {
             output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
             simulator.cluster.log_cluster();

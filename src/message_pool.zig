@@ -28,7 +28,6 @@ pub const messages_max_replica = messages_max: {
     sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}
     sum += 1; // Replica.commit_prepare
     // Replica.do_view_change_from_all_replicas quorum:
-    // Replica.recovery_response_quorum is only used for recovery and does not increase the limit.
     // All other quorums are bitsets.
     sum += constants.replicas_max;
     sum += constants.connections_max; // Connection.recv_message

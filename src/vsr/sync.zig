@@ -13,19 +13,19 @@ pub const Stage = union(enum) {
     /// We are waiting until that uninterruptible stage completes.
     /// When it completes, we will abort the commit chain and resume sync.
     /// (State sync will replace any changes the commit made anyway.)
-    cancelling_commit,
+    canceling_commit,
 
     /// Waiting for `Grid.cancel()`.
-    cancelling_grid,
+    canceling_grid,
 
     /// We need to sync, but are waiting for a usable `sync_target_max`.
     requesting_target,
 
-    request_trailers: struct {
+    requesting_trailers: struct {
+        const Trailers = std.enums.EnumArray(vsr.SuperBlockTrailer, Trailer);
+
         target: Target,
-        manifest: Trailer = .{},
-        free_set: Trailer = .{},
-        client_sessions: Trailer = .{},
+        trailers: Trailers = Trailers.initFill(.{}),
         /// Our new superblock's `vsr_state.previous_checkpoint_id`.
         /// Arrives with command=sync_free_set.
         previous_checkpoint_id: ?u128 = null,
@@ -34,10 +34,13 @@ pub const Stage = union(enum) {
         checkpoint_op_checksum: ?u128 = null,
 
         pub fn done(self: *const @This()) bool {
-            if (self.free_set.done) assert(self.previous_checkpoint_id != null);
-            if (self.client_sessions.done) assert(self.checkpoint_op_checksum != null);
+            for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
+                if (!self.trailers.get(trailer).done) return false;
+            }
 
-            return self.manifest.done and self.free_set.done and self.client_sessions.done;
+            assert(self.previous_checkpoint_id != null);
+            assert(self.checkpoint_op_checksum != null);
+            return true;
         }
     },
 
@@ -49,16 +52,16 @@ pub const Stage = union(enum) {
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
-            .not_syncing => to == .cancelling_commit or
-                to == .cancelling_grid or
+            .not_syncing => to == .canceling_commit or
+                to == .canceling_grid or
                 to == .requesting_target,
-            .cancelling_commit => to == .cancelling_grid,
-            .cancelling_grid => to == .requesting_target,
+            .canceling_commit => to == .canceling_grid,
+            .canceling_grid => to == .requesting_target,
             .requesting_target => to == .requesting_target or
-                to == .request_trailers,
-            .request_trailers => to == .request_trailers or
+                to == .requesting_trailers,
+            .requesting_trailers => to == .requesting_trailers or
                 to == .updating_superblock,
-            .updating_superblock => to == .request_trailers or
+            .updating_superblock => to == .requesting_trailers or
                 to == .not_syncing,
         };
     }
@@ -66,11 +69,11 @@ pub const Stage = union(enum) {
     pub fn target(stage: *const Stage) ?Target {
         return switch (stage.*) {
             .not_syncing,
-            .cancelling_commit,
-            .cancelling_grid,
+            .canceling_commit,
+            .canceling_grid,
             .requesting_target,
             => null,
-            .request_trailers => |s| s.target,
+            .requesting_trailers => |s| s.target,
             .updating_superblock => |s| s.target,
         };
     }
@@ -164,7 +167,7 @@ pub const Trailer = struct {
             chunk: []const u8,
             chunk_offset: u32,
         },
-    ) ?[]align(@alignOf(u128)) u8 {
+    ) enum { complete, incomplete, ignore } {
         assert(chunk.chunk.len <= chunk_size_max);
         assert(destination.size <= destination.buffer.len);
 
@@ -181,7 +184,7 @@ pub const Trailer = struct {
             };
         }
 
-        if (trailer.done) return null;
+        if (trailer.done) return .ignore;
 
         const buffer = destination.buffer[chunk.chunk_offset..][0..chunk.chunk.len];
         if (trailer.offset == chunk.chunk_offset) {
@@ -193,7 +196,9 @@ pub const Trailer = struct {
                 assert(vsr.checksum(destination.buffer[0..destination.size]) == destination.checksum);
 
                 trailer.done = true;
-                return destination.buffer[0..destination.size];
+                return .complete;
+            } else {
+                return .incomplete;
             }
         } else {
             if (trailer.offset < chunk.chunk_offset) {
@@ -203,12 +208,12 @@ pub const Trailer = struct {
                 assert(std.mem.eql(u8, buffer, chunk.chunk));
                 assert(chunk.chunk_offset + chunk.chunk.len <= trailer.offset);
             }
+            return .ignore;
         }
-        return null;
     }
 };
 
-test "Trailer chunk sequence" {
+test "sync: Trailer chunk sequence" {
     const total_want = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
 
     var chunk_step: usize = 1;
@@ -231,24 +236,28 @@ test "Trailer chunk sequence" {
             chunk_offset += chunk_size;
 
             if (chunk_offset == total_want.len) {
-                try std.testing.expect(std.mem.eql(u8, result.?, total_want[0..]));
+                try std.testing.expect(std.mem.eql(
+                    u8,
+                    total_got[0..total_want.len],
+                    total_want[0..],
+                ));
+                try std.testing.expectEqual(result, .complete);
                 break;
             } else {
-                try std.testing.expectEqual(result, null);
+                try std.testing.expectEqual(result, .incomplete);
             }
         } else unreachable;
     }
 }
 
-test "Trailer past/future chunk" {
+test "sync: Trailer past/future chunk" {
     const total_want = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
     var total_got: [16]u8 align(@alignOf(u128)) = undefined;
     var trailer = Trailer{};
 
     // Ignore a repeated chunk.
-    var i: usize = 0;
-    while (i < 2) : (i += 1) {
-        const result = trailer.write_chunk(.{
+    inline for (.{ .incomplete, .ignore }) |result_want| {
+        const result_got = trailer.write_chunk(.{
             .buffer = total_got[0..],
             .size = @intCast(u32, total_want.len),
             .checksum = vsr.checksum(total_want[0..]),
@@ -256,7 +265,7 @@ test "Trailer past/future chunk" {
             .chunk = total_want[0..2],
             .chunk_offset = 0,
         });
-        try std.testing.expectEqual(result, null);
+        try std.testing.expectEqual(result_got, result_want);
     }
 
     {
@@ -269,7 +278,7 @@ test "Trailer past/future chunk" {
             .chunk = total_want[6..8],
             .chunk_offset = 6,
         });
-        try std.testing.expectEqual(result, null);
+        try std.testing.expectEqual(result, .ignore);
     }
 
     const result = trailer.write_chunk(.{
@@ -280,5 +289,10 @@ test "Trailer past/future chunk" {
         .chunk = total_want[2..],
         .chunk_offset = 2,
     });
-    try std.testing.expect(std.mem.eql(u8, result.?, total_want[0..]));
+    try std.testing.expectEqual(result, .complete);
+    try std.testing.expect(std.mem.eql(
+        u8,
+        total_got[0..total_want.len],
+        total_want[0..],
+    ));
 }

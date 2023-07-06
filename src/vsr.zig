@@ -46,6 +46,7 @@ pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
+pub const SuperBlockTrailer = superblock.Trailer;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 

@@ -350,9 +350,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(cluster.replica_health[replica_index] == .up);
 
             cluster.replica_diverged.set(replica_index);
-            for (cluster.replicas) |*replica| {
-                replica.test_checkpoint_divergence = false;
-            }
 
             const replica = &cluster.replicas[replica_index];
             assert(replica.commit_stage == .idle);
@@ -426,7 +423,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(replica.standby_count == cluster.standby_count);
 
             replica.test_context = cluster;
-            replica.test_event_callback = on_replica_event;
+            replica.event_callback = on_replica_event;
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
@@ -495,7 +492,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
                 },
-                .compact => {
+                .compaction_completed => {
                     if (cluster.replica_diverged.isSet(replica.replica)) {
                         // This replica's storage intentionally does not match the cluster.
                         log.debug("{}: on_compact: skipping StorageChecker; diverged", .{
@@ -507,11 +504,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         };
                     }
                 },
-                .checkpoint_start => {
-                    cluster.log_replica(.checkpoint_start, replica.replica);
+                .checkpoint_commenced => {
+                    cluster.log_replica(.checkpoint_commenced, replica.replica);
                 },
-                .checkpoint_done => {
-                    cluster.log_replica(.checkpoint_done, replica.replica);
+                .checkpoint_completed => {
+                    cluster.log_replica(.checkpoint_completed, replica.replica);
                     if (cluster.replica_diverged.isSet(replica.replica)) {
                         log.debug("{}: on_checkpoint: skipping StorageChecker; diverged", .{
                             replica.replica,
@@ -522,13 +519,17 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         };
                     }
                 },
-                .sync => switch (replica.sync_stage) {
-                    .request_trailers => {
-                        cluster.log_replica(.sync_start, replica.replica);
+                .checkpoint_divergence_detected => |event_data| {
+                    // If the replica diverged, ensure that it was deliberate.
+                    assert(cluster.replica_diverged.isSet(event_data.replica));
+                },
+                .sync_stage_changed => switch (replica.sync_stage) {
+                    .requesting_trailers => {
+                        cluster.log_replica(.sync_commenced, replica.replica);
                         cluster.sync_checker.replica_sync_start(replica);
                     },
                     .not_syncing => {
-                        cluster.log_replica(.sync_done, replica.replica);
+                        cluster.log_replica(.sync_completed, replica.replica);
                         cluster.sync_checker.replica_sync_done(replica);
                         if (cluster.replica_diverged.isSet(replica.replica)) {
                             cluster.replica_diverged.unset(replica.replica);
@@ -560,10 +561,10 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 crash = '$',
                 recover = '^',
                 commit = ' ',
-                checkpoint_start = '[',
-                checkpoint_done = ']',
-                sync_start = '<',
-                sync_done = '>',
+                checkpoint_commenced = '[',
+                checkpoint_completed = ']',
+                sync_commenced = '<',
+                sync_completed = '>',
             },
             replica_index: u8,
         ) void {
