@@ -176,7 +176,7 @@ jobs:
         docker run -v $(pwd)/test:/test -w /test ${{ matrix.image }} java -cp "./*" Main.java
 
   samples_integration_test:
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     if: inputs.version == ''
     needs: build_and_publish
@@ -229,7 +229,7 @@ jobs:
     - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language java --sample ${{ matrix.sample }}
 
   docs:
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     if: inputs.version == ''
 
@@ -276,4 +276,4 @@ jobs:
         .\zig-out\bin\client_docs --language java
 
     - if: matrix.os == 'ubuntu-latest'
-      run: ./scripts/fail_on_diff.sh
+      run: ./.github/ci/fail_on_diff.sh

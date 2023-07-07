@@ -145,6 +145,15 @@ test "disjoint_slices" {
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
 
+// TODO(Performance): Iterate over words.
+pub fn zeroed(bytes: []const u8) bool {
+    var byte_bits: u8 = 0;
+    for (bytes) |byte| {
+        byte_bits |= byte;
+    }
+    return byte_bits == 0;
+}
+
 /// `maybe` is the dual of `assert`: it signals that condition is sometimes true
 ///  and sometimes false.
 ///

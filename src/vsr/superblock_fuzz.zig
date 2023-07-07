@@ -8,7 +8,7 @@
 //! - Calling checkpoint() and view_change() concurrently is safe.
 //!   - VSRState will not leak before the corresponding checkpoint()/view_change().
 //!   - Trailers will not leak before the corresponding checkpoint().
-//! - view_change_in_progress() reports the correct state.
+//! - updating() reports the correct state.
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -24,6 +24,7 @@ const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockHeader.VSRState;
 const SuperBlockHeader = @import("superblock.zig").SuperBlockHeader;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
+const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../testing/fuzz.zig");
 
@@ -99,6 +100,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .superblock = &superblock,
         .superblock_verify = &superblock_verify,
         .latest_vsr_state = SuperBlockHeader.VSRState{
+            .previous_checkpoint_id = 0,
             .commit_min_checksum = 0,
             .commit_min = 0,
             .commit_max = 0,
@@ -189,7 +191,7 @@ const Environment = struct {
     context_verify: SuperBlock.Context = undefined,
 
     // Set bits indicate pending operations.
-    pending: std.enums.EnumSet(SuperBlock.Context.Caller) = .{},
+    pending: std.enums.EnumSet(Caller) = .{},
     pending_verify: bool = false,
 
     /// After every write to `superblock`'s storage, verify that the superblock can be opened,
@@ -200,7 +202,7 @@ const Environment = struct {
         assert(!env.pending.contains(.format));
         assert(!env.pending.contains(.open));
         assert(!env.pending_verify);
-        assert(env.pending.contains(.view_change) == env.superblock.view_change_in_progress());
+        assert(env.pending.contains(.view_change) == env.superblock.updating(.view_change));
 
         const write = env.superblock.storage.writes.peek();
         env.superblock.storage.tick();
@@ -231,6 +233,7 @@ const Environment = struct {
         // faults for pending writes) and clear the read/write queues.
         env.superblock_verify.storage.copy(env.superblock.storage);
         env.superblock_verify.storage.reset();
+        env.superblock_verify.client_sessions.reset();
         env.superblock_verify.open(verify_callback, &env.context_verify);
 
         env.pending_verify = true;
@@ -328,6 +331,7 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
+            .previous_checkpoint_id = env.superblock.staging.vsr_state.previous_checkpoint_id,
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
             .commit_min = env.superblock.staging.vsr_state.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
@@ -377,6 +381,7 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = .{
+            .previous_checkpoint_id = env.superblock.staging.checkpoint_id(),
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
@@ -386,6 +391,20 @@ const Environment = struct {
             .members = env.members,
             .replica_count = replica_count,
         };
+
+        // To mimic the replica, ClientSessions mutates between every checkpoint.
+        // This ensures that sequential checkpoint ids are never identical.
+        const session: u64 = 1;
+        var reply = vsr.Header{
+            .cluster = cluster,
+            .command = .reply,
+            .client = 456,
+            .commit = vsr_state.commit_min,
+        };
+        reply.set_checksum_body(&.{});
+        reply.set_checksum();
+
+        _ = env.superblock.client_sessions.put(session, &reply);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
