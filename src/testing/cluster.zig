@@ -528,7 +528,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         cluster.log_replica(.sync_commenced, replica.replica);
                         cluster.sync_checker.replica_sync_start(replica);
                     },
-                    .not_syncing => {
+                    .idle => {
                         cluster.log_replica(.sync_completed, replica.replica);
                         cluster.sync_checker.replica_sync_done(replica);
                         if (cluster.replica_diverged.isSet(replica.replica)) {
@@ -584,7 +584,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             const role: u8 = role: {
                 if (cluster.replica_health[replica_index] == .down) break :role '#';
-                if (replica.sync_stage != .not_syncing) break :role '~';
+                if (replica.sync_stage != .idle) break :role '~';
                 if (replica.standby()) break :role '|';
                 if (replica.primary_index(replica.view) == replica.replica) break :role '/';
                 break :role '\\';

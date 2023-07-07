@@ -679,7 +679,7 @@ pub const Simulator = struct {
             recoverable_count += @boolToInt(simulator.cluster.replica_health[i] == .up and
                 !replica.standby() and
                 replica.status != .recovering_head and
-                replica.sync_stage == .not_syncing);
+                replica.sync_stage == .idle);
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -697,7 +697,7 @@ pub const Simulator = struct {
 
                     recoverable_count -= @boolToInt(!replica.standby() and
                         replica.status != .recovering_head and
-                        replica.sync_stage == .not_syncing);
+                        replica.sync_stage == .idle);
 
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);
