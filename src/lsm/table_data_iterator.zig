@@ -38,7 +38,17 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         next_tick: Grid.NextTick,
 
         pub fn init() !TableDataIterator {
-            return TableDataIterator{
+            var it: TableDataIterator = undefined;
+            it.reset();
+            return it;
+        }
+
+        pub fn deinit(it: *TableDataIterator) void {
+            it.* = undefined;
+        }
+
+        pub fn reset(it: *TableDataIterator) void {
+            it.* = .{
                 .context = .{
                     .grid = undefined,
                     // The zero-init here is important.
@@ -51,10 +61,6 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 .read = undefined,
                 .next_tick = undefined,
             };
-        }
-
-        pub fn deinit(it: *TableDataIterator) void {
-            it.* = undefined;
         }
 
         pub fn start(

@@ -576,24 +576,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return copied;
         }
 
-        pub fn find_earliest_dirty_header_between(
-            journal: *const Journal,
-            op_min: u64,
-            op_max: u64,
-        ) ?u64 {
-            assert(journal.status == .recovered);
-            assert(op_min <= op_max);
-
-            var op = op_min;
-            while (op <= op_max) : (op += 1) {
-                const slot = journal.slot_with_op(op).?;
-                if (journal.dirty.bit(slot)) {
-                    return op;
-                }
-            }
-            return null;
-        }
-
         const HeaderRange = struct { op_min: u64, op_max: u64 };
 
         /// Finds the latest break in headers between `op_min` and `op_max` (both inclusive).
