@@ -52,24 +52,12 @@ const NativeClient = struct {
         addresses_obj: jni.JString,
         max_concurrency: u32,
     ) *Context {
-        const addresses = blk: {
-            if (addresses_obj == null) {
-                ReflectionHelper.initialization_exception_throw(
-                    env,
-                    tb.tb_status_t.address_invalid,
-                );
-                return undefined;
-            }
-            const addresses_bytes = env.get_string_utf_chars(addresses_obj, null) orelse {
-                ReflectionHelper.initialization_exception_throw(
-                    env,
-                    tb.tb_status_t.address_invalid,
-                );
-                return undefined;
-            };
-
-            const addresses_len = @intCast(usize, env.get_string_utf_length(addresses_obj));
-            break :blk addresses_bytes[0..addresses_len];
+        const addresses = JNIHelper.get_string_utf(env, addresses_obj) orelse {
+            ReflectionHelper.initialization_exception_throw(
+                env,
+                tb.tb_status_t.address_invalid,
+            );
+            return undefined;
         };
         defer env.release_string_utf_chars(addresses_obj, addresses.ptr);
 
@@ -596,7 +584,6 @@ const JNIHelper = struct {
         };
 
         env.fatal_error(message.ptr);
-        unreachable;
     }
 
     pub inline fn check_jni_result(
@@ -677,5 +664,18 @@ const JNIHelper = struct {
             // NewGlobalRef fails only when the JVM runs out of memory.
             JNIHelper.vm_panic(env, "Unexpected result calling JNIEnv.NewGlobalRef", .{});
         };
+    }
+
+    pub inline fn get_string_utf(env: *jni.JNIEnv, string: jni.JString) ?[:0]const u8 {
+        if (string == null) return null;
+
+        const address = env.get_string_utf_chars(string, null) orelse return null;
+        const length = env.get_string_utf_length(string);
+        if (length < 0) return null;
+
+        return std.meta.assumeSentinel(
+            address[0..@intCast(usize, length)],
+            0,
+        );
     }
 };
