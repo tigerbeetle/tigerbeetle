@@ -30,7 +30,6 @@ pub fn SetAssociativeCache(
     comptime hash: fn (Key) callconv(.Inline) u64,
     comptime equal: fn (Key, Key) callconv(.Inline) bool,
     comptime layout: Layout,
-    comptime name: [:0]const u8,
 ) type {
     assert(math.isPowerOfTwo(@sizeOf(Key)));
     assert(math.isPowerOfTwo(@sizeOf(Value)));
@@ -95,6 +94,7 @@ pub fn SetAssociativeCache(
         /// follows from a multiple which will satisfy all asserts.
         pub const value_count_max_multiple = layout.cache_line_size * layout.ways * layout.clock_bits;
 
+        name: []const u8,
         sets: u64,
 
         hits: u64 = 0,
@@ -132,7 +132,9 @@ pub fn SetAssociativeCache(
         ///   https://en.wikipedia.org/wiki/Page_replacement_algorithm.
         clocks: PackedUnsignedIntegerArray(Clock),
 
-        pub fn init(allocator: mem.Allocator, value_count_max: u64) !Self {
+        pub const Options = struct { name: []const u8 };
+
+        pub fn init(allocator: mem.Allocator, value_count_max: u64, options: Options) !Self {
             const sets = @divExact(value_count_max, layout.ways);
 
             assert(value_count_max > 0);
@@ -171,6 +173,7 @@ pub fn SetAssociativeCache(
             errdefer allocator.free(clocks);
 
             var self = Self{
+                .name = options.name,
                 .sets = sets,
                 .tags = tags,
                 .values = values,
@@ -203,13 +206,19 @@ pub fn SetAssociativeCache(
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
                 self.hits += 1;
-                tracer.plot(.{ .cache_hits = .{ .cache_name = name } }, @intToFloat(f64, self.hits));
+                tracer.plot(
+                    .{ .cache_hits = .{ .cache_name = self.name } },
+                    @intToFloat(f64, self.hits),
+                );
                 const count = self.counts.get(set.offset + way);
                 self.counts.set(set.offset + way, count +| 1);
                 return set.offset + way;
             } else {
                 self.misses += 1;
-                tracer.plot(.{ .cache_misses = .{ .cache_name = name } }, @intToFloat(f64, self.misses));
+                tracer.plot(
+                    .{ .cache_misses = .{ .cache_name = self.name } },
+                    @intToFloat(f64, self.misses),
+                );
                 return null;
             }
         }
@@ -402,7 +411,6 @@ fn set_associative_cache_test(
         context.hash,
         context.equal,
         layout,
-        "test",
     );
 
     return struct {
@@ -410,7 +418,7 @@ fn set_associative_cache_test(
             if (log) SAC.inspect();
 
             // TODO Add a nice calculator method to help solve the minimum value_count_max required:
-            var sac = try SAC.init(testing.allocator, 16 * 16 * 8);
+            var sac = try SAC.init(testing.allocator, 16 * 16 * 8, .{ .name = "test" });
             defer sac.deinit(testing.allocator);
 
             for (sac.tags) |tag| try testing.expectEqual(@as(SAC.Tag, 0), tag);
@@ -788,7 +796,6 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
         context.hash,
         context.equal,
         layout,
-        "test",
     );
 
     const reference = struct {
