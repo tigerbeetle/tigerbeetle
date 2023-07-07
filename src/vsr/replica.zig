@@ -67,7 +67,7 @@ const CommitStage = enum {
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
     /// Called immediately after a prepare is committed by the state machine.
-    commit,
+    committed,
     /// Called immediately after a compaction.
     compaction_completed,
     /// Called immediately before a checkpoint.
@@ -3616,7 +3616,7 @@ pub fn ReplicaType(
             assert(self.commit_min == prepare.header.op);
             if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
 
-            if (self.event_callback) |hook| hook(self, .commit);
+            if (self.event_callback) |hook| hook(self, .committed);
 
             reply.header.* = .{
                 .command = .reply,
