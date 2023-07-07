@@ -2396,7 +2396,7 @@ pub fn ReplicaType(
         fn on_sync_trailer(
             self: *Self,
             comptime trailer: vsr.SuperBlockTrailer,
-            message: *Message,
+            message: *const Message,
         ) void {
             assert(message.header.replica < self.replica_count);
             assert(message.header.command == trailer.response());
