@@ -486,7 +486,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .message_sent => |message| {
                     cluster.state_checker.on_message(message);
                 },
-                .commit => {
+                .committed => {
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
