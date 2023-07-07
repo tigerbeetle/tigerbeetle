@@ -316,7 +316,7 @@ pub fn build(b: *std.build.Builder) void {
 
     {
         const jni_tests_step = b.step("test:jni", "Run the JNI tests");
-        const jni_tests = JniTestStep.add(b, mode);
+        const jni_tests = JniTestStep.add(b, mode, target);
         jni_tests_step.dependOn(&jni_tests.step);
     }
 
@@ -959,10 +959,11 @@ const JniTestStep = struct {
     step: std.build.Step,
     tests: *std.build.LibExeObjStep,
 
-    fn add(b: *std.build.Builder, mode: Mode) *std.build.LibExeObjStep {
+    fn add(b: *std.build.Builder, mode: Mode, target: CrossTarget) *std.build.LibExeObjStep {
         const tests = b.addTest("src/clients/java/src/jni_tests.zig");
         tests.linkSystemLibrary("jvm");
         tests.linkLibC();
+        tests.setTarget(target);
         if (builtin.os.tag == .windows) {
             // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
             // the stack size and causes a SEGV that is handled by Zig's panic handler.
@@ -996,26 +997,30 @@ const JniTestStep = struct {
             return error.JavaHomeNotSet;
         };
 
-        const libjvm_path = if (builtin.os.tag == .windows) "/lib" else "/lib/server";
-        self.tests.addLibPath(builder.pathJoin(&.{ java_home, libjvm_path }));
+        const libjvm_path = builder.pathJoin(&.{
+            java_home,
+            if (builtin.os.tag == .windows) "/lib" else "/lib/server",
+        });
+        self.tests.addLibPath(libjvm_path);
 
-        if (builtin.os.tag == .linux) {
-            // On Linux, detects the abi by calling `ldd` to check if
-            // the libjvm.so is linked against libc or musl.
-            // It's reasonable to assume that ldd will be present.
-            const abi = builder.exec(&.{
-                "sh",
-                "-c",
-                builder.fmt(
-                    "ldd {s} | grep -q musl && echo musl || echo libc",
-                    .{builder.pathJoin(&.{ java_home, libjvm_path, "libjvm.so" })},
-                ),
-            }) catch unreachable;
-            self.tests.target.abi = if (std.mem.startsWith(u8, abi, "musl")) .musl else .gnu;
-        }
-
-        if (builtin.os.tag == .windows) {
-            set_windows_dll(builder.allocator, java_home);
+        switch (builtin.os.tag) {
+            .windows => set_windows_dll(builder.allocator, java_home),
+            .macos => try builder.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
+            .linux => {
+                // On Linux, detects the abi by calling `ldd` to check if
+                // the libjvm.so is linked against libc or musl.
+                // It's reasonable to assume that ldd will be present.
+                const abi = builder.exec(&.{
+                    "sh",
+                    "-c",
+                    builder.fmt(
+                        "ldd {s} | grep -q musl && echo musl || echo libc",
+                        .{builder.pathJoin(&.{ libjvm_path, "libjvm.so" })},
+                    ),
+                }) catch unreachable;
+                self.tests.target.abi = if (std.mem.startsWith(u8, abi, "musl")) .musl else .gnu;
+            },
+            else => unreachable,
         }
     }
 
