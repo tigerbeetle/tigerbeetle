@@ -218,7 +218,7 @@ pub fn ReplicaType(
 
         opened: bool,
 
-        sync_stage: SyncStage = .idle,
+        syncing: SyncStage = .idle,
         /// The latest discovered *canonical* checkpoint.
         /// Kept up-to-date during every status, while syncing or healthy.
         sync_target_max: ?SyncTarget = null,
@@ -277,9 +277,9 @@ pub fn ReplicaType(
         /// The op number of the latest committed operation (according to the cluster).
         /// This is the commit number in terms of the VRR paper.
         ///
-        /// - When sync_stage=idle and status≠recovering_head,
+        /// - When syncing=idle and status≠recovering_head,
         ///   this is the latest commit *within our view*.
-        /// - When sync_stage≠idle or status=recovering_head,
+        /// - When syncing≠idle or status=recovering_head,
         ///   this is max(latest commit within our view, sync_target.op).
         ///
         /// Invariants:
@@ -411,8 +411,8 @@ pub fn ReplicaType(
         /// (grid.read_faulty_queue.count>0)
         grid_repair_message_timeout: Timeout,
 
-        /// The number of ticks before sending a sync message (message types depend on sync_stage).
-        /// (sync_stage≠idle)
+        /// The number of ticks before sending a sync message (message types depend on syncing).
+        /// (syncing≠idle)
         sync_message_timeout: Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
@@ -664,7 +664,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
 
             log.debug("{}: state_machine_open_callback", .{self.replica});
 
@@ -1186,7 +1186,7 @@ pub fn ReplicaType(
 
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
             assert(self.commit_min == self.commit_max);
             assert(self.commit_max + self.pipeline.queue.prepare_queue.count == self.op);
 
@@ -1326,7 +1326,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.primary());
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
@@ -1633,7 +1633,7 @@ pub fn ReplicaType(
 
             assert(!self.solo());
             assert(self.status == .view_change);
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
             assert(!self.do_view_change_quorum);
             assert(self.primary_index(self.view) == self.replica);
             assert(message.header.view == self.view);
@@ -1846,7 +1846,7 @@ pub fn ReplicaType(
                 // This replica is too far behind, i.e. the new `self.op` is too far ahead of
                 // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
                 // in the WAL, precluding recovery.
-                if (self.sync_stage == .idle) {
+                if (self.syncing == .idle) {
                     log.warn("{}: on_start_view: start sync; lagging behind cluster " ++
                         "(checkpoint_trigger={} quorum_head={})", .{
                         self.replica,
@@ -2402,7 +2402,7 @@ pub fn ReplicaType(
             assert(message.header.command == trailer.response());
             if (self.ignore_sync_response_message(message)) return;
 
-            const stage: *SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
+            const stage: *SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
             assert(stage.target.checkpoint_id == message.header.parent);
 
             log.debug("{}: on_{s}: checkpoint_op={} checkpoint_id={x:0>32}", .{
@@ -2721,7 +2721,7 @@ pub fn ReplicaType(
 
             self.repair_sync_timeout.reset();
 
-            if (self.sync_stage != .idle) return;
+            if (self.syncing != .idle) return;
             // May as well wait for an in-progress checkpoint to complete —
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
@@ -2794,12 +2794,12 @@ pub fn ReplicaType(
 
         fn on_sync_message_timeout(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage != .idle);
+            assert(self.syncing != .idle);
             assert(self.sync_message_timeout.ticking);
 
             self.sync_message_timeout.reset();
 
-            switch (self.sync_stage) {
+            switch (self.syncing) {
                 .idle => unreachable,
                 .canceling_commit,
                 .canceling_grid,
@@ -3024,10 +3024,10 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (self.sync_stage == .canceling_commit) {
+            if (self.syncing == .canceling_commit) {
                 return self.sync_cancel_commit_callback();
             }
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
 
             const stage_old = self.commit_stage;
             assert(stage_old != stage_new);
@@ -3110,7 +3110,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.sync_stage != .idle) return;
+            if (self.syncing != .idle) return;
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.commit_stage != .idle) {
@@ -3241,7 +3241,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.pipeline.queue.prepare_queue.count > 0);
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
 
             if (!self.state_machine_opened) {
                 assert(self.commit_stage == .idle);
@@ -3265,7 +3265,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .next_pipeline);
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
 
             if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
                 assert(self.commit_min == self.commit_max);
@@ -4539,10 +4539,10 @@ pub fn ReplicaType(
                 },
             }
 
-            if (self.sync_stage != .idle) {
+            if (self.syncing != .idle) {
                 log.debug("{}: on_start_view_change: ignoring (sync_status={s})", .{
                     self.replica,
-                    @tagName(self.sync_stage),
+                    @tagName(self.syncing),
                 });
                 return true;
             }
@@ -4663,11 +4663,11 @@ pub fn ReplicaType(
                 return true;
             }
 
-            if (self.sync_stage != .idle) {
+            if (self.syncing != .idle) {
                 log.debug("{}: on_{s}: ignoring (sync_status={s})", .{
                     self.replica,
                     command,
-                    @tagName(self.sync_stage),
+                    @tagName(self.syncing),
                 });
                 return true;
             }
@@ -4702,17 +4702,17 @@ pub fn ReplicaType(
                 message.header.command == .sync_client_sessions);
             assert(message.header.replica < self.replica_count);
 
-            if (self.sync_stage != .requesting_trailers) {
+            if (self.syncing != .requesting_trailers) {
                 log.debug("{}: on_{s}: ignoring (status={} sync_status={s})", .{
                     self.replica,
                     @tagName(message.header.command),
                     self.status,
-                    @tagName(self.sync_stage),
+                    @tagName(self.syncing),
                 });
                 return true;
             }
 
-            const stage: *const SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
 
             if (message.header.op != stage.target.checkpoint_op) {
                 log.debug("{}: on_{s}: ignoring, wrong op (got={} want={})", .{
@@ -6026,10 +6026,10 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.sync_stage != .idle) {
+            if (self.syncing != .idle) {
                 log.debug("{}: send_prepare_ok: not sending (sync_status={s})", .{
                     self.replica,
-                    @tagName(self.sync_stage),
+                    @tagName(self.syncing),
                 });
                 return;
             }
@@ -6302,7 +6302,7 @@ pub fn ReplicaType(
                 .prepare_ok => {
                     assert(!self.standby());
                     assert(self.status == .normal);
-                    assert(self.sync_stage == .idle);
+                    assert(self.syncing == .idle);
                     assert(message.header.view == self.view);
                     assert(message.header.op <= self.op_checkpoint_trigger());
                     // We must only ever send a prepare_ok to the latest primary of the active view:
@@ -6339,7 +6339,7 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(!self.do_view_change_quorum);
-                    assert(self.sync_stage == .idle);
+                    assert(self.syncing == .idle);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -6370,7 +6370,7 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(self.primary());
-                    assert(self.sync_stage == .idle);
+                    assert(self.syncing == .idle);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -6420,7 +6420,7 @@ pub fn ReplicaType(
                 .request_sync_client_sessions,
                 => {
                     maybe(self.standby());
-                    assert(self.sync_stage != .idle);
+                    assert(self.syncing != .idle);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -6429,7 +6429,7 @@ pub fn ReplicaType(
                 .sync_client_sessions,
                 => {
                     assert(!self.standby());
-                    assert(self.sync_stage == .idle);
+                    assert(self.syncing == .idle);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -6744,7 +6744,7 @@ pub fn ReplicaType(
             assert(self.view > self.log_view);
             assert(self.primary_index(self.view) == self.replica);
             assert(!self.solo());
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
             assert(self.commit_max <= self.op_checkpoint_trigger());
             assert(self.do_view_change_quorum);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
@@ -6903,7 +6903,7 @@ pub fn ReplicaType(
         fn primary_start_view_as_the_new_primary(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
             assert(self.view == self.log_view);
             assert(self.do_view_change_quorum);
             assert(!self.pipeline_repairing);
@@ -6975,7 +6975,7 @@ pub fn ReplicaType(
             } else {
                 // During state sync, we may use recovering_head to avoid violating invariants when
                 // the checkpoint jumps ahead.
-                assert(self.sync_stage != .idle);
+                assert(self.syncing != .idle);
                 assert(self.op < self.commit_min);
             }
 
@@ -7232,7 +7232,7 @@ pub fn ReplicaType(
             defer assert(self.view_headers.command == .do_view_change);
 
             const view_new = view: {
-                if (self.sync_stage == .idle or
+                if (self.syncing == .idle or
                     self.primary_index(view_new_min) != self.replica)
                 {
                     break :view view_new_min;
@@ -7370,7 +7370,7 @@ pub fn ReplicaType(
         fn sync_start_from_committing(self: *Self) void {
             assert(!self.solo());
             assert(self.status != .recovering);
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
 
             log.debug("{}: sync_start_from_committing " ++
                 "(commit_stage={s} checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7417,7 +7417,7 @@ pub fn ReplicaType(
         fn sync_start_from_sync(self: *Self) void {
             assert(!self.solo());
             assert(self.status != .recovering);
-            assert(self.sync_stage != .idle);
+            assert(self.syncing != .idle);
 
             log.debug("{}: sync_start_from_sync " ++
                 "(checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7426,7 +7426,7 @@ pub fn ReplicaType(
                 self.superblock.staging.checkpoint_id(),
             });
 
-            switch (self.sync_stage) {
+            switch (self.syncing) {
                 .idle => unreachable,
 
                 // Uninterruptible states:
@@ -7458,14 +7458,14 @@ pub fn ReplicaType(
         /// sync_dispatch() is called between every sync-state transition.
         fn sync_dispatch(self: *Self, state_new: SyncStage) void {
             assert(!self.solo());
-            assert(self.sync_stage.valid_transition(state_new));
+            assert(self.syncing.valid_transition(state_new));
             if (self.op < self.commit_min) assert(self.status == .recovering_head);
 
-            const state_old = self.sync_stage;
-            self.sync_stage = state_new;
+            const state_old = self.syncing;
+            self.syncing = state_new;
 
             // We were already syncing, but discovered a newer target:
-            if (self.sync_stage.target()) |target| {
+            if (self.syncing.target()) |target| {
                 assert(self.commit_stage == .idle);
 
                 if (target.checkpoint_op < self.sync_target_max.?.checkpoint_op) {
@@ -7476,12 +7476,12 @@ pub fn ReplicaType(
                         target.checkpoint_id,
                         self.sync_target_max.?.checkpoint_id,
                     });
-                    self.sync_stage = .{ .requesting_trailers = .{ .target = self.sync_target_max.? } };
+                    self.syncing = .{ .requesting_trailers = .{ .target = self.sync_target_max.? } };
                 }
             }
 
             // We have been waiting for a target:
-            if (self.sync_stage == .requesting_target) {
+            if (self.syncing == .requesting_target) {
                 assert(self.commit_stage == .idle);
 
                 if (self.sync_target_max) |target| {
@@ -7489,17 +7489,17 @@ pub fn ReplicaType(
                         (target.checkpoint_op == self.op_checkpoint() and
                         target.checkpoint_id != self.superblock.working.checkpoint_id()))
                     {
-                        self.sync_stage = .{ .requesting_trailers = .{ .target = target } };
+                        self.syncing = .{ .requesting_trailers = .{ .target = target } };
                     }
                 }
             }
 
-            if (self.sync_stage.target()) |target| {
+            if (self.syncing.target()) |target| {
                 log.debug("{}: sync_dispatch: {s}..{s}: " ++
                     "(target_op={} target_id={x:0>32})", .{
                     self.replica,
                     @tagName(state_old),
-                    @tagName(self.sync_stage),
+                    @tagName(self.syncing),
                     target.checkpoint_op,
                     target.checkpoint_id,
                 });
@@ -7507,13 +7507,13 @@ pub fn ReplicaType(
                 log.debug("{}: sync_dispatch: {s}..{s}", .{
                     self.replica,
                     @tagName(state_old),
-                    @tagName(self.sync_stage),
+                    @tagName(self.syncing),
                 });
             }
 
             if (self.event_callback) |hook| hook(self, .sync_stage_changed);
 
-            switch (self.sync_stage) {
+            switch (self.syncing) {
                 .idle => {},
                 .canceling_commit => {}, // Waiting for an uninterruptible commit step.
                 .canceling_grid => {
@@ -7530,7 +7530,7 @@ pub fn ReplicaType(
 
         fn sync_cancel_commit_callback(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage == .canceling_commit);
+            assert(self.syncing == .canceling_commit);
 
             switch (self.commit_stage) {
                 .idle,
@@ -7558,7 +7558,7 @@ pub fn ReplicaType(
 
         fn sync_cancel_grid_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
-            assert(self.sync_stage == .canceling_grid);
+            assert(self.syncing == .canceling_grid);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_faulty_queue.empty());
 
@@ -7588,7 +7588,7 @@ pub fn ReplicaType(
 
         fn sync_requesting_trailers_callback(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage == .requesting_trailers);
+            assert(self.syncing == .requesting_trailers);
             assert(!self.superblock.updating(.checkpoint));
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
@@ -7600,7 +7600,7 @@ pub fn ReplicaType(
             assert(self.grid_writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
-            const stage: *const SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
             assert(stage.done());
 
             // TODO(Zig) Use named format specifiers to avoid mixups.
@@ -7626,11 +7626,11 @@ pub fn ReplicaType(
 
         fn sync_superblock_update(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage == .updating_superblock);
+            assert(self.syncing == .updating_superblock);
             assert(self.sync_message_timeout.ticking);
             maybe(self.state_machine_opened);
 
-            const stage: *const SyncStage.UpdatingSuperBlock = &self.sync_stage.updating_superblock;
+            const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
             self.state_machine_opened = false;
             self.state_machine.reset();
@@ -7654,9 +7654,9 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            assert(self.sync_stage == .updating_superblock);
+            assert(self.syncing == .updating_superblock);
 
-            const stage: *const SyncStage.UpdatingSuperBlock = &self.sync_stage.updating_superblock;
+            const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
             assert(self.superblock.working.vsr_state.commit_min == stage.target.checkpoint_op);
             assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
@@ -7960,17 +7960,17 @@ pub fn ReplicaType(
 
             if (!candidate_canonical) return;
 
-            log.debug("{}: on_{s}: jump_sync_target: op={} id={x:0>32} (sync_stage={s})", .{
+            log.debug("{}: on_{s}: jump_sync_target: op={} id={x:0>32} (syncing={s})", .{
                 self.replica,
                 @tagName(header.command),
                 candidate.checkpoint_op,
                 candidate.checkpoint_id,
-                @tagName(self.sync_stage),
+                @tagName(self.syncing),
             });
 
             self.sync_target_max = candidate.canonical();
 
-            if (self.sync_stage == .idle) {
+            if (self.syncing == .idle) {
                 if (candidate.checkpoint_op == self.op_checkpoint() and
                     candidate.checkpoint_id != self.superblock.working.checkpoint_id())
                 {
@@ -8066,7 +8066,7 @@ pub fn ReplicaType(
             // `read` is *not* a BlockRead.read; we cannot use @fieldParentPtr() on it.
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(!self.grid.read_faulty_queue.empty());
-            assert(self.sync_stage != .canceling_grid);
+            assert(self.syncing != .canceling_grid);
             assert(!self.superblock.free_set.is_free(read.address));
             maybe(self.state_machine_opened);
 
@@ -8152,14 +8152,14 @@ pub fn ReplicaType(
 
         fn send_request_sync_trailer(self: *Self, command: vsr.Command, offset: u32) void {
             assert(!self.solo());
-            assert(self.sync_stage == .requesting_trailers);
+            assert(self.syncing == .requesting_trailers);
             assert(self.sync_message_timeout.ticking);
             assert(command == .request_sync_manifest or
                 command == .request_sync_free_set or
                 command == .request_sync_client_sessions);
             assert(@mod(offset, SyncTrailer.chunk_size_max) == 0);
 
-            const stage: *const SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
@@ -8183,7 +8183,7 @@ pub fn ReplicaType(
             replica: u8,
         }) void {
             assert(!self.standby());
-            assert(self.sync_stage == .idle);
+            assert(self.syncing == .idle);
             assert(self.replica != parameters.replica);
             assert(command == .request_sync_manifest or
                 command == .request_sync_free_set or

@@ -1295,9 +1295,9 @@ const TestReplicas = struct {
         for (t.replicas.constSlice()) |r| {
             const replica = &t.cluster.replicas[r];
             if (sync_stage_all) |all| {
-                assert(std.meta.eql(all, replica.sync_stage));
+                assert(std.meta.eql(all, replica.syncing));
             } else {
-                sync_stage_all = replica.sync_stage;
+                sync_stage_all = replica.syncing;
             }
         }
         return sync_stage_all.?;
