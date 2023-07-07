@@ -315,6 +315,12 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const jni_tests_step = b.step("test:jni", "Run the JNI tests");
+        const jni_tests = JniTestStep.add(b, mode, target);
+        jni_tests_step.dependOn(&jni_tests.step);
+    }
+
+    {
         const simulator_options = b.addOptions();
 
         // When running without a SEED, default to release.
@@ -625,20 +631,12 @@ fn java_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    const git_clone_jui = GitCloneStep.add(b, .{
-        .repo = "https://github.com/zig-java/jui.git",
-        .tag = "zig-0.9.1",
-        .path = "src/clients/java/lib/jui",
-    });
-    bindings_step.step.dependOn(&git_clone_jui.step);
-
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
         var b_isolated = builder_with_isolated_cache(b, cross_target);
 
         const lib = b_isolated.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
-        lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
         lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform[0]);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
@@ -954,6 +952,102 @@ fn client_docs(
 
     maybe_execute(b, allocator, client_docs_build, "client_docs");
 }
+
+/// Detects the system's JVM.
+/// JNI tests requires the Java SDK installed and
+/// JAVA_HOME environment variable set.
+const JniTestStep = struct {
+    step: std.build.Step,
+    tests: *std.build.LibExeObjStep,
+
+    fn add(b: *std.build.Builder, mode: Mode, target: CrossTarget) *std.build.LibExeObjStep {
+        const tests = b.addTest("src/clients/java/src/jni_tests.zig");
+        tests.linkSystemLibrary("jvm");
+        tests.linkLibC();
+        tests.setTarget(target);
+        if (builtin.os.tag == .windows) {
+            // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
+            // the stack size and causes a SEGV that is handled by Zig's panic handler.
+            // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
+            //
+            // The workaround is run the tests in "ReleaseFast" mode.
+            tests.setBuildMode(.ReleaseFast);
+        } else {
+            tests.setBuildMode(mode);
+        }
+
+        var jvm_check_step = b.allocator.create(JniTestStep) catch unreachable;
+        jvm_check_step.* = .{
+            .step = std.build.Step.init(.custom, "jni test", b.allocator, JniTestStep.make),
+            .tests = tests,
+        };
+
+        tests.step.dependOn(&jvm_check_step.step);
+        return tests;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(JniTestStep, "step", step);
+        const builder: *std.build.Builder = self.tests.builder;
+
+        const java_home = builder.env_map.get("JAVA_HOME") orelse {
+            std.log.err(
+                "JNI tests require the Java SDK installed and JAVA_HOME environment variable set.",
+                .{},
+            );
+            return error.JavaHomeNotSet;
+        };
+
+        const libjvm_path = builder.pathJoin(&.{
+            java_home,
+            if (builtin.os.tag == .windows) "/lib" else "/lib/server",
+        });
+        self.tests.addLibPath(libjvm_path);
+
+        switch (builtin.os.tag) {
+            .windows => set_windows_dll(builder.allocator, java_home),
+            .macos => try builder.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
+            .linux => {
+                // On Linux, detects the abi by calling `ldd` to check if
+                // the libjvm.so is linked against libc or musl.
+                // It's reasonable to assume that ldd will be present.
+                const ldd_result = try builder.exec(&.{
+                    "ldd",
+                    builder.pathJoin(&.{ libjvm_path, "libjvm.so" }),
+                });
+                self.tests.target.abi = if (std.mem.indexOf(u8, ldd_result, "musl") != null)
+                    .musl
+                else if (std.mem.indexOf(u8, ldd_result, "libc") != null)
+                    .gnu
+                else {
+                    std.log.err("{s}", .{ ldd_result });
+                    return error.JavaAbiUnrecognized;
+                };
+            },
+            else => unreachable,
+        }
+    }
+
+    /// Set the JVM DLL directory on Windows.
+    fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
+        comptime std.debug.assert(builtin.os.tag == .windows);
+        const set_dll_directory = struct {
+            pub extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
+        }.SetDllDirectoryA;
+
+        var java_bin_path = std.fs.path.joinZ(
+            allocator,
+            &.{ java_home, "\\bin" },
+        ) catch unreachable;
+        _ = set_dll_directory(java_bin_path);
+
+        var java_bin_server_path = std.fs.path.joinZ(
+            allocator,
+            &.{ java_home, "\\bin\\server" },
+        ) catch unreachable;
+        _ = set_dll_directory(java_bin_server_path);
+    }
+};
 
 const ShellcheckStep = struct {
     step: std.build.Step,
