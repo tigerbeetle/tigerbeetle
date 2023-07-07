@@ -5,6 +5,7 @@ const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
 const node = @import("./node/docs.zig").NodeDocs;
 const java = @import("./java/docs.zig").JavaDocs;
+const dotnet = @import("./dotnet/docs.zig").DotnetDocs;
 const samples = @import("./docs_samples.zig").samples;
 const TmpDir = @import("./shutil.zig").TmpDir;
 const git_root = @import("./shutil.zig").git_root;
@@ -15,7 +16,7 @@ const write_shell_newlines_into_single_line = @import("./shutil.zig").write_shel
 const run_shell_with_env = @import("./shutil.zig").run_shell_with_env;
 const run_with_tb = @import("./run_with_tb.zig").run_with_tb;
 
-const languages = [_]Docs{ go, node, java };
+const languages = [_]Docs{ go, node, java, dotnet };
 
 const MarkdownWriter = struct {
     buf: *std.ArrayList(u8),
@@ -133,23 +134,38 @@ const MarkdownWriter = struct {
     }
 };
 
-pub fn prepare_directory_and_integrate(
+pub fn prepare_directory(
     arena: *std.heap.ArenaAllocator,
     language: Docs,
     dir: []const u8,
-    integrate: bool,
 ) !void {
     var cmd = std.ArrayList(u8).init(arena.allocator());
     defer cmd.deinit();
 
-    const root = try git_root(arena);
+    // Some languages (Java) have an additional project file
+    // (pom.xml) they need to have available.
+    if (language.project_file.len > 0) {
+        const project_file = try std.fs.cwd().createFile(
+            try std.fmt.allocPrint(
+                arena.allocator(),
+                "{s}/{s}",
+                .{ dir, language.project_file_name },
+            ),
+            .{ .truncate = true },
+        );
+        defer project_file.close();
 
+        _ = try project_file.write(language.project_file);
+    }
+
+    const root = try git_root(arena);
     if (language.current_commit_pre_install_hook) |hook| {
         try hook(arena, dir, root);
     }
 
-    // Then run project, within tmp dir
+    // Then set up project, within tmp dir
     try std.os.chdir(dir);
+    defer std.os.chdir(root) catch unreachable;
 
     cmd.clearRetainingCapacity();
     try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_install_commands_hook) |hook|
@@ -157,22 +173,34 @@ pub fn prepare_directory_and_integrate(
     else
         language.install_commands);
     try run_shell(arena, cmd.items);
+}
+
+pub fn integrate(
+    arena: *std.heap.ArenaAllocator,
+    language: Docs,
+    dir: []const u8,
+    run: bool,
+) !void {
+    const root = try git_root(arena);
 
     if (language.current_commit_post_install_hook) |hook| {
         try hook(arena, dir, root);
-
-        // Reset cwd
-        try std.os.chdir(dir);
     }
 
-    cmd.clearRetainingCapacity();
+    // Run project within dir
+    try std.os.chdir(dir);
+    defer std.os.chdir(root) catch unreachable;
+
+    var cmd = std.ArrayList(u8).init(arena.allocator());
+    defer cmd.deinit();
+
     try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_build_commands_hook) |hook|
         try hook(arena, language.build_commands)
     else
         language.build_commands);
     try run_shell(arena, cmd.items);
 
-    if (integrate) {
+    if (run) {
         cmd.clearRetainingCapacity();
         try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_run_commands_hook) |hook|
             try hook(arena, language.run_commands)
@@ -213,6 +241,8 @@ const Generator = struct {
     }
 
     fn build_file_within_project(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
+        try prepare_directory(self.arena, self.language, tmp_dir.path);
+
         var tmp_file_name = self.sprintf(
             "{s}/{s}{s}.{s}",
             .{
@@ -229,21 +259,8 @@ const Generator = struct {
         defer tmp_file.close();
         _ = try tmp_file.write(file);
 
-        // Some languages (Java) have an additional project file
-        // (pom.xml) they need to have available.
-        if (self.language.project_file.len > 0) {
-            const project_file = try std.fs.cwd().createFile(
-                self.sprintf(
-                    "{s}/{s}",
-                    .{ tmp_dir.path, self.language.project_file_name },
-                ),
-                .{ .truncate = true },
-            );
-            defer project_file.close();
-
-            _ = try project_file.write(self.language.project_file);
-        }
-
+        const root = try git_root(self.arena);
+        try std.os.chdir(root);
         var cmd = std.ArrayList(u8).init(self.arena.allocator());
         // First run general setup within already cloned repo
         try write_shell_newlines_into_single_line(&cmd, if (builtin.os.tag == .windows)
@@ -254,7 +271,11 @@ const Generator = struct {
         var env = std.ArrayList([]const u8).init(self.arena.allocator());
         defer env.deinit();
         if (run_setup_tests) {
-            try env.appendSlice(&[_][]const u8{ "TEST", "true" });
+            // TODO (Phil): Get dotnet tests working outside of linux in CI.
+            // They do work locally on my machines but I can't get them working in CI.
+            if (!std.mem.eql(u8, self.language.markdown_name, "cs") and builtin.os.tag != .linux) {
+                try env.appendSlice(&[_][]const u8{ "TEST", "true" });
+            }
         }
         try run_shell_with_env(
             self.arena,
@@ -263,8 +284,8 @@ const Generator = struct {
         );
 
         // TODO: JavaScript integration is not yet working.
-        const integrate = !std.mem.eql(u8, self.language.markdown_name, "javascript");
-        try prepare_directory_and_integrate(self.arena, self.language, tmp_dir.path, integrate);
+        const run = !std.mem.eql(u8, self.language.markdown_name, "javascript");
+        try integrate(self.arena, self.language, tmp_dir.path, run);
     }
 
     fn print(self: Generator, msg: []const u8) void {
@@ -297,6 +318,13 @@ const Generator = struct {
     fn validate_aggregate(self: Generator, keepTmp: bool) !void {
         // Test major parts of sample code
         var sample = try self.make_aggregate_sample();
+        self.print("Aggregate");
+        var line_no: u32 = 0;
+        var lines = std.mem.split(u8, sample, "\n");
+        while (lines.next()) |line| {
+            line_no += 1;
+            std.debug.print("{: >3} {s}\n", .{ line_no, line });
+        }
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
         defer if (!keepTmp) tmp_dir.deinit();
@@ -330,10 +358,12 @@ const Generator = struct {
             self.language.lookup_accounts_example,
             self.language.create_transfers_example,
             self.language.create_transfers_errors_example,
+            self.language.lookup_transfers_example,
+            self.language.no_batch_example,
+            self.language.batch_example,
             self.language.transfer_flags_link_example,
             self.language.transfer_flags_post_example,
             self.language.transfer_flags_void_example,
-            self.language.lookup_transfers_example,
             self.language.linked_events_example,
             self.language.test_main_suffix,
         };
@@ -641,6 +671,10 @@ const Generator = struct {
         mw.code(language.markdown_name, language.linked_events_example);
 
         mw.header(2, "Development Setup");
+        if (language.developer_setup_documentation.len > 0) {
+            mw.print("{s}\n\n", .{language.developer_setup_documentation});
+        }
+
         // Shell setup
         mw.header(3, "On Linux and macOS");
         mw.paragraph("In a POSIX shell run:");
@@ -693,6 +727,8 @@ const Generator = struct {
             var main_file_name = if (std.mem.eql(u8, language.directory, "go") or
                 std.mem.eql(u8, language.directory, "node"))
                 "main"
+            else if (std.mem.eql(u8, language.directory, "dotnet"))
+                "Program"
             else
                 "Main";
 

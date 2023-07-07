@@ -27,7 +27,7 @@ fi
 ZIG_EXE="./zig/zig"
 BUILD_ROOT="./"
 CACHE_ROOT="./zig-cache"
-GLOBAL_CACHE_ROOT="$HOME/.cache/zig"
+GLOBAL_CACHE_ROOT="${ZIG_GLOBAL_CACHE_DIR:-$HOME/.cache/zig}"
 
 # This executes "zig/zig build {args}" using "-target native-{os}" for the build.zig executable.
 # Using the {os} directly instead of "native" avoids hitting an abort on macos Ventura.

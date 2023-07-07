@@ -884,11 +884,12 @@ fn maybe_execute(
 
         if (std.mem.eql(u8, arg, "--")) {
             build_and_run = true;
+            continue;
         }
 
-        if (!build_and_run) continue;
-
-        to_run.append(arg) catch unreachable;
+        if (build_and_run) {
+            to_run.append(arg) catch unreachable;
+        }
     }
 
     if (build_and_run) {

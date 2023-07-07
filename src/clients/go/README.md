@@ -32,7 +32,7 @@ Then, install the TigerBeetle client:
 
 ```console
 $ go mod init tbtest
-$ go mod tidy
+$ go get github.com/tigerbeetledb/tigerbeetle-go
 ```
 
 Now, create `main.go` and copy this into it:
@@ -296,7 +296,7 @@ one at a time like so:
 
 ```go
 for i := 0; i < len(transfers); i++ {
-	errors := client.CreateTransfers(transfers[i]);
+	transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfers[i]})
 	// error handling omitted
 }
 ```
@@ -312,9 +312,9 @@ BATCH_SIZE := 8191
 for i := 0; i < len(transfers); i += BATCH_SIZE {
 	batch := BATCH_SIZE
 	if i + BATCH_SIZE > len(transfers) {
-		i = BATCH_SIZE - i
+		batch = len(transfers) - i
 	}
-	transfersRes, err := client.CreateTransfers(transfers[i:i + batch])
+	transfersRes, err = client.CreateTransfers(transfers[i:i + batch])
 	// error handling omitted
 }
 ```
@@ -349,6 +349,7 @@ transfer0 := tb_types.Transfer{ /* ... account values ... */ }
 transfer1 := tb_types.Transfer{ /* ... account values ... */ }
 transfer0.Flags = tb_types.TransferFlags{Linked: true}.ToUint16()
 transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer0, transfer1})
+// error handling omitted
 ```
 
 ### Two-Phase Transfers
@@ -375,6 +376,7 @@ transfer = tb_types.Transfer{
 	Timestamp:	0,
 }
 transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+// error handling omitted
 ```
 
 #### Void a Pending Transfer
@@ -393,7 +395,7 @@ transfer = tb_types.Transfer{
 	Timestamp:	0,
 }
 transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
-log.Println(transfersRes, err)
+// error handling omitted
 ```
 
 ## Transfer Lookup
@@ -442,7 +444,7 @@ batch := []tb_types.Transfer{}
 linkedFlag := tb_types.TransferFlags{Linked: true}.ToUint16()
 
 // An individual transfer (successful):
-batch = append(batch, tb_types.Transfer{ID: uint128("1"), /* ... */ })
+batch = append(batch, tb_types.Transfer{ID: uint128("1"), /* ... rest of transfer ... */ })
 
 // A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
 batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
@@ -452,18 +454,17 @@ batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... , */ }) // Fail
 
 // An individual transfer (successful):
 // This should not see any effect from the failed chain above.
-batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ })
+batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ })
 
 // A chain of 2 transfers (the first transfer fails the chain):
-batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... */ Flags: linkedFlag })
-batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ })
+batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ Flags: linkedFlag })
+batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ })
 
 // A chain of 2 transfers (successful):
-batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... */ Flags: linkedFlag })
-batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... */ })
+batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ Flags: linkedFlag })
+batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... rest of transfer ... */ })
 
 transfersRes, err = client.CreateTransfers(batch)
-log.Println(transfersRes, err)
 ```
 
 ## Development Setup
