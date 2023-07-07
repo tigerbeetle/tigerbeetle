@@ -2402,7 +2402,7 @@ pub fn ReplicaType(
             assert(message.header.command == trailer.response());
             if (self.ignore_sync_response_message(message)) return;
 
-            const stage = &self.sync_stage.requesting_trailers;
+            const stage: *SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
             assert(stage.target.checkpoint_id == message.header.parent);
 
             log.debug("{}: on_{s}: checkpoint_op={} checkpoint_id={x:0>32}", .{
@@ -4712,7 +4712,7 @@ pub fn ReplicaType(
                 return true;
             }
 
-            const stage = &self.sync_stage.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
 
             if (message.header.op != stage.target.checkpoint_op) {
                 log.debug("{}: on_{s}: ignoring, wrong op (got={} want={})", .{
@@ -7600,7 +7600,7 @@ pub fn ReplicaType(
             assert(self.grid_writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
-            const stage = &self.sync_stage.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
             assert(stage.done());
 
             // TODO(Zig) Use named format specifiers to avoid mixups.
@@ -7630,7 +7630,7 @@ pub fn ReplicaType(
             assert(self.sync_message_timeout.ticking);
             maybe(self.state_machine_opened);
 
-            const stage = &self.sync_stage.updating_superblock;
+            const stage: *const SyncStage.UpdatingSuperBlock = &self.sync_stage.updating_superblock;
 
             self.state_machine_opened = false;
             self.state_machine.reset();
@@ -7656,7 +7656,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
             assert(self.sync_stage == .updating_superblock);
 
-            const stage = &self.sync_stage.updating_superblock;
+            const stage: *const SyncStage.UpdatingSuperBlock = &self.sync_stage.updating_superblock;
 
             assert(self.superblock.working.vsr_state.commit_min == stage.target.checkpoint_op);
             assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
@@ -8159,7 +8159,7 @@ pub fn ReplicaType(
                 command == .request_sync_client_sessions);
             assert(@mod(offset, SyncTrailer.chunk_size_max) == 0);
 
-            const stage = &self.sync_stage.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.sync_stage.requesting_trailers;
             const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
