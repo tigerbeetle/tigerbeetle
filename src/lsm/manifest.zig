@@ -153,7 +153,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            tree_hash: u128,
+            tree_id: u128,
         ) !Manifest {
             var levels: [constants.lsm_levels]Level = undefined;
             for (levels) |*level, i| {
@@ -162,7 +162,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
             errdefer for (levels) |*level| level.deinit(allocator, node_pool);
 
-            var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
+            var manifest_log = try ManifestLog.init(allocator, grid, tree_id);
             errdefer manifest_log.deinit(allocator);
 
             return Manifest{
