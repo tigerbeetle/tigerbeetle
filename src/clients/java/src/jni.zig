@@ -1,5 +1,18 @@
 ///! Based on Java Native Interface Specification and Java Invocation API.
 ///! https://docs.oracle.com/en/java/javase/17/docs/specs/jni.
+///!
+///! We don't rely on @import("jni.h") to translate the JNI declarations by several factors:
+///! - Ability to rewrite it using our naming convention and idiomatic Zig pointers
+///!   such as ?*, [*], [*:0], ?[*].
+///! - Great stability of the JNI specification makes manual implementation a viable option.
+///! - Licensing issues redistributing the jni.h file (or even translating it).
+///! - To avoid duplicated function definitions by using comptime generated signatures
+///!   when calling the function table.
+///! - To mitigate the risk of human error by using explicit vtable indexes instead of a 
+///!   struct of function pointers sensitive to the fields ordering.
+///! 
+///! Additionally, each function is unit tested against a real JVM to validate if they are 
+///! calling the correct vtable entry with the expected arguments.
 const std = @import("std");
 
 /// JNI calling convention.
@@ -901,8 +914,8 @@ pub const JNIEnv = opaque {
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#fatalerror.
     pub inline fn fatal_error(
         env: *JNIEnv,
-        msg: [*]const u8,
-    ) void {
+        msg: [*:0]const u8,
+    ) noreturn {
         JNIEnv.interface_call(
             env,
             .fatal_error,
@@ -2129,7 +2142,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         string: JString,
         is_copy: ?*JBoolean,
-    ) ?[*]const u8 {
+    ) ?[*:0]const u8 {
         return JNIEnv.interface_call(
             env,
             .get_string_utf_chars,
@@ -2141,7 +2154,7 @@ pub const JNIEnv = opaque {
     pub inline fn release_string_utf_chars(
         env: *JNIEnv,
         string: JString,
-        utf: [*]const u8,
+        utf: [*:0]const u8,
     ) void {
         JNIEnv.interface_call(
             env,
@@ -3073,7 +3086,7 @@ pub const JavaVMInitArgs = extern struct {
 /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#attachcurrentthread.
 pub const JavaVMAttachArgs = extern struct {
     version: JInt,
-    name: [*]const u8,
+    name: [*:0]const u8,
     group: JObject,
 };
 
@@ -3216,7 +3229,7 @@ fn JniInterface(comptime T: type) type {
         } {
             const Fn = JniFn(function);
             const VTable = extern struct {
-                functions: [*]*anyopaque,
+                functions: [*]const *const anyopaque,
             };
 
             const vtable = @ptrCast(

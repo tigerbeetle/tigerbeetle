@@ -312,7 +312,12 @@ pub fn build(b: *std.build.Builder) void {
             mode,
             target,
         );
-        jni_tests_run(b, mode);
+    }
+
+    {
+        const jni_tests_step = b.step("test:jni", "Run the JNI tests");
+        const jni_tests = JniTestStep.add(b, mode);
+        jni_tests_step.dependOn(&jni_tests.step);
     }
 
     {
@@ -947,70 +952,93 @@ fn client_docs(
     maybe_execute(b, allocator, client_docs_build, "client_docs");
 }
 
-// Executes the JNI tests.
-// Requires the Java SDK installed and JAVA_HOME environment variable set.
-fn jni_tests_run(
-    b: *std.build.Builder,
-    mode: Mode,
-) void {
-    var test_step = b.step("test:jni", "Run the JNI tests");
-    const jni_abi = if (builtin.os.tag == .linux) b.option(
-        enum { gnu, musl },
-        "jni-test-abi",
-        "Which ABI the JVM will run the test uses",
-    ) orelse .gnu else {};
+/// Detects the system's JVM.
+/// JNI tests requires the Java SDK installed and
+/// JAVA_HOME environment variable set.
+const JniTestStep = struct {
+    step: std.build.Step,
+    tests: *std.build.LibExeObjStep,
 
-    const java_home = b.env_map.get("JAVA_HOME") orelse {
-        const log_step = b.addLog(
-            "JNI tests require the Java SDK installed and JAVA_HOME environment variable set.",
-            .{},
-        );
-        test_step.dependOn(&log_step.step);
-        return;
-    };
+    fn add(b: *std.build.Builder, mode: Mode) *std.build.LibExeObjStep {
+        const tests = b.addTest("src/clients/java/src/jni_tests.zig");
+        tests.linkSystemLibrary("jvm");
+        tests.linkLibC();
+        if (builtin.os.tag == .windows) {
+            // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
+            // the stack size and causes a SEGV that is handled by Zig's panic handler.
+            // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
+            //
+            // The workaround is run the tests in "ReleaseFast" mode.
+            tests.setBuildMode(.ReleaseFast);
+        } else {
+            tests.setBuildMode(mode);
+        }
 
-    const jni_tests = b.addTest("src/clients/java/src/jni_tests.zig");
-    const libjvm_path = if (builtin.os.tag == .windows) "/lib" else "/lib/server";
-    jni_tests.addLibPath(b.pathJoin(&.{ java_home, libjvm_path }));
-    jni_tests.linkSystemLibrary("jvm");
-    jni_tests.linkLibC();
-    if (builtin.os.tag == .linux) {
-        jni_tests.target.abi = std.meta.stringToEnum(
-            std.Target.Abi,
-            @tagName(jni_abi),
-        );
+        var jvm_check_step = b.allocator.create(JniTestStep) catch unreachable;
+        jvm_check_step.* = .{
+            .step = std.build.Step.init(.custom, "jni test", b.allocator, JniTestStep.make),
+            .tests = tests,
+        };
+
+        tests.step.dependOn(&jvm_check_step.step);
+        return tests;
     }
 
-    if (builtin.os.tag == .windows) {
-        // On Windows we need to set the DLL directory.
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(JniTestStep, "step", step);
+        const builder: *std.build.Builder = self.tests.builder;
+
+        const java_home = builder.env_map.get("JAVA_HOME") orelse {
+            std.log.err(
+                "JNI tests require the Java SDK installed and JAVA_HOME environment variable set.",
+                .{},
+            );
+            return error.JavaHomeNotSet;
+        };
+
+        const libjvm_path = if (builtin.os.tag == .windows) "/lib" else "/lib/server";
+        self.tests.addLibPath(builder.pathJoin(&.{ java_home, libjvm_path }));
+
+        if (builtin.os.tag == .linux) {
+            // On Linux, detects the abi by calling `ldd` to check if
+            // the libjvm.so is linked against libc or musl.
+            // It's reasonable to assume that ldd will be present.
+            const abi = builder.exec(&.{
+                "sh",
+                "-c",
+                builder.fmt(
+                    "ldd {s} | grep -q musl && echo musl || echo libc",
+                    .{builder.pathJoin(&.{ java_home, libjvm_path, "libjvm.so" })},
+                ),
+            }) catch unreachable;
+            self.tests.target.abi = if (std.mem.startsWith(u8, abi, "musl")) .musl else .gnu;
+        }
+
+        if (builtin.os.tag == .windows) {
+            set_windows_dll(builtin.allocator, java_home);
+        }
+    }
+
+    /// Set the JVM DLL directory on Windows.
+    fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
+        comptime std.debug.assert(builtin.os.tag == .windows);
         const set_dll_directory = struct {
             pub extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
         }.SetDllDirectoryA;
 
         var java_bin_path = std.fs.path.joinZ(
-            b.allocator,
+            allocator,
             &.{ java_home, "\\bin" },
         ) catch unreachable;
         _ = set_dll_directory(java_bin_path);
 
         var java_bin_server_path = std.fs.path.joinZ(
-            b.allocator,
+            allocator,
             &.{ java_home, "\\bin\\server" },
         ) catch unreachable;
         _ = set_dll_directory(java_bin_server_path);
-
-        // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
-        // the stack size and causes a SEGV that is handled by Zig's panic handler.
-        // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
-        //
-        // The workaround is run the tests in "ReleaseFast" mode.
-        jni_tests.setBuildMode(.ReleaseFast);
-    } else {
-        jni_tests.setBuildMode(mode);
     }
-
-    test_step.dependOn(&jni_tests.step);
-}
+};
 
 const ShellcheckStep = struct {
     step: std.build.Step,
