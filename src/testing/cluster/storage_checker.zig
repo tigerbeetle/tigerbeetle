@@ -19,7 +19,7 @@
 //!   to faulty slots to ensure recovery is consistent.
 //! - WAL prepares — a replica can commit + checkpoint an op before it is persisted to the WAL.
 //!   (The primary can commit from the pipeline-queue, backups can commit from the pipeline-cache.)
-//! - Non-allocated Grid blocks, which may differ due to state transfer.
+//! - Non-allocated Grid blocks, which may differ due to state sync.
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.storage_checker);
@@ -101,7 +101,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             if (1 == 1) return;
 
             const checksum = checksum_grid(replica);
-            log.debug("{}: replica_compact: op={} area=grid checksum={x:>32}", .{
+            log.debug("{}: replica_compact: op={} area=grid checksum={x:0>32}", .{
                 replica.replica,
                 replica.commit_min,
                 checksum,
@@ -114,7 +114,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             } else {
                 const checksum_expect = checker.compactions.items[compactions_index];
                 if (checksum_expect != checksum) {
-                    log.err("{}: replica_compact: mismatch area=grid expect={x:>32} actual={x:>32}", .{
+                    log.err("{}: replica_compact: mismatch area=grid expect={x:0>32} actual={x:0>32}", .{
                         replica.replica,
                         checksum_expect,
                         checksum,
@@ -132,8 +132,12 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 .checksum_superblock_manifest = 0,
                 .checksum_superblock_free_set = 0,
                 .checksum_superblock_client_sessions = 0,
-                .checksum_client_replies = checksum_client_replies(storage),
-                .checksum_grid = checksum_grid(replica),
+                // TODO State sync: Enable this when proactive client replies sync is implemented.
+                // .checksum_client_replies = checksum_client_replies(storage),
+                .checksum_client_replies = 0,
+                // TODO: State sync: Enable this (again) when proactive table sync is implemented.
+                // .checksum_grid = checksum_grid(replica),
+                .checksum_grid = 0,
             };
 
             inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
@@ -147,7 +151,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             }
 
             inline for (std.meta.fields(Checkpoint)) |field| {
-                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:>32}", .{
+                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:0>32}", .{
                     replica.replica,
                     replica.op_checkpoint(),
                     field.name,
@@ -167,7 +171,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 const field_expect = @field(checkpoint_expect, field.name);
                 if (!std.meta.eql(field_expect, field_actual)) {
                     fail = true;
-                    log.err("{}: replica_checkpoint: mismatch area={s} expect={x:>32} actual={x:>32}", .{
+                    log.err("{}: replica_checkpoint: mismatch area={s} expect={x:0>32} actual={x:0>32}", .{
                         replica.replica,
                         field.name,
                         @field(checkpoint_expect, field.name),

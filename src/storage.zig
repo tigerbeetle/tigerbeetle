@@ -70,8 +70,11 @@ pub const Storage = struct {
 
     pub const NextTick = struct {
         next: ?*NextTick = null,
+        source: NextTickSource,
         callback: fn (next_tick: *NextTick) void,
     };
+
+    pub const NextTickSource = enum { lsm, vsr };
 
     io: *IO,
     fd: os.fd_t,
@@ -102,10 +105,15 @@ pub const Storage = struct {
 
     pub fn on_next_tick(
         storage: *Storage,
+        source: NextTickSource,
         callback: fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
-        next_tick.* = .{ .callback = callback };
+        next_tick.* = .{
+            .source = source,
+            .callback = callback,
+        };
+
         storage.next_tick_queue.push(next_tick);
 
         if (!storage.next_tick_completion_scheduled) {
@@ -117,6 +125,15 @@ pub const Storage = struct {
                 &storage.next_tick_completion,
                 0, // 0ns timeout means to resolve as soon as possible - like a yield
             );
+        }
+    }
+
+    pub fn reset_next_tick_lsm(storage: *Storage) void {
+        var next_tick_iterator = storage.next_tick_queue;
+        storage.next_tick_queue.reset();
+
+        while (next_tick_iterator.pop()) |next_tick| {
+            if (next_tick.source != .lsm) storage.next_tick_queue.push(next_tick);
         }
     }
 

@@ -133,6 +133,21 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator.destroy(forest.node_pool);
         }
 
+        pub fn reset(forest: *Forest) void {
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).reset();
+            }
+
+            forest.node_pool.reset();
+
+            forest.* = .{
+                // Don't reset the grid – replica is responsible for grid cancellation.
+                .grid = forest.grid,
+                .grooves = forest.grooves,
+                .node_pool = forest.node_pool,
+            };
+        }
+
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {
                 pub fn start(forest: *Forest, callback: Callback) void {
@@ -172,9 +187,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
                             if (join_op == .checkpoint) {
                                 if (Storage == @import("../testing/storage.zig").Storage) {
-                                    // We should have finished all checkpoint io by now.
-                                    // TODO This may change when grid repair lands.
-                                    forest.grid.superblock.storage.assert_no_pending_io(.grid);
+                                    // We should have finished all checkpoint writes by now.
+                                    forest.grid.superblock.storage.assert_no_pending_writes(.grid);
                                 }
                             }
 
@@ -210,8 +224,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io before checkpointing.
-                // TODO This may change when grid repair lands.
-                forest.grid.superblock.storage.assert_no_pending_io(.grid);
+                forest.grid.superblock.storage.assert_no_pending_writes(.grid);
             }
 
             const Join = JoinType(.checkpoint);

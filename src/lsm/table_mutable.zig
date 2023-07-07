@@ -157,6 +157,10 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
         pub fn clear(table: *TableMutable) void {
             assert(table.values.count() > 0);
+            table.reset();
+        }
+
+        pub fn reset(table: *TableMutable) void {
             table.value_count_worst_case = 0;
             table.values.clearRetainingCapacity();
             assert(table.values.count() == 0);

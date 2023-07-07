@@ -84,6 +84,15 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             it.* = undefined;
         }
 
+        pub fn reset(it: *LevelTableValueBlockIterator) void {
+            it.table_data_iterator.reset();
+            it.* = .{
+                .context = undefined,
+                .table_data_iterator = it.table_data_iterator,
+                .callback = .none,
+            };
+        }
+
         pub fn start(
             it: *LevelTableValueBlockIterator,
             context: Context,

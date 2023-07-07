@@ -45,6 +45,11 @@ pub fn RingBuffer(
             },
         };
 
+        pub inline fn clear(self: *Self) void {
+            self.index = 0;
+            self.count = 0;
+        }
+
         // TODO Add doc comments to these functions:
         pub inline fn head(self: Self) ?T {
             if (count_max == 0 or self.empty()) return null;
