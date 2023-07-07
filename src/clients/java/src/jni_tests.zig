@@ -1226,7 +1226,7 @@ test "JNI: GetStringRegion" {
 
     var buff: [10]jni.JChar = undefined;
     env.get_string_region(string, 5, 10, &buff);
-
+    try testing.expect(env.exception_check() == .jni_false);
     try testing.expectEqualSlices(u16, content[5..][0..10], &buff);
 }
 
@@ -1238,10 +1238,15 @@ test "JNI: GetStringUTFRegion" {
     try testing.expect(string != null);
     defer env.delete_local_ref(string);
 
-    var buff: [10]u8 = undefined;
-    env.get_string_utf_region(string, 5, 10, &buff);
+    // From: https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getstringutfregion.
+    // The resulting number modified UTF-8 encoding characters may be greater than
+    // the given len argument. GetStringUTFLength() may be used to determine the
+    // maximum size of the required character buffer.
 
-    try testing.expectEqualSlices(u8, content[5..][0..10], &buff);
+    var buff: [content.len]u8 = undefined;
+    env.get_string_utf_region(string, 5, 10, &buff);
+    try testing.expect(env.exception_check() == .jni_false);
+    try testing.expectEqualSlices(u8, content[5..][0..10], buff[0..10]);
 }
 
 test "JNI: GetStringCritical" {

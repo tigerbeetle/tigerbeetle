@@ -1010,15 +1010,18 @@ const JniTestStep = struct {
                 // On Linux, detects the abi by calling `ldd` to check if
                 // the libjvm.so is linked against libc or musl.
                 // It's reasonable to assume that ldd will be present.
-                const abi = builder.exec(&.{
-                    "sh",
-                    "-c",
-                    builder.fmt(
-                        "ldd {s} | grep -q musl && echo musl || echo libc",
-                        .{builder.pathJoin(&.{ libjvm_path, "libjvm.so" })},
-                    ),
-                }) catch unreachable;
-                self.tests.target.abi = if (std.mem.startsWith(u8, abi, "musl")) .musl else .gnu;
+                const ldd_result = try builder.exec(&.{
+                    "ldd",
+                    builder.pathJoin(&.{ libjvm_path, "libjvm.so" }),
+                });
+                self.tests.target.abi = if (std.mem.indexOf(u8, ldd_result, "musl") != null)
+                    .musl
+                else if (std.mem.indexOf(u8, ldd_result, "libc") != null)
+                    .gnu
+                else {
+                    std.log.err("{s}", .{ ldd_result });
+                    return error.JavaAbiUnrecognized;
+                };
             },
             else => unreachable,
         }
