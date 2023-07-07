@@ -12,32 +12,15 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const java_docs = @import("./java/docs.zig").JavaDocs;
+const dotnet_docs = @import("./dotnet/docs.zig").DotnetDocs;
 const go_docs = @import("./go/docs.zig").GoDocs;
 const node_docs = @import("./node/docs.zig").NodeDocs;
 const Docs = @import("./docs_types.zig").Docs;
 const TmpDir = @import("./shutil.zig").TmpDir;
 const git_root = @import("./shutil.zig").git_root;
 const run_shell = @import("./shutil.zig").run_shell;
-const prepare_directory_and_integrate = @import("./docs_generate.zig").prepare_directory_and_integrate;
-
-fn copy_into_tmp_dir(
-    arena: *std.heap.ArenaAllocator,
-    sample_dir: []const u8,
-) !TmpDir {
-    var t = try TmpDir.init(arena);
-
-    try run_shell(
-        arena,
-        // Should actually work on Windows as well!
-        try std.fmt.allocPrint(
-            arena.allocator(),
-            "cp -r {s}/* {s}/",
-            .{ sample_dir, t.path },
-        ),
-    );
-
-    return t;
-}
+const prepare_directory = @import("./docs_generate.zig").prepare_directory;
+const integrate = @import("./docs_generate.zig").integrate;
 
 fn error_main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -70,6 +53,8 @@ fn error_main() !void {
                 language = node_docs;
             } else if (std.mem.eql(u8, next, "go")) {
                 language = go_docs;
+            } else if (std.mem.eql(u8, next, "dotnet")) {
+                language = dotnet_docs;
             } else {
                 std.debug.print("Unknown language: {s}.\n", .{next});
                 return error.UnknownLanguage;
@@ -97,39 +82,34 @@ fn error_main() !void {
         return error.LanguageNotSet;
     }
 
+    var tmp_copy = try TmpDir.init(&arena);
+
     // Copy the sample into a temporary directory.
-    const sample_dir = try std.fmt.allocPrint(
-        allocator,
-        "{s}/src/clients/{s}/samples/{s}",
-        .{
-            root,
-            language.?.directory,
-            sample,
-        },
+    try run_shell(
+        &arena,
+        try std.fmt.allocPrint(
+            arena.allocator(),
+            // Works on Windows as well.
+            "cp -r {s}/* {s}/",
+            .{
+                // Full path of sample directory.
+                try std.fmt.allocPrint(allocator, "{s}/src/clients/{s}/samples/{s}", .{
+                    root,
+                    language.?.directory,
+                    sample,
+                }),
+                tmp_copy.path,
+            },
+        ),
     );
-    var tmp_copy = try copy_into_tmp_dir(&arena, sample_dir);
 
-    // Not a great hack. The integration code depends on being able to
-    // init go.mod. This is reasonable in most cases but breaks
-    // integration testing of the sample code which do already including
-    // go.mod.
-    if (std.mem.eql(u8, language.?.markdown_name, "go")) {
-        try std.os.unlink(
-            try std.fmt.allocPrint(
-                arena.allocator(),
-                "{s}/go.mod",
-                .{tmp_copy.path},
-            ),
-        );
+    try prepare_directory(&arena, language.?, tmp_copy.path);
+
+    try integrate(&arena, language.?, tmp_copy.path, true);
+
+    if (!keep_tmp) {
+        tmp_copy.deinit();
     }
-
-    defer {
-        if (!keep_tmp) {
-            tmp_copy.deinit();
-        }
-    }
-
-    try prepare_directory_and_integrate(&arena, language.?, tmp_copy.path, true);
 }
 
 // Returning errors in main produces useless traces, at least for some
