@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 pub const Stage = union(enum) {
-    not_syncing,
+    idle,
 
     /// The commit lifecycle is in a stage that cannot be interrupted/canceled.
     /// We are waiting until that uninterruptible stage completes.
@@ -55,7 +55,7 @@ pub const Stage = union(enum) {
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
-            .not_syncing => to == .canceling_commit or
+            .idle => to == .canceling_commit or
                 to == .canceling_grid or
                 to == .requesting_target,
             .canceling_commit => to == .canceling_grid,
@@ -65,13 +65,13 @@ pub const Stage = union(enum) {
             .requesting_trailers => to == .requesting_trailers or
                 to == .updating_superblock,
             .updating_superblock => to == .requesting_trailers or
-                to == .not_syncing,
+                to == .idle,
         };
     }
 
     pub fn target(stage: *const Stage) ?Target {
         return switch (stage.*) {
-            .not_syncing,
+            .idle,
             .canceling_commit,
             .canceling_grid,
             .requesting_target,

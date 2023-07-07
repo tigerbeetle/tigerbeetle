@@ -218,7 +218,7 @@ pub fn ReplicaType(
 
         opened: bool,
 
-        sync_stage: SyncStage = .not_syncing,
+        sync_stage: SyncStage = .idle,
         /// The latest discovered *canonical* checkpoint.
         /// Kept up-to-date during every status, while syncing or healthy.
         sync_target_max: ?SyncTarget = null,
@@ -277,9 +277,9 @@ pub fn ReplicaType(
         /// The op number of the latest committed operation (according to the cluster).
         /// This is the commit number in terms of the VRR paper.
         ///
-        /// - When sync_stage=not_syncing and status≠recovering_head,
+        /// - When sync_stage=idle and status≠recovering_head,
         ///   this is the latest commit *within our view*.
-        /// - When sync_stage≠not_syncing or status=recovering_head,
+        /// - When sync_stage≠idle or status=recovering_head,
         ///   this is max(latest commit within our view, sync_target.op).
         ///
         /// Invariants:
@@ -412,7 +412,7 @@ pub fn ReplicaType(
         grid_repair_message_timeout: Timeout,
 
         /// The number of ticks before sending a sync message (message types depend on sync_stage).
-        /// (sync_stage≠not_syncing)
+        /// (sync_stage≠idle)
         sync_message_timeout: Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
@@ -664,7 +664,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
 
             log.debug("{}: state_machine_open_callback", .{self.replica});
 
@@ -1186,7 +1186,7 @@ pub fn ReplicaType(
 
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
             assert(self.commit_min == self.commit_max);
             assert(self.commit_max + self.pipeline.queue.prepare_queue.count == self.op);
 
@@ -1326,7 +1326,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(message.header.view == self.view);
             assert(self.primary());
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
@@ -1633,7 +1633,7 @@ pub fn ReplicaType(
 
             assert(!self.solo());
             assert(self.status == .view_change);
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
             assert(!self.do_view_change_quorum);
             assert(self.primary_index(self.view) == self.replica);
             assert(message.header.view == self.view);
@@ -1846,7 +1846,7 @@ pub fn ReplicaType(
                 // This replica is too far behind, i.e. the new `self.op` is too far ahead of
                 // the last checkpoint. If we wrap now, we overwrite un-checkpointed transfers
                 // in the WAL, precluding recovery.
-                if (self.sync_stage == .not_syncing) {
+                if (self.sync_stage == .idle) {
                     log.warn("{}: on_start_view: start sync; lagging behind cluster " ++
                         "(checkpoint_trigger={} quorum_head={})", .{
                         self.replica,
@@ -2721,7 +2721,7 @@ pub fn ReplicaType(
 
             self.repair_sync_timeout.reset();
 
-            if (self.sync_stage != .not_syncing) return;
+            if (self.sync_stage != .idle) return;
             // May as well wait for an in-progress checkpoint to complete —
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
@@ -2794,13 +2794,13 @@ pub fn ReplicaType(
 
         fn on_sync_message_timeout(self: *Self) void {
             assert(!self.solo());
-            assert(self.sync_stage != .not_syncing);
+            assert(self.sync_stage != .idle);
             assert(self.sync_message_timeout.ticking);
 
             self.sync_message_timeout.reset();
 
             switch (self.sync_stage) {
-                .not_syncing => unreachable,
+                .idle => unreachable,
                 .canceling_commit,
                 .canceling_grid,
                 .requesting_target,
@@ -3027,7 +3027,7 @@ pub fn ReplicaType(
             if (self.sync_stage == .canceling_commit) {
                 return self.sync_cancel_commit_callback();
             }
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
 
             const stage_old = self.commit_stage;
             assert(stage_old != stage_new);
@@ -3110,7 +3110,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.sync_stage != .not_syncing) return;
+            if (self.sync_stage != .idle) return;
 
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.commit_stage != .idle) {
@@ -3241,7 +3241,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.pipeline.queue.prepare_queue.count > 0);
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
 
             if (!self.state_machine_opened) {
                 assert(self.commit_stage == .idle);
@@ -3265,7 +3265,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .next_pipeline);
             assert(self.status == .normal);
             assert(self.primary());
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
 
             if (self.pipeline.queue.prepare_queue.head_ptr()) |prepare| {
                 assert(self.commit_min == self.commit_max);
@@ -4539,7 +4539,7 @@ pub fn ReplicaType(
                 },
             }
 
-            if (self.sync_stage != .not_syncing) {
+            if (self.sync_stage != .idle) {
                 log.debug("{}: on_start_view_change: ignoring (sync_status={s})", .{
                     self.replica,
                     @tagName(self.sync_stage),
@@ -4663,7 +4663,7 @@ pub fn ReplicaType(
                 return true;
             }
 
-            if (self.sync_stage != .not_syncing) {
+            if (self.sync_stage != .idle) {
                 log.debug("{}: on_{s}: ignoring (sync_status={s})", .{
                     self.replica,
                     command,
@@ -6026,7 +6026,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.sync_stage != .not_syncing) {
+            if (self.sync_stage != .idle) {
                 log.debug("{}: send_prepare_ok: not sending (sync_status={s})", .{
                     self.replica,
                     @tagName(self.sync_stage),
@@ -6302,7 +6302,7 @@ pub fn ReplicaType(
                 .prepare_ok => {
                     assert(!self.standby());
                     assert(self.status == .normal);
-                    assert(self.sync_stage == .not_syncing);
+                    assert(self.sync_stage == .idle);
                     assert(message.header.view == self.view);
                     assert(message.header.op <= self.op_checkpoint_trigger());
                     // We must only ever send a prepare_ok to the latest primary of the active view:
@@ -6339,7 +6339,7 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(!self.do_view_change_quorum);
-                    assert(self.sync_stage == .not_syncing);
+                    assert(self.sync_stage == .idle);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -6370,7 +6370,7 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(self.primary());
-                    assert(self.sync_stage == .not_syncing);
+                    assert(self.sync_stage == .idle);
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -6420,7 +6420,7 @@ pub fn ReplicaType(
                 .request_sync_client_sessions,
                 => {
                     maybe(self.standby());
-                    assert(self.sync_stage != .not_syncing);
+                    assert(self.sync_stage != .idle);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -6429,7 +6429,7 @@ pub fn ReplicaType(
                 .sync_client_sessions,
                 => {
                     assert(!self.standby());
-                    assert(self.sync_stage == .not_syncing);
+                    assert(self.sync_stage == .idle);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
@@ -6744,7 +6744,7 @@ pub fn ReplicaType(
             assert(self.view > self.log_view);
             assert(self.primary_index(self.view) == self.replica);
             assert(!self.solo());
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
             assert(self.commit_max <= self.op_checkpoint_trigger());
             assert(self.do_view_change_quorum);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
@@ -6903,7 +6903,7 @@ pub fn ReplicaType(
         fn primary_start_view_as_the_new_primary(self: *Self) void {
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
             assert(self.view == self.log_view);
             assert(self.do_view_change_quorum);
             assert(!self.pipeline_repairing);
@@ -6975,7 +6975,7 @@ pub fn ReplicaType(
             } else {
                 // During state sync, we may use recovering_head to avoid violating invariants when
                 // the checkpoint jumps ahead.
-                assert(self.sync_stage != .not_syncing);
+                assert(self.sync_stage != .idle);
                 assert(self.op < self.commit_min);
             }
 
@@ -7232,7 +7232,7 @@ pub fn ReplicaType(
             defer assert(self.view_headers.command == .do_view_change);
 
             const view_new = view: {
-                if (self.sync_stage == .not_syncing or
+                if (self.sync_stage == .idle or
                     self.primary_index(view_new_min) != self.replica)
                 {
                     break :view view_new_min;
@@ -7370,7 +7370,7 @@ pub fn ReplicaType(
         fn sync_start_from_committing(self: *Self) void {
             assert(!self.solo());
             assert(self.status != .recovering);
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
 
             log.debug("{}: sync_start_from_committing " ++
                 "(commit_stage={s} checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7417,7 +7417,7 @@ pub fn ReplicaType(
         fn sync_start_from_sync(self: *Self) void {
             assert(!self.solo());
             assert(self.status != .recovering);
-            assert(self.sync_stage != .not_syncing);
+            assert(self.sync_stage != .idle);
 
             log.debug("{}: sync_start_from_sync " ++
                 "(checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7427,7 +7427,7 @@ pub fn ReplicaType(
             });
 
             switch (self.sync_stage) {
-                .not_syncing => unreachable,
+                .idle => unreachable,
 
                 // Uninterruptible states:
                 .canceling_commit, // No sync target selected yet.
@@ -7514,7 +7514,7 @@ pub fn ReplicaType(
             if (self.event_callback) |hook| hook(self, .sync_stage_changed);
 
             switch (self.sync_stage) {
-                .not_syncing => {},
+                .idle => {},
                 .canceling_commit => {}, // Waiting for an uninterruptible commit step.
                 .canceling_grid => {
                     self.grid_repair_message_timeout.stop();
@@ -7672,7 +7672,7 @@ pub fn ReplicaType(
 
             self.grid.cache_invalidate();
             self.state_machine.open(state_machine_open_callback);
-            self.sync_dispatch(.not_syncing);
+            self.sync_dispatch(.idle);
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
@@ -7970,7 +7970,7 @@ pub fn ReplicaType(
 
             self.sync_target_max = candidate.canonical();
 
-            if (self.sync_stage == .not_syncing) {
+            if (self.sync_stage == .idle) {
                 if (candidate.checkpoint_op == self.op_checkpoint() and
                     candidate.checkpoint_id != self.superblock.working.checkpoint_id())
                 {
@@ -8183,7 +8183,7 @@ pub fn ReplicaType(
             replica: u8,
         }) void {
             assert(!self.standby());
-            assert(self.sync_stage == .not_syncing);
+            assert(self.sync_stage == .idle);
             assert(self.replica != parameters.replica);
             assert(command == .request_sync_manifest or
                 command == .request_sync_free_set or
