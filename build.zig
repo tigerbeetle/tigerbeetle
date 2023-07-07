@@ -100,7 +100,6 @@ pub fn build(b: *std.build.Builder) void {
         benchmark.setTarget(target);
         benchmark.setBuildMode(mode);
         benchmark.addPackage(vsr_package);
-        benchmark.install();
         benchmark.addOptions("vsr_options", options);
         link_tracer_backend(benchmark, git_clone_tracy, tracer_backend, target);
 
@@ -115,7 +114,6 @@ pub fn build(b: *std.build.Builder) void {
         const aof = b.addExecutable("aof", "src/aof.zig");
         aof.setTarget(target);
         aof.setBuildMode(mode);
-        aof.install();
         aof.addOptions("vsr_options", options);
         link_tracer_backend(aof, git_clone_tracy, tracer_backend, target);
 
