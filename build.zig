@@ -1015,7 +1015,7 @@ const JniTestStep = struct {
         }
 
         if (builtin.os.tag == .windows) {
-            set_windows_dll(builtin.allocator, java_home);
+            set_windows_dll(builder.allocator, java_home);
         }
     }
 
