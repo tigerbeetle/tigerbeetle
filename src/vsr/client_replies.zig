@@ -245,6 +245,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             if (client_replies.writes.available() > 0) {
                 client_replies.ready_callback = .{ .next_tick = callback };
                 client_replies.storage.on_next_tick(
+                    .vsr,
                     ready_next_tick_callback,
                     &client_replies.ready_next_tick,
                 );
@@ -374,6 +375,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 assert(client_replies.writing.count() == 0);
                 assert(client_replies.write_queue.count == 0);
                 client_replies.storage.on_next_tick(
+                    .vsr,
                     checkpoint_next_tick_callback,
                     &client_replies.checkpoint_next_tick,
                 );

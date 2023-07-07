@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 4
 ---
 
 # Testing
@@ -17,10 +17,13 @@ Documentation for (roughly) code in the `src/testing` directory.
     - ` `: commit
     - `[`: checkpoint start
     - `]`: checkpoint done
+    - `<`: sync start (or change target)
+    - `>`: sync done
 3. Role (according to the replica itself):
     - `/`: primary
     - `\`: backup
     - `|`: standby
+    - `~`: syncing
     - `#`: (crashed)
 4. Status:
     - The column (e.g. `.   ` vs `   .`) corresponds to the replica index. (This can help identify events' replicas at a quick glance.)
@@ -29,6 +32,7 @@ Documentation for (roughly) code in the `src/testing` directory.
     - `v`: `view_change`
     - `r`: `recovering`
     - `h`: `recovering_head`
+    - `s`: `sync`
 5. View: e.g. `74V` indicates `replica.view=74`.
 6. Commit: e.g. `150/160C` indicates `replica.commit_min=150` and `replica.commit_max=160`.
 7. Journal op: e.g. `87:150Jo` indicates that the minimum op in the journal is `87` and the maximum is `150`.

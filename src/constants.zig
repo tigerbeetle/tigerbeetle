@@ -177,6 +177,23 @@ comptime {
     assert(message_body_size_max >= view_change_headers_max * @sizeOf(vsr.Header));
 }
 
+/// The maximum body size of:
+/// - command=sync_manifest
+/// - command=sync_free_set
+/// - command=sync_client_sessions
+///
+/// In practice, this should always be as high as possible to minimize the number of round trips
+/// required for sync.
+/// It is configurable to make testing multipart trailers simple.
+pub const sync_trailer_message_body_size_max =
+    config.process.sync_trailer_message_body_size_max orelse
+    message_body_size_max;
+
+comptime {
+    assert(sync_trailer_message_body_size_max > 0);
+    assert(sync_trailer_message_body_size_max <= message_body_size_max);
+}
+
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
