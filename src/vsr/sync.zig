@@ -21,7 +21,10 @@ pub const Stage = union(enum) {
     /// We need to sync, but are waiting for a usable `sync_target_max`.
     requesting_target,
 
-    requesting_trailers: struct {
+    requesting_trailers: RequestingTrailers,
+    updating_superblock: UpdatingSuperBlock,
+
+    pub const RequestingTrailers = struct {
         const Trailers = std.enums.EnumArray(vsr.SuperBlockTrailer, Trailer);
 
         target: Target,
@@ -42,13 +45,13 @@ pub const Stage = union(enum) {
             assert(self.checkpoint_op_checksum != null);
             return true;
         }
-    },
+    };
 
-    updating_superblock: struct {
+    pub const UpdatingSuperBlock = struct {
         target: Target,
         previous_checkpoint_id: u128,
         checkpoint_op_checksum: u128,
-    },
+    };
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
         return switch (from) {
