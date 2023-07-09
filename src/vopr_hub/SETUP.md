@@ -120,7 +120,7 @@ export CURRENT_VOPR=$1
 go run ./src/vopr_hub/scheduler/main.go
 
 # Run the VOPR a few times before we go back to the top:
-zig/zig run ./src/vopr.zig -- --send="<address>" --simulations=5
+zig/zig run ./src/vopr.zig -- --send="<address>" --simulations=100
 ```
 
 Ensure the script is executable:

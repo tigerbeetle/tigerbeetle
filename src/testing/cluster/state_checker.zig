@@ -94,7 +94,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *Self, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
-            if (replica.sync_stage.target()) |sync_target| {
+            if (replica.syncing.target()) |sync_target| {
                 // Allow a syncing replica to fast-forward its commit.
                 //
                 // But "fast-forwarding" may actually move commit_min slightly backwards:

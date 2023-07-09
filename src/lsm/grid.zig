@@ -41,7 +41,7 @@ pub const BlockType = enum(u8) {
 // Leave this outside GridType so we can call it from modules that don't know about Storage.
 pub fn allocate_block(
     allocator: mem.Allocator,
-) !*align(constants.sector_size) [constants.block_size]u8 {
+) error{OutOfMemory}!*align(constants.sector_size) [constants.block_size]u8 {
     const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
     mem.set(u8, block, 0);
     return block[0..constants.block_size];
@@ -180,7 +180,8 @@ pub fn GridType(comptime Storage: type) type {
         // List if Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
         read_pending_queue: FIFO(ReadPending) = .{ .name = "grid_read_pending" },
         read_faulty_queue: FIFO(Read) = .{ .name = "grid_read_faulty" },
-        // True if there's a read thats resolving callbacks. If so, the read cache must not be invalidated.
+        // True if there's a read that is resolving callbacks.
+        // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
         canceling: ?struct { callback: fn (*Grid) void } = null,

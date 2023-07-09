@@ -486,7 +486,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .message_sent => |message| {
                     cluster.state_checker.on_message(message);
                 },
-                .commit => {
+                .committed => {
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
@@ -523,12 +523,12 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     // If the replica diverged, ensure that it was deliberate.
                     assert(cluster.replica_diverged.isSet(event_data.replica));
                 },
-                .sync_stage_changed => switch (replica.sync_stage) {
+                .sync_stage_changed => switch (replica.syncing) {
                     .requesting_trailers => {
                         cluster.log_replica(.sync_commenced, replica.replica);
                         cluster.sync_checker.replica_sync_start(replica);
                     },
-                    .not_syncing => {
+                    .idle => {
                         cluster.log_replica(.sync_completed, replica.replica);
                         cluster.sync_checker.replica_sync_done(replica);
                         if (cluster.replica_diverged.isSet(replica.replica)) {
@@ -584,7 +584,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             const role: u8 = role: {
                 if (cluster.replica_health[replica_index] == .down) break :role '#';
-                if (replica.sync_stage != .not_syncing) break :role '~';
+                if (replica.syncing != .idle) break :role '~';
                 if (replica.standby()) break :role '|';
                 if (replica.primary_index(replica.view) == replica.replica) break :role '/';
                 break :role '\\';
