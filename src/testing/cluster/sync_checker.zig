@@ -79,7 +79,7 @@ pub fn SyncCheckerType(comptime Replica: type) type {
                 });
             }
 
-            if (replica.sync_stage.target()) |sync_target| {
+            if (replica.syncing.target()) |sync_target| {
                 checker.check_sync_target(.{
                     .replica = replica.replica,
                     .checkpoint_op = sync_target.checkpoint_op,

@@ -846,7 +846,7 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
         // R2 catches up via state sync.
         try expectEqual(t.replica(.R_).status(), .normal);
         try expectEqual(t.replica(.R_).commit(), cluster_commit_max);
-        try expectEqual(t.replica(.R_).sync_status(), .not_syncing);
+        try expectEqual(t.replica(.R_).sync_status(), .idle);
 
         // The entire cluster is healthy and able to commit more.
         try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
@@ -884,7 +884,7 @@ test "Cluster: sync: sync, bump target, sync" {
 
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
-    try expectEqual(t.replica(.R_).sync_status(), .not_syncing);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
 }
 
 test "Cluster: sync: R=2" {
@@ -973,7 +973,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     t.run();
 
     // After syncing, A0 is back to the correct checkpoint.
-    try expectEqual(t.replica(.R_).sync_status(), .not_syncing);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
     try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
@@ -1005,7 +1005,7 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).sync_status(), .not_syncing);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 }
@@ -1295,9 +1295,9 @@ const TestReplicas = struct {
         for (t.replicas.constSlice()) |r| {
             const replica = &t.cluster.replicas[r];
             if (sync_stage_all) |all| {
-                assert(std.meta.eql(all, replica.sync_stage));
+                assert(std.meta.eql(all, replica.syncing));
             } else {
-                sync_stage_all = replica.sync_stage;
+                sync_stage_all = replica.syncing;
             }
         }
         return sync_stage_all.?;
