@@ -9,7 +9,7 @@ const stdx = @import("../stdx.zig");
 const ManifestType = @import("manifest.zig").ManifestType;
 const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
-const TableIndexSchema = @import("table.zig").TableIndexSchema;
+const schema = @import("schema.zig");
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 
 // Iterates over the data blocks in a level B table. References to the level B
@@ -143,7 +143,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             const it = @fieldParentPtr(LevelTableValueBlockIterator, "read", read);
             assert(it.table_data_iterator.empty());
 
-            const index = TableIndexSchema.from_index_block(index_block);
+            const index_schema = schema.TableIndex.from_index_block(index_block);
             const callback = it.callback.level_next;
             it.callback = .none;
             // `index_block` is only valid for this callback, so copy it's contents.
@@ -151,8 +151,8 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             stdx.copy_disjoint(.exact, u8, it.context.index_block, index_block);
             it.table_data_iterator.start(.{
                 .grid = it.context.grid,
-                .addresses = index.data_addresses_used(it.context.index_block),
-                .checksums = index.data_checksums_used(it.context.index_block),
+                .addresses = index_schema.data_addresses_used(it.context.index_block),
+                .checksums = index_schema.data_checksums_used(it.context.index_block),
             });
             callback.on_index(it);
             it.table_index += 1;

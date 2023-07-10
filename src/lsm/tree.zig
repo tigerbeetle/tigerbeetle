@@ -19,7 +19,7 @@ const bloom_filter = @import("bloom_filter.zig");
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const TableFilterSchema = @import("table.zig").TableFilterSchema;
+const schema = @import("schema.zig");
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -423,7 +423,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
 
-                const filter_schema = TableFilterSchema.from_filter_block(filter_block);
+                const filter_schema = schema.TableFilter.from_filter_block(filter_block);
                 const filter_bytes = filter_schema.block_filter_const(filter_block);
                 if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
                     context.tree.filter_block_hits += 1;

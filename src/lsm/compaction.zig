@@ -46,7 +46,7 @@ const GridType = @import("grid.zig").GridType;
 const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
-const TableIndexSchema = @import("table.zig").TableIndexSchema;
+const schema = @import("schema.zig");
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 const LevelTableValueBlockIteratorType = @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
@@ -412,11 +412,11 @@ pub fn CompactionType(
             // TODO(jamii) This copy can be avoided if we bypass the cache.
             stdx.copy_disjoint(.exact, u8, compaction.index_block_a, index_block);
 
-            const index_a = TableIndexSchema.from_index_block(compaction.index_block_a);
+            const index_schema_a = schema.TableIndex.from_index_block(compaction.index_block_a);
             compaction.iterator_a.start(.{
                 .grid = compaction.context.grid,
-                .addresses = index_a.data_addresses_used(compaction.index_block_a),
-                .checksums = index_a.data_checksums_used(compaction.index_block_a),
+                .addresses = index_schema_a.data_addresses_used(compaction.index_block_a),
+                .checksums = index_schema_a.data_checksums_used(compaction.index_block_a),
             });
             compaction.release_table_blocks(compaction.index_block_a);
             compaction.state = .compacting;
@@ -475,9 +475,9 @@ pub fn CompactionType(
             // a copy of the index block for the Level A table being compacted.
 
             const grid = compaction.context.grid;
-            const index = TableIndexSchema.from_index_block(index_block);
-            for (index.data_addresses_used(index_block)) |address| grid.release(address);
-            for (index.filter_addresses_used(index_block)) |address| grid.release(address);
+            const index_schema = schema.TableIndex.from_index_block(index_block);
+            for (index_schema.data_addresses_used(index_block)) |address| grid.release(address);
+            for (index_schema.filter_addresses_used(index_block)) |address| grid.release(address);
             grid.release(Table.block_address(index_block));
         }
 
