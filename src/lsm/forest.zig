@@ -68,6 +68,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         };
 
         pub const groove_config = groove_config;
+        pub const Grooves = Grooves;
         pub const GroovesOptions = _GroovesOptions;
 
         join_op: ?JoinOp = null,
