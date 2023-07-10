@@ -3,13 +3,21 @@
 //! This allows them to be resent to the corresponding client if the client missed the original
 //! reply message (e.g. dropped packet).
 //!
-//! - Client replies' headers are redundantly stored in the SuperBlock's ClientSessions trailer.
-//! - Client replies are only stored when `header.size ≠ sizeOf(Header)`
-//!   (the header is in ClientSessions).
+//! - Client replies' headers are stored in the SuperBlock's ClientSessions trailer.
+//! - Client replies (header and body) are only stored by ClientReplies in the `client_replies` zone
+//!   when `reply.header.size ≠ sizeOf(Header)` – that is, when the body is non-empty.
 //! - Corrupt client replies can be repaired from other replicas.
 //!
-//! ClientReplies may defer writing the reply immediately – often the reply will be replaced
-//! quickly. But all writes must flush during a checkpoint.
+//! Replies are written asynchronously. Subsequent writes for the same client may be coalesced –
+//! we only care about the last reply to each client session.
+//!
+//! ClientReplies guarantees that the latest replies are durable at checkpoint.
+//!
+//! If the same reply is corrupted by all replicas, the cluster is still available.
+//! If the respective client also never received the reply (due to a network fault), the client may
+//! be "locked out" of the cluster – continually retrying a request which has been executed, but
+//! whose reply has been permanently lost. This can be resolved by the operator restarting the
+//! client to create a new session.
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
