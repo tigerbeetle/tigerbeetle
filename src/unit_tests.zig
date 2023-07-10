@@ -21,7 +21,6 @@ test {
     _ = @import("lsm/k_way_merge.zig");
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
-    _ = @import("lsm/posted_groove.zig");
     _ = @import("lsm/segmented_array.zig");
     _ = @import("lsm/set_associative_cache.zig");
     _ = @import("lsm/table.zig");
