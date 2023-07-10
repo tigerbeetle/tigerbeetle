@@ -345,6 +345,22 @@ pub const SuperBlockHeader = extern struct {
             superblock.vsr_headers_all[0..superblock.vsr_headers_count],
         );
     }
+
+    pub fn trailer_size(superblock: *const SuperBlockHeader, trailer: Trailer) u32 {
+        return switch (trailer) {
+            .manifest => superblock.manifest_size,
+            .free_set => superblock.free_set_size,
+            .client_sessions => superblock.client_sessions_size,
+        };
+    }
+
+    pub fn trailer_checksum(superblock: *const SuperBlockHeader, trailer: Trailer) u128 {
+        return switch (trailer) {
+            .manifest => superblock.manifest_checksum,
+            .free_set => superblock.free_set_checksum,
+            .client_sessions => superblock.client_sessions_checksum,
+        };
+    }
 };
 
 comptime {
@@ -482,7 +498,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             callback: fn (context: *Context) void,
             caller: Caller,
 
-            write_trailer: ?Trailer = null,
+            trailer: ?Trailer = null,
             write: Storage.Write = undefined,
             read: Storage.Read = undefined,
             read_threshold: ?Quorums.Threshold = null,
@@ -981,28 +997,30 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_trailer(superblock: *SuperBlock, context: *Context, trailer: Trailer) void {
             assert(superblock.queue_head == context);
-            assert(context.write_trailer == null);
+            assert(context.trailer == null);
 
-            context.write_trailer = trailer;
+            context.trailer = trailer;
 
-            const trailer_data_ = superblock.trailer_data(trailer);
+            const trailer_buffer_all = superblock.trailer_buffer(trailer);
+            const trailer_size_ = superblock.staging.trailer_size(trailer);
+            const trailer_checksum_ = superblock.staging.trailer_checksum(trailer);
 
-            const trailer_size_ceil = vsr.sector_ceil(trailer_data_.size);
+            const trailer_size_ceil = vsr.sector_ceil(trailer_size_);
             assert(trailer_size_ceil <= trailer.area().size_max());
 
             const offset = trailer.area().offset(context.copy.?);
-            const buffer = trailer_data_.buffer[0..trailer_size_ceil];
-            assert(trailer_data_.checksum == vsr.checksum(buffer[0..trailer_data_.size]));
+            const buffer = trailer_buffer_all[0..trailer_size_ceil];
+            assert(trailer_checksum_ == vsr.checksum(buffer[0..trailer_size_]));
 
-            mem.set(u8, buffer[trailer_data_.size..], 0); // Zero sector padding.
+            mem.set(u8, buffer[trailer_size_..], 0); // Zero sector padding.
 
             log.debug("{s}: write_trailer: " ++
                 "trailer={s} copy={} checksum={x:0>32} size={} offset={}", .{
                 @tagName(context.caller),
                 @tagName(trailer),
                 context.copy.?,
-                trailer_data_.checksum,
-                trailer_data_.size,
+                trailer_checksum_,
+                trailer_size_,
                 offset,
             });
 
@@ -1024,11 +1042,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_trailer_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
-            const trailer_ = context.write_trailer.?;
+            const trailer = context.trailer.?;
 
-            context.write_trailer = null;
+            context.trailer = null;
 
-            switch (trailer_) {
+            switch (trailer) {
                 .manifest => context.superblock.write_trailer(context, .free_set),
                 .free_set => context.superblock.write_trailer(context, .client_sessions),
                 .client_sessions => context.superblock.write_header(context),
@@ -1259,7 +1277,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         assert(threshold == .open);
                         context.copy = 0;
                         context.repairs = quorum.repairs();
-                        superblock.read_manifest(context);
+                        superblock.read_trailer(context, .manifest);
                     }
                 } else {
                     // TODO Consider calling TRIM() on Grid's free suffix after checkpointing.
@@ -1275,19 +1293,25 @@ pub fn SuperBlockType(comptime Storage: type) type {
             }
         }
 
-        fn read_manifest(superblock: *SuperBlock, context: *Context) void {
+        fn read_trailer(superblock: *SuperBlock, context: *Context, trailer: Trailer) void {
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(context.copy.? < constants.superblock_copies);
+            assert(context.trailer == null);
 
-            const size = vsr.sector_ceil(superblock.working.manifest_size);
-            assert(size <= superblock_trailer_manifest_size_max);
+            context.trailer = trailer;
 
-            const buffer = superblock.manifest_buffer[0..size];
-            const offset = Area.manifest.offset(context.copy.?);
+            const trailer_buffer_all = superblock.trailer_buffer(trailer);
+            const trailer_size_ = superblock.working.trailer_size(trailer);
+            const trailer_size_ceil = vsr.sector_ceil(trailer_size_);
+            assert(trailer_size_ceil <= trailer.area().size_max());
 
-            log.debug("{s}: read_manifest: copy={} size={} offset={}", .{
+            const buffer = trailer_buffer_all[0..trailer_size_ceil];
+            const offset = trailer.area().offset(context.copy.?);
+
+            log.debug("{s}: read_trailer: trailer={s} copy={} size={} offset={}", .{
                 @tagName(context.caller),
+                @tagName(trailer),
                 context.copy.?,
                 buffer.len,
                 offset,
@@ -1296,12 +1320,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
-                read_manifest_callback(&context.read);
+                read_trailer_callback(&context.read);
                 return;
             }
 
             superblock.storage.read_sectors(
-                read_manifest_callback,
+                read_trailer_callback,
                 &context.read,
                 buffer,
                 .superblock,
@@ -1309,106 +1333,81 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
         }
 
-        fn read_manifest_callback(read: *Storage.Read) void {
+        fn read_trailer_callback(read: *Storage.Read) void {
             const context = @fieldParentPtr(Context, "read", read);
             const superblock = context.superblock;
             const copy = context.copy.?;
+            const trailer = context.trailer.?;
 
             assert(context.caller == .open);
             assert(superblock.queue_head == context);
             assert(!superblock.opened);
-            assert(superblock.manifest.count == 0);
 
-            const slice = superblock.manifest_buffer[0..superblock.working.manifest_size];
-            if (vsr.checksum(slice) == superblock.working.manifest_checksum) {
-                superblock.manifest.decode(slice);
+            context.trailer = null;
 
-                log.debug("open: read_manifest: manifest blocks: {}/{}", .{
+            const trailer_checksum_expected = superblock.working.trailer_checksum(trailer);
+            const trailer_checksum_computed = vsr.checksum(
+                superblock.trailer_buffer(trailer)[0..superblock.working.trailer_size(trailer)],
+            );
+
+            if (trailer_checksum_computed == trailer_checksum_expected) {
+                log.debug("open: read_trailer: {s}: ok (copy={})", .{
+                    @tagName(trailer),
+                    copy,
+                });
+
+                switch (trailer) {
+                    .manifest => {
+                        context.copy = 0;
+                        superblock.read_trailer(context, .free_set);
+                        return;
+                    },
+                    .free_set => {
+                        context.copy = 0;
+                        superblock.read_trailer(context, .client_sessions);
+                        return;
+                    },
+                    .client_sessions => {},
+                }
+
+                assert(superblock.manifest.count == 0);
+                assert(superblock.free_set.count_acquired() == 0);
+                assert(superblock.client_sessions.count() == 0);
+
+                const working: *const SuperBlockHeader = superblock.working;
+                superblock.manifest.decode(superblock.manifest_buffer[0..working.manifest_size]);
+                superblock.free_set.decode(superblock.free_set_buffer[0..working.free_set_size]);
+                superblock.client_sessions.decode(superblock.client_sessions_buffer[0..working.client_sessions_size]);
+
+                superblock.verify_manifest_blocks_are_acquired_in_free_set();
+
+                log.debug("open: read_trailer: manifest: blocks: {}/{}", .{
                     superblock.manifest.count,
                     superblock.manifest.count_max,
                 });
-
-                // TODO Repair any impaired copies before we continue.
-                // At present, we repair at the next checkpoint.
-                // We do not repair padding.
-                context.copy = 0;
-                superblock.read_free_set(context);
-            } else {
-                log.debug("open: read_manifest: corrupt copy={}", .{copy});
-                if (copy + 1 == constants.superblock_copies) {
-                    @panic("superblock manifest lost");
-                } else {
-                    context.copy = copy + 1;
-                    superblock.read_manifest(context);
-                }
-            }
-        }
-
-        fn read_free_set(superblock: *SuperBlock, context: *Context) void {
-            assert(context.caller == .open);
-            assert(superblock.queue_head == context);
-            assert(context.copy.? < constants.superblock_copies);
-
-            const size = vsr.sector_ceil(superblock.working.free_set_size);
-            assert(size <= superblock_trailer_free_set_size_max);
-
-            const buffer = superblock.free_set_buffer[0..size];
-            const offset = Area.free_set.offset(context.copy.?);
-
-            log.debug("{s}: read_free_set: copy={} size={} offset={}", .{
-                @tagName(context.caller),
-                context.copy.?,
-                buffer.len,
-                offset,
-            });
-
-            superblock.assert_bounds(offset, buffer.len);
-
-            if (buffer.len == 0) {
-                read_free_set_callback(&context.read);
-                return;
-            }
-
-            superblock.storage.read_sectors(
-                read_free_set_callback,
-                &context.read,
-                buffer,
-                .superblock,
-                offset,
-            );
-        }
-
-        fn read_free_set_callback(read: *Storage.Read) void {
-            const context = @fieldParentPtr(Context, "read", read);
-            const superblock = context.superblock;
-            const copy = context.copy.?;
-
-            assert(context.caller == .open);
-            assert(superblock.queue_head == context);
-            assert(!superblock.opened);
-            assert(superblock.free_set.count_acquired() == 0);
-
-            const slice = superblock.free_set_buffer[0..superblock.working.free_set_size];
-            if (vsr.checksum(slice) == superblock.working.free_set_checksum) {
-                superblock.free_set.decode(slice);
-
-                log.debug("open: read_free_set: acquired blocks: {}/{}/{}", .{
+                log.debug("open: read_trailer: free_set: acquired blocks: {}/{}/{}", .{
                     superblock.free_set.count_acquired(),
                     superblock.block_count_limit,
                     grid_blocks_max,
                 });
+                log.debug("open: read_trailer: client_sessions: client requests: {}/{}", .{
+                    superblock.client_sessions.count(),
+                    constants.clients_max,
+                });
 
-                superblock.verify_manifest_blocks_are_acquired_in_free_set();
-
-                // TODO Repair any impaired copies before we continue.
-                context.copy = 0;
-                superblock.read_client_sessions(context);
-            } else if (copy + 1 == constants.superblock_copies) {
-                @panic("superblock free set lost");
+                // TODO Repair any impaired (trailer) copies before we continue.
+                // At present, we repair at the next checkpoint.
+                // We do not repair padding.
+                context.copy = null;
+                superblock.repair(context);
             } else {
-                log.debug("open: read_free_set: corrupt copy={}", .{copy});
-                context.copy = copy + 1;
-                superblock.read_free_set(context);
+                log.debug("open: read_trailer: {s}: corrupt (copy={})", .{ trailer, copy });
+                if (copy + 1 == constants.superblock_copies) {
+                    std.debug.panic("superblock {s} lost", .{@tagName(trailer)});
+                } else {
+                    context.copy = copy + 1;
+                    superblock.read_trailer(context, trailer);
+                }
             }
         }
 
@@ -1416,70 +1415,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.manifest.count <= superblock.free_set.count_acquired());
             for (superblock.manifest.addresses[0..superblock.manifest.count]) |address| {
                 assert(!superblock.free_set.is_free(address));
-            }
-        }
-
-        fn read_client_sessions(superblock: *SuperBlock, context: *Context) void {
-            assert(context.caller == .open);
-            assert(superblock.queue_head == context);
-            assert(context.copy.? < constants.superblock_copies);
-
-            const size = vsr.sector_ceil(superblock.working.client_sessions_size);
-            assert(size == superblock_trailer_client_sessions_size_max);
-
-            const buffer = superblock.client_sessions_buffer[0..size];
-            const offset = Area.client_sessions.offset(context.copy.?);
-
-            log.debug("{s}: read_client_sessions: copy={} size={} offset={}", .{
-                @tagName(context.caller),
-                context.copy.?,
-                buffer.len,
-                offset,
-            });
-
-            superblock.assert_bounds(offset, buffer.len);
-
-            if (buffer.len == 0) {
-                read_client_sessions_callback(&context.read);
-                return;
-            }
-
-            superblock.storage.read_sectors(
-                read_client_sessions_callback,
-                &context.read,
-                buffer,
-                .superblock,
-                offset,
-            );
-        }
-
-        fn read_client_sessions_callback(read: *Storage.Read) void {
-            const context = @fieldParentPtr(Context, "read", read);
-            const superblock = context.superblock;
-            const copy = context.copy.?;
-
-            assert(context.caller == .open);
-            assert(superblock.queue_head == context);
-            assert(!superblock.opened);
-            assert(superblock.client_sessions.count() == 0);
-
-            const slice = superblock.client_sessions_buffer[0..superblock.working.client_sessions_size];
-            if (vsr.checksum(slice) == superblock.working.client_sessions_checksum) {
-                superblock.client_sessions.decode(slice);
-
-                log.debug("open: read_client_sessions: client requests: {}/{}", .{
-                    superblock.client_sessions.count(),
-                    constants.clients_max,
-                });
-
-                context.copy = null;
-                superblock.repair(context);
-            } else if (copy + 1 == constants.superblock_copies) {
-                @panic("superblock client table lost");
-            } else {
-                log.debug("open: read_client_sessions: corrupt copy={}", .{copy});
-                context.copy = copy + 1;
-                superblock.read_client_sessions(context);
             }
         }
 
@@ -1650,27 +1585,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
             });
         }
 
-        pub fn trailer_data(superblock: *SuperBlock, trailer: Trailer) struct {
-            buffer: []align(constants.sector_size) u8,
-            size: u32,
-            checksum: u128,
-        } {
+        pub fn trailer_buffer(
+            superblock: *SuperBlock,
+            trailer: Trailer,
+        ) []align(constants.sector_size) u8 {
             return switch (trailer) {
-                .manifest => .{
-                    .buffer = superblock.manifest_buffer,
-                    .size = superblock.staging.manifest_size,
-                    .checksum = superblock.staging.manifest_checksum,
-                },
-                .free_set => .{
-                    .buffer = superblock.free_set_buffer,
-                    .size = superblock.staging.free_set_size,
-                    .checksum = superblock.staging.free_set_checksum,
-                },
-                .client_sessions => .{
-                    .buffer = superblock.client_sessions_buffer,
-                    .size = superblock.staging.client_sessions_size,
-                    .checksum = superblock.staging.client_sessions_checksum,
-                },
+                .manifest => superblock.manifest_buffer,
+                .free_set => superblock.free_set_buffer,
+                .client_sessions => superblock.client_sessions_buffer,
             };
         }
     };

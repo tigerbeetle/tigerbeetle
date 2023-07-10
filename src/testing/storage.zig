@@ -502,7 +502,7 @@ pub const Storage = struct {
         copy_: u8,
     ) *const superblock.SuperBlockHeader {
         const offset = vsr.Zone.superblock.offset(superblock.Area.header.offset(copy_));
-        const bytes = storage.memory[offset..][0..superblock.Area.header.size_max()];
+        const bytes = storage.memory[offset..][0..comptime superblock.Area.header.size_max()];
         return mem.bytesAsValue(superblock.SuperBlockHeader, bytes);
     }
 
