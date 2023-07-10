@@ -34,7 +34,7 @@ interchangeable.
   manager.
 
 * .NET: \`dotnet add package tigerbeetle --version $VERSION\`
-* Go: \`go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@$VERSION\`
+* Go: \`go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@v${VERSION}\`
 * Java: Update the version of \`com.tigerbeetle.tigerbeetle-java\` in \`pom.xml\` to \`$VERSION\`.
 * Node.js: \`npm install tigerbeetle-node@$VERSION\`
 "
