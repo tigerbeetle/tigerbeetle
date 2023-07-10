@@ -83,6 +83,10 @@ jobs:
         zip -9 "${ZIP_NAME}" "${BINARY}" && \
         gh release upload "${GIT_TAG}" "${ZIP_NAME}"
 
+        # Propagate token into environment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Split out the macOS building from the step above, so we can build a universal binary.
   # This means 2 less binaries (one for debug, one for release) on the release page,
   # less chance of confusion by a macOS user downloading the wrong arch, and less
@@ -128,6 +132,10 @@ jobs:
         export ZIP_NAME="tigerbeetle-universal-macos-${GIT_TAG}${{ matrix.debug }}.zip" && \
         zip -9 "${ZIP_NAME}" "${BINARY}" && \
         gh release upload "${GIT_TAG}" "${ZIP_NAME}"
+
+        # Propagate token into environment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Publish all clients and Docker image.
   client-dotnet:
