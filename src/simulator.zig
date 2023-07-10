@@ -255,7 +255,10 @@ pub fn main() !void {
             break;
         }
     } else {
-        output.info("no liveness, final cluster state:", .{});
+        output.info(
+            "no liveness, final cluster state (requests_max={} requests_replied={}):",
+            .{simulator.options.requests_max, simulator.requests_replied},
+        );
         simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
@@ -296,7 +299,7 @@ pub fn main() !void {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
             unreachable;
         } else {
-            output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
+            output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
             output.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "no state convergence", .{});
