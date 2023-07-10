@@ -364,8 +364,18 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 return;
             }
 
-            const inflight = self.request_queue.pop().?;
-            defer self.message_bus.unref(inflight.message);
+            var inflight = self.request_queue.pop().?;
+            const inflight_request = inflight.message.header.request;
+            const inflight_operation = inflight.message.header.operation;
+
+            if (self.on_reply_callback) |on_reply_callback| {
+                on_reply_callback(self, inflight.message, reply);
+            }
+
+            // Eagerly release request message, to ensure that user's callback can submit a new
+            // request.
+            self.message_bus.unref(inflight.message);
+            inflight.message = undefined;
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -377,10 +387,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             assert(reply.header.parent == self.parent);
             assert(reply.header.client == self.id);
-            assert(reply.header.request == inflight.message.header.request);
+            assert(reply.header.request == inflight_request);
             assert(reply.header.cluster == self.cluster);
             assert(reply.header.op == reply.header.commit);
-            assert(reply.header.operation == inflight.message.header.operation);
+            assert(reply.header.operation == inflight_operation);
 
             // The context of this reply becomes the parent of our next request:
             self.parent = reply.header.context;
@@ -396,7 +406,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             self.request_timeout.stop();
 
-            if (inflight.message.header.operation == .register) {
+            if (inflight_operation == .register) {
                 assert(self.session == 0);
                 assert(reply.header.commit > 0);
                 self.session = reply.header.commit; // The commit number becomes the session number.
@@ -408,20 +418,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 self.send_request_for_the_first_time(next_request.message);
             }
 
-            if (self.on_reply_callback) |on_reply_callback| {
-                on_reply_callback(self, inflight.message, reply);
-            }
-
             if (inflight.callback) |callback| {
-                assert(!inflight.message.header.operation.reserved());
+                assert(!inflight_operation.reserved());
 
                 callback(
                     inflight.user_data,
-                    inflight.message.header.operation.cast(StateMachine),
+                    inflight_operation.cast(StateMachine),
                     reply.body(),
                 );
             } else {
-                assert(inflight.message.header.operation == .register);
+                assert(inflight_operation == .register);
             }
         }
 
