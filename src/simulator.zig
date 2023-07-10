@@ -257,7 +257,7 @@ pub fn main() !void {
     } else {
         output.info(
             "no liveness, final cluster state (requests_max={} requests_replied={}):",
-            .{simulator.options.requests_max, simulator.requests_replied},
+            .{ simulator.options.requests_max, simulator.requests_replied },
         );
         simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
