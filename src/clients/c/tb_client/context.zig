@@ -242,8 +242,11 @@ pub fn ContextType(
         }
 
         pub fn request(self: *Context, packet: *Packet) void {
-            const message = self.message_pool.get_message();
-            defer self.message_pool.unref(message);
+            assert(self.messages_available > 0);
+
+            const message = self.client.get_message();
+            defer self.client.unref(message);
+
             self.messages_available -= 1;
 
             // Get the size of each request structure in the packet.data:
