@@ -42,6 +42,7 @@ jobs:
         env:
           TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
           GITHUB_SHA: ${{ github.sha }}
+          VERSION: ${{ inputs.version }}
 
   samples_integration_test:
     timeout-minutes: 20
