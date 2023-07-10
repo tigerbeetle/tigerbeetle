@@ -143,7 +143,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             const it = @fieldParentPtr(LevelTableValueBlockIterator, "read", read);
             assert(it.table_data_iterator.empty());
 
-            const index_schema = schema.TableIndex.from_index_block(index_block);
+            const index_schema = schema.TableIndex.from(index_block);
             const callback = it.callback.level_next;
             it.callback = .none;
             // `index_block` is only valid for this callback, so copy it's contents.
