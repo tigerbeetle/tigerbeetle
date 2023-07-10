@@ -108,7 +108,7 @@ pub const MessagePool = struct {
                 );
                 const message = try allocator.create(Message);
                 message.* = .{
-                    .header = mem.bytesAsValue(Header, buffer[0..@sizeOf(Header)]),
+                    .header = undefined,
                     .buffer = buffer[0..constants.message_size_max],
                     .next = pool.free_list,
                 };
@@ -139,6 +139,7 @@ pub const MessagePool = struct {
         const message = pool.free_list.?;
         pool.free_list = message.next;
         message.next = null;
+        message.header = mem.bytesAsValue(Header, message.buffer[0..@sizeOf(Header)]);
         assert(message.references == 0);
 
         message.references = 1;
@@ -149,7 +150,10 @@ pub const MessagePool = struct {
     pub fn unref(pool: *MessagePool, message: *Message) void {
         message.references -= 1;
         if (message.references == 0) {
-            mem.set(u8, message.buffer, 0);
+            message.header = undefined;
+            if (constants.verify) {
+                @memset(message.buffer, undefined, message.buffer.len);
+            }
             message.next = pool.free_list;
             pool.free_list = message;
         }
