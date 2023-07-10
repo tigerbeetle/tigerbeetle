@@ -1018,7 +1018,7 @@ const JniTestStep = struct {
                 else if (std.mem.indexOf(u8, ldd_result, "libc") != null)
                     .gnu
                 else {
-                    std.log.err("{s}", .{ ldd_result });
+                    std.log.err("{s}", .{ldd_result});
                     return error.JavaAbiUnrecognized;
                 };
             },
