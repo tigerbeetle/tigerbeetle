@@ -380,7 +380,7 @@ pub fn CompactionType(
                     .grid = context.grid,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .tables = context.range_b.tables,
+                    .tables = compaction.context.range_b.tables.constSlice(),
                     .index_block = compaction.index_block_b,
                 });
 
