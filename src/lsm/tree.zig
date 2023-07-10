@@ -423,7 +423,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type, comptime tree_
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
 
-                const filter_schema = schema.TableFilter.from_filter_block(filter_block);
+                const filter_schema = schema.TableFilter.from(filter_block);
                 const filter_bytes = filter_schema.block_filter_const(filter_block);
                 if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
                     context.tree.filter_block_hits += 1;

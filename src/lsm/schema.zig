@@ -150,7 +150,7 @@ pub const TableIndex = struct {
         };
     }
 
-    pub fn from_index_block(index_block: BlockPtrConst) TableIndex {
+    pub fn from(index_block: BlockPtrConst) TableIndex {
         const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .index);
@@ -304,7 +304,7 @@ pub const TableFilter = struct {
         };
     }
 
-    pub fn from_filter_block(filter_block: BlockPtrConst) TableFilter {
+    pub fn from(filter_block: BlockPtrConst) TableFilter {
         const header = mem.bytesAsValue(vsr.Header, filter_block[0..@sizeOf(vsr.Header)]);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .filter);
@@ -389,7 +389,7 @@ pub const TableData = struct {
         };
     }
 
-    pub fn from_data_block(data_block: BlockPtrConst) TableData {
+    pub fn from(data_block: BlockPtrConst) TableData {
         const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .data);
