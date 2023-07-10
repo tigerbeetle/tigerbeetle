@@ -63,5 +63,4 @@ jobs:
         if: failure()
         run: |
           export URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" && \
-          echo "Failed!" && \
-          # curl -d "text=Release process for ${{ inputs.version }} failed! See ${URL} for more information." -d "channel=C04RWHT9EP5" -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" -X POST https://slack.com/api/chat.postMessage
+          curl -d "text=Release process for ${{ inputs.version }} failed! See ${URL} for more information." -d "channel=C04RWHT9EP5" -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" -X POST https://slack.com/api/chat.postMessage
