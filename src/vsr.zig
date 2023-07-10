@@ -109,42 +109,48 @@ pub const Zone = enum {
 
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
-    reserved,
+    reserved = 0,
 
-    ping,
-    pong,
+    ping = 1,
+    pong = 2,
 
-    ping_client,
-    pong_client,
+    ping_client = 3,
+    pong_client = 4,
 
-    request,
-    prepare,
-    prepare_ok,
-    reply,
-    commit,
+    request = 5,
+    prepare = 6,
+    prepare_ok = 7,
+    reply = 8,
+    commit = 9,
 
-    start_view_change,
-    do_view_change,
-    start_view,
+    start_view_change = 10,
+    do_view_change = 11,
+    start_view = 12,
 
-    request_start_view,
-    request_headers,
-    request_prepare,
-    request_reply,
-    headers,
+    request_start_view = 13,
+    request_headers = 14,
+    request_prepare = 15,
+    request_reply = 16,
+    headers = 17,
 
-    eviction,
+    eviction = 18,
 
-    request_blocks,
-    block,
+    request_blocks = 19,
+    block = 20,
 
-    request_sync_manifest,
-    request_sync_free_set,
-    request_sync_client_sessions,
+    request_sync_manifest = 21,
+    request_sync_free_set = 22,
+    request_sync_client_sessions = 23,
 
-    sync_manifest,
-    sync_free_set,
-    sync_client_sessions,
+    sync_manifest = 24,
+    sync_free_set = 25,
+    sync_client_sessions = 26,
+
+    comptime {
+        for (std.enums.values(Command)) |result, index| {
+            assert(@enumToInt(result) == index);
+        }
+    }
 };
 
 /// This type exists to avoid making the Header type dependant on the state
