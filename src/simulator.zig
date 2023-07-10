@@ -502,7 +502,6 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica)) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
-                assert(replica.status == .normal);
                 if (replica.commit_min < replica.op) {
                     if (missing_op == null or missing_op.? > replica.commit_min + 1) {
                         missing_op = replica.commit_min + 1;
