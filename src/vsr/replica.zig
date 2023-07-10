@@ -2399,7 +2399,7 @@ pub fn ReplicaType(
             message: *const Message,
         ) void {
             assert(message.header.replica < self.replica_count);
-            assert(message.header.command == trailer.response());
+            assert(message.header.command == SyncTrailer.responses.get(trailer));
             if (self.ignore_sync_response_message(message)) return;
 
             const stage: *SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
@@ -2427,7 +2427,7 @@ pub fn ReplicaType(
                 },
             }
 
-            const target_buffer = self.superblock.trailer(trailer).buffer;
+            const target_buffer = self.superblock.trailer_data(trailer).buffer;
             const target_size = @intCast(u32, message.header.commit);
             const progress = stage.trailers.getPtr(trailer).write_chunk(.{
                 .buffer = target_buffer,
@@ -2811,7 +2811,7 @@ pub fn ReplicaType(
                     for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
                         if (!stage.trailers.get(trailer).done) {
                             self.send_request_sync_trailer(
-                                trailer.request(),
+                                SyncTrailer.requests.get(trailer),
                                 stage.trailers.get(trailer).offset,
                             );
                         }
@@ -8192,16 +8192,16 @@ pub fn ReplicaType(
             const reply = self.message_bus.get_message();
             defer self.message_bus.unref(reply);
 
-            const trailer = self.superblock.trailer(switch (command) {
+            const trailer_data = self.superblock.trailer_data(switch (command) {
                 .request_sync_manifest => .manifest,
                 .request_sync_free_set => .free_set,
                 .request_sync_client_sessions => .client_sessions,
                 else => unreachable,
             });
-            assert(trailer.size >= parameters.offset);
+            assert(trailer_data.size >= parameters.offset);
 
             const body_size = @intCast(u32, @minimum(
-                trailer.size - parameters.offset,
+                trailer_data.size - parameters.offset,
                 constants.sync_trailer_message_body_size_max,
             ));
             assert(body_size <= constants.message_body_size_max);
@@ -8210,11 +8210,12 @@ pub fn ReplicaType(
                 .inexact,
                 u8,
                 reply.buffer[@sizeOf(Header)..],
-                trailer.buffer[parameters.offset..][0..body_size],
+                trailer_data.buffer[parameters.offset..][0..body_size],
             );
 
             if (constants.verify) {
-                assert(trailer.checksum == vsr.checksum(trailer.buffer[0..trailer.size]));
+                assert(trailer_data.checksum ==
+                    vsr.checksum(trailer_data.buffer[0..trailer_data.size]));
             }
 
             reply.header.* = .{
@@ -8236,8 +8237,8 @@ pub fn ReplicaType(
                 },
                 .op = self.op_checkpoint(),
                 .request = parameters.offset,
-                .context = trailer.checksum,
-                .commit = trailer.size,
+                .context = trailer_data.checksum,
+                .commit = trailer_data.size,
             };
             reply.header.set_checksum_body(reply.body());
             reply.header.set_checksum();

@@ -501,8 +501,8 @@ pub const Storage = struct {
         storage: *const Storage,
         copy_: u8,
     ) *const superblock.SuperBlockHeader {
-        const offset = vsr.Zone.superblock.offset(superblock.areas.header.offset(copy_));
-        const bytes = storage.memory[offset..][0..superblock.areas.header.size_max];
+        const offset = vsr.Zone.superblock.offset(superblock.Area.header.offset(copy_));
+        const bytes = storage.memory[offset..][0..superblock.Area.header.size_max()];
         return mem.bytesAsValue(superblock.SuperBlockHeader, bytes);
     }
 
@@ -610,8 +610,8 @@ pub const Area = union(enum) {
         switch (area) {
             .superblock => |data| SectorRange.from_zone(
                 .superblock,
-                @field(superblock.areas, data.area).offset(data.copy),
-                @field(superblock.areas, data.area).size_max,
+                data.area.offset(data.copy),
+                data.area.size_max(),
             ),
             .wal_headers => |data| SectorRange.from_zone(
                 .wal_headers,
@@ -814,10 +814,10 @@ pub const ClusterFaultAtlas = struct {
         const copy = @divFloor(offset_in_zone, superblock.superblock_copy_size);
         const offset_in_copy = offset_in_zone % superblock.superblock_copy_size;
         const area: superblock.Area = switch (offset_in_copy) {
-            superblock.areas.header.base => .header,
-            superblock.areas.manifest.base => .manifest,
-            superblock.areas.free_set.base => .free_set,
-            superblock.areas.client_sessions.base => .client_sessions,
+            superblock.Area.header.base() => .header,
+            superblock.Area.manifest.base() => .manifest,
+            superblock.Area.free_set.base() => .free_set,
+            superblock.Area.client_sessions.base() => .client_sessions,
             else => unreachable,
         };
 
