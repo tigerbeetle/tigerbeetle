@@ -129,8 +129,8 @@ pub fn build(b: *std.build.Builder) void {
     // The meta-target lint runs them all
     {
         // lint_zig_fmt
-        const lint_zig_fmt = b.addSystemCommand(&.{ b.zig_exe, "fmt", "--check", "src/" });
-        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt on src/");
+        const lint_zig_fmt = b.addSystemCommand(&.{ b.zig_exe, "fmt", "--check", "." });
+        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt");
         lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
 
         // lint_tigerstyle
@@ -1124,7 +1124,7 @@ const GitCloneStep = struct {
 /// - From Linux, it runs fine.
 /// - From Windows it fails on libc "invalid object".
 /// - From MacOS, similar to https://github.com/ziglang/zig/issues/9711#issuecomment-1090071087.
-/// Workarround: Just setting different cache folders for each platform.
+/// Workaround: Just setting different cache folders for each platform.
 fn builder_with_isolated_cache(
     b: *std.build.Builder,
     target: CrossTarget,
