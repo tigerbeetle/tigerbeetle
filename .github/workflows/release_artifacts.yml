@@ -85,7 +85,7 @@ jobs:
 
         # Propagate token into environment
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Split out the macOS building from the step above, so we can build a universal binary.
   # This means 2 less binaries (one for debug, one for release) on the release page,
@@ -135,7 +135,7 @@ jobs:
 
         # Propagate token into environment
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Publish all clients and Docker image.
   client-dotnet:
