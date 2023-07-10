@@ -99,108 +99,120 @@ pub const TransferFlags = packed struct {
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
 /// the ordering matches struct field order.
 pub const CreateAccountResult = enum(u32) {
-    ok,
-    linked_event_failed,
-    linked_event_chain_open,
-    timestamp_must_be_zero,
+    ok = 0,
+    linked_event_failed = 1,
+    linked_event_chain_open = 2,
+    timestamp_must_be_zero = 3,
 
-    reserved_flag,
-    reserved_field,
+    reserved_flag = 4,
+    reserved_field = 5,
 
-    id_must_not_be_zero,
-    id_must_not_be_int_max,
+    id_must_not_be_zero = 6,
+    id_must_not_be_int_max = 7,
 
-    flags_are_mutually_exclusive,
+    flags_are_mutually_exclusive = 8,
 
-    ledger_must_not_be_zero,
-    code_must_not_be_zero,
-    debits_pending_must_be_zero,
-    debits_posted_must_be_zero,
-    credits_pending_must_be_zero,
-    credits_posted_must_be_zero,
+    ledger_must_not_be_zero = 9,
+    code_must_not_be_zero = 10,
+    debits_pending_must_be_zero = 11,
+    debits_posted_must_be_zero = 12,
+    credits_pending_must_be_zero = 13,
+    credits_posted_must_be_zero = 14,
 
-    exists_with_different_flags,
-    exists_with_different_user_data,
-    exists_with_different_ledger,
-    exists_with_different_code,
-    exists,
+    exists_with_different_flags = 15,
+    exists_with_different_user_data = 16,
+    exists_with_different_ledger = 17,
+    exists_with_different_code = 18,
+    exists = 19,
+
+    comptime {
+        for (std.enums.values(CreateAccountResult)) |result, index| {
+            assert(@enumToInt(result) == index);
+        }
+    }
 };
 
 /// Error codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
 /// the ordering matches struct field order.
 pub const CreateTransferResult = enum(u32) {
-    ok,
-    linked_event_failed,
-    linked_event_chain_open,
-    timestamp_must_be_zero,
+    ok = 0,
+    linked_event_failed = 1,
+    linked_event_chain_open = 2,
+    timestamp_must_be_zero = 3,
 
-    reserved_flag,
-    reserved_field,
+    reserved_flag = 4,
+    reserved_field = 5,
 
-    id_must_not_be_zero,
-    id_must_not_be_int_max,
+    id_must_not_be_zero = 6,
+    id_must_not_be_int_max = 7,
 
-    flags_are_mutually_exclusive,
+    flags_are_mutually_exclusive = 8,
 
-    debit_account_id_must_not_be_zero,
-    debit_account_id_must_not_be_int_max,
-    credit_account_id_must_not_be_zero,
-    credit_account_id_must_not_be_int_max,
-    accounts_must_be_different,
+    debit_account_id_must_not_be_zero = 9,
+    debit_account_id_must_not_be_int_max = 10,
+    credit_account_id_must_not_be_zero = 11,
+    credit_account_id_must_not_be_int_max = 12,
+    accounts_must_be_different = 13,
 
-    pending_id_must_be_zero,
-    pending_id_must_not_be_zero,
-    pending_id_must_not_be_int_max,
-    pending_id_must_be_different,
-    timeout_reserved_for_pending_transfer,
+    pending_id_must_be_zero = 14,
+    pending_id_must_not_be_zero = 15,
+    pending_id_must_not_be_int_max = 16,
+    pending_id_must_be_different = 17,
+    timeout_reserved_for_pending_transfer = 18,
 
-    ledger_must_not_be_zero,
-    code_must_not_be_zero,
-    amount_must_not_be_zero,
+    ledger_must_not_be_zero = 19,
+    code_must_not_be_zero = 20,
+    amount_must_not_be_zero = 21,
 
-    debit_account_not_found,
-    credit_account_not_found,
+    debit_account_not_found = 22,
+    credit_account_not_found = 23,
 
-    accounts_must_have_the_same_ledger,
-    transfer_must_have_the_same_ledger_as_accounts,
+    accounts_must_have_the_same_ledger = 24,
+    transfer_must_have_the_same_ledger_as_accounts = 25,
 
-    pending_transfer_not_found,
-    pending_transfer_not_pending,
+    pending_transfer_not_found = 26,
+    pending_transfer_not_pending = 27,
 
-    pending_transfer_has_different_debit_account_id,
-    pending_transfer_has_different_credit_account_id,
-    pending_transfer_has_different_ledger,
-    pending_transfer_has_different_code,
+    pending_transfer_has_different_debit_account_id = 28,
+    pending_transfer_has_different_credit_account_id = 29,
+    pending_transfer_has_different_ledger = 30,
+    pending_transfer_has_different_code = 31,
 
-    exceeds_pending_transfer_amount,
-    pending_transfer_has_different_amount,
+    exceeds_pending_transfer_amount = 32,
+    pending_transfer_has_different_amount = 33,
 
-    pending_transfer_already_posted,
-    pending_transfer_already_voided,
+    pending_transfer_already_posted = 34,
+    pending_transfer_already_voided = 35,
 
-    pending_transfer_expired,
+    pending_transfer_expired = 36,
 
-    exists_with_different_flags,
-    exists_with_different_debit_account_id,
-    exists_with_different_credit_account_id,
-    exists_with_different_pending_id,
-    exists_with_different_user_data,
-    exists_with_different_timeout,
-    exists_with_different_code,
-    exists_with_different_amount,
-    exists,
+    exists_with_different_flags = 37,
+    exists_with_different_debit_account_id = 38,
+    exists_with_different_credit_account_id = 39,
+    exists_with_different_pending_id = 40,
+    exists_with_different_user_data = 41,
+    exists_with_different_timeout = 42,
+    exists_with_different_code = 43,
+    exists_with_different_amount = 44,
+    exists = 45,
 
-    overflows_debits_pending,
-    overflows_credits_pending,
-    overflows_debits_posted,
-    overflows_credits_posted,
-    overflows_debits,
-    overflows_credits,
-    overflows_timeout,
+    overflows_debits_pending = 46,
+    overflows_credits_pending = 47,
+    overflows_debits_posted = 48,
+    overflows_credits_posted = 49,
+    overflows_debits = 50,
+    overflows_credits = 51,
+    overflows_timeout = 52,
 
-    exceeds_credits,
-    exceeds_debits,
+    exceeds_credits = 53,
+    exceeds_debits = 54,
+
+    comptime {
+        for (std.enums.values(CreateTransferResult)) |result, index| {
+            assert(@enumToInt(result) == index);
+        }
+    }
 };
 
 pub const CreateAccountsResult = extern struct {
