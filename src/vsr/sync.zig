@@ -159,6 +159,18 @@ pub const Trailer = struct {
     done: bool = false,
     final: ?struct { size: u32, checksum: u128 } = null,
 
+    pub const requests = std.enums.EnumArray(vsr.SuperBlockTrailer, vsr.Command).init(.{
+        .manifest = .request_sync_manifest,
+        .free_set = .request_sync_free_set,
+        .client_sessions = .request_sync_client_sessions,
+    });
+
+    pub const responses = std.enums.EnumArray(vsr.SuperBlockTrailer, vsr.Command).init(.{
+        .manifest = .sync_manifest,
+        .free_set = .sync_free_set,
+        .client_sessions = .sync_client_sessions,
+    });
+
     pub fn write_chunk(
         trailer: *Trailer,
         destination: struct {
