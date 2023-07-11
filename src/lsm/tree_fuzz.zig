@@ -102,7 +102,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
         const Environment = @This();
 
-        const Tree = @import("tree.zig").TreeType(Table, Storage, "Key.Value");
+        const Tree = @import("tree.zig").TreeType(Table, Storage);
         const Table = TableType(
             Key,
             Key.Value,
@@ -204,7 +204,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.superblock.open(superblock_open_callback, &env.superblock_context);
 
             env.tick_until_state_change(.superblock_open, .tree_init);
-            env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, tree_options);
+            env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
+                .id = 1,
+                .name = "Key.Value",
+            }, tree_options);
             defer env.tree.deinit(allocator);
 
             env.change_state(.tree_init, .tree_open);
