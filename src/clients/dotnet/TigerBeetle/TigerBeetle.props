@@ -6,7 +6,7 @@
       <NeutralLanguage>en-US</NeutralLanguage>
       <PackageId>tigerbeetle</PackageId>
       <PackageTags>TigerBeetle</PackageTags>
-      <PackageProjectUrl>https://github.com/tigerbeetledb/tigerbeetle</PackageProjectUrl>
+      <PackageProjectUrl>https://github.com/tigerbeetle/tigerbeetle</PackageProjectUrl>
       <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
       <PublishRepositoryUrl>true</PublishRepositoryUrl>
     </PropertyGroup>

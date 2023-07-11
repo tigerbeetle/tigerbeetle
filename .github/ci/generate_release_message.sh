@@ -24,8 +24,8 @@ interchangeable.
 ## Server
 
 * Binary: Download the zip for your OS and architecture from this page and unzip.
-* Docker: \`docker pull ghcr.io/tigerbeetledb/tigerbeetle:$VERSION\`
-* Docker (debug image): \`docker pull ghcr.io/tigerbeetledb/tigerbeetle:$VERSION-debug\`
+* Docker: \`docker pull ghcr.io/tigerbeetle/tigerbeetle:$VERSION\`
+* Docker (debug image): \`docker pull ghcr.io/tigerbeetle/tigerbeetle:$VERSION-debug\`
 
 ## Clients
 
@@ -34,7 +34,7 @@ interchangeable.
   manager.
 
 * .NET: \`dotnet add package tigerbeetle --version $VERSION\`
-* Go: \`go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@v${VERSION}\`
+* Go: \`go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v${VERSION}\`
 * Java: Update the version of \`com.tigerbeetle.tigerbeetle-java\` in \`pom.xml\` to \`$VERSION\`.
 * Node.js: \`npm install tigerbeetle-node@$VERSION\`
 "

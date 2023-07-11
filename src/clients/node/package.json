@@ -6,7 +6,7 @@
   "typings": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tigerbeetledb/tigerbeetle.git",
+    "url": "git+https://github.com/tigerbeetle/tigerbeetle.git",
     "directory": "src/clients/node"
   },
   "preferUnplugged": true,

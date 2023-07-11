@@ -2,7 +2,7 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetledb/viewstamped-replication-made-famous)**
+**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetle/viewstamped-replication-made-famous)**
 
 Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
 
@@ -18,7 +18,7 @@ doc](docs/DESIGN.md) provides an overview of TigerBeetle's data
 structures.
 
 Check out our
-[roadmap](https://github.com/tigerbeetledb/tigerbeetle/issues/259)
+[roadmap](https://github.com/tigerbeetle/tigerbeetle/issues/259)
 below for where we're heading! And [join one of our communities](#Community) to stay
 in the loop about fixes and features!
 
@@ -54,7 +54,7 @@ x86_64 builds are available for Windows.
 For example:
 
 ```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2023-03-27-weekly/tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
+$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2023-03-27-weekly/tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
 $ unzip tigerbeetle-x86_64-linux-2023-03-27-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle # On Windows, add $(pwd) to $env:PATH instead.
 $ tigerbeetle version --verbose | head -n6
@@ -67,7 +67,7 @@ build.zig_version=0.9.1
 ```
 
 NOTE: This example version is not kept up-to-date. So always check the
-[releases](https://github.com/tigerbeetledb/tigerbeetle/releases) page
+[releases](https://github.com/tigerbeetle/tigerbeetle/releases) page
 for the latest version. You can also find debug builds for each
 arch/OS combo on the release page as well.
 
@@ -79,7 +79,7 @@ the install script.
 You will need POSIX userland, curl or wget, tar, and xz.
 
 ```bash
-$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
+$ git clone https://github.com/tigerbeetle/tigerbeetle.git
 $ cd tigerbeetle
 $ git checkout 2022-11-16-weekly # Or latest tag
 $ scripts/install.sh
@@ -114,7 +114,7 @@ Now skip ahead to [Use Node as a CLI](#use-node-as-a-cli).
 First provision TigerBeetle's data directory.
 
 ```bash
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
@@ -123,7 +123,7 @@ info(io): allocating 660.140625MiB...
 Then run the server.
 
 ```bash
-$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
@@ -271,7 +271,7 @@ For further reading:
 First grab the sources and run the setup script:
 
 ```bash
-$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
+$ git clone https://github.com/tigerbeetle/tigerbeetle.git
 $ cd tigerbeetle
 $ scripts/install.sh
 ```
@@ -290,7 +290,7 @@ Read [docs/HACKING.md](docs/HACKING.md).
 
 ## Roadmap
 
-See https://github.com/tigerbeetledb/tigerbeetle/issues/259.
+See https://github.com/tigerbeetle/tigerbeetle/issues/259.
 
 ## License
 

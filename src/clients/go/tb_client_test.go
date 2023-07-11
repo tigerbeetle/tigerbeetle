@@ -10,8 +10,8 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/tigerbeetledb/tigerbeetle-go/assert"
-	"github.com/tigerbeetledb/tigerbeetle-go/pkg/types"
+	"github.com/tigerbeetle/tigerbeetle-go/assert"
+	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 const (

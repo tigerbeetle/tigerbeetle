@@ -474,7 +474,7 @@ pub const Simulator = struct {
     /// insufficient.
     /// TODO: State sync can trigger recovering_head without any crashes, and we should be able to
     /// recover in that case.
-    /// (See https://github.com/tigerbeetledb/tigerbeetle/pull/933#discussion_r1245440623)
+    /// (See https://github.com/tigerbeetle/tigerbeetle/pull/933#discussion_r1245440623)
     pub fn core_missing_quorum(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 

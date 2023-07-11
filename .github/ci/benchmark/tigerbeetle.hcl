@@ -35,7 +35,7 @@ variable "addresses" {
 
 variable "git_url" {
   type = string
-  default = "https://github.com/tigerbeetledb/tigerbeetle.git"
+  default = "https://github.com/tigerbeetle/tigerbeetle.git"
 }
 
 variable "git_ref" {
