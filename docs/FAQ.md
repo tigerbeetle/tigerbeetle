@@ -140,7 +140,7 @@ Not yet! TigerBeetle was started in 2020 and you're watching us build
 the plane while we're flying it. We are working with design partners
 and TigerBeetle is being used in corporate "lab" settings. Likewise,
 we encourage you to [try out
-TigerBeetle](https://github.com/tigerbeetledb/tigerbeetle#quickstart),
+TigerBeetle](https://github.com/tigerbeetle/tigerbeetle#quickstart),
 [follow our
-development](https://github.com/tigerbeetledb/tigerbeetle#short-term-roadmap),
+development](https://github.com/tigerbeetle/tigerbeetle#short-term-roadmap),
 and [give feedback](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)!

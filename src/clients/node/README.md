@@ -43,12 +43,12 @@ up, let's dig into using TigerBeetle.
 If you run into issues, check out the distribution-specific install
 steps that are run in CI to test support:
 
-* [Alpine](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_alpine.sh)
-* [Amazon Linux](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_amazonlinux.sh)
-* [Debian](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_debian.sh)
-* [Fedora](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_fedora.sh)
-* [Ubuntu](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_ubuntu.sh)
-* [RHEL](https://github.com/tigerbeetledb/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_rhelubi.sh)
+* [Alpine](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_alpine.sh)
+* [Amazon Linux](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_amazonlinux.sh)
+* [Debian](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_debian.sh)
+* [Fedora](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_fedora.sh)
+* [Ubuntu](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_ubuntu.sh)
+* [RHEL](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_rhelubi.sh)
 
 ## Sample projects
 
@@ -603,7 +603,7 @@ const errors = await client.createTransfers(batch);
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetledb/tigerbeetle
+$ git clone https://github.com/tigerbeetle/tigerbeetle
 $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh

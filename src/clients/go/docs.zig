@@ -52,7 +52,7 @@ fn go_current_commit_post_install_hook(
         "require",
         try std.fmt.allocPrint(
             arena.allocator(),
-            "replace github.com/tigerbeetledb/tigerbeetle-go => {s}/src/clients/go\n\nrequire",
+            "replace github.com/tigerbeetle/tigerbeetle-go => {s}/src/clients/go\n\nrequire",
             .{root},
         ),
     );
@@ -85,9 +85,9 @@ pub const GoDocs = Docs{
     .description = 
     \\The TigerBeetle client for Go.
     \\
-    \\[![Go Reference](https://pkg.go.dev/badge/github.com/tigerbeetledb/tigerbeetle-go.svg)](https://pkg.go.dev/github.com/tigerbeetledb/tigerbeetle-go)
+    \\[![Go Reference](https://pkg.go.dev/badge/github.com/tigerbeetle/tigerbeetle-go.svg)](https://pkg.go.dev/github.com/tigerbeetle/tigerbeetle-go)
     \\
-    \\Make sure to import `github.com/tigerbeetledb/tigerbeetle-go`, not
+    \\Make sure to import `github.com/tigerbeetle/tigerbeetle-go`, not
     \\this repo and subdirectory.
     ,
 
@@ -108,7 +108,7 @@ pub const GoDocs = Docs{
     .install_sample_file = 
     \\package main
     \\
-    \\import _ "github.com/tigerbeetledb/tigerbeetle-go"
+    \\import _ "github.com/tigerbeetle/tigerbeetle-go"
     \\import "fmt"
     \\
     \\func main() {
@@ -120,7 +120,7 @@ pub const GoDocs = Docs{
 
     .install_commands = 
     \\go mod init tbtest
-    \\go get github.com/tigerbeetledb/tigerbeetle-go
+    \\go get github.com/tigerbeetle/tigerbeetle-go
     ,
     .build_commands = 
     \\go mod tidy
@@ -200,7 +200,7 @@ pub const GoDocs = Docs{
     ,
 
     .create_accounts_documentation = 
-    \\The `tb_types` package can be imported from `"github.com/tigerbeetledb/tigerbeetle-go/pkg/types"`.
+    \\The `tb_types` package can be imported from `"github.com/tigerbeetle/tigerbeetle-go/pkg/types"`.
     ,
 
     .account_flags_documentation = 
@@ -408,8 +408,8 @@ pub const GoDocs = Docs{
     \\import "log"
     \\import "os"
     \\
-    \\import tb "github.com/tigerbeetledb/tigerbeetle-go"
-    \\import tb_types "github.com/tigerbeetledb/tigerbeetle-go/pkg/types"
+    \\import tb "github.com/tigerbeetle/tigerbeetle-go"
+    \\import tb_types "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
     \\
     \\func uint128(value string) tb_types.Uint128 {
     \\	x, err := tb_types.HexStringToUint128(value)

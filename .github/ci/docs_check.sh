@@ -11,7 +11,7 @@ git config --global --add safe.directory /build
 # absolute links until
 # https://github.com/remarkjs/remark-validate-links/issues/75 is fixed
 # upstream.
-npm install cspell@^6.31.1 remark-cli@^11.0.0 https://github.com/tigerbeetledb/remark-validate-links
+npm install cspell@^6.31.1 remark-cli@^11.0.0 https://github.com/tigerbeetle/remark-validate-links
 
 # Validate links
 npx remark --use remark-validate-links --frail /build

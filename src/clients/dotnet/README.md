@@ -420,7 +420,7 @@ createTransfersError = client.CreateTransfers(batch.ToArray());
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetledb/tigerbeetle
+$ git clone https://github.com/tigerbeetle/tigerbeetle
 $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh
@@ -436,7 +436,7 @@ $ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tes
 In PowerShell run:
 
 ```console
-$ git clone https://github.com/tigerbeetledb/tigerbeetle
+$ git clone https://github.com/tigerbeetle/tigerbeetle
 $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ .\scripts\install_zig.bat

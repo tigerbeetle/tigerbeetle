@@ -6,7 +6,7 @@ set -e
 # This script builds the docs website for the currently checked out
 # branch.
 
-git clone https://github.com/tigerbeetledb/docs docs_website
+git clone https://github.com/tigerbeetle/docs docs_website
 # Try to grab branch from Github Actions CI.
 # See also: https://docs.github.com/en/actions/learn-github-actions/environment-variables.
 BRANCH="$GITHUB_HEAD_REF"
@@ -15,7 +15,7 @@ if [[ -z "$BRANCH" ]]; then
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
 fi
 
-REPO="https://github.com/tigerbeetledb/tigerbeetle"
+REPO="https://github.com/tigerbeetle/tigerbeetle"
 if [[ -n "$SOURCE_REPO" ]]; then
     REPO="${SOURCE_REPO}"
 fi

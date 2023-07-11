@@ -385,7 +385,7 @@ test "Cluster: network: partition client-primary (symmetric)" {
     try c.request(20, 20);
 
     t.replica(.A0).drop_all(.C_, .bidirectional);
-    // TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
+    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
     // try c.request(40, 40);
     try c.request(40, 20);
 }
@@ -399,7 +399,7 @@ test "Cluster: network: partititon client-primary (asymmetric, drop requests)" {
     try c.request(20, 20);
 
     t.replica(.A0).drop_all(.C_, .incoming);
-    // TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
+    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
     // try c.request(40, 40);
     try c.request(40, 20);
 }
@@ -413,7 +413,7 @@ test "Cluster: network: partititon client-primary (asymmetric, drop replies)" {
     try c.request(20, 20);
 
     t.replica(.A0).drop_all(.C_, .outgoing);
-    // TODO: https://github.com/tigerbeetledb/tigerbeetle/issues/444
+    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
     // try c.request(40, 40);
     try c.request(40, 20);
 }

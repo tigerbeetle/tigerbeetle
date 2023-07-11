@@ -37,7 +37,7 @@ su - voprhub
 
 Clone `tigerbeetle`:
 ```bash
-git clone https://github.com/tigerbeetledb/tigerbeetle.git
+git clone https://github.com/tigerbeetle/tigerbeetle.git
 ```
 
 Install Zig:
@@ -67,7 +67,7 @@ Description=Continuously runs the VOPR Hub.
 
 User=voprhub
 WorkingDirectory=/home/voprhub/hub/tigerbeetle/src/vopr_hub
-Environment="REPOSITORY_URL=https://api.github.com/repos/tigerbeetledb/tigerbeetle"
+Environment="REPOSITORY_URL=https://api.github.com/repos/tigerbeetle/tigerbeetle"
 Environment="TIGERBEETLE_DIRECTORY=/home/voprhub/tigerbeetle"
 Environment="VOPR_HUB_ADDRESS=<address>"
 Environment="ISSUE_DIRECTORY=/home/voprhub"
@@ -113,7 +113,7 @@ set -e
 
 # Checkout the correct branch
 export TIGERBEETLE_DIRECTORY="/home/voprrunner/tigerbeetle"
-export REPOSITORY_URL="https://api.github.com/repos/tigerbeetledb/tigerbeetle"
+export REPOSITORY_URL="https://api.github.com/repos/tigerbeetle/tigerbeetle"
 export DEVELOPER_TOKEN="******"
 export NUM_VOPRS="4"
 export CURRENT_VOPR=$1
@@ -134,7 +134,7 @@ Note that the number of directories corresponds to the number of service instanc
 
 Ideally, this number should be increased/decreased to be two less than the number of CPU cores available. The simulators burn CPU, and so this allocation leaves a core available for the rest of the system, plus a core for the hub itself.
 ```bash
-git clone https://github.com/tigerbeetledb/tigerbeetle.git
+git clone https://github.com/tigerbeetle/tigerbeetle.git
 # Install Zig:
 cd ./tigerbeetle
 ./scripts/install_zig.sh
