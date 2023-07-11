@@ -8199,13 +8199,14 @@ pub fn ReplicaType(
             const trailer_buffer_all = self.superblock.trailer_buffer(trailer);
             const trailer_checksum = self.superblock.staging.trailer_checksum(trailer);
             const trailer_size = self.superblock.staging.trailer_size(trailer);
-            assert(trailer_size >= parameters.offset);
-            assert(trailer_size <= trailer.area().size_max());
+            assert(trailer_size > parameters.offset);
+            assert(trailer_size <= trailer.zone().size_max());
 
             const body_size = @intCast(u32, @minimum(
                 trailer_size - parameters.offset,
                 constants.sync_trailer_message_body_size_max,
             ));
+            assert(body_size > 0 or parameters.offset == 0);
             assert(body_size <= constants.message_body_size_max);
 
             stdx.copy_disjoint(
