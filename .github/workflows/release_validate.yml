@@ -20,10 +20,10 @@ jobs:
           fetch-depth: 0
 
       - name: Check Docker Image
-        run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}-debug
+        run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}
 
       - name: Check Debug Docker Image
-        run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}
+        run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}-debug
 
       - name: Check Release Binaries
         run: |
