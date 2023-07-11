@@ -21,6 +21,8 @@ on:
         required: true
       TIGERBEETLE_GO_DEPLOY_KEY:
         required: true
+      SLACK_TOKEN:
+        required: true
     inputs:
       dry-run:
         required: false
@@ -177,5 +179,14 @@ jobs:
   linux:
     needs: version
     uses: ./.github/workflows/linux.yml
+    with:
+      version: ${{needs.version.outputs.version}}
+
+  validate:
+    if: '!cancelled()'
+    needs: [version, build_and_upload_binaries, build_and_upload_binaries_macos, client-dotnet, client-go, client-java, client-node, linux]
+    uses: ./.github/workflows/release_validate.yml
+    secrets:
+      SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
     with:
       version: ${{needs.version.outputs.version}}
