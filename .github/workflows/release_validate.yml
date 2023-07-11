@@ -1,0 +1,84 @@
+name: "Release (validate)"
+
+on:
+  workflow_call:
+    secrets:
+      SLACK_TOKEN:
+        required: true
+    inputs:
+      version:
+        required: true
+        type: string
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Check Docker Image
+        run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}
+
+      - name: Check Debug Docker Image
+        run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}-debug
+
+      - name: Check Release Binaries
+        run: |
+          gh release view ${{ inputs.version }} --json assets > /tmp/release.json && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-x86_64-windows-${{ inputs.version }}.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-x86_64-windows-${{ inputs.version }}--debug.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-x86_64-linux-${{ inputs.version }}.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-x86_64-linux-${{ inputs.version }}--debug.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-universal-macos-${{ inputs.version }}.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-universal-macos-${{ inputs.version }}--debug.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-aarch64-linux-${{ inputs.version }}.zip")' | grep "uploaded") && \
+          (cat /tmp/release.json | jq '.assets[] | select(.name=="tigerbeetle-aarch64-linux-${{ inputs.version }}--debug.zip")' | grep "uploaded")
+
+        # Propagate token into environment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Dotnet
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Check Client Dotnet
+        run: |
+          mkdir -p /tmp/dotnet && cd /tmp/dotnet && \
+          dotnet new console && \
+          dotnet add package tigerbeetle --version ${{ inputs.version }}
+
+      - name: Check Client Go
+        run: |
+          mkdir -p /tmp/go && cd /tmp/go && \
+          go mod init test && \
+          go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@v${{ inputs.version }} && \
+          go mod tidy
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Check Client Java
+        run: |
+          mkdir -p /tmp/java && \
+          cat src/clients/java/validation_pom.xml | sed 's|{{VERSION}}|${{ inputs.version }}|' > /tmp/java/pom.xml && \
+          cd /tmp/java && mvn dependency:copy-dependencies && \
+          test -e target/dependency/tigerbeetle-java-${{ inputs.version }}.jar
+
+      - name: Check Client Node
+        run: |
+          mkdir -p /tmp/node && cd /tmp/node && \
+          npm install tigerbeetle-node@${{ inputs.version }}
+
+      - name: Alert if anything failed
+        if: failure()
+        run: |
+          export URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" && \
+          curl -d "text=Release process for ${{ inputs.version }} failed! See ${URL} for more information." -d "channel=C04RWHT9EP5" -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" -X POST https://slack.com/api/chat.postMessage
