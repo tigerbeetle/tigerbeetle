@@ -46,10 +46,10 @@ jobs:
 
       - name: Check Client Go
         run: |
-          export MATCHING_COMMIT=$(git rev-list -n 1 ${{ inputs.version }}) && \
-          cd /tmp && \
-          git clone https://github.com/tigerbeetle/tigerbeetle-go.git && cd tigerbeetle-go && \
-          git checkout tigerbeetle-${MATCHING_COMMIT}
+          mkdir -p /tmp/go && cd /tmp/go && \
+          go mod init test && \
+          go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@v${{ inputs.version }} && \
+          go mod tidy
 
       - name: Check Client Java
         run: curl -L --fail 'https://central.sonatype.com/artifact/com.tigerbeetle/tigerbeetle-java/${{ inputs.version }}' > /dev/null
