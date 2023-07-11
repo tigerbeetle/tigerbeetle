@@ -46,6 +46,7 @@ const GridType = @import("grid.zig").GridType;
 const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
+const schema = @import("schema.zig");
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 const LevelTableValueBlockIteratorType = @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
@@ -108,10 +109,10 @@ pub fn CompactionType(
         // Allocated during `init`.
         iterator_a: TableDataIterator,
         iterator_b: LevelTableValueBlockIterator,
+        table_builder: Table.Builder,
         index_block_a: BlockPtr,
         index_block_b: BlockPtr,
         data_blocks: [2]BlockPtr,
-        table_builder: Table.Builder,
         last_keys_in: [2]?Key = .{ null, null },
 
         /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
@@ -226,6 +227,43 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
+            compaction.* = .{
+                .tree_name = compaction.tree_name,
+
+                .iterator_a = compaction.iterator_a,
+                .iterator_b = compaction.iterator_b,
+                .index_block_a = compaction.index_block_a,
+                .index_block_b = compaction.index_block_b,
+                .data_blocks = compaction.data_blocks,
+                .table_builder = compaction.table_builder,
+
+                .context = undefined,
+                .move_table = undefined,
+                .grid_reservation = null,
+                .drop_tombstones = undefined,
+
+                .values_in = .{ &.{}, &.{} },
+
+                .input_state = .remaining,
+                .state = .idle,
+
+                .tracer_slot = null,
+                .iterator_tracer_slot = null,
+            };
+
+            compaction.iterator_a.reset();
+            compaction.iterator_b.reset();
+            compaction.table_builder.reset();
+
+            // Zero the blocks because allocate_block() returns a zeroed block.
+            std.mem.set(u8, compaction.index_block_a, 0);
+            std.mem.set(u8, compaction.index_block_b, 0);
+            for (compaction.data_blocks) |data_block| {
+                std.mem.set(u8, data_block, 0);
+            }
+        }
+
+        pub fn transition_to_idle(compaction: *Compaction) void {
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
@@ -343,7 +381,7 @@ pub fn CompactionType(
                     .grid = context.grid,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .tables = context.range_b.tables,
+                    .tables = compaction.context.range_b.tables.constSlice(),
                     .index_block = compaction.index_block_b,
                 });
 
@@ -373,10 +411,12 @@ pub fn CompactionType(
             // `index_block` is only valid for this callback, so copy its contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
             stdx.copy_disjoint(.exact, u8, compaction.index_block_a, index_block);
+
+            const index_schema_a = schema.TableIndex.from(compaction.index_block_a);
             compaction.iterator_a.start(.{
                 .grid = compaction.context.grid,
-                .addresses = Table.index_data_addresses_used(compaction.index_block_a),
-                .checksums = Table.index_data_checksums_used(compaction.index_block_a),
+                .addresses = index_schema_a.data_addresses_used(compaction.index_block_a),
+                .checksums = index_schema_a.data_checksums_used(compaction.index_block_a),
             });
             compaction.release_table_blocks(compaction.index_block_a);
             compaction.state = .compacting;
@@ -435,12 +475,9 @@ pub fn CompactionType(
             // a copy of the index block for the Level A table being compacted.
 
             const grid = compaction.context.grid;
-            for (Table.index_data_addresses_used(index_block)) |address| {
-                grid.release(address);
-            }
-            for (Table.index_filter_addresses_used(index_block)) |address| {
-                grid.release(address);
-            }
+            const index_schema = schema.TableIndex.from(index_block);
+            for (index_schema.data_addresses_used(index_block)) |address| grid.release(address);
+            for (index_schema.filter_addresses_used(index_block)) |address| grid.release(address);
             grid.release(Table.block_address(index_block));
         }
 

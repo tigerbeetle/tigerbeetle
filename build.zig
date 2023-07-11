@@ -2,13 +2,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
 const Mode = std.builtin.Mode;
-const file_or_directory_exists = @import("src/clients/shutil.zig").file_or_directory_exists;
 
 const config = @import("./src/config.zig");
-
-// We need to ensure we only add a clone dependency once.
-var git_clone_tracy = false;
-var git_clone_jui = false;
+const Shell = @import("./src/shell.zig");
 
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
@@ -16,18 +12,16 @@ pub fn build(b: *std.build.Builder) void {
 
     const options = b.addOptions();
 
-    // The "tigerbeetle version" command includes the build-time commit hash.
-   if (git_commit(b.allocator)) |commit| {
-        options.addOption(?[]const u8, "git_commit", commit[0..]);
-    } else {
-        options.addOption(?[]const u8, "git_commit", null);
-    }
+    var shell = Shell.create(b.allocator) catch unreachable;
+    defer shell.destroy();
 
+    // The "tigerbeetle version" command includes the build-time commit hash.
     options.addOption(
         ?[]const u8,
-        "git_tag",
-        if (git_tag(b.allocator)) |tag| tag.constSlice() else null,
+        "git_commit",
+        if (shell.git_commit()) |commit| @as([]const u8, &commit) else |_| null,
     );
+    options.addOption(?[]const u8, "git_tag", shell.git_tag() catch null);
 
     options.addOption(
         config.ConfigBase,
@@ -47,6 +41,11 @@ pub fn build(b: *std.build.Builder) void {
         "Which backend to use for tracing.",
     ) orelse .none;
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
+    const git_clone_tracy = GitCloneStep.add(b, .{
+        .repo = "https://github.com/wolfpld/tracy.git",
+        .tag = "v0.9.1", // unrelated to Zig 0.9.1
+        .path = "tools/tracy",
+    });
 
     const aof_record_enable = b.option(bool, "config-aof-record", "Enable AOF Recording.") orelse false;
     const aof_recovery_enable = b.option(bool, "config-aof-recovery", "Enable AOF Recovery mode.") orelse false;
@@ -74,7 +73,7 @@ pub fn build(b: *std.build.Builder) void {
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
     tigerbeetle.addOptions("vsr_options", options);
-    link_tracer_backend(tigerbeetle, tracer_backend, target);
+    link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target);
 
     {
         const run_cmd = tigerbeetle.run();
@@ -92,7 +91,7 @@ pub fn build(b: *std.build.Builder) void {
         );
         move_cmd.step.dependOn(&tigerbeetle.step);
 
-        var install_step = b.getInstallStep();
+        const install_step = b.getInstallStep();
         install_step.dependOn(&move_cmd.step);
     }
 
@@ -101,9 +100,8 @@ pub fn build(b: *std.build.Builder) void {
         benchmark.setTarget(target);
         benchmark.setBuildMode(mode);
         benchmark.addPackage(vsr_package);
-        benchmark.install();
         benchmark.addOptions("vsr_options", options);
-        link_tracer_backend(benchmark, tracer_backend, target);
+        link_tracer_backend(benchmark, git_clone_tracy, tracer_backend, target);
 
         const run_cmd = benchmark.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -116,9 +114,8 @@ pub fn build(b: *std.build.Builder) void {
         const aof = b.addExecutable("aof", "src/aof.zig");
         aof.setTarget(target);
         aof.setBuildMode(mode);
-        aof.install();
         aof.addOptions("vsr_options", options);
-        link_tracer_backend(aof, tracer_backend, target);
+        link_tracer_backend(aof, git_clone_tracy, tracer_backend, target);
 
         const run_cmd = aof.run();
         if (b.args) |args| run_cmd.addArgs(args);
@@ -132,9 +129,8 @@ pub fn build(b: *std.build.Builder) void {
     // The meta-target lint runs them all
     {
         // lint_zig_fmt
-        // TODO: Better way of running zig fmt?
-        const lint_zig_fmt = b.addSystemCommand(&.{ b.zig_exe, "fmt", "--check", "src/" });
-        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt on src/");
+        const lint_zig_fmt = b.addSystemCommand(&.{ b.zig_exe, "fmt", "--check", "." });
+        const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt");
         lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
 
         // lint_tigerstyle
@@ -153,9 +149,7 @@ pub fn build(b: *std.build.Builder) void {
         lint_tigerstyle_step.dependOn(&run_cmd.step);
 
         // lint_shellcheck
-        const lint_shellcheck = b.addSystemCommand(&.{ "sh", "-c", "command -v shellcheck >/dev/null" ++
-            " || (echo -e '\\033[0;31mPlease install shellcheck - https://www.shellcheck.net/\\033[0m' && exit 1)" ++
-            " && shellcheck $(find ./src ./scripts -type f -name '*.sh')" });
+        const lint_shellcheck = ShellcheckStep.add(b);
         const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
         lint_shellcheck_step.dependOn(&lint_shellcheck.step);
 
@@ -195,7 +189,7 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests.addOptions("vsr_options", options);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
         unit_tests.setFilter(test_filter);
-        link_tracer_backend(unit_tests, tracer_backend, target);
+        link_tracer_backend(unit_tests, git_clone_tracy, tracer_backend, target);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
@@ -230,7 +224,7 @@ pub fn build(b: *std.build.Builder) void {
         unit_tests_exe.addOptions("vsr_options", options);
         unit_tests_exe.step.dependOn(&tb_client_header_generate.step);
         unit_tests_exe.setFilter(test_filter);
-        link_tracer_backend(unit_tests_exe, tracer_backend, target);
+        link_tracer_backend(unit_tests_exe, git_clone_tracy, tracer_backend, target);
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests_exe.linkLibC();
@@ -251,6 +245,7 @@ pub fn build(b: *std.build.Builder) void {
             &.{ &install_step.step, &tb_client_header_generate.step },
             target,
             options,
+            git_clone_tracy,
             tracer_backend,
         );
         java_client(
@@ -259,6 +254,7 @@ pub fn build(b: *std.build.Builder) void {
             &.{&install_step.step},
             target,
             options,
+            git_clone_tracy,
             tracer_backend,
         );
         dotnet_client(
@@ -267,6 +263,7 @@ pub fn build(b: *std.build.Builder) void {
             &.{&install_step.step},
             target,
             options,
+            git_clone_tracy,
             tracer_backend,
         );
         node_client(
@@ -275,6 +272,7 @@ pub fn build(b: *std.build.Builder) void {
             &.{&install_step.step},
             target,
             options,
+            git_clone_tracy,
             tracer_backend,
         );
         c_client(
@@ -282,6 +280,7 @@ pub fn build(b: *std.build.Builder) void {
             mode,
             &.{ &install_step.step, &tb_client_header_generate.step },
             options,
+            git_clone_tracy,
             tracer_backend,
         );
         c_client_sample(
@@ -290,6 +289,7 @@ pub fn build(b: *std.build.Builder) void {
             target,
             &.{ &install_step.step, &tb_client_header_generate.step },
             options,
+            git_clone_tracy,
             tracer_backend,
         );
         run_with_tb(
@@ -313,6 +313,12 @@ pub fn build(b: *std.build.Builder) void {
     }
 
     {
+        const jni_tests_step = b.step("test:jni", "Run the JNI tests");
+        const jni_tests = JniTestStep.add(b, mode, target);
+        jni_tests_step.dependOn(&jni_tests.step);
+    }
+
+    {
         const simulator_options = b.addOptions();
 
         // When running without a SEED, default to release.
@@ -330,7 +336,8 @@ pub fn build(b: *std.build.Builder) void {
         );
 
         const SimulatorLog = enum { full, short };
-        const default_simulator_log = if (simulator_mode == .ReleaseSafe) SimulatorLog.short else .full;
+        const default_simulator_log =
+            if (simulator_mode == .ReleaseSafe) SimulatorLog.short else .full;
         simulator_options.addOption(
             SimulatorLog,
             "log",
@@ -348,13 +355,11 @@ pub fn build(b: *std.build.Builder) void {
         simulator.omit_frame_pointer = false;
         simulator.addOptions("vsr_options", options);
         simulator.addOptions("vsr_simulator_options", simulator_options);
-        link_tracer_backend(simulator, tracer_backend, target);
+        link_tracer_backend(simulator, git_clone_tracy, tracer_backend, target);
 
         const run_cmd = simulator.run();
 
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        }
+        if (b.args) |args| run_cmd.addArgs(args);
 
         const install_step = b.addInstallArtifact(simulator);
         const build_step = b.step("simulator", "Build the Simulator");
@@ -370,7 +375,7 @@ pub fn build(b: *std.build.Builder) void {
         // Ensure that we get stack traces even in release builds.
         vopr.omit_frame_pointer = false;
         vopr.addOptions("vsr_options", options);
-        link_tracer_backend(vopr, tracer_backend, target);
+        link_tracer_backend(vopr, git_clone_tracy, tracer_backend, target);
 
         const run_cmd = vopr.run();
 
@@ -443,7 +448,7 @@ pub fn build(b: *std.build.Builder) void {
         exe.setBuildMode(mode);
         exe.omit_frame_pointer = false;
         exe.addOptions("vsr_options", options);
-        link_tracer_backend(exe, tracer_backend, target);
+        link_tracer_backend(exe, git_clone_tracy, tracer_backend, target);
         const install_step = b.addInstallArtifact(exe);
         const build_step = b.step("build_" ++ fuzzer.name, fuzzer.description);
         build_step.dependOn(&install_step.step);
@@ -477,9 +482,12 @@ pub fn build(b: *std.build.Builder) void {
         exe.setBuildMode(.ReleaseSafe);
         exe.setMainPkgPath("src");
         exe.addOptions("vsr_options", options);
-        link_tracer_backend(exe, tracer_backend, target);
+        link_tracer_backend(exe, git_clone_tracy, tracer_backend, target);
 
-        const build_step = b.step("build_" ++ benchmark.name, "Build " ++ benchmark.description ++ " benchmark");
+        const build_step = b.step(
+            "build_" ++ benchmark.name,
+            "Build " ++ benchmark.description ++ " benchmark",
+        );
         build_step.dependOn(&exe.step);
 
         const run_cmd = exe.run();
@@ -488,43 +496,9 @@ pub fn build(b: *std.build.Builder) void {
     }
 }
 
-fn git_commit(allocator: std.mem.Allocator) ?[40]u8 {
-    const exec_result = std.ChildProcess.exec(.{
-        .allocator = allocator,
-        .argv = &.{ "git", "rev-parse", "--verify", "HEAD" },
-    }) catch return null;
-    defer allocator.free(exec_result.stdout);
-    defer allocator.free(exec_result.stderr);
-
-    // +1 for trailing newline.
-    if (exec_result.stdout.len != 40 + 1) return null;
-    if (exec_result.stderr.len != 0) return null;
-
-    var output: [40]u8 = undefined;
-    std.mem.copy(u8, &output, exec_result.stdout[0..40]);
-    return output;
-}
-
-fn git_tag(allocator: std.mem.Allocator) ?std.BoundedArray(u8, 100) {
-    const exec_result = std.ChildProcess.exec(.{
-        .allocator = allocator,
-        .argv = &.{ "git", "describe", "--tags" },
-    }) catch return null;
-    defer allocator.free(exec_result.stdout);
-    defer allocator.free(exec_result.stderr);
-
-    if (exec_result.stderr.len != 0) return null;
-
-    var tag = std.BoundedArray(u8, 100){ .buffer = undefined };
-    tag.appendSlice(exec_result.stdout) catch {
-        std.debug.print("`git describe --tags` output too long.\n", .{});
-        return null;
-    };
-    return tag;
-}
-
 fn link_tracer_backend(
     exe: *std.build.LibExeObjStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
     target: std.zig.CrossTarget,
 ) void {
@@ -558,13 +532,7 @@ fn link_tracer_backend(
                 exe.linkSystemLibrary("dbghelp");
                 exe.linkSystemLibrary("ws2_32");
             }
-
-            // We might need to clone Tracy, if it doesn't exist.
-            if (!file_or_directory_exists("tools/tracy") and !git_clone_tracy) {
-                const git_clone = exe.builder.addSystemCommand(&.{ "git", "clone", "-b", "v0.9.1", "https://github.com/wolfpld/tracy.git", "tools/tracy" });
-                exe.step.dependOn(&git_clone.step);
-                git_clone_tracy = true;
-            }
+            exe.step.dependOn(&git_clone_tracy.step);
         },
     }
 }
@@ -586,6 +554,7 @@ fn go_client(
     dependencies: []const *std.build.Step,
     target: CrossTarget,
     options: *std.build.OptionsStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("go_client", "Build Go client shared library");
@@ -617,8 +586,9 @@ fn go_client(
         // We don't need the linux-gnu builds.
         if (comptime !std.mem.endsWith(u8, platform[0], "linux-gnu")) {
             const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
+            var b_isolated = builder_with_isolated_cache(b, cross_target);
 
-            const lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+            const lib = b_isolated.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
             lib.setMainPkgPath("src");
             lib.setTarget(cross_target);
             lib.setBuildMode(mode);
@@ -629,7 +599,7 @@ fn go_client(
             lib.setOutputDir("src/clients/go/pkg/native/" ++ name);
 
             lib.addOptions("vsr_options", options);
-            link_tracer_backend(lib, tracer_backend, cross_target);
+            link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
             lib.step.dependOn(&install_header.step);
             lib.step.dependOn(&bindings_step.step);
@@ -644,6 +614,7 @@ fn java_client(
     dependencies: []const *std.build.Step,
     target: CrossTarget,
     options: *std.build.OptionsStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("java_client", "Build Java client shared library");
@@ -658,19 +629,12 @@ fn java_client(
     bindings.setMainPkgPath("src");
     const bindings_step = bindings.run();
 
-    // We might need to clone JUI, if it doesn't exist.
-    if (!file_or_directory_exists("src/clients/java/lib/jui") and !git_clone_jui) {
-        const git_clone = b.addSystemCommand(&.{ "git", "clone", "-b", "zig-0.9.1", "https://github.com/zig-java/jui.git", "src/clients/java/lib/jui" });
-        bindings_step.step.dependOn(&git_clone.step);
-        git_clone_jui = true;
-    }
-
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
-        const lib = b.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
+        const lib = b_isolated.addSharedLibrary("tb_jniclient", "src/clients/java/src/client.zig", .unversioned);
         lib.setMainPkgPath("src");
-        lib.addPackagePath("jui", "src/clients/java/lib/jui/src/jui.zig");
         lib.setOutputDir("src/clients/java/src/main/resources/lib/" ++ platform[0]);
         lib.setTarget(cross_target);
         lib.setBuildMode(mode);
@@ -682,7 +646,7 @@ fn java_client(
         }
 
         lib.addOptions("vsr_options", options);
-        link_tracer_backend(lib, tracer_backend, cross_target);
+        link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
         build_step.dependOn(&lib.step);
@@ -695,6 +659,7 @@ fn dotnet_client(
     dependencies: []const *std.build.Step,
     target: CrossTarget,
     options: *std.build.OptionsStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("dotnet_client", "Build dotnet client shared library");
@@ -711,8 +676,9 @@ fn dotnet_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
-        const lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        const lib = b_isolated.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
         lib.setMainPkgPath("src");
         lib.setOutputDir("src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native");
         lib.setTarget(cross_target);
@@ -725,7 +691,7 @@ fn dotnet_client(
         }
 
         lib.addOptions("vsr_options", options);
-        link_tracer_backend(lib, tracer_backend, cross_target);
+        link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
         build_step.dependOn(&lib.step);
@@ -738,6 +704,7 @@ fn node_client(
     dependencies: []const *std.build.Step,
     target: CrossTarget,
     options: *std.build.OptionsStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("node_client", "Build Node client shared library");
@@ -754,11 +721,12 @@ fn node_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
         if (cross_target.os_tag.? == .windows) {
             // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
         } else {
-            const lib = b.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
+            const lib = b_isolated.addSharedLibrary("tb_nodeclient", "src/clients/node/src/node.zig", .unversioned);
             lib.setMainPkgPath("src");
             lib.setOutputDir("src/clients/node/dist/bin/" ++ platform[0]);
 
@@ -776,7 +744,7 @@ fn node_client(
             }
 
             lib.addOptions("vsr_options", options);
-            link_tracer_backend(lib, tracer_backend, cross_target);
+            link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
             lib.step.dependOn(&bindings_step.step);
             build_step.dependOn(&lib.step);
@@ -789,6 +757,7 @@ fn c_client(
     mode: Mode,
     dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const build_step = b.step("c_client", "Build C client library");
@@ -807,9 +776,10 @@ fn c_client(
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
-        const shared_lib = b.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
-        const static_lib = b.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
+        const shared_lib = b_isolated.addSharedLibrary("tb_client", "src/clients/c/tb_client.zig", .unversioned);
+        const static_lib = b_isolated.addStaticLibrary("tb_client", "src/clients/c/tb_client.zig");
         static_lib.bundle_compiler_rt = true;
         static_lib.pie = true;
 
@@ -826,7 +796,7 @@ fn c_client(
             }
 
             lib.addOptions("vsr_options", options);
-            link_tracer_backend(lib, tracer_backend, cross_target);
+            link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
             build_step.dependOn(&lib.step);
         }
@@ -839,6 +809,7 @@ fn c_client_sample(
     target: CrossTarget,
     dependencies: []const *std.build.Step,
     options: *std.build.OptionsStep,
+    git_clone_tracy: *GitCloneStep,
     tracer_backend: config.TracerBackend,
 ) void {
     const c_sample_build = b.step("c_sample", "Build the C client sample");
@@ -855,7 +826,7 @@ fn c_client_sample(
     static_lib.pie = true;
     static_lib.bundle_compiler_rt = true;
     static_lib.addOptions("vsr_options", options);
-    link_tracer_backend(static_lib, tracer_backend, target);
+    link_tracer_backend(static_lib, git_clone_tracy, tracer_backend, target);
     c_sample_build.dependOn(&static_lib.step);
 
     const sample = b.addExecutable("c_sample", "src/clients/c/samples/main.c");
@@ -909,11 +880,12 @@ fn maybe_execute(
 
         if (std.mem.eql(u8, arg, "--")) {
             build_and_run = true;
+            continue;
         }
 
-        if (!build_and_run) continue;
-
-        to_run.append(arg) catch unreachable;
+        if (build_and_run) {
+            to_run.append(arg) catch unreachable;
+        }
     }
 
     if (build_and_run) {
@@ -977,4 +949,213 @@ fn client_docs(
     client_docs_build.dependOn(&install_step.step);
 
     maybe_execute(b, allocator, client_docs_build, "client_docs");
+}
+
+/// Detects the system's JVM.
+/// JNI tests requires the Java SDK installed and
+/// JAVA_HOME environment variable set.
+const JniTestStep = struct {
+    step: std.build.Step,
+    tests: *std.build.LibExeObjStep,
+
+    fn add(b: *std.build.Builder, mode: Mode, target: CrossTarget) *std.build.LibExeObjStep {
+        const tests = b.addTest("src/clients/java/src/jni_tests.zig");
+        tests.linkSystemLibrary("jvm");
+        tests.linkLibC();
+        tests.setTarget(target);
+        if (builtin.os.tag == .windows) {
+            // TODO(zig): The function `JNI_CreateJavaVM` tries to detect
+            // the stack size and causes a SEGV that is handled by Zig's panic handler.
+            // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
+            //
+            // The workaround is run the tests in "ReleaseFast" mode.
+            tests.setBuildMode(.ReleaseFast);
+        } else {
+            tests.setBuildMode(mode);
+        }
+
+        var jvm_check_step = b.allocator.create(JniTestStep) catch unreachable;
+        jvm_check_step.* = .{
+            .step = std.build.Step.init(.custom, "jni test", b.allocator, JniTestStep.make),
+            .tests = tests,
+        };
+
+        tests.step.dependOn(&jvm_check_step.step);
+        return tests;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(JniTestStep, "step", step);
+        const builder: *std.build.Builder = self.tests.builder;
+
+        const java_home = builder.env_map.get("JAVA_HOME") orelse {
+            std.log.err(
+                "JNI tests require the Java SDK installed and JAVA_HOME environment variable set.",
+                .{},
+            );
+            return error.JavaHomeNotSet;
+        };
+
+        const libjvm_path = builder.pathJoin(&.{
+            java_home,
+            if (builtin.os.tag == .windows) "/lib" else "/lib/server",
+        });
+        self.tests.addLibPath(libjvm_path);
+
+        switch (builtin.os.tag) {
+            .windows => set_windows_dll(builder.allocator, java_home),
+            .macos => try builder.env_map.put("DYLD_LIBRARY_PATH", libjvm_path),
+            .linux => {
+                // On Linux, detects the abi by calling `ldd` to check if
+                // the libjvm.so is linked against libc or musl.
+                // It's reasonable to assume that ldd will be present.
+                const ldd_result = try builder.exec(&.{
+                    "ldd",
+                    builder.pathJoin(&.{ libjvm_path, "libjvm.so" }),
+                });
+                self.tests.target.abi = if (std.mem.indexOf(u8, ldd_result, "musl") != null)
+                    .musl
+                else if (std.mem.indexOf(u8, ldd_result, "libc") != null)
+                    .gnu
+                else {
+                    std.log.err("{s}", .{ldd_result});
+                    return error.JavaAbiUnrecognized;
+                };
+            },
+            else => unreachable,
+        }
+    }
+
+    /// Set the JVM DLL directory on Windows.
+    fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
+        comptime std.debug.assert(builtin.os.tag == .windows);
+        const set_dll_directory = struct {
+            pub extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
+        }.SetDllDirectoryA;
+
+        var java_bin_path = std.fs.path.joinZ(
+            allocator,
+            &.{ java_home, "\\bin" },
+        ) catch unreachable;
+        _ = set_dll_directory(java_bin_path);
+
+        var java_bin_server_path = std.fs.path.joinZ(
+            allocator,
+            &.{ java_home, "\\bin\\server" },
+        ) catch unreachable;
+        _ = set_dll_directory(java_bin_server_path);
+    }
+};
+
+const ShellcheckStep = struct {
+    step: std.build.Step,
+    gpa: std.mem.Allocator,
+
+    fn add(b: *std.build.Builder) *ShellcheckStep {
+        var result = b.allocator.create(ShellcheckStep) catch unreachable;
+        result.* = .{
+            .step = std.build.Step.init(.custom, "run shellcheck", b.allocator, ShellcheckStep.make),
+            .gpa = b.allocator,
+        };
+        return result;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(ShellcheckStep, "step", step);
+
+        var shell = try Shell.create(self.gpa);
+        defer shell.destroy();
+
+        if (!try shell.exec_status_ok("shellcheck --version", .{})) {
+            shell.echo(
+                "{ansi-red}Please install shellcheck - https://www.shellcheck.net/{ansi-reset}",
+                .{},
+            );
+            return error.NoShellcheck;
+        }
+
+        const scripts = try shell.find(.{
+            .where = &.{ "src", "scripts", ".github" },
+            .ends_with = ".sh",
+        });
+
+        try shell.exec("shellcheck {scripts}", .{
+            .scripts = scripts,
+        });
+    }
+};
+
+/// Every large project contains its own bespoke implementation of `git submodule`, this is ours.
+/// We use `GitCloneStep` to lazily download build-time dependencies when we need them.
+const GitCloneStep = struct {
+    step: std.build.Step,
+    gpa: std.mem.Allocator,
+    options: Options,
+
+    const Options = struct {
+        repo: []const u8,
+        tag: []const u8,
+        path: []const u8,
+    };
+
+    fn add(b: *std.build.Builder, options: Options) *GitCloneStep {
+        var result = b.allocator.create(GitCloneStep) catch unreachable;
+        result.* = .{
+            .step = std.build.Step.init(.custom, "run git clone", b.allocator, GitCloneStep.make),
+            .gpa = b.allocator,
+            .options = options,
+        };
+        return result;
+    }
+
+    fn make(step: *std.build.Step) anyerror!void {
+        const self = @fieldParentPtr(GitCloneStep, "step", step);
+
+        var shell = try Shell.create(self.gpa);
+        defer shell.destroy();
+
+        if (try shell.dir_exists(self.options.path)) return;
+        try shell.exec("git clone --branch {tag} {repo} {path}", self.options);
+    }
+};
+
+/// Creates a new Builder, with isolated cache for each platform.
+/// Hit some issues with the build cache between cross compilations:
+/// - From Linux, it runs fine.
+/// - From Windows it fails on libc "invalid object".
+/// - From MacOS, similar to https://github.com/ziglang/zig/issues/9711#issuecomment-1090071087.
+/// Workaround: Just setting different cache folders for each platform.
+fn builder_with_isolated_cache(
+    b: *std.build.Builder,
+    target: CrossTarget,
+) *std.build.Builder {
+    // This workaround isn't necessary when cross-compiling from Linux.
+    if (builtin.os.tag == .linux) return b;
+
+    // If not cross-compiling, we can return the current *Builder in order
+    // to reuse the same cache from other artifacts.
+    if (target.cpu_arch.? == builtin.cpu.arch and
+        target.os_tag.? == builtin.os.tag)
+        return b;
+
+    // Generating isolated cache and global_cache dirs for each cpu/os:
+    const cache_root = b.pathJoin(&.{
+        b.cache_root,
+        @tagName(target.cpu_arch.?),
+        @tagName(target.os_tag.?),
+    });
+    const global_cache_root = b.pathJoin(&.{
+        b.global_cache_root,
+        @tagName(target.cpu_arch.?),
+        @tagName(target.os_tag.?),
+    });
+
+    // Note, this builder leaks memory, since there is no way to deinit it.
+    return std.build.Builder.create(
+        b.allocator,
+        b.zig_exe,
+        b.build_root,
+        cache_root,
+        global_cache_root,
+    ) catch unreachable;
 }

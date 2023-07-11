@@ -82,6 +82,7 @@ pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8
         tb_binary,
         "start",
         try std.fmt.allocPrint(arena.allocator(), "--addresses={}", .{port}),
+        "--cache-grid=128MB",
         data_file,
     };
     std.debug.print("Starting TigerBeetle server: {s}\n", .{start_args});

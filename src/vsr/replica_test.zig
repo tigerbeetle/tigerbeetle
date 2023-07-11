@@ -15,10 +15,12 @@ const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 
 const slot_count = constants.journal_slot_count;
-const checkpoint_1 = checkpoint_trigger_1 - constants.lsm_batch_multiple;
-const checkpoint_2 = checkpoint_trigger_2 - constants.lsm_batch_multiple;
-const checkpoint_trigger_1 = slot_count - 1;
-const checkpoint_trigger_2 = slot_count + checkpoint_trigger_1 - constants.lsm_batch_multiple;
+const checkpoint_1 = checkpoint_1_trigger - constants.lsm_batch_multiple;
+const checkpoint_2 = checkpoint_2_trigger - constants.lsm_batch_multiple;
+const checkpoint_3 = checkpoint_3_trigger - constants.lsm_batch_multiple;
+const checkpoint_1_trigger = slot_count - 1;
+const checkpoint_2_trigger = slot_count + checkpoint_1_trigger - constants.lsm_batch_multiple;
+const checkpoint_3_trigger = slot_count + checkpoint_2_trigger - constants.lsm_batch_multiple;
 const log_level = std.log.Level.err;
 
 // TODO Test client eviction once it no longer triggers a client panic.
@@ -96,7 +98,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
 
     var c = t.clients(0, t.cluster.clients.len);
     // Trigger the first checkpoint.
-    try c.request(checkpoint_trigger_1, checkpoint_trigger_1);
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
     t.replica(.R0).stop();
 
     // Corrupt op_checkpoint (59) and all ops that follow.
@@ -174,9 +176,9 @@ test "Cluster: recovery: grid corruption (disjoint)" {
     // Checkpoint to ensure that the replicas will actually use the grid to recover.
     // All replicas must be at the same commit to ensure grid repair won't fail and
     // fall back to state sync.
-    try c.request(checkpoint_trigger_1, checkpoint_trigger_1);
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
 
     t.replica(.R_).stop();
 
@@ -188,7 +190,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         t.replica(.R1),
         t.replica(.R2),
     }) |replica, i| {
-        var address = 1 + i; // Addresses start at 1.
+        var address: u64 = 1 + i; // Addresses start at 1.
         while (address <= vsr.superblock.grid_blocks_max) : (address += 3) {
             // Leave every third address un-corrupt.
             // Each block exists intact on exactly one replica.
@@ -201,12 +203,12 @@ test "Cluster: recovery: grid corruption (disjoint)" {
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
 
-    try c.request(checkpoint_trigger_2, checkpoint_trigger_2);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_trigger_2);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 }
 
 test "Cluster: recovery: recovering_head, outdated start view" {
@@ -418,7 +420,6 @@ test "Cluster: network: partititon client-primary (asymmetric, drop replies)" {
 
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     // A backup that has fallen behind by two checkpoints can catch up, without using state sync.
-    // TODO(State Sync): How to assert that state sync is not used?
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -439,7 +440,9 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
+    // Allow repair, but ensure that state sync doesn't run.
     r_lag.pass_all(.__, .bidirectional);
+    r_lag.drop(.__, .bidirectional, .sync_manifest);
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -461,13 +464,13 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
 
     b1.drop_all(.__, .bidirectional);
 
-    try c.request(checkpoint_trigger_1 - 1, checkpoint_trigger_1 - 1);
-    try expectEqual(a0.commit(), checkpoint_trigger_1 - 1);
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+    try expectEqual(a0.commit(), checkpoint_1_trigger - 1);
     try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), checkpoint_trigger_1 - 1);
+    try expectEqual(b2.commit(), checkpoint_1_trigger - 1);
 
     b2.drop(.__, .incoming, .commit);
-    try c.request(checkpoint_trigger_1 + 1, checkpoint_trigger_1 + 1);
+    try c.request(checkpoint_1_trigger + 1, checkpoint_1_trigger + 1);
     try expectEqual(a0.op_checkpoint(), checkpoint_1);
     try expectEqual(b1.op_checkpoint(), 0);
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
@@ -489,92 +492,95 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     // Thanks to the new primary, the lagging backup is able to catch up to the latest
     // checkpoint/commit.
     try expectEqual(b1.role(), .backup);
-    try expectEqual(b1.commit(), checkpoint_trigger_1);
+    try expectEqual(b1.commit(), checkpoint_1_trigger);
     try expectEqual(b1.op_checkpoint(), checkpoint_1);
 }
 
-test "Cluster: repair: view-change, new-primary lagging behind checkpoint, truncate all post-checkpoint ops" {
-    const t = try TestContext.init(.{
-        .replica_count = 3,
-        .client_count = constants.pipeline_prepare_queue_max,
-    });
-    defer t.deinit();
-
-    var c = t.clients(0, t.cluster.clients.len);
-    try c.request(checkpoint_trigger_1 - 1, checkpoint_trigger_1 - 1);
-
-    var a0 = t.replica(.A0);
-    var b1 = t.replica(.B1);
-    var b2 = t.replica(.B2);
-
-    // Drop SVCs to ensure A0 cannot abdicate (yet).
-    t.replica(.R_).drop(.__, .bidirectional, .start_view_change);
-    // B1 can see and ack the checkpoint-trigger prepare, but not its commit, so it cannot checkpoint.
-    b1.drop(.__, .incoming, .commit);
-    // B2 can see that the checkpoint-trigger prepare commits, but cannot receive the message itself.
-    // It will try RSV to advances its head, but don't let it just yet.
-    b2.drop(.__, .incoming, .prepare);
-    b2.drop(.__, .incoming, .start_view);
-
-    try c.request(checkpoint_trigger_1, checkpoint_trigger_1);
-    try expectEqual(a0.op_checkpoint(), checkpoint_1);
-    try expectEqual(b1.op_checkpoint(), 0);
-    try expectEqual(b2.op_checkpoint(), 0);
-
-    // B1 wouldn't prepare these anyway, but we prevent it from learning that the checkpoint
-    // trigger is committed.
-    b1.drop(.__, .incoming, .prepare);
-
-    try c.request(checkpoint_trigger_1 + constants.pipeline_prepare_queue_max, checkpoint_trigger_1);
-    try expectEqual(a0.op_head(), checkpoint_trigger_1 + constants.pipeline_prepare_queue_max);
-    try expectEqual(b1.op_head(), checkpoint_trigger_1);
-    try expectEqual(b2.op_head(), checkpoint_trigger_1 - 1);
-
-    {
-        // Now that A0 has a full pipeline past the checkpoint, allow B2 to advance its head via the
-        // hook. But first kick it into recovering_head to force it to load the SV's headers into
-        // its view_headers. Those SV headers have an op-max past the next checkpoint, so our
-        // op_head does not increase beyond the checkpoint trigger.
-        b2.pass(.__, .incoming, .start_view);
-        b2.corrupt(.{ .wal_prepare = checkpoint_trigger_1 - 1 });
-
-        // We must receive a prepare to trigger a view_jump, which is what will trigger the RSV.
-        // But don't send an ack, since that would allow A0 to send us the next prepare,
-        // which would cause us to learn that the trigger is committed,
-        // which would cause us to checkpoint.
-        b2.pass(.__, .incoming, .prepare);
-        b2.drop(.__, .outgoing, .prepare_ok);
-
-        // Corrupt headers & prevent header repair so that we can't commit.
-        b2.corrupt(.{ .wal_header = 5 });
-        b2.drop(.__, .incoming, .headers);
-
-        b2.stop();
-        try b2.open();
-        try expectEqual(b2.status(), .recovering_head);
-        t.run();
-
-        try expectEqual(b2.status(), .normal);
-        try expectEqual(b2.op_checkpoint(), 0);
-        try expectEqual(b2.op_head(), checkpoint_trigger_1);
-        try expectEqual(b2.view_headers()[0].op, checkpoint_trigger_1 + constants.pipeline_prepare_queue_max);
-    }
-
-    // Take down A0 and allow a view-change.
-    // B2 has not repaired yet, so it reuses the view_headers that it got from the SV (with headers
-    // from the next wrap).
-    // TODO Explicit code coverage marks: This hits the "discarded uncommitted ops after trigger"
-    // log line in on_do_view_change().
-    a0.stop();
-    b1.pass_all(.__, .incoming);
-    b2.pass_all(.__, .incoming);
-    t.run();
-
-    try expectEqual(b1.status(), .normal);
-    try expectEqual(b2.status(), .normal);
-    try expectEqual(b1.op_checkpoint(), checkpoint_1);
-    try expectEqual(b2.op_checkpoint(), checkpoint_1);
-}
+// TODO: Re-enable when the op_checkpoint hack is removed from ignore_request_message().
+// (This test relies on preparing on the primary before the backups commit, which is presently
+// impossible.)
+// test "Cluster: repair: view-change, new-primary lagging behind checkpoint, truncate all post-checkpoint ops" {
+//     const t = try TestContext.init(.{
+//         .replica_count = 3,
+//         .client_count = constants.pipeline_prepare_queue_max,
+//     });
+//     defer t.deinit();
+//
+//     var c = t.clients(0, t.cluster.clients.len);
+//     try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+//
+//     var a0 = t.replica(.A0);
+//     var b1 = t.replica(.B1);
+//     var b2 = t.replica(.B2);
+//
+//     // Drop SVCs to ensure A0 cannot abdicate (yet).
+//     t.replica(.R_).drop(.__, .bidirectional, .start_view_change);
+//     // B1 can see and ack the checkpoint-trigger prepare, but not its commit, so it cannot checkpoint.
+//     b1.drop(.__, .incoming, .commit);
+//     // B2 can see that the checkpoint-trigger prepare commits, but cannot receive the message itself.
+//     // It will try RSV to advances its head, but don't let it just yet.
+//     b2.drop(.__, .incoming, .prepare);
+//     b2.drop(.__, .incoming, .start_view);
+//
+//     try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+//     try expectEqual(a0.op_checkpoint(), checkpoint_1);
+//     try expectEqual(b1.op_checkpoint(), 0);
+//     try expectEqual(b2.op_checkpoint(), 0);
+//
+//     // B1 wouldn't prepare these anyway, but we prevent it from learning that the checkpoint
+//     // trigger is committed.
+//     b1.drop(.__, .incoming, .prepare);
+//
+//     try c.request(checkpoint_1_trigger + constants.pipeline_prepare_queue_max, checkpoint_1_trigger);
+//     try expectEqual(a0.op_head(), checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
+//     try expectEqual(b1.op_head(), checkpoint_1_trigger);
+//     try expectEqual(b2.op_head(), checkpoint_1_trigger - 1);
+//
+//     {
+//         // Now that A0 has a full pipeline past the checkpoint, allow B2 to advance its head via the
+//         // hook. But first kick it into recovering_head to force it to load the SV's headers into
+//         // its view_headers. Those SV headers have an op-max past the next checkpoint, so our
+//         // op_head does not increase beyond the checkpoint trigger.
+//         b2.pass(.__, .incoming, .start_view);
+//         b2.corrupt(.{ .wal_prepare = checkpoint_1_trigger - 1 });
+//
+//         // We must receive a prepare to trigger a view_jump, which is what will trigger the RSV.
+//         // But don't send an ack, since that would allow A0 to send us the next prepare,
+//         // which would cause us to learn that the trigger is committed,
+//         // which would cause us to checkpoint.
+//         b2.pass(.__, .incoming, .prepare);
+//         b2.drop(.__, .outgoing, .prepare_ok);
+//
+//         // Corrupt headers & prevent header repair so that we can't commit.
+//         b2.corrupt(.{ .wal_header = 5 });
+//         b2.drop(.__, .incoming, .headers);
+//
+//         b2.stop();
+//         try b2.open();
+//         try expectEqual(b2.status(), .recovering_head);
+//         t.run();
+//
+//         try expectEqual(b2.status(), .normal);
+//         try expectEqual(b2.op_checkpoint(), 0);
+//         try expectEqual(b2.op_head(), checkpoint_1_trigger);
+//         try expectEqual(b2.view_headers()[0].op, checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
+//     }
+//
+//     // Take down A0 and allow a view-change.
+//     // B2 has not repaired yet, so it reuses the view_headers that it got from the SV (with headers
+//     // from the next wrap).
+//     // TODO Explicit code coverage marks: This hits the "discarded uncommitted ops after trigger"
+//     // log line in on_do_view_change().
+//     a0.stop();
+//     b1.pass_all(.__, .incoming);
+//     b2.pass_all(.__, .incoming);
+//     t.run();
+//
+//     try expectEqual(b1.status(), .normal);
+//     try expectEqual(b2.status(), .normal);
+//     try expectEqual(b1.op_checkpoint(), checkpoint_1);
+//     try expectEqual(b2.op_checkpoint(), checkpoint_1);
+// }
 
 test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-change; dont nack" {
     // This scenario is also applicable when any op within the pipeline suffix is corrupted.
@@ -710,6 +716,49 @@ test "Cluster: repair: ack committed prepare" {
     try expectEqual(b1.commit(), 21);
 }
 
+test "Cluster: repair: primary checkpoint, backup crash before checkpoint, primary prepare" {
+    // 1. Given 3 replica: A0, B1, B2.
+    // 2. B2 is partitioned (for the entire scenario).
+    // 3. A0 and B1 prepare and commit many messages...
+    // 4. A0 commits a checkpoint trigger and checkpoints.
+    // 5. B1 crashes before it can commit the trigger or checkpoint.
+    // 6. A0 prepares a message.
+    // 7. B1 restarts. The very first entry in its WAL is corrupt, but A0 has already overwritten the corresponding entry in its own WAL.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    var p = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    // B2 does not participate in this scenario.
+    b2.stop();
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+
+    b1.drop(.R_, .incoming, .commit);
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(p.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.op_checkpoint(), 0);
+    try expectEqual(p.commit(), checkpoint_1_trigger);
+    try expectEqual(b1.commit(), checkpoint_1_trigger - 1);
+
+    b1.pass(.R_, .incoming, .commit);
+    b1.stop();
+    b1.corrupt(.{ .wal_prepare = 1 });
+    try c.request(checkpoint_1_trigger + constants.pipeline_prepare_queue_max, checkpoint_1_trigger);
+    try b1.open();
+    t.run();
+
+    try expectEqual(p.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_1);
+    try expectEqual(p.commit(), checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
+    try expectEqual(b1.commit(), checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
+}
+
 test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header succeed" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -766,6 +815,199 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     // log line in on_do_view_change().
     t.run();
     try expectEqual(t.replica(.R_).status(), .view_change);
+}
+
+test "Cluster: sync: partition, lag, sync (transition from idle)" {
+    for ([_]u64{
+        // Normal case: the cluster has committed atop the checkpoint trigger.
+        // The lagging replica can learn the canonical checkpoint from a commit message.
+        checkpoint_2_trigger + 1,
+        // Idle case: the idle cluster has not committed atop the checkpoint trigger.
+        // The lagging replica uses the sync target candidate quorum (populated by ping messages)
+        // to identify the canonical checkpoint.
+        // TODO Explicit code coverage: "candidate checkpoint is canonical (quorum)"
+        checkpoint_2_trigger,
+    }) |cluster_commit_max| {
+        log.info("test cluster_commit_max={}", .{cluster_commit_max});
+
+        const t = try TestContext.init(.{ .replica_count = 3 });
+        defer t.deinit();
+
+        var c = t.clients(0, t.cluster.clients.len);
+        try c.request(20, 20);
+        try expectEqual(t.replica(.R_).commit(), 20);
+
+        t.replica(.R2).drop_all(.R_, .bidirectional);
+        try c.request(cluster_commit_max, cluster_commit_max);
+
+        t.replica(.R2).pass_all(.R_, .bidirectional);
+        t.run();
+
+        // R2 catches up via state sync.
+        try expectEqual(t.replica(.R_).status(), .normal);
+        try expectEqual(t.replica(.R_).commit(), cluster_commit_max);
+        try expectEqual(t.replica(.R_).sync_status(), .idle);
+
+        // The entire cluster is healthy and able to commit more.
+        try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
+        try expectEqual(t.replica(.R_).status(), .normal);
+        try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
+    }
+}
+
+test "Cluster: sync: sync, bump target, sync" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    t.replica(.R2).drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    // Allow R2 to complete SyncStage.requesting_trailers, but get stuck
+    // during SyncStage.requesting_trailers.
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R2).drop(.R_, .outgoing, .request_sync_manifest);
+    t.run();
+    try expectEqual(t.replica(.R2).sync_status(), .requesting_trailers);
+    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
+
+    // R2 discovers the newer sync target and restarts sync.
+    try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
+    try expectEqual(t.replica(.R2).sync_status(), .requesting_trailers);
+    try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_3);
+
+    t.replica(.R2).pass(.R_, .bidirectional, .request_sync_manifest);
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
+}
+
+test "Cluster: sync: R=2" {
+    // TODO explicit code coverage marks: "candidate is canonical (R=2)"
+    const t = try TestContext.init(.{ .replica_count = 2 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+
+    // A0 prepares the trigger op, commits it, and checkpoints.
+    // B1 prepares the trigger op, but does not commit/checkpoint.
+    b1.drop(.R_, .incoming, .commit); // Prevent last commit.
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(a0.commit(), checkpoint_1_trigger);
+    try expectEqual(b1.commit(), checkpoint_1_trigger - 1);
+    try expectEqual(a0.op_head(), checkpoint_1_trigger);
+    try expectEqual(b1.op_head(), checkpoint_1_trigger);
+    try expectEqual(a0.op_checkpoint(), checkpoint_1);
+    try expectEqual(b1.op_checkpoint(), 0);
+
+    // On B1, corrupt the same slot that A0 is about to overwrite with a new prepare.
+    b1.stop();
+    b1.pass(.R_, .incoming, .commit);
+    b1.corrupt(.{ .wal_prepare = (checkpoint_1_trigger + 2) % slot_count });
+
+    // Prepare 2 more ops, to overwrite A0's slots 0,1 in the WAL.
+    try c.request(checkpoint_1_trigger + 2, checkpoint_1_trigger);
+
+    try b1.open();
+    t.run();
+
+    // B1 needs a prepare that no longer exists anywhere in the cluster.
+    // So it state syncs. This is a special case, since normally A0's latest checkpoint
+    // would not be recognized as canonical until it was committed.
+
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 2);
+    try expectEqual(c.replies(), checkpoint_1_trigger + 2);
+}
+
+test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
+    // Buggify a divergent replica (i.e. a storage determinism bug).
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    // Pass the first checkpoint to ensure that manifest blocks are required.
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Block sync for now.)
+    a0.diverge();
+
+    // Prior to the checkpoint, the cluster has not realized that A0 diverged.
+    try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger - 1);
+    try expectEqual(a0.role(), .primary);
+
+    // After the checkpoint, A0 must discard all acks from B1/B2, since they are from
+    // a different (i.e. correct) checkpoint.
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+    // A0 was forced to ignore B1/B2's acks since the checkpoint id didn't match its own.
+    // Unable to commit, it stepped down as primary.
+    try expectEqual(a0.role(), .backup);
+    try expectEqual(b1.commit(), checkpoint_2_trigger);
+    try expectEqual(b2.commit(), checkpoint_2_trigger);
+    // A0 may have committed trigger+1, but its commit_min will backtrack due to sync.
+
+    // A0 has learned about B1/B2's canonical checkpoint — a checkpoint with the same op,
+    // but a different identifier.
+    try expectEqual(a0.sync_status(), .requesting_trailers);
+    try expectEqual(a0.sync_target_checkpoint_op(), checkpoint_2);
+    try expectEqual(a0.sync_target_checkpoint_op(), t.replica(.R_).op_checkpoint());
+    try expectEqual(a0.sync_target_checkpoint_id(), b1.op_checkpoint_id());
+    try expectEqual(a0.sync_target_checkpoint_id(), b2.op_checkpoint_id());
+
+    a0.pass(.R_, .bidirectional, .request_sync_manifest); // Allow sync again.
+    t.run();
+
+    // After syncing, A0 is back to the correct checkpoint.
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+    try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
+}
+
+test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
+    const t = try TestContext.init(.{ .replica_count = 4 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+    var b3 = t.replica(.B3);
+
+    b2.stop();
+    b3.stop();
+
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(a0.status(), .normal);
+    try expectEqual(b1.status(), .normal);
+
+    try b2.open();
+    try b3.open();
+    t.run();
+    t.run();
+
+    try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 }
 
 const ProcessSelector = enum {
@@ -1005,7 +1247,16 @@ const TestReplicas = struct {
             const replica = &t.cluster.replicas[r];
             const value = @field(replica, @tagName(field));
             if (value_all) |all| {
-                assert(all == value);
+                if (all != value) {
+                    for (t.replicas.constSlice()) |replica_index| {
+                        log.err("replica={} field={s} value={}", .{
+                            replica_index,
+                            @tagName(field),
+                            @field(&t.cluster.replicas[replica_index], @tagName(field)),
+                        });
+                    }
+                    @panic("test failed: value mismatch");
+                }
             } else {
                 value_all = value;
             }
@@ -1033,6 +1284,49 @@ const TestReplicas = struct {
         return t.get(.commit_min);
     }
 
+    pub fn state_machine_opened(t: *const TestReplicas) bool {
+        return t.get(.state_machine_opened);
+    }
+
+    fn sync_stage(t: *const TestReplicas) vsr.SyncStage {
+        assert(t.replicas.len > 0);
+
+        var sync_stage_all: ?vsr.SyncStage = null;
+        for (t.replicas.constSlice()) |r| {
+            const replica = &t.cluster.replicas[r];
+            if (sync_stage_all) |all| {
+                assert(std.meta.eql(all, replica.syncing));
+            } else {
+                sync_stage_all = replica.syncing;
+            }
+        }
+        return sync_stage_all.?;
+    }
+
+    pub fn sync_status(t: *const TestReplicas) std.meta.Tag(vsr.SyncStage) {
+        return @as(std.meta.Tag(vsr.SyncStage), t.sync_stage());
+    }
+
+    fn sync_target(t: *const TestReplicas) ?vsr.SyncTarget {
+        return t.sync_stage().target();
+    }
+
+    pub fn sync_target_checkpoint_op(t: *const TestReplicas) ?u64 {
+        if (t.sync_target()) |target| {
+            return target.checkpoint_op;
+        } else {
+            return null;
+        }
+    }
+
+    pub fn sync_target_checkpoint_id(t: *const TestReplicas) ?u128 {
+        if (t.sync_target()) |target| {
+            return target.checkpoint_id;
+        } else {
+            return null;
+        }
+    }
+
     const Role = enum { primary, backup, standby };
 
     pub fn role(t: *const TestReplicas) Role {
@@ -1054,6 +1348,17 @@ const TestReplicas = struct {
         return role_all.?;
     }
 
+    pub fn op_checkpoint_id(t: *const TestReplicas) u128 {
+        var checkpoint_id_all: ?u128 = null;
+        for (t.replicas.constSlice()) |r| {
+            const replica = &t.cluster.replicas[r];
+            const replica_checkpoint_id = replica.superblock.working.checkpoint_id();
+            assert(checkpoint_id_all == null or checkpoint_id_all.? == replica_checkpoint_id);
+            checkpoint_id_all = replica_checkpoint_id;
+        }
+        return checkpoint_id_all.?;
+    }
+
     pub fn op_checkpoint(t: *const TestReplicas) u64 {
         var checkpoint_all: ?u64 = null;
         for (t.replicas.constSlice()) |r| {
@@ -1067,6 +1372,14 @@ const TestReplicas = struct {
     pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
         assert(t.replicas.len == 1);
         return t.cluster.replicas[t.replicas.get(0)].view_headers.array.constSlice();
+    }
+
+    /// Simulate a storage determinism bug.
+    /// (Replicas must be running and between compaction beats for this to run.)
+    pub fn diverge(t: *TestReplicas) void {
+        for (t.replicas.slice()) |r| {
+            t.cluster.diverge(r);
+        }
     }
 
     pub fn corrupt(

@@ -19,6 +19,8 @@ on:
         required: true
       TIGERBEETLE_GO_DEPLOY_KEY:
         required: true
+      SLACK_TOKEN:
+        required: true
     inputs:
       version:
         required: false
@@ -33,7 +35,7 @@ jobs:
     - uses: actions/checkout@v3
     - id: calculate_version
       run: |
-        echo "version=$(./scripts/next_version.sh)" >> "$GITHUB_OUTPUT"
+        echo "version=$(./.github/ci/next_version.sh)" >> "$GITHUB_OUTPUT"
   
   scheduled_release:
     runs-on: ubuntu-latest
@@ -45,7 +47,7 @@ jobs:
       - run: |
           hub release create \
             --prerelease \
-            --message "$(./scripts/generate_release_message.sh ${{ needs.version.outputs.version }})" \
+            --message "$(./.github/ci/generate_release_message.sh ${{ needs.version.outputs.version }})" \
             -t ${{ github.sha }} \
             "${{ needs.version.outputs.version }}"
 
@@ -69,3 +71,4 @@ jobs:
       MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
       MAVEN_GPG_SECRET_KEY_PASSWORD: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
       TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
+      SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}

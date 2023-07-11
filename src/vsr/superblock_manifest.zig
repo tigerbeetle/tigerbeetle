@@ -96,6 +96,18 @@ pub const Manifest = struct {
         allocator.free(manifest.addresses);
         manifest.tables.deinit(allocator);
         manifest.compaction_set.deinit(allocator);
+
+        manifest.* = undefined;
+    }
+
+    pub fn reset(manifest: *Manifest) void {
+        mem.set(u128, manifest.trees, 0);
+        mem.set(u128, manifest.checksums, 0);
+        mem.set(u64, manifest.addresses, 0);
+
+        manifest.count = 0;
+        manifest.tables.clearRetainingCapacity();
+        manifest.compaction_set.clearRetainingCapacity();
     }
 
     pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {

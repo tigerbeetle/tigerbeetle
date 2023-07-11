@@ -297,11 +297,11 @@ const Environment = struct {
         var manifest_log_model = try ManifestLogModel.init(allocator);
         errdefer manifest_log_model.deinit();
 
-        const tree_hash = std.math.maxInt(u128);
-        var manifest_log = try ManifestLog.init(allocator, options.grid, tree_hash);
+        const tree_id = std.math.maxInt(u128);
+        var manifest_log = try ManifestLog.init(allocator, options.grid, tree_id);
         errdefer manifest_log.deinit(allocator);
 
-        var manifest_log_verify = try ManifestLog.init(allocator, options.grid_verify, tree_hash);
+        var manifest_log_verify = try ManifestLog.init(allocator, options.grid_verify, tree_id);
         errdefer manifest_log_verify.deinit(allocator);
 
         return Environment{
@@ -478,7 +478,7 @@ const Environment = struct {
             test_manifest_log.* = try ManifestLog.init(
                 env.allocator,
                 test_grid,
-                env.manifest_log.tree_hash,
+                env.manifest_log.tree_id,
             );
         }
 

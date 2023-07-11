@@ -25,21 +25,27 @@ pub const lsm = .{
     .grid = @import("lsm/grid.zig"),
     .groove = @import("lsm/groove.zig"),
     .forest = @import("lsm/forest.zig"),
-    .posted_groove = @import("lsm/posted_groove.zig"),
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
 };
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
+pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
+pub const SyncStage = @import("vsr/sync.zig").Stage;
+pub const SyncTarget = @import("vsr/sync.zig").Target;
+pub const SyncTargetCandidate = @import("vsr/sync.zig").TargetCandidate;
+pub const SyncTargetQuorum = @import("vsr/sync.zig").TargetQuorum;
+pub const SyncTrailer = @import("vsr/sync.zig").Trailer;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
+pub const SuperBlockTrailer = superblock.Trailer;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 
@@ -102,34 +108,48 @@ pub const Zone = enum {
 
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
-    reserved,
+    reserved = 0,
 
-    ping,
-    pong,
+    ping = 1,
+    pong = 2,
 
-    ping_client,
-    pong_client,
+    ping_client = 3,
+    pong_client = 4,
 
-    request,
-    prepare,
-    prepare_ok,
-    reply,
-    commit,
+    request = 5,
+    prepare = 6,
+    prepare_ok = 7,
+    reply = 8,
+    commit = 9,
 
-    start_view_change,
-    do_view_change,
-    start_view,
+    start_view_change = 10,
+    do_view_change = 11,
+    start_view = 12,
 
-    request_start_view,
-    request_headers,
-    request_prepare,
-    request_reply,
-    headers,
+    request_start_view = 13,
+    request_headers = 14,
+    request_prepare = 15,
+    request_reply = 16,
+    headers = 17,
 
-    eviction,
+    eviction = 18,
 
-    request_blocks,
-    block,
+    request_blocks = 19,
+    block = 20,
+
+    request_sync_manifest = 21,
+    request_sync_free_set = 22,
+    request_sync_client_sessions = 23,
+
+    sync_manifest = 24,
+    sync_free_set = 25,
+    sync_client_sessions = 26,
+
+    comptime {
+        for (std.enums.values(Command)) |result, index| {
+            assert(@enumToInt(result) == index);
+        }
+    }
 };
 
 /// This type exists to avoid making the Header type dependant on the state
@@ -235,6 +255,16 @@ pub const Header = extern struct {
     /// This may also be used as the initialization vector for AEAD encryption at rest, provided
     /// that the primary ratchets the encryption key every view change to ensure that prepares
     /// reordered through a view change never repeat the same IV for the same encryption key.
+    ///
+    /// * A `prepare_ok` sets this to the checkpoint id. (TODO(Big headers): Use a separate field.)
+    /// * A `commit` sets this to the checkpoint id. (Possibly uncanonical.)
+    /// * A `ping` sets this to the checkpoint id. (Possibly uncanonical.)
+    /// * A `request_sync_manifest` sets this to the requested checkpoint id.
+    /// * A `request_sync_free_set` sets this to the requested checkpoint id.
+    /// * A `request_sync_client_sessions` sets this to the requested checkpoint id.
+    /// * A `sync_manifest` sets this to the checkpoint id.
+    /// * A `sync_free_set` sets this to the checkpoint id.
+    /// * A `sync_client_sessions` sets this to the checkpoint id.
     parent: u128 = 0,
 
     /// Each client process generates a unique, random and ephemeral client ID at initialization.
@@ -254,6 +284,8 @@ pub const Header = extern struct {
     /// * A `do_view_change` sets this to a bitset of "present" prepares. If a bit is set, then
     ///   the corresponding header is not "blank", the replica has the prepare, and the prepare
     ///   is not known to be faulty.
+    /// * A `sync_free_set` sets this to the vsr_state.previous_checkpoint_id.
+    /// * A `sync_client_sessions` sets this to the vsr_state.commit_min_checksum.
     client: u128 = 0,
 
     /// The checksum of the message to which this message refers.
@@ -275,6 +307,9 @@ pub const Header = extern struct {
     ///   responding to the RSV.
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `request_reply` sets this to the checksum of the reply being requested.
+    /// * A `sync_manifest` sets this to the complete Manifest's checksum.
+    /// * A `sync_free_set` sets this to the complete FreeSet's checksum.
+    /// * A `sync_manifest` sets this to the complete ClientSessions's checksum.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -286,6 +321,12 @@ pub const Header = extern struct {
     /// A client is allowed to have at most one request inflight at a time.
     ///
     /// * A `do_view_change` sets this to its latest log_view number.
+    /// * A `request_sync_manifest` sets this to the requested offset within the encoded Manifest.
+    /// * A `request_sync_free_set` sets this to the requested offset within the encoded FreeSet.
+    /// * A `request_sync_client_sessions` sets this to the requested offset within the encoded ClientSessions.
+    /// * A `sync_manifest` sets this to the offset within the encoded Manifest.
+    /// * A `sync_free_set` sets this to the offset within the encoded FreeSet.
+    /// * A `sync_client_sessions` sets this to the offset within the encoded ClientSessions.
     request: u32 = 0,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
@@ -303,9 +344,17 @@ pub const Header = extern struct {
     /// The op number of the latest prepare that may or may not yet be committed. Uncommitted ops
     /// may be replaced by different ops if they do not survive through a view change.
     ///
+    /// * A `commit` sets this to its checkpoint op.
+    /// * A `ping` sets this to its checkpoint op.
     /// * A `request_headers` sets this to the maximum op requested (inclusive).
     /// * A `request_prepare` sets this to the requested op.
     /// * A `request_reply` sets this to the requested op.
+    /// * A `request_sync_manifest` sets this to the requested checkpoint op.
+    /// * A `request_sync_free_set` sets this to the requested checkpoint op.
+    /// * A `request_sync_client_sessions` sets this to the requested checkpoint op.
+    /// * A `sync_manifest` sets this to the checkpoint op.
+    /// * A `sync_free_set` sets this to the checkpoint op.
+    /// * A `sync_client_sessions` sets this to the checkpoint op.
     op: u64 = 0,
 
     /// The commit number of the latest committed prepare. Committed ops are immutable.
@@ -314,6 +363,11 @@ pub const Header = extern struct {
     ///   The sending replica may continue to commit after sending the DVC.
     /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
     /// * A `request_headers` sets this to the minimum op requested (inclusive).
+    /// * A `sync_manifest` sets this to the complete Manifest's size.
+    /// * A `sync_free_set` sets this to the complete FreeSet's size.
+    /// * A `sync_client_sessions` sets this to the complete ClientSessions's size.
+    /// * A `ping` sets this to its monotonic timestamp.
+    /// * A `pong` echoes the ping's monotonic timestamp.
     commit: u64 = 0,
 
     /// This field is used in various ways:
@@ -405,6 +459,12 @@ pub const Header = extern struct {
             .headers => self.invalid_headers(),
             .eviction => self.invalid_eviction(),
             .block => self.invalid_block(),
+            .request_sync_manifest => self.invalid_request_sync_manifest(),
+            .request_sync_free_set => self.invalid_request_sync_free_set(),
+            .request_sync_client_sessions => self.invalid_request_sync_client_sessions(),
+            .sync_manifest => self.invalid_sync_manifest(),
+            .sync_free_set => self.invalid_sync_free_set(),
+            .sync_client_sessions => self.invalid_sync_client_sessions(),
         };
     }
 
@@ -424,12 +484,10 @@ pub const Header = extern struct {
 
     fn invalid_ping(self: *const Header) ?[]const u8 {
         assert(self.command == .ping);
-        if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -444,7 +502,7 @@ pub const Header = extern struct {
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
         if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
+        if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -558,7 +616,6 @@ pub const Header = extern struct {
             .reserved => return "operation == .reserved",
             .root => {
                 const root_checksum = Header.root_prepare(self.cluster).checksum;
-                if (self.parent != 0) return "root: parent != 0";
                 if (self.client != 0) return "root: client != 0";
                 if (self.context != root_checksum) return "root: context != expected";
                 if (self.request != 0) return "root: request != 0";
@@ -601,10 +658,8 @@ pub const Header = extern struct {
 
     fn invalid_commit(self: *const Header) ?[]const u8 {
         assert(self.command == .commit);
-        if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.request != 0) return "request != 0";
-        if (self.op != 0) return "op != 0";
         if (self.timestamp == 0) return "timestamp == 0";
         if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
         if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -703,6 +758,7 @@ pub const Header = extern struct {
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";
+        if (self.view != 0) return "view != 0";
         if (self.op != 0) return "op != 0";
         if (self.commit != 0) return "commit != 0";
         if (self.timestamp != 0) return "timestamp != 0";
@@ -744,11 +800,75 @@ pub const Header = extern struct {
         assert(self.command == .block);
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
         if (self.view != 0) return "view != 0";
         if (self.op == 0) return "op == 0"; // address ≠ 0
+        if (self.commit != 0) return "commit != 0";
         if (self.replica != 0) return "replica != 0";
         if (self.operation == .reserved) return "operation == .reserved";
+        return null;
+    }
+
+    fn invalid_request_sync_manifest(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_sync_manifest);
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_sync_free_set(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_sync_free_set);
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_request_sync_client_sessions(self: *const Header) ?[]const u8 {
+        assert(self.command == .request_sync_client_sessions);
+        if (self.client != 0) return "client != 0";
+        if (self.context != 0) return "context != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.commit != 0) return "commit != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_sync_manifest(self: *const Header) ?[]const u8 {
+        assert(self.command == .sync_manifest);
+        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
+        if (self.client != 0) return "client != 0";
+        if (self.view != 0) return "view != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_sync_free_set(self: *const Header) ?[]const u8 {
+        assert(self.command == .sync_free_set);
+        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
+        if (self.view != 0) return "view != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
+        return null;
+    }
+
+    fn invalid_sync_client_sessions(self: *const Header) ?[]const u8 {
+        assert(self.command == .sync_client_sessions);
+        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
+        if (self.view != 0) return "view != 0";
+        if (self.timestamp != 0) return "timestamp != 0";
+        if (self.operation != .reserved) return "operation != .reserved";
         return null;
     }
 
@@ -1128,6 +1248,7 @@ pub fn quorums(replica_count: u8) struct {
     replication: u8,
     view_change: u8,
     nack_prepare: u8,
+    majority: u8,
 } {
     assert(replica_count > 0);
 
@@ -1159,10 +1280,15 @@ pub fn quorums(replica_count: u8) struct {
     const quorum_nack_prepare = replica_count - quorum_replication + 1;
     assert(quorum_nack_prepare + quorum_replication > replica_count);
 
+    const quorum_majority =
+        stdx.div_ceil(replica_count, 2) + @boolToInt(@mod(replica_count, 2) == 0);
+    assert(quorum_majority > @divFloor(replica_count, 2));
+
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
         .nack_prepare = quorum_nack_prepare,
+        .majority = quorum_majority,
     };
 }
 
@@ -1172,6 +1298,7 @@ test "quorums" {
     const expect_replication = [_]u8{ 1, 2, 2, 2, 3, 3, 3, 3 };
     const expect_view_change = [_]u8{ 1, 2, 2, 3, 3, 4, 5, 6 };
     const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
+    const expect_majority = [_]u8{ 1, 2, 2, 3, 3, 4, 4, 5 };
 
     for (expect_replication[0..]) |_, i| {
         const replicas = @intCast(u8, i) + 1;
@@ -1179,6 +1306,7 @@ test "quorums" {
         try std.testing.expectEqual(actual.replication, expect_replication[i]);
         try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
         try std.testing.expectEqual(actual.nack_prepare, expect_nack_prepare[i]);
+        try std.testing.expectEqual(actual.majority, expect_majority[i]);
 
         // The nack quorum only differs from the view-change quorum when R=2.
         if (replicas == 2) {
@@ -1191,9 +1319,9 @@ test "quorums" {
 
 /// Deterministically assigns replica_ids for the initial configuration.
 ///
-/// Eventualy, we want to identify replicas using random u128 ids to prevent operator errors.
+/// Eventually, we want to identify replicas using random u128 ids to prevent operator errors.
 /// However, that requires unergonomic two-step process for spinning a new cluster up.  To avoid
-/// needlessly compromizing the experience until reconfiguration is fully implemented, derive
+/// needlessly compromising the experience until reconfiguration is fully implemented, derive
 /// replica ids for the initial cluster deterministically.
 pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
     const IdSeed = packed struct {

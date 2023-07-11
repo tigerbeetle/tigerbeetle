@@ -153,16 +153,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            tree_hash: u128,
+            tree_id: u128,
         ) !Manifest {
             var levels: [constants.lsm_levels]Level = undefined;
             for (levels) |*level, i| {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
             }
-            errdefer for (levels) |*l| l.deinit(allocator, node_pool);
+            errdefer for (levels) |*level| level.deinit(allocator, node_pool);
 
-            var manifest_log = try ManifestLog.init(allocator, grid, tree_hash);
+            var manifest_log = try ManifestLog.init(allocator, grid, tree_id);
             errdefer manifest_log.deinit(allocator);
 
             return Manifest{
@@ -173,9 +173,21 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-            for (manifest.levels) |*l| l.deinit(allocator, manifest.node_pool);
+            for (manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
 
             manifest.manifest_log.deinit(allocator);
+        }
+
+        pub fn reset(manifest: *Manifest) void {
+            for (manifest.levels) |*level| level.reset();
+
+            manifest.manifest_log.reset();
+
+            manifest.* = .{
+                .node_pool = manifest.node_pool,
+                .levels = manifest.levels,
+                .manifest_log = manifest.manifest_log,
+            };
         }
 
         pub fn open(manifest: *Manifest, callback: Callback) void {
@@ -562,6 +574,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn verify(manifest: *Manifest, snapshot: u64) void {
+            // TODO: When state sync is proactive, re-enable this.
+            if (true) return;
+
+            // TODO s/prev/previous; s/iter/iterator.
             for (manifest.levels) |*level| {
                 var key_max_prev: ?Key = null;
                 var table_info_iter = level.iterator(

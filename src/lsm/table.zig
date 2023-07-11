@@ -16,6 +16,7 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 const BlockType = @import("grid.zig").BlockType;
 const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
+const schema = @import("schema.zig");
 
 pub const TableUsage = enum {
     /// General purpose table.
@@ -28,6 +29,15 @@ pub const TableUsage = enum {
     secondary_index,
 };
 
+const address_size = @sizeOf(u64);
+const checksum_size = @sizeOf(u128);
+
+const block_size = constants.block_size;
+const block_body_size = block_size - @sizeOf(vsr.Header);
+
+const BlockPtr = *align(constants.sector_size) [block_size]u8;
+const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
+
 /// A table is a set of blocks:
 ///
 /// * Index block (exactly 1)
@@ -35,38 +45,6 @@ pub const TableUsage = enum {
 ///   Each filter block summarizes the keys for several adjacent (in terms of key) data blocks.
 /// * Data blocks (at least one, at most `data_block_count_max`)
 ///   Store the actual keys/values, along with a small index of the keys to optimize lookups.
-///
-///
-/// Every block begins with a `vsr.Header` that includes:
-///
-/// * `checksum`, `checksum_body` verify the data integrity.
-/// * `cluster` is the cluster id.
-/// * `command` is `.block`.
-/// * `op` is the block address.
-/// * `size` is the block size excluding padding.
-///
-/// Index block schema:
-/// │ vsr.Header                   │ operation=BlockType.index
-/// │ vsr.Header                   │ commit=filter_block_count,
-/// │                              │ request=data_block_count,
-/// │                              │ timestamp=snapshot_min
-/// │ [filter_block_count_max]u128 │ checksums of filter blocks
-/// │ [data_block_count_max]u128   │ checksums of data blocks
-/// │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
-/// │ [filter_block_count_max]u64  │ addresses of filter blocks
-/// │ [data_block_count_max]u64    │ addresses of data blocks
-/// │ […]u8{0}                     │ padding (to end of block)
-///
-/// Filter block schema:
-/// │ vsr.Header │ operation=BlockType.filter
-/// │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
-/// │            │   `filter_data_block_count_max` data blocks.
-///
-/// Data block schema:
-/// │ vsr.Header               │ operation=BlockType.data
-/// │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
-/// │ [≤value_count_max]Value  │ At least one value (no empty tables).
-/// │ […]u8{0}                 │ padding (to end of block)
 pub fn TableType(
     comptime TableKey: type,
     comptime TableValue: type,
@@ -110,10 +88,6 @@ pub fn TableType(
             }
         };
 
-        const block_size = constants.block_size;
-        const BlockPtr = *align(constants.sector_size) [block_size]u8;
-        const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
-
         pub const key_size = @sizeOf(Key);
         pub const value_size = @sizeOf(Value);
 
@@ -132,10 +106,6 @@ pub fn TableType(
             assert(key_size <= 32);
             assert(key_size == 8 or key_size == 16 or key_size == 24 or key_size == 32);
         }
-
-        const address_size = @sizeOf(u64);
-        const checksum_size = @sizeOf(u128);
-        const block_body_size = block_size - @sizeOf(vsr.Header);
 
         pub const layout = layout: {
             @setEvalBranchQuota(10_000);
@@ -239,52 +209,22 @@ pub fn TableType(
         pub const block_count_max =
             index_block_count + filter_block_count_max + data_block_count_max;
 
-        const index = struct {
-            const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
-                keys_size + filter_addresses_size + data_addresses_size;
+        const index = schema.TableIndex.init(.{
+            .key_size = key_size,
+            .filter_block_count_max = filter_block_count_max,
+            .data_block_count_max = data_block_count_max,
+        });
 
-            const filter_checksums_offset = @sizeOf(vsr.Header);
-            const filter_checksums_size = filter_block_count_max * checksum_size;
+        const filter = schema.TableFilter.init(.{
+            .data_block_count_max = layout.filter_data_block_count_max,
+        });
 
-            const data_checksums_offset = filter_checksums_offset + filter_checksums_size;
-            const data_checksums_size = data_block_count_max * checksum_size;
-
-            const keys_offset = data_checksums_offset + data_checksums_size;
-            const keys_size = data_block_count_max * key_size;
-
-            const filter_addresses_offset = keys_offset + keys_size;
-            const filter_addresses_size = filter_block_count_max * address_size;
-
-            const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
-            const data_addresses_size = data_block_count_max * address_size;
-
-            const padding_offset = data_addresses_offset + data_addresses_size;
-            const padding_size = block_size - padding_offset;
-        };
-
-        pub const filter = struct {
-            pub const data_block_count_max = layout.filter_data_block_count_max;
-
-            const filter_offset = @sizeOf(vsr.Header);
-            const filter_size = block_size - filter_offset;
-
-            const padding_offset = filter_offset + filter_size;
-            const padding_size = block_size - padding_offset;
-        };
-
-        pub const data = struct {
-            const key_count = layout.block_key_count;
-            pub const block_value_count_max = layout.block_value_count_max;
-
-            const key_layout_offset = @sizeOf(vsr.Header);
-            const key_layout_size = layout.block_key_layout_size;
-
-            const values_offset = key_layout_offset + key_layout_size;
-            const values_size = block_value_count_max * value_size;
-
-            const padding_offset = values_offset + values_size;
-            const padding_size = block_size - padding_offset;
-        };
+        pub const data = schema.TableData.init(.{
+            .key_count = layout.block_key_count,
+            .key_layout_size = layout.block_key_layout_size,
+            .value_count_max = layout.block_value_count_max,
+            .value_size = value_size,
+        });
 
         const compile_log_layout = false;
         comptime {
@@ -361,7 +301,7 @@ pub fn TableType(
                         filter.padding_size,
 
                         data.key_count,
-                        data.block_value_count_max,
+                        data.value_count_max,
                         data.key_layout_offset,
                         data.key_layout_size,
                         data.values_offset,
@@ -384,7 +324,7 @@ pub fn TableType(
 
             const filter_bytes_per_key = 2;
             assert(filter_block_count_max * filter.filter_size >=
-                data_block_count_max * data.block_value_count_max * filter_bytes_per_key);
+                data_block_count_max * data.value_count_max * filter_bytes_per_key);
 
             assert(index.size == @sizeOf(vsr.Header) +
                 data_block_count_max * (key_size + address_size + checksum_size) +
@@ -419,13 +359,13 @@ pub fn TableType(
                 assert(data.values_offset == data.key_layout_offset);
             }
 
-            assert(data.block_value_count_max > 0);
-            assert(data.block_value_count_max >= data.key_count);
-            assert(@divExact(data.values_size, value_size) == data.block_value_count_max);
+            assert(data.value_count_max > 0);
+            assert(data.value_count_max >= data.key_count);
+            assert(@divExact(data.values_size, value_size) == data.value_count_max);
             assert(data.values_offset % constants.cache_line_size == 0);
             // You can have any size value you want, as long as it fits
             // neatly into the CPU cache lines :)
-            assert((data.block_value_count_max * value_size) % constants.cache_line_size == 0);
+            assert((data.value_count_max * value_size) % constants.cache_line_size == 0);
 
             assert(data.padding_size >= 0);
             assert(block_size == @sizeOf(vsr.Header) + data.key_layout_size +
@@ -483,6 +423,18 @@ pub fn TableType(
                 builder.* = undefined;
             }
 
+            pub fn reset(builder: *Builder) void {
+                std.mem.set(u8, builder.index_block, 0);
+                std.mem.set(u8, builder.filter_block, 0);
+                std.mem.set(u8, builder.data_block, 0);
+
+                builder.* = .{
+                    .index_block = builder.index_block,
+                    .filter_block = builder.filter_block,
+                    .data_block = builder.data_block,
+                };
+            }
+
             pub fn data_block_values(builder: *Builder) []Value {
                 return Table.data_block_values(builder.data_block);
             }
@@ -502,13 +454,13 @@ pub fn TableType(
             }
 
             pub fn data_block_empty(builder: *const Builder) bool {
-                assert(builder.value_count <= data.block_value_count_max);
+                assert(builder.value_count <= data.value_count_max);
                 return builder.value_count == 0;
             }
 
             pub fn data_block_full(builder: *const Builder) bool {
-                assert(builder.value_count <= data.block_value_count_max);
-                return builder.value_count == data.block_value_count_max;
+                assert(builder.value_count <= data.value_count_max);
+                return builder.value_count == data.value_count_max;
             }
 
             const DataFinishOptions = struct {
@@ -523,13 +475,19 @@ pub fn TableType(
                 assert(options.address > 0);
                 assert(builder.value_count > 0);
 
+                if (constants.verify) {
+                    if (builder.data_blocks_in_filter == 0) {
+                        assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
+                    }
+                }
+
                 const block = builder.data_block;
                 const values_max = Table.data_block_values(block);
-                assert(values_max.len == data.block_value_count_max);
+                assert(values_max.len == data.value_count_max);
 
                 const values = values_max[0..builder.value_count];
 
-                const filter_bytes = filter_block_filter(builder.filter_block);
+                const filter_bytes = filter.block_filter(builder.filter_block);
                 for (values) |*value| {
                     const key = key_from_value(value);
                     const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
@@ -555,7 +513,7 @@ pub fn TableType(
                     );
                     const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                    const e = eytzinger(data.key_count, data.block_value_count_max);
+                    const e = eytzinger(data.key_count, data.value_count_max);
                     e.layout_from_keys_or_values(
                         Key,
                         Value,
@@ -575,8 +533,14 @@ pub fn TableType(
 
                 header.* = .{
                     .cluster = options.cluster,
+                    .context = @bitCast(u128, schema.TableData.Context{
+                        .key_count = data.key_count,
+                        .key_layout_size = data.key_layout_size,
+                        .value_count_max = data.value_count_max,
+                        .value_size = value_size,
+                    }),
                     .op = options.address,
-                    .request = @intCast(u32, values.len),
+                    .request = builder.value_count,
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
                     .operation = BlockType.data.operation(),
@@ -587,8 +551,8 @@ pub fn TableType(
 
                 const current = builder.data_block_count;
                 index_data_keys(builder.index_block)[current] = key_max;
-                index_data_addresses(builder.index_block)[current] = options.address;
-                index_data_checksums(builder.index_block)[current] = header.checksum;
+                index.data_addresses(builder.index_block)[current] = options.address;
+                index.data_checksums(builder.index_block)[current] = header.checksum;
 
                 if (current == 0) builder.key_min = key_from_value(&values[0]);
                 builder.key_max = key_max;
@@ -634,6 +598,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, header_bytes);
                 header.* = .{
                     .cluster = options.cluster,
+                    .context = @bitCast(u128, schema.TableFilter.Context{
+                        .data_block_count_max = data_block_count_max,
+                    }),
                     .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
@@ -645,8 +612,8 @@ pub fn TableType(
                 header.set_checksum();
 
                 const current = builder.filter_block_count;
-                index_filter_addresses(builder.index_block)[current] = options.address;
-                index_filter_checksums(builder.index_block)[current] = header.checksum;
+                index.filter_addresses(builder.index_block)[current] = options.address;
+                index.filter_checksums(builder.index_block)[current] = header.checksum;
 
                 builder.filter_block_count += 1;
                 builder.data_blocks_in_filter = 0;
@@ -687,9 +654,14 @@ pub fn TableType(
 
                 header.* = .{
                     .cluster = options.cluster,
+                    .context = @bitCast(u128, schema.TableIndex.Context{
+                        .filter_block_count = builder.filter_block_count,
+                        .filter_block_count_max = index.filter_block_count_max,
+                        .data_block_count = builder.data_block_count,
+                        .data_block_count_max = index.data_block_count_max,
+                    }),
+                    .request = index.key_size,
                     .op = options.address,
-                    .commit = builder.filter_block_count,
-                    .request = builder.data_block_count,
                     .timestamp = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
@@ -730,87 +702,7 @@ pub fn TableType(
                 Key,
                 index_block[index.keys_offset..][0..index.keys_size],
             );
-            return slice[0..index_data_blocks_used(index_block)];
-        }
-
-        pub inline fn index_data_addresses(index_block: BlockPtr) []u64 {
-            return mem.bytesAsSlice(
-                u64,
-                index_block[index.data_addresses_offset..][0..index.data_addresses_size],
-            );
-        }
-
-        pub inline fn index_data_addresses_used(index_block: BlockPtrConst) []const u64 {
-            const slice = mem.bytesAsSlice(
-                u64,
-                index_block[index.data_addresses_offset..][0..index.data_addresses_size],
-            );
-            return slice[0..index_data_blocks_used(index_block)];
-        }
-        pub inline fn index_data_checksums(index_block: BlockPtr) []u128 {
-            return mem.bytesAsSlice(
-                u128,
-                index_block[index.data_checksums_offset..][0..index.data_checksums_size],
-            );
-        }
-
-        pub inline fn index_data_checksums_used(index_block: BlockPtrConst) []const u128 {
-            const slice = mem.bytesAsSlice(
-                u128,
-                index_block[index.data_checksums_offset..][0..index.data_checksums_size],
-            );
-            return slice[0..index_data_blocks_used(index_block)];
-        }
-
-        inline fn index_filter_addresses(index_block: BlockPtr) []u64 {
-            return mem.bytesAsSlice(
-                u64,
-                index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-            );
-        }
-
-        pub inline fn index_filter_addresses_used(index_block: BlockPtrConst) []const u64 {
-            const slice = mem.bytesAsSlice(
-                u64,
-                index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-            );
-            return slice[0..index_filter_blocks_used(index_block)];
-        }
-
-        inline fn index_filter_checksums(index_block: BlockPtr) []u128 {
-            return mem.bytesAsSlice(
-                u128,
-                index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-            );
-        }
-
-        pub inline fn index_filter_checksums_used(index_block: BlockPtrConst) []const u128 {
-            const slice = mem.bytesAsSlice(
-                u128,
-                index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-            );
-            return slice[0..index_filter_blocks_used(index_block)];
-        }
-
-        inline fn index_blocks_used(index_block: BlockPtrConst) u32 {
-            return index_block_count + index_filter_blocks_used(index_block) +
-                index_data_blocks_used(index_block);
-        }
-
-        inline fn index_filter_blocks_used(index_block: BlockPtrConst) u32 {
-            const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-            const value = @intCast(u32, header.commit);
-            assert(value > 0);
-            assert(value <= filter_block_count_max);
-            return value;
-        }
-
-        pub inline fn index_data_blocks_used(index_block: BlockPtrConst) u32 {
-            const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-            const value = @intCast(u32, header.request);
-            assert(value > 0);
-            assert(value <= data_block_count_max);
-            return value;
+            return slice[0..index.data_blocks_used(index_block)];
         }
 
         /// Returns the zero-based index of the data block that may contain the key.
@@ -828,7 +720,7 @@ pub fn TableType(
                 key,
                 .{},
             );
-            assert(data_block_index < index_data_blocks_used(index_block));
+            assert(data_block_index < index.data_blocks_used(index_block));
             return data_block_index;
         }
 
@@ -846,31 +738,19 @@ pub fn TableType(
             const f = @divFloor(d, filter.data_block_count_max);
 
             return .{
-                .filter_block_address = index_filter_addresses_used(index_block)[f],
-                .filter_block_checksum = index_filter_checksums_used(index_block)[f],
-                .data_block_address = index_data_addresses_used(index_block)[d],
-                .data_block_checksum = index_data_checksums_used(index_block)[d],
+                .filter_block_address = index.filter_addresses_used(index_block)[f],
+                .filter_block_checksum = index.filter_checksums_used(index_block)[f],
+                .data_block_address = index.data_addresses_used(index_block)[d],
+                .data_block_checksum = index.data_checksums_used(index_block)[d],
             };
         }
 
         pub inline fn data_block_values(data_block: BlockPtr) []Value {
-            return mem.bytesAsSlice(
-                Value,
-                data_block[data.values_offset..][0..data.values_size],
-            );
+            return mem.bytesAsSlice(Value, data.block_values_bytes(data_block));
         }
 
         pub inline fn data_block_values_used(data_block: BlockPtrConst) []const Value {
-            const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
-            // TODO we should be able to cross-check this with the header size
-            // for more safety.
-            const used = @intCast(u32, header.request);
-            assert(used <= data.block_value_count_max);
-            const slice = mem.bytesAsSlice(
-                Value,
-                data_block[data.values_offset..][0..data.values_size],
-            );
-            return slice[0..used];
+            return mem.bytesAsSlice(Value, data.block_values_used_bytes(data_block));
         }
 
         pub inline fn block_address(block: BlockPtrConst) u64 {
@@ -878,14 +758,6 @@ pub fn TableType(
             const address = header.op;
             assert(address > 0);
             return address;
-        }
-
-        pub inline fn filter_block_filter(filter_block: BlockPtr) []u8 {
-            return filter_block[filter.filter_offset..][0..filter.filter_size];
-        }
-
-        pub inline fn filter_block_filter_const(filter_block: BlockPtrConst) []const u8 {
-            return filter_block[filter.filter_offset..][0..filter.filter_size];
         }
 
         pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
@@ -899,7 +771,7 @@ pub fn TableType(
                 );
                 const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
-                const e = eytzinger(data.key_count, data.block_value_count_max);
+                const e = eytzinger(data.key_count, data.value_count_max);
                 break :blk e.search_values(
                     Key,
                     Value,
@@ -948,8 +820,8 @@ pub fn TableType(
                 return;
 
             const index_block = storage.grid_block(index_address);
-            const addresses = index_data_addresses(index_block);
-            const data_blocks_used = index_data_blocks_used(index_block);
+            const addresses = index.data_addresses(index_block);
+            const data_blocks_used = index.data_blocks_used(index_block);
             var data_block_index: usize = 0;
             while (data_block_index < data_blocks_used) : (data_block_index += 1) {
                 const address = addresses[data_block_index];

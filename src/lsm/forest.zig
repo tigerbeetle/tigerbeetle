@@ -55,6 +55,22 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         },
     });
 
+    {
+        // Verify that every tree id is unique.
+        comptime var ids: []const u128 = &.{};
+
+        inline for (std.meta.fields(Grooves)) |groove_field| {
+            const Groove = groove_field.field_type;
+
+            for (std.meta.fields(@TypeOf(Groove.config.ids))) |field| {
+                const id = @field(Groove.config.ids, field.name);
+
+                assert(std.mem.indexOfScalar(u128, ids, id) == null);
+                ids = ids ++ [_]u128{id};
+            }
+        }
+    }
+
     return struct {
         const Forest = @This();
 
@@ -68,6 +84,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         };
 
         pub const groove_config = groove_config;
+        pub const Grooves = Grooves;
         pub const GroovesOptions = _GroovesOptions;
 
         join_op: ?JoinOp = null,
@@ -133,6 +150,21 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             allocator.destroy(forest.node_pool);
         }
 
+        pub fn reset(forest: *Forest) void {
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).reset();
+            }
+
+            forest.node_pool.reset();
+
+            forest.* = .{
+                // Don't reset the grid – replica is responsible for grid cancellation.
+                .grid = forest.grid,
+                .grooves = forest.grooves,
+                .node_pool = forest.node_pool,
+            };
+        }
+
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {
                 pub fn start(forest: *Forest, callback: Callback) void {
@@ -172,9 +204,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
                             if (join_op == .checkpoint) {
                                 if (Storage == @import("../testing/storage.zig").Storage) {
-                                    // We should have finished all checkpoint io by now.
-                                    // TODO This may change when grid repair lands.
-                                    forest.grid.superblock.storage.assert_no_pending_io(.grid);
+                                    // We should have finished all checkpoint writes by now.
+                                    forest.grid.superblock.storage.assert_no_pending_writes(.grid);
                                 }
                             }
 
@@ -210,8 +241,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io before checkpointing.
-                // TODO This may change when grid repair lands.
-                forest.grid.superblock.storage.assert_no_pending_io(.grid);
+                forest.grid.superblock.storage.assert_no_pending_writes(.grid);
             }
 
             const Join = JoinType(.checkpoint);

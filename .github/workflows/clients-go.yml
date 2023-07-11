@@ -42,6 +42,7 @@ jobs:
         env:
           TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
           GITHUB_SHA: ${{ github.sha }}
+          VERSION: ${{ inputs.version }}
 
   samples_integration_test:
     timeout-minutes: 20
@@ -55,8 +56,7 @@ jobs:
 
     strategy:
       matrix:
-        # TODO: Add windows-latest in here.
-        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
         sample: [basic, two-phase]
 
     runs-on: ${{ matrix.os }}
@@ -76,9 +76,17 @@ jobs:
       - if: matrix.os != 'windows-latest'
         run: rm -rf /Users/macos/Library/Caches/go-build
 
-      # Build and run the integration tests
+      # Build integration tests
       - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
-      - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language go --sample ${{ matrix.sample }}
+
+      - if: matrix.os != 'windows-latest'
+        run: ./zig-out/bin/client_integration --language go --sample ${{ matrix.sample }}
+
+      # Set CC='zig.exe cc' for Windows.
+      - if: matrix.os == 'windows-latest'
+        run: |
+          $env:CC = "$(pwd)\zig\zig.exe cc"
+          ./zig-out/bin/client_integration.exe --language go --sample ${{ matrix.sample }}
 
   docs:
     timeout-minutes: 20
@@ -114,4 +122,4 @@ jobs:
           .\zig-out\bin\client_docs --language go
 
       - if: matrix.os == 'ubuntu-latest'
-        run: ./scripts/fail_on_diff.sh
+        run: ./.github/ci/fail_on_diff.sh

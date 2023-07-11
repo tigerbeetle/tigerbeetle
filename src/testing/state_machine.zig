@@ -32,11 +32,15 @@ pub fn StateMachineType(
             Storage,
             Thing,
             .{
+                .ids = .{
+                    .timestamp = 1,
+                    .id = 2,
+                    .value = 3,
+                },
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple,
                     .id = config.lsm_batch_multiple,
-                    // ×2: modifying a 'value' both inserts the new Thing, and removes the old one.
-                    .value = 2 * config.lsm_batch_multiple,
+                    .value = config.lsm_batch_multiple,
                 },
                 .ignored = &[_][]const u8{},
                 .derived = .{},
@@ -84,6 +88,15 @@ pub fn StateMachineType(
             state_machine.forest.deinit(allocator);
         }
 
+        pub fn reset(state_machine: *StateMachine) void {
+            state_machine.forest.reset();
+
+            state_machine.* = .{
+                .options = state_machine.options,
+                .forest = state_machine.forest,
+            };
+        }
+
         pub fn open(state_machine: *StateMachine, callback: fn (*StateMachine) void) void {
             assert(state_machine.callback == null);
 
@@ -125,7 +138,7 @@ pub fn StateMachineType(
 
             // TODO(Snapshots) Pass in the target snapshot.
             state_machine.forest.grooves.things.prefetch_setup(null);
-            state_machine.forest.grooves.things.prefetch_enqueue(123);
+            state_machine.forest.grooves.things.prefetch_enqueue(op);
             state_machine.forest.grooves.things.prefetch(prefetch_callback, &state_machine.prefetch_context);
         }
 
@@ -151,12 +164,12 @@ pub fn StateMachineType(
 
             switch (operation) {
                 .echo => {
-                    const thing = state_machine.forest.grooves.things.get(123);
-                    const key: u64 = if (thing) |t| t.timestamp else timestamp;
+                    const thing = state_machine.forest.grooves.things.get(op);
+                    assert(thing == null);
 
                     state_machine.forest.grooves.things.put(&.{
-                        .timestamp = key,
-                        .id = 123,
+                        .timestamp = timestamp,
+                        .id = op,
                         .value = @truncate(u64, vsr.checksum(input)),
                     });
 

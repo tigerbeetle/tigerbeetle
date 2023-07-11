@@ -83,7 +83,7 @@ pub fn TableImmutableType(comptime Table: type) type {
             assert(sorted_values.ptr == table.values.ptr);
             assert(sorted_values.len > 0);
             assert(sorted_values.len <= value_count_max);
-            assert(sorted_values.len <= Table.data.block_value_count_max * Table.data_block_count_max);
+            assert(sorted_values.len <= Table.data.value_count_max * Table.data_block_count_max);
 
             if (constants.verify) {
                 var i: usize = 1;

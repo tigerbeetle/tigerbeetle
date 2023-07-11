@@ -24,7 +24,7 @@ Then, install the TigerBeetle client:
 
 ```console
 $ go mod init tbtest
-$ go mod tidy
+$ go get github.com/tigerbeetledb/tigerbeetle-go
 ```
 
 ## Start the TigerBeetle server

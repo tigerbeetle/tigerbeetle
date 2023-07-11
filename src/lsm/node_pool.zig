@@ -49,6 +49,17 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             pool.free.deinit(allocator);
         }
 
+        pub fn reset(pool: *Self) void {
+            // TODO(Performance): maybe a set_all (word-wise) function would be faster?
+            var iterator = pool.free.iterator(.{ .kind = .unset });
+            while (iterator.next()) |bit| pool.free.set(bit);
+
+            pool.* = .{
+                .buffer = pool.buffer,
+                .free = pool.free,
+            };
+        }
+
         pub fn acquire(pool: *Self) Node {
             // TODO: To ensure this "unreachable" is never reached, the primary must reject
             // new requests when storage space is too low to fulfill them.

@@ -43,8 +43,8 @@ INR). Assuming an exchange rate of `$1.00 = ₹82.42135`, `$100.00 = ₹8242.135
 
 | Ledger | Debit Account | Credit Account |  Amount | `flags.linked` |
 | -----: | ------------: | -------------: | ------: | -------------: |
-|    USD |          `L₁` |           `A₁` |   10000 |           true |
-|    INR |          `A₂` |           `L₂` | 8242135 |          false |
+|    USD |          `A₁` |           `L₁` |   10000 |           true |
+|    INR |          `L₂` |           `A₂` | 8242135 |          false |
 
 - Amounts are [represented as integers](./fractional-amounts.md).
 - Because both liquidity accounts belong to the same entity, the entity does not lose money on

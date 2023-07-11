@@ -8,7 +8,7 @@ const constants = @import("../constants.zig");
 const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
 
 /// Range queries are not supported on the TableMutable, it must first be made immutable.
-pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) type {
+pub fn TableMutableType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const compare_keys = Table.compare_keys;
@@ -44,7 +44,6 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
                 }
             }.equal,
             .{},
-            tree_name,
         );
 
         values: Values = .{},
@@ -157,6 +156,10 @@ pub fn TableMutableType(comptime Table: type, comptime tree_name: [:0]const u8) 
 
         pub fn clear(table: *TableMutable) void {
             assert(table.values.count() > 0);
+            table.reset();
+        }
+
+        pub fn reset(table: *TableMutable) void {
             table.value_count_worst_case = 0;
             table.values.clearRetainingCapacity();
             assert(table.values.count() == 0);

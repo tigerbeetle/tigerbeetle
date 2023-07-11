@@ -114,7 +114,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         superblock: *SuperBlock,
         grid: *Grid,
         grid_reservation: ?Grid.Reservation = null,
-        tree_hash: u128,
+        tree_id: u128,
 
         /// The head block is used to accumulate a full block, to be written at the next flush.
         /// The remaining blocks must accommodate all further appends.
@@ -146,9 +146,9 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         write: Grid.Write = undefined,
         write_callback: ?Callback = null,
 
-        flush_next_tick: Grid.NextTick = undefined,
+        next_tick: Grid.NextTick = undefined,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, tree_hash: u128) !ManifestLog {
+        pub fn init(allocator: mem.Allocator, grid: *Grid, tree_id: u128) !ManifestLog {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
             var blocks: [blocks_count_max]BlockPtr = undefined;
@@ -161,13 +161,24 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             return ManifestLog{
                 .superblock = grid.superblock,
                 .grid = grid,
-                .tree_hash = tree_hash,
+                .tree_id = tree_id,
                 .blocks = .{ .buffer = blocks },
             };
         }
 
         pub fn deinit(manifest_log: *ManifestLog, allocator: mem.Allocator) void {
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
+        }
+
+        pub fn reset(manifest_log: *ManifestLog) void {
+            for (manifest_log.blocks.buffer) |block| std.mem.set(u8, block, 0);
+
+            manifest_log.* = .{
+                .superblock = manifest_log.superblock,
+                .grid = manifest_log.grid,
+                .tree_id = manifest_log.tree_id,
+                .blocks = .{ .buffer = manifest_log.blocks.buffer },
+            };
         }
 
         /// Opens the manifest log.
@@ -188,7 +199,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             manifest_log.open_event = event;
             manifest_log.open_iterator = manifest_log.superblock.manifest.iterator_reverse(
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
             );
 
             manifest_log.reading = true;
@@ -209,7 +220,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.read_block_reference = manifest_log.open_iterator.next();
 
             if (manifest_log.read_block_reference) |block| {
-                assert(block.tree == manifest_log.tree_hash);
+                assert(block.tree == manifest_log.tree_id);
                 assert(block.address > 0);
 
                 manifest_log.grid.read_block(
@@ -220,17 +231,29 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     .manifest,
                 );
             } else {
-                manifest_log.opened = true;
-                manifest_log.open_event = undefined;
-                manifest_log.open_iterator = undefined;
-
-                const callback = manifest_log.read_callback.?;
-                manifest_log.reading = false;
-                manifest_log.read_callback = null;
-                assert(manifest_log.read_block_reference == null);
-
-                callback(manifest_log);
+                // Use next_tick because the manifest may be empty (no blocks to read).
+                manifest_log.grid.on_next_tick(open_next_tick_callback, &manifest_log.next_tick);
             }
+        }
+
+        fn open_next_tick_callback(next_tick: *Grid.NextTick) void {
+            const manifest_log = @fieldParentPtr(ManifestLog, "next_tick", next_tick);
+            assert(!manifest_log.opened);
+            assert(manifest_log.reading);
+            assert(manifest_log.read_callback != null);
+            assert(!manifest_log.writing);
+            assert(manifest_log.write_callback == null);
+
+            manifest_log.opened = true;
+            manifest_log.open_event = undefined;
+            manifest_log.open_iterator = undefined;
+
+            const callback = manifest_log.read_callback.?;
+            manifest_log.reading = false;
+            manifest_log.read_callback = null;
+            assert(manifest_log.read_block_reference == null);
+
+            callback(manifest_log);
         }
 
         fn open_read_block_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
@@ -255,7 +278,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 const label = labels_used[entry];
                 const table = &tables_used[entry];
 
-                if (manifest.insert_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
+                if (manifest.insert_table_extent(
+                    manifest_log.tree_id,
+                    table.address,
+                    block_reference.address,
+                    entry,
+                )) {
                     switch (label.event) {
                         .insert => manifest_log.open_event(manifest_log, label.level, table),
                         .remove => manifest.queue_for_compaction(block_reference.address),
@@ -270,7 +298,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
 
             log.debug("{}: opened: checksum={} address={} entries={}", .{
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
                 block_reference.checksum,
                 block_reference.address,
                 entry_count,
@@ -314,7 +342,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             log.debug(
                 "{}: {s}: level={} checksum={} address={} flags={} snapshot={}..{}",
                 .{
-                    manifest_log.tree_hash,
+                    manifest_log.tree_id,
                     @tagName(label.event),
                     label.level,
                     table.checksum,
@@ -332,7 +360,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             const address = Block.address(block);
-            if (manifest.update_table_extent(manifest_log.tree_hash, table.address, address, entry)) |previous_block| {
+            if (manifest.update_table_extent(
+                manifest_log.tree_id,
+                table.address,
+                address,
+                entry,
+            )) |previous_block| {
                 manifest.queue_for_compaction(previous_block);
                 if (label.event == .remove) manifest.queue_for_compaction(address);
             } else {
@@ -357,7 +390,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             manifest_log.write_callback = callback;
 
             log.debug("{}: flush: writing {} block(s)", .{
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
                 manifest_log.blocks_closed,
             });
 
@@ -374,7 +407,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 const address = Block.address(block);
                 assert(address > 0);
 
-                manifest.append(manifest_log.tree_hash, header.checksum, address);
+                manifest.append(manifest_log.tree_id, header.checksum, address);
                 if (Block.entry_count(block) < Block.entry_count_max) {
                     manifest.queue_for_compaction(address);
                 }
@@ -383,7 +416,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             if (manifest_log.blocks_closed == 0) {
                 manifest_log.grid.on_next_tick(
                     flush_next_tick_callback,
-                    &manifest_log.flush_next_tick,
+                    &manifest_log.next_tick,
                 );
             } else {
                 manifest_log.write_block();
@@ -391,7 +424,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         fn flush_next_tick_callback(next_tick: *Grid.NextTick) void {
-            const manifest_log = @fieldParentPtr(ManifestLog, "flush_next_tick", next_tick);
+            const manifest_log = @fieldParentPtr(ManifestLog, "next_tick", next_tick);
             assert(manifest_log.writing);
 
             const callback = manifest_log.write_callback.?;
@@ -438,7 +471,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
 
             log.debug("{}: write_block: checksum={} address={} entries={}", .{
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
                 header.checksum,
                 address,
                 entry_count,
@@ -537,8 +570,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // (Make sure to update the grid block reservation to account for this).
             // Or assert that compactions cannot update blocks fast enough to outpace manifest
             // log compaction (relative to the number of updates that fit in a manifest log block).
-            if (manifest.oldest_block_queued_for_compaction(manifest_log.tree_hash)) |block| {
-                assert(block.tree == manifest_log.tree_hash);
+            if (manifest.oldest_block_queued_for_compaction(manifest_log.tree_id)) |block| {
+                assert(block.tree == manifest_log.tree_id);
                 assert(block.address > 0);
 
                 manifest_log.reading = true;
@@ -583,7 +616,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 // Remove the extent if the table is the latest version.
                 // We must iterate entries in forward order to drop the extent here.
                 // Otherwise, stale versions earlier in the block may reappear.
-                if (manifest.remove_table_extent(manifest_log.tree_hash, table.address, block_reference.address, entry)) {
+                if (manifest.remove_table_extent(
+                    manifest_log.tree_id,
+                    table.address,
+                    block_reference.address,
+                    entry,
+                )) {
                     switch (label.event) {
                         // Append the table, updating the table extent:
                         .insert => manifest_log.append(label, table),
@@ -599,7 +637,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             }
 
             log.debug("{}: compacted: checksum={} address={} frees={}/{}", .{
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
                 block_reference.checksum,
                 block_reference.address,
                 frees,
@@ -614,7 +652,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
             assert(manifest.queued_for_compaction(block_reference.address));
             manifest.remove(
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
                 block_reference.checksum,
                 block_reference.address,
             );
@@ -694,7 +732,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             assert(Block.entry_count(block) == entry_count);
 
             log.debug("{}: close_block: checksum={} address={} entries={}", .{
-                manifest_log.tree_hash,
+                manifest_log.tree_id,
                 header.checksum,
                 Block.address(block),
                 entry_count,

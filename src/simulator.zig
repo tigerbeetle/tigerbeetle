@@ -18,7 +18,6 @@ const StateMachineType = switch (state_machine) {
 
 const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
-const Replica = @import("testing/cluster.zig").Replica;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
 const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
@@ -134,9 +133,9 @@ pub fn main() !void {
             .faulty_wal_headers = replica_count > 1,
             .faulty_wal_prepares = replica_count > 1,
             .faulty_client_replies = replica_count > 1,
-            // TODO State sync: Enable faults when grid repair can fall back to state sync.
-            // (Without state sync it can get stuck.)
-            .faulty_grid = false,
+            // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
+            // but then the leading replica may have the only copy of a block in the cluster.
+            .faulty_grid = replica_count > 2,
         },
         .state_machine = switch (state_machine) {
             .testing => .{ .lsm_forest_node_count = 4096 },
@@ -256,7 +255,10 @@ pub fn main() !void {
             break;
         }
     } else {
-        output.info("no liveness, final cluster state:", .{});
+        output.info(
+            "no liveness, final cluster state (requests_max={} requests_replied={}):",
+            .{ simulator.options.requests_max, simulator.requests_replied },
+        );
         simulator.cluster.log_cluster();
         output.err("you can reproduce this failure with seed={}", .{seed});
         fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
@@ -293,8 +295,11 @@ pub fn main() !void {
             output.warn("no liveness, core replicas cannot view-change", .{});
         } else if (simulator.core_missing_prepare()) |header| {
             output.warn("no liveness, op={} is not available in core", .{header.op});
+        } else if (simulator.core_missing_blocks()) |blocks| {
+            output.warn("no liveness, {} blocks are not available in core", .{blocks});
+            unreachable;
         } else {
-            output.info("no liveness, final cluster state (core={b})", .{simulator.core.mask});
+            output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
             output.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "no state convergence", .{});
@@ -385,6 +390,9 @@ pub const Simulator = struct {
         simulator.cluster.deinit();
     }
 
+    // TODO(Table sync): replica_convergence() should check that scrubbing has finished syncing
+    // tables. Or if it didn't finish, verify that the blocks we are stuck waiting for do not exist
+    // in the living replicas.
     pub fn done(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
         assert(simulator.requests_sent == simulator.options.requests_max);
@@ -464,6 +472,9 @@ pub const Simulator = struct {
     /// The core contains at least a view-change quorum of replicas. But if one or more of those
     /// replicas are in status=recovering_head (due to corruption or state sync), then that may be
     /// insufficient.
+    /// TODO: State sync can trigger recovering_head without any crashes, and we should be able to
+    /// recover in that case.
+    /// (See https://github.com/tigerbeetledb/tigerbeetle/pull/933#discussion_r1245440623)
     pub fn core_missing_quorum(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 
@@ -494,7 +505,6 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica)) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
-                assert(replica.status == .normal);
                 if (replica.commit_min < replica.op) {
                     if (missing_op == null or missing_op.? > replica.commit_min + 1) {
                         missing_op = replica.commit_min + 1;
@@ -518,6 +528,39 @@ pub const Simulator = struct {
         }
 
         return missing_header;
+    }
+
+    /// Check whether the cluster is stuck because the entire core is missing the same block[s].
+    pub fn core_missing_blocks(simulator: *const Simulator) ?usize {
+        assert(simulator.core.count() > 0);
+
+        var missing_block_count: ?usize = null;
+        var missing_block_xor: ?u128 = null;
+
+        for (simulator.cluster.replicas) |replica| {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
+                var fault_xor: u128 = 0;
+                var fault_iterator = replica.grid.read_faulty_queue.peek();
+                while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
+                    fault_xor ^= faulty_read.checksum;
+                }
+
+                if (missing_block_count) |_| {
+                    assert(missing_block_count.? == replica.grid.read_faulty_queue.count);
+                    assert(missing_block_xor.? == fault_xor);
+                } else {
+                    missing_block_count = replica.grid.read_faulty_queue.count;
+                    missing_block_xor = fault_xor;
+                }
+            }
+        }
+
+        if (missing_block_count.? == 0) {
+            return null;
+        } else {
+            assert(missing_block_xor.? != 0);
+            return missing_block_count;
+        }
     }
 
     fn on_cluster_reply(
@@ -632,11 +675,13 @@ pub const Simulator = struct {
     fn tick_crash(simulator: *Simulator) void {
         const recoverable_count_min =
             vsr.quorums(simulator.options.cluster.replica_count).view_change;
+
         var recoverable_count: usize = 0;
         for (simulator.cluster.replicas) |*replica, i| {
             recoverable_count += @boolToInt(simulator.cluster.replica_health[i] == .up and
+                !replica.standby() and
                 replica.status != .recovering_head and
-                !replica.standby());
+                replica.syncing == .idle);
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -652,8 +697,9 @@ pub const Simulator = struct {
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
-                    recoverable_count -=
-                        @boolToInt(replica.status != .recovering_head and !replica.standby());
+                    recoverable_count -= @boolToInt(!replica.standby() and
+                        replica.status != .recovering_head and
+                        replica.syncing == .idle);
 
                     log_simulator.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);
@@ -669,7 +715,7 @@ pub const Simulator = struct {
                         continue;
                     }
 
-                    const fault = recoverable_count > recoverable_count_min or replica.standby();
+                    const fault = recoverable_count >= recoverable_count_min or replica.standby();
                     simulator.restart_replica(replica.replica, fault);
                 },
             }
@@ -703,7 +749,14 @@ pub const Simulator = struct {
 
         replica_storage.faulty = fault;
         simulator.cluster.restart_replica(replica_index) catch unreachable;
-        assert(simulator.cluster.replicas[replica_index].status != .recovering_head or fault);
+
+        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
+        if (replica.status == .recovering_head) {
+            // Even with faults disabled, a replica that was syncing before it crashed
+            // (or just recently finished syncing before it crashed) may wind up in
+            // status=recovering_head.
+            assert(fault or replica.op < replica.op_checkpoint());
+        }
 
         replica_storage.faulty = true;
         simulator.replica_stability[replica_index] =
