@@ -153,7 +153,6 @@ pub fn GridType(comptime Storage: type) type {
                 .ways = set_associative_cache_ways,
                 .value_alignment = @alignOf(u64),
             },
-            "grid",
         );
 
         superblock: *SuperBlock,
@@ -207,7 +206,7 @@ pub fn GridType(comptime Storage: type) type {
             }
             errdefer for (cache_blocks) |block| allocator.free(block);
 
-            var cache = try Cache.init(allocator, options.cache_blocks_count);
+            var cache = try Cache.init(allocator, options.cache_blocks_count, .{ .name = "grid" });
             errdefer cache.deinit(allocator);
 
             var read_iop_blocks: [read_iops_max]BlockPtr = undefined;

@@ -32,6 +32,11 @@ pub fn StateMachineType(
             Storage,
             Thing,
             .{
+                .ids = .{
+                    .timestamp = 1,
+                    .id = 2,
+                    .value = 3,
+                },
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple,
                     .id = config.lsm_batch_multiple,
