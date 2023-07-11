@@ -61,6 +61,41 @@ pub fn StateMachineType(
                     ));
                 }
             };
+
+            pub const tree_ids = struct {
+                pub const accounts_immutable = .{
+                    .timestamp = 1,
+                    .id = 2,
+                    .user_data = 3,
+                    .ledger = 4,
+                    .code = 5,
+                };
+
+                pub const accounts_mutable = .{
+                    .timestamp = 6,
+                    .debits_pending = 7,
+                    .debits_posted = 8,
+                    .credits_pending = 9,
+                    .credits_posted = 10,
+                };
+
+                pub const transfers = .{
+                    .timestamp = 11,
+                    .id = 12,
+                    .debit_account_id = 13,
+                    .credit_account_id = 14,
+                    .user_data = 15,
+                    .pending_id = 16,
+                    .timeout = 17,
+                    .ledger = 18,
+                    .code = 19,
+                    .amount = 20,
+                };
+
+                pub const posted = .{
+                    .timestamp = 21,
+                };
+            };
         };
 
         pub const AccountImmutable = extern struct {
@@ -136,13 +171,7 @@ pub fn StateMachineType(
             Storage,
             AccountImmutable,
             .{
-                .ids = .{
-                    .timestamp = 1,
-                    .id = 2,
-                    .user_data = 3,
-                    .ledger = 4,
-                    .code = 5,
-                },
+                .ids = constants.tree_ids.accounts_immutable,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * math.max(
                         constants.batch_max.create_accounts,
@@ -163,13 +192,7 @@ pub fn StateMachineType(
             Storage,
             AccountMutable,
             .{
-                .ids = .{
-                    .timestamp = 6,
-                    .debits_pending = 7,
-                    .debits_posted = 8,
-                    .credits_pending = 9,
-                    .credits_posted = 10,
-                },
+                .ids = constants.tree_ids.accounts_mutable,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * math.max(
                         constants.batch_max.create_accounts,
@@ -208,18 +231,7 @@ pub fn StateMachineType(
             Storage,
             Transfer,
             .{
-                .ids = .{
-                    .timestamp = 11,
-                    .id = 12,
-                    .debit_account_id = 13,
-                    .credit_account_id = 14,
-                    .user_data = 15,
-                    .pending_id = 16,
-                    .timeout = 17,
-                    .ledger = 18,
-                    .code = 19,
-                    .amount = 20,
-                },
+                .ids = constants.tree_ids.transfers,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
@@ -241,7 +253,7 @@ pub fn StateMachineType(
             Storage,
             PostedGrooveValue,
             .{
-                .ids = .{ .timestamp = 21 },
+                .ids = constants.tree_ids.posted,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .fulfillment = config.lsm_batch_multiple * constants.batch_max.create_transfers,
