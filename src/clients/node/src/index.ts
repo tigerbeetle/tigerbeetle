@@ -89,6 +89,7 @@ export type TransferID = bigint // u128
 
 export type Event = Account | Transfer | AccountID | TransferID
 export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer
+// Note: as of #990, the error is always `undefined` here.
 export type ResultCallback = (error: undefined | Error, results: Result[]) => void
 
 export interface Client {

@@ -582,6 +582,12 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
+    if (context.client.messages_available == 0) {
+        translate.throw(
+            env,
+            "Too many outstanding requests - message pool exhausted.",
+        ) catch return null;
+    }
     const message = context.client.get_message();
     defer context.client.unref(message);
 
@@ -632,6 +638,12 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     }
     const operation = @intToEnum(Operation, @intCast(u8, operation_int));
 
+    if (context.client.messages_available == 0) {
+        translate.throw(
+            env,
+            "Too many outstanding requests - message pool exhausted.",
+        ) catch return null;
+    }
     const message = context.client.get_message();
     defer context.client.unref(message);
 
@@ -653,16 +665,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     return null;
 }
 
-fn create_client_error(env: c.napi_env, client_error: Client.Error) !c.napi_value {
-    return switch (client_error) {
-        error.TooManyOutstandingRequests => try translate.create_error(
-            env,
-            "Too many outstanding requests - message pool exhausted.",
-        ),
-    };
-}
-
-fn on_result(user_data: u128, operation: Operation, results: Client.Error![]const u8) void {
+fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     // A reference to the user's JS callback was made in `request` or `raw_request`. This MUST be
     // cleaned up regardless of the result of this function.
     const env = @bitCast(translate.UserData, user_data).env;
@@ -685,30 +688,23 @@ fn on_result(user_data: u128, operation: Operation, results: Client.Error![]cons
     const argc: usize = 2;
     var argv: [argc]c.napi_value = undefined;
 
-    if (results) |value| {
-        const napi_results = switch (operation) {
-            .create_accounts => encode_napi_results_array(
-                CreateAccountsResult,
-                env,
-                value,
-            ) catch return,
-            .create_transfers => encode_napi_results_array(
-                CreateTransfersResult,
-                env,
-                value,
-            ) catch return,
-            .lookup_accounts => encode_napi_results_array(Account, env, value) catch return,
-            .lookup_transfers => encode_napi_results_array(Transfer, env, value) catch return,
-        };
+    const napi_results = switch (operation) {
+        .create_accounts => encode_napi_results_array(
+            CreateAccountsResult,
+            env,
+            results,
+        ) catch return,
+        .create_transfers => encode_napi_results_array(
+            CreateTransfersResult,
+            env,
+            results,
+        ) catch return,
+        .lookup_accounts => encode_napi_results_array(Account, env, results) catch return,
+        .lookup_transfers => encode_napi_results_array(Transfer, env, results) catch return,
+    };
 
-        argv[0] = globals.napi_undefined;
-        argv[1] = napi_results;
-    } else |err| {
-        argv[0] = create_client_error(env, err) catch {
-            translate.throw(env, "Failed to create Node Error.") catch return;
-        };
-        argv[1] = globals.napi_undefined;
-    }
+    argv[0] = globals.napi_undefined;
+    argv[1] = napi_results;
 
     translate.call_function(env, scope, napi_callback, argc, argv[0..]) catch {
         translate.throw(env, "Failed to call JS results callback.") catch return;

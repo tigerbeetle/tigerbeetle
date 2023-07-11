@@ -426,23 +426,6 @@ pub fn delete_reference(env: c.napi_env, reference: c.napi_ref) !void {
     }
 }
 
-pub fn create_error(
-    env: c.napi_env,
-    comptime message: [:0]const u8,
-) TranslationError!c.napi_value {
-    var napi_string: c.napi_value = undefined;
-    if (c.napi_create_string_utf8(env, message, std.mem.len(message), &napi_string) != c.napi_ok) {
-        return TranslationError.ExceptionThrown;
-    }
-
-    var napi_error: c.napi_value = undefined;
-    if (c.napi_create_error(env, null, napi_string, &napi_error) != c.napi_ok) {
-        return TranslationError.ExceptionThrown;
-    }
-
-    return napi_error;
-}
-
 pub fn call_function(
     env: c.napi_env,
     this: c.napi_value,

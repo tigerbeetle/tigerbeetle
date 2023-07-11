@@ -205,7 +205,7 @@ func (c *c_client) doRequest(
 			// but allow an invalid opcode to be passed to emulate a client nop
 			return 0, errors.ErrInvalidOperation{}
 		case C.TB_PACKET_INVALID_DATA_SIZE:
-			panic("unreachable") // we contorl what type of data is given
+			panic("unreachable") // we control what type of data is given
 		default:
 			panic("tb_client_submit(): returned packet with invalid status")
 		}

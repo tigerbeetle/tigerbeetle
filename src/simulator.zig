@@ -627,10 +627,6 @@ pub const Simulator = struct {
             simulator.random.uintLessThan(usize, simulator.options.cluster.client_count);
         var client = &simulator.cluster.clients[client_index];
 
-        // Make sure that there is capacity in the client's request queue so that we never trigger
-        // error.TooManyOutstandingRequests.
-        if (client.request_queue.count + 1 > constants.client_request_queue_max) return;
-
         // Messages aren't added to the ReplySequence until a reply arrives.
         // Before sending a new message, make sure there will definitely be room for it.
         var reserved: usize = 0;
@@ -644,6 +640,8 @@ pub const Simulator = struct {
         // +1 for the potential request — is there room in the sequencer's queue?
         if (reserved + 1 > simulator.reply_sequence.free()) return;
 
+        // Make sure that there is capacity in the client's request queue.
+        if (client.messages_available == 0) return;
         var request_message = client.get_message();
         defer client.unref(request_message);
 
