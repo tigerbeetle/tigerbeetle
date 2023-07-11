@@ -41,8 +41,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up Dotnet
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 6.0.x
+
       - name: Check Client Dotnet
-        run: curl -L --fail 'https://www.nuget.org/api/v2/package/tigerbeetle/${{ inputs.version }}' > /dev/null
+        run: |
+          mkdir -p /tmp/dotnet && cd /tmp/dotnet && \
+          dotnet new console && \
+          dotnet add package tigerbeetle --version ${{ inputs.version }}
 
       - name: Check Client Go
         run: |
@@ -51,8 +59,18 @@ jobs:
           go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@v${{ inputs.version }} && \
           go mod tidy
 
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
       - name: Check Client Java
-        run: curl -L --fail 'https://central.sonatype.com/artifact/com.tigerbeetle/tigerbeetle-java/${{ inputs.version }}' > /dev/null
+        run: |
+          mkdir -p /tmp/java && \
+          cat src/clients/java/validation_pom.xml | sed 's|{{VERSION}}|${{ inputs.version }}|' > /tmp/java/pom.xml && \
+          cd /tmp/java && mvn dependency:copy-dependencies && \
+          test -e target/dependency/tigerbeetle-java-${{ inputs.version }}.jar
 
       - name: Check Client Node
         run: |
