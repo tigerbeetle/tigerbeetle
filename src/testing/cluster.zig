@@ -453,13 +453,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         fn request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
-            result: Client.Error![]const u8,
+            result: []const u8,
         ) void {
             _ = user_data;
             _ = operation;
-            _ = result catch |err| switch (err) {
-                error.TooManyOutstandingRequests => unreachable,
-            };
+            _ = result;
         }
 
         fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {

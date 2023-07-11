@@ -81,7 +81,7 @@ pub fn ContextType(
             return null;
         }
 
-        const PacketError = Client.Error || error{
+        const PacketError = error{
             TooMuchData,
             InvalidOperation,
             InvalidDataSize,
@@ -95,7 +95,6 @@ pub fn ContextType(
         addresses: []const std.net.Address,
         io: IO,
         message_pool: MessagePool,
-        messages_available: usize,
         client: Client,
 
         on_completion_ctx: usize,
@@ -179,7 +178,6 @@ pub fn ContextType(
             );
             errdefer context.client.deinit(context.allocator);
 
-            context.messages_available = constants.client_request_queue_max;
             context.on_completion_ctx = on_completion_ctx;
             context.on_completion_fn = on_completion_fn;
             context.implementation = .{
@@ -242,12 +240,10 @@ pub fn ContextType(
         }
 
         pub fn request(self: *Context, packet: *Packet) void {
-            assert(self.messages_available > 0);
+            assert(self.client.messages_available > 0);
 
             const message = self.client.get_message();
             defer self.client.unref(message);
-
-            self.messages_available -= 1;
 
             // Get the size of each request structure in the packet.data:
             const event_size: usize = operation_event_size(packet.operation) orelse {
@@ -286,7 +282,7 @@ pub fn ContextType(
         fn on_result(
             raw_user_data: u128,
             op: Client.StateMachine.Operation,
-            results: Client.Error![]const u8,
+            results: []const u8,
         ) void {
             const user_data = @bitCast(UserData, raw_user_data);
             const self = user_data.self;
@@ -301,19 +297,14 @@ pub fn ContextType(
             packet: *Packet,
             result: PacketError![]const u8,
         ) void {
-            self.messages_available += 1;
-            assert(self.messages_available <= constants.client_request_queue_max);
+            assert(self.client.messages_available <= constants.client_request_queue_max);
 
             // Signal to resume sending requests that was waiting for available messages.
-            if (self.messages_available == 1) self.thread.signal.notify();
+            if (self.client.messages_available == 1) self.thread.signal.notify();
 
             const tb_client = api.context_to_client(&self.implementation);
             const bytes = result catch |err| {
                 packet.status = switch (err) {
-                    // If there's too many requests, (re)try submitting the packet later.
-                    error.TooManyOutstandingRequests => {
-                        return self.thread.retry.push(Packet.List.from(packet));
-                    },
                     error.TooMuchData => .too_much_data,
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,

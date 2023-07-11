@@ -365,10 +365,10 @@ pub const AOFReplayClient = struct {
     fn replay_callback(
         user_data: u128,
         operation: StateMachine.Operation,
-        result: Client.Error![]const u8,
+        result: []const u8,
     ) void {
         _ = operation;
-        _ = result catch @panic("Client returned error");
+        _ = result;
 
         const self = @intToPtr(*AOFReplayClient, @intCast(u64, user_data));
 

@@ -1,5 +1,7 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const mem = std.mem;
 
 const constants = @import("../constants.zig");
@@ -18,15 +20,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub const StateMachine = StateMachine_;
 
-        pub const Error = error{
-            TooManyOutstandingRequests,
-        };
-
         pub const Request = struct {
             pub const Callback = fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
-                results: Error![]const u8,
+                results: []const u8,
             ) void;
             user_data: u128,
             // Null iff operation=register.
@@ -35,6 +33,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         };
 
         allocator: mem.Allocator,
+
         message_bus: MessageBus,
 
         /// A universally unique identifier for the client (must not be zero).
@@ -67,6 +66,15 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// The highest view number seen by the client in messages exchanged with the cluster.
         /// Used to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
+
+        /// The number of messages available for requests.
+        ///
+        /// This budget is consumed by `get_message` and is replenished when a message is released.
+        ///
+        /// Note that `Client` sends a `.register` request automatically on behalf of the user, so,
+        /// until the first response is received, at most `constants.client_request_queue_max - 1`
+        /// requests can be submitted.
+        messages_available: u32 = constants.client_request_queue_max,
 
         /// A client is allowed at most one inflight request at a time at the protocol layer.
         /// We therefore queue any further concurrent requests made by the application layer.
@@ -139,8 +147,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             while (self.request_queue.pop()) |inflight| {
-                self.message_bus.unref(inflight.message);
+                self.unref(inflight.message);
             }
+            assert(self.messages_available == constants.client_request_queue_max);
             self.message_bus.deinit(allocator);
         }
 
@@ -216,11 +225,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 @tagName(operation),
             });
 
-            if (self.request_queue.full()) {
-                callback(user_data, operation, error.TooManyOutstandingRequests);
-                return;
-            }
-
+            assert(!self.request_queue.full());
             const was_empty = self.request_queue.empty();
 
             self.request_number += 1;
@@ -229,6 +234,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .callback = callback,
                 .message = message.ref(),
             });
+            if (self.request_queue.full()) assert(self.messages_available == 0);
 
             // If the queue was empty, then there is no request inflight and we must send this one:
             if (was_empty) self.send_request_for_the_first_time(message);
@@ -258,11 +264,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 @tagName(operation),
             });
 
-            if (self.request_queue.full()) {
-                callback(user_data, operation, error.TooManyOutstandingRequests);
-                return;
-            }
-
+            assert(!self.request_queue.full());
             const was_empty = self.request_queue.empty();
 
             self.request_number += 1;
@@ -271,18 +273,29 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .callback = callback,
                 .message = message.ref(),
             });
+            if (self.request_queue.full()) assert(self.messages_available == 0);
 
             // If the queue was empty, then there is no request inflight and we must send this one:
             if (was_empty) self.send_request_for_the_first_time(message);
         }
 
-        /// Acquires a message from the message bus if one is available.
+        /// Acquires a message from the message bus.
+        ///
+        /// The caller must ensure that a message is available.
+        // FIXME: change back to get_message.
         pub fn get_message(self: *Self) *Message {
+            assert(self.messages_available > 0);
+            self.messages_available -= 1;
+
             return self.message_bus.get_message();
         }
 
         /// Releases a message back to the message bus.
         pub fn unref(self: *Self, message: *Message) void {
+            assert(self.messages_available < constants.client_request_queue_max);
+            if (message.references == 1) {
+                self.messages_available += 1;
+            }
             self.message_bus.unref(message);
         }
 
@@ -374,8 +387,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Eagerly release request message, to ensure that user's callback can submit a new
             // request.
-            self.message_bus.unref(inflight.message);
+            self.unref(inflight.message);
             inflight.message = undefined;
+
+            // Even though we release our reference to the message, the user might have retained
+            // another one.
+            maybe(self.messages_available == 0);
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -486,8 +503,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
 
-            const message = self.message_bus.get_message();
-            defer self.message_bus.unref(message);
+            const message = self.get_message();
+            defer self.unref(message);
 
             // We will set parent, context, view and checksums only when sending for the first time:
             message.header.* = .{
@@ -556,6 +573,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.request < self.request_number);
             assert(message.header.view == 0);
             assert(message.header.size <= constants.message_size_max);
+            assert(self.messages_available < constants.client_request_queue_max);
 
             // We set the message checksums only when sending the request for the first time,
             // which is when we have the checksum of the latest reply available to set as `parent`,
