@@ -941,7 +941,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             context.copy = 0;
             if (context.caller.updates_trailers()) {
-                superblock.write_trailer(context, .manifest);
+                superblock.write_trailers(context);
             } else {
                 superblock.write_header(context);
             }
@@ -995,26 +995,54 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(staging.client_sessions_size == ClientSessions.encode_size_max);
         }
 
-        fn write_trailer(superblock: *SuperBlock, context: *Context, trailer: Trailer) void {
+        /// Write each trailer in sequence (for the current copy).
+        fn write_trailers(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
-            assert(context.trailer == null);
 
-            context.trailer = trailer;
+            context.trailer = trailer_next: {
+                if (context.trailer) |trailer_previous| {
+                    break :trailer_next switch (trailer_previous) {
+                        .manifest => Trailer.free_set,
+                        .free_set => Trailer.client_sessions,
+                        .client_sessions => null,
+                    };
+                } else {
+                    break :trailer_next Trailer.manifest;
+                }
+            };
 
+            if (context.trailer) |_| {
+                context.superblock.write_trailer_next(context);
+            } else {
+                context.superblock.write_header(context);
+            }
+        }
+
+        fn write_trailer_next(superblock: *SuperBlock, context: *Context) void {
+            assert(superblock.queue_head == context);
+            assert(context.trailer != null);
+
+            const trailer = context.trailer.?;
             const trailer_buffer_all = superblock.trailer_buffer(trailer);
             const trailer_size_ = superblock.staging.trailer_size(trailer);
             const trailer_checksum_ = superblock.staging.trailer_checksum(trailer);
 
-            const trailer_size_ceil = vsr.sector_ceil(trailer_size_);
-            assert(trailer_size_ceil <= trailer.area().size_max());
+            switch (trailer) {
+                .manifest => assert(trailer_size_ % SuperBlockManifest.BlockReferenceSize == 0),
+                .free_set => assert(trailer_size_ % @sizeOf(u64) == 0),
+                .client_sessions => assert(trailer_size_ % (@sizeOf(vsr.Header) + @sizeOf(u64)) == 0),
+            }
 
-            const offset = trailer.area().offset(context.copy.?);
+            const trailer_size_ceil = vsr.sector_ceil(trailer_size_);
+            assert(trailer_size_ceil <= trailer.zone().size_max());
+
             const buffer = trailer_buffer_all[0..trailer_size_ceil];
             assert(trailer_checksum_ == vsr.checksum(buffer[0..trailer_size_]));
 
             mem.set(u8, buffer[trailer_size_..], 0); // Zero sector padding.
 
-            log.debug("{s}: write_trailer: " ++
+            const offset = trailer.zone().start_for_copy(context.copy.?);
+            log.debug("{s}: write_trailer_next: " ++
                 "trailer={s} copy={} checksum={x:0>32} size={} offset={}", .{
                 @tagName(context.caller),
                 @tagName(trailer),
@@ -1042,15 +1070,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         fn write_trailer_callback(write: *Storage.Write) void {
             const context = @fieldParentPtr(Context, "write", write);
-            const trailer = context.trailer.?;
+            assert(context.trailer != null);
 
-            context.trailer = null;
-
-            switch (trailer) {
-                .manifest => context.superblock.write_trailer(context, .free_set),
-                .free_set => context.superblock.write_trailer(context, .client_sessions),
-                .client_sessions => context.superblock.write_header(context),
-            }
+            context.superblock.write_trailers(context);
         }
 
         fn write_header(superblock: *SuperBlock, context: *Context) void {
@@ -1079,7 +1101,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.valid_checksum());
 
             const buffer = mem.asBytes(superblock.staging);
-            const offset = Area.header.offset(context.copy.?);
+            const offset = SuperBlockZone.header.start_for_copy(context.copy.?);
 
             log.debug("{}: {s}: write_header: checksum={x:0>32} sequence={} copy={} size={} offset={}", .{
                 superblock.staging.vsr_state.replica_id,
@@ -1125,7 +1147,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 context.copy = copy + 1;
 
                 if (context.caller.updates_trailers()) {
-                    superblock.write_trailer(context, .manifest);
+                    superblock.write_trailers(context);
                 } else {
                     superblock.write_header(context);
                 }
@@ -1158,7 +1180,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(context.read_threshold != null);
 
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
-            const offset = Area.header.offset(context.copy.?);
+            const offset = SuperBlockZone.header.start_for_copy(context.copy.?);
 
             log.debug("{s}: read_header: copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1304,10 +1326,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const trailer_buffer_all = superblock.trailer_buffer(trailer);
             const trailer_size_ = superblock.working.trailer_size(trailer);
             const trailer_size_ceil = vsr.sector_ceil(trailer_size_);
-            assert(trailer_size_ceil <= trailer.area().size_max());
+            assert(trailer_size_ceil <= trailer.zone().size_max());
 
             const buffer = trailer_buffer_all[0..trailer_size_ceil];
-            const offset = trailer.area().offset(context.copy.?);
+            const offset = trailer.zone().start_for_copy(context.copy.?);
 
             log.debug("{s}: read_trailer: trailer={s} copy={} size={} offset={}", .{
                 @tagName(context.caller),
@@ -1428,7 +1450,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 log.warn("repair: copy={}", .{repair_copy});
 
                 superblock.staging.* = superblock.working.*;
-                superblock.write_trailer(context, .manifest);
+                superblock.write_trailers(context);
             } else {
                 superblock.release(context);
             }
@@ -1649,7 +1671,7 @@ pub const Trailer = enum {
     free_set,
     client_sessions,
 
-    pub fn area(trailer: Trailer) Area {
+    pub fn zone(trailer: Trailer) SuperBlockZone {
         return switch (trailer) {
             .manifest => .manifest,
             .free_set => .free_set,
@@ -1658,32 +1680,29 @@ pub const Trailer = enum {
     }
 };
 
-pub const Area = enum {
+pub const SuperBlockZone = enum {
     header,
     manifest,
     free_set,
     client_sessions,
 
-    pub fn base(area: Area) u64 {
-        const base_header = 0;
-        const base_manifest = base_header + size_max(.header);
-        const base_free_set = base_manifest + size_max(.manifest);
-        const base_client_sessions = base_free_set + size_max(.free_set);
-
-        return switch (area) {
-            .header => base_header,
-            .manifest => base_manifest,
-            .free_set => base_free_set,
-            .client_sessions => base_client_sessions,
-        };
+    pub fn start(zone: SuperBlockZone) u64 {
+        comptime var start_offset = 0;
+        inline for (comptime std.enums.values(SuperBlockZone)) |z| {
+            if (z == zone) return start_offset;
+            start_offset += comptime size_max(z);
+        }
+        unreachable;
     }
 
-    pub fn offset(area: Area, copy: u8) u64 {
-        return superblock_copy_size * @as(u64, copy) + area.base();
+    pub fn start_for_copy(zone: SuperBlockZone, copy: u8) u64 {
+        assert(copy < constants.superblock_copies);
+
+        return superblock_copy_size * @as(u64, copy) + zone.start();
     }
 
-    pub fn size_max(area: Area) u64 {
-        return switch (area) {
+    pub fn size_max(zone: SuperBlockZone) u64 {
+        return switch (zone) {
             .header => @sizeOf(SuperBlockHeader),
             .manifest => superblock_trailer_manifest_size_max, // TODO inline these constants?
             .free_set => superblock_trailer_free_set_size_max,
