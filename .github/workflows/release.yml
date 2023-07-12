@@ -75,6 +75,7 @@ jobs:
       SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
 
   finalize_release:
+    runs-on: ubuntu-latest
     needs: [release]
     steps:
       - uses: actions/checkout@v3
