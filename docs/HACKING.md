@@ -52,6 +52,19 @@ To run the unit tests:
 zig/zig build test
 ```
 
+To run a single test by name:
+
+```bash
+zig/zig build test:unit -Dtest-filter="name of test"
+```
+
+To run tests with code coverage (assuming `kcov` is installed on your system):
+
+```bash
+COV=1 zig/zig build test
+open kcov-output/index.html
+```
+
 The [Setup](#setup) step above will install Zig for you to the root of the `tigerbeetle` directory.
 
 ### Simulation Tests
