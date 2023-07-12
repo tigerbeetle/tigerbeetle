@@ -32,10 +32,15 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 result: vsr.ReconfigurationResult,
             ) void;
 
+            const AnyCallback = union(enum) {
+                request: Callback,
+                reconfigure: ReconfigureCallback,
+            };
+
             user_data: u128,
 
             // Null iff operation=register.
-            callback: ?union { request: Callback, reconfigure: ReconfigureCallback },
+            callback: ?AnyCallback,
             message: *Message,
         };
 
@@ -214,40 +219,15 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
             assert(message_body_size <= constants.message_body_size_max);
 
-            self.register();
-            assert(self.request_number > 0);
-
             // We will set parent, context, view and checksums only when sending for the first time:
             message.header.* = .{
                 .client = self.id,
-                .request = self.request_number,
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(u32, @sizeOf(Header) + message_body_size),
             };
-
-            log.debug("{}: request: user_data={} request={} size={} {s}", .{
-                self.id,
-                user_data,
-                message.header.request,
-                message.header.size,
-                @tagName(operation),
-            });
-
-            assert(!self.request_queue.full());
-            const was_empty = self.request_queue.empty();
-
-            self.request_number += 1;
-            self.request_queue.push_assume_capacity(.{
-                .user_data = user_data,
-                .callback = .{ .request = callback },
-                .message = message.ref(),
-            });
-            if (self.request_queue.full()) assert(self.messages_available == 0);
-
-            // If the queue was empty, then there is no request inflight and we must send this one:
-            if (was_empty) self.send_request_for_the_first_time(message);
+            self.raw_request(user_data, .{ .request = callback }, message);
         }
 
         pub fn request_reconfigure(
@@ -262,33 +242,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             message.header.* = .{
                 .client = self.id,
-                .request = self.request_number,
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = vsr.Operation.reconfigure,
                 .size = @intCast(u32, @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)),
             };
             stdx.copy_disjoint(.exact, u8, message.body(), std.mem.asBytes(reconfiguration));
-
-            log.debug("{}: request_reconfigure: user_data={} request={}", .{
-                self.id,
-                user_data,
-                message.header.request,
-            });
-
-            assert(!self.request_queue.full());
-            const was_empty = self.request_queue.empty();
-
-            self.request_number += 1;
-            self.request_queue.push_assume_capacity(.{
-                .user_data = user_data,
-                .callback = .{ .reconfigure = callback },
-                .message = message.ref(),
-            });
-            if (self.request_queue.full()) assert(self.messages_available == 0);
-
-            // If the queue was empty, then there is no request inflight and we must send this one:
-            if (was_empty) self.send_request_for_the_first_time(message);
+            self.raw_request(user_data, .{ .reconfigure = callback }, message);
         }
 
         /// Sends a request, only setting request_number in the header. Currently only used by
@@ -296,23 +256,31 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub fn raw_request(
             self: *Self,
             user_data: u128,
-            callback: Request.Callback,
+            callback: Request.AnyCallback,
             message: *Message,
         ) void {
-            assert(!message.header.operation.vsr_reserved());
-            const operation = message.header.operation.cast(StateMachine);
+            assert(message.header.request == 0);
+            const operation = message.header.operation;
+            switch (callback) {
+                .request => assert(!operation.vsr_reserved()),
+                .reconfigure => assert(operation == .reconfigure),
+            }
 
             self.register();
             assert(self.request_number > 0);
-
             message.header.request = self.request_number;
+
+            const operation_name = if (operation.vsr_reserved())
+                @tagName(operation)
+            else
+                @tagName(operation.cast(StateMachine));
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
                 user_data,
                 message.header.request,
                 message.header.size,
-                @tagName(operation),
+                operation_name,
             });
 
             assert(!self.request_queue.full());
@@ -321,7 +289,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_number += 1;
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
-                .callback = .{ .request = callback },
+                .callback = callback,
                 .message = message.ref(),
             });
             if (self.request_queue.full()) assert(self.messages_available == 0);

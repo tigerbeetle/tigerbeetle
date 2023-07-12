@@ -366,7 +366,11 @@ pub const AOFReplayClient = struct {
                 .timestamp = header.timestamp,
             };
 
-            self.client.raw_request(@ptrToInt(self), AOFReplayClient.replay_callback, message);
+            self.client.raw_request(
+                @ptrToInt(self),
+                .{ .request = AOFReplayClient.replay_callback },
+                message,
+            );
 
             // Process messages one by one for now
             while (self.client.request_queue.count > 0) {
