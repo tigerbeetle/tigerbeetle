@@ -501,8 +501,8 @@ pub const Storage = struct {
         storage: *const Storage,
         copy_: u8,
     ) *const superblock.SuperBlockHeader {
-        const offset = vsr.Zone.superblock.offset(superblock.areas.header.offset(copy_));
-        const bytes = storage.memory[offset..][0..superblock.areas.header.size_max];
+        const offset = vsr.Zone.superblock.offset(superblock.SuperBlockZone.header.start_for_copy(copy_));
+        const bytes = storage.memory[offset..][0..comptime superblock.SuperBlockZone.header.size_max()];
         return mem.bytesAsValue(superblock.SuperBlockHeader, bytes);
     }
 
@@ -600,7 +600,7 @@ fn verify_alignment(buffer: []const u8) void {
 }
 
 pub const Area = union(enum) {
-    superblock: struct { area: superblock.Area, copy: u8 },
+    superblock: struct { zone: superblock.SuperBlockZone, copy: u8 },
     wal_headers: struct { sector: usize },
     wal_prepares: struct { slot: usize },
     client_replies: struct { slot: usize },
@@ -610,8 +610,8 @@ pub const Area = union(enum) {
         switch (area) {
             .superblock => |data| SectorRange.from_zone(
                 .superblock,
-                @field(superblock.areas, data.area).offset(data.copy),
-                @field(superblock.areas, data.area).size_max,
+                data.zone.start_for_copy(data.copy),
+                data.zone.size_max(),
             ),
             .wal_headers => |data| SectorRange.from_zone(
                 .wal_headers,
@@ -716,7 +716,7 @@ pub const ClusterFaultAtlas = struct {
     const headers_per_sector = @divExact(constants.sector_size, @sizeOf(vsr.Header));
     const header_sectors = @divExact(constants.journal_slot_count, headers_per_sector);
 
-    const FaultySuperBlockAreas = std.enums.EnumArray(superblock.Area, CopySet);
+    const FaultySuperBlockAreas = std.enums.EnumArray(superblock.SuperBlockZone, CopySet);
     const FaultyWALHeaders = std.StaticBitSet(@divExact(
         constants.journal_size_headers,
         constants.sector_size,
@@ -747,7 +747,7 @@ pub const ClusterFaultAtlas = struct {
         var atlas = ClusterFaultAtlas{ .options = options };
 
         for (&atlas.faulty_superblock_areas.values) |*copies, area| {
-            if (area == @enumToInt(superblock.Area.header)) {
+            if (area == @enumToInt(superblock.SuperBlockZone.header)) {
                 // Only inject read/write faults into trailers, not the header.
                 // This prevents the quorum from being lost like so:
                 // - copy₀: B (ok)
@@ -813,11 +813,11 @@ pub const ClusterFaultAtlas = struct {
 
         const copy = @divFloor(offset_in_zone, superblock.superblock_copy_size);
         const offset_in_copy = offset_in_zone % superblock.superblock_copy_size;
-        const area: superblock.Area = switch (offset_in_copy) {
-            superblock.areas.header.base => .header,
-            superblock.areas.manifest.base => .manifest,
-            superblock.areas.free_set.base => .free_set,
-            superblock.areas.client_sessions.base => .client_sessions,
+        const area: superblock.SuperBlockZone = switch (offset_in_copy) {
+            superblock.SuperBlockZone.header.start() => .header,
+            superblock.SuperBlockZone.manifest.start() => .manifest,
+            superblock.SuperBlockZone.free_set.start() => .free_set,
+            superblock.SuperBlockZone.client_sessions.start() => .client_sessions,
             else => unreachable,
         };
 
