@@ -26,9 +26,16 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 operation: StateMachine.Operation,
                 results: []const u8,
             ) void;
+
+            pub const ReconfigureCallback = *const fn (
+                user_data: u128,
+                result: vsr.ReconfigurationResult,
+            ) void;
+
             user_data: u128,
+
             // Null iff operation=register.
-            callback: ?Callback,
+            callback: ?union { request: Callback, reconfigure: ReconfigureCallback },
             message: *Message,
         };
 
@@ -205,6 +212,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message_body_size: usize,
         ) void {
             assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
+            assert(message_body_size <= constants.message_body_size_max);
 
             self.register();
             assert(self.request_number > 0);
@@ -233,7 +241,48 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_number += 1;
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
-                .callback = callback,
+                .callback = .{ .request = callback },
+                .message = message.ref(),
+            });
+            if (self.request_queue.full()) assert(self.messages_available == 0);
+
+            // If the queue was empty, then there is no request inflight and we must send this one:
+            if (was_empty) self.send_request_for_the_first_time(message);
+        }
+
+        pub fn request_reconfigure(
+            self: *Self,
+            user_data: u128,
+            callback: Request.ReconfigureCallback,
+            reconfiguration: *const vsr.ReconfigurationRequest,
+            message: *Message,
+        ) void {
+            self.register();
+            assert(self.request_number > 0);
+
+            message.header.* = .{
+                .client = self.id,
+                .request = self.request_number,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = vsr.Operation.reconfigure,
+                .size = @intCast(u32, @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)),
+            };
+            stdx.copy_disjoint(.exact, u8, message.body(), std.mem.asBytes(reconfiguration));
+
+            log.debug("{}: request_reconfigure: user_data={} request={}", .{
+                self.id,
+                user_data,
+                message.header.request,
+            });
+
+            assert(!self.request_queue.full());
+            const was_empty = self.request_queue.empty();
+
+            self.request_number += 1;
+            self.request_queue.push_assume_capacity(.{
+                .user_data = user_data,
+                .callback = .{ .reconfigure = callback },
                 .message = message.ref(),
             });
             if (self.request_queue.full()) assert(self.messages_available == 0);
@@ -272,7 +321,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_number += 1;
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
-                .callback = callback,
+                .callback = .{ .request = callback },
                 .message = message.ref(),
             });
             if (self.request_queue.full()) assert(self.messages_available == 0);
@@ -437,13 +486,22 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             if (inflight.callback) |callback| {
-                assert(!inflight_operation.vsr_reserved());
+                if (inflight_operation == .reconfigure) {
+                    const result = std.mem.bytesAsValue(
+                        vsr.ReconfigurationResult,
+                        reply.body()[0..@sizeOf(vsr.ReconfigurationResult)],
+                    );
 
-                callback(
-                    inflight.user_data,
-                    inflight_operation.cast(StateMachine),
-                    reply.body(),
-                );
+                    callback.reconfigure(inflight.user_data, result.*);
+                } else {
+                    assert(!inflight_operation.vsr_reserved());
+
+                    callback.request(
+                        inflight.user_data,
+                        inflight_operation.cast(StateMachine),
+                        reply.body(),
+                    );
+                }
             } else {
                 assert(inflight_operation == .register);
             }

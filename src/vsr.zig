@@ -970,7 +970,7 @@ pub const ReconfigurationRequest = extern struct {
     reserved: [54]u8 = [_]u8{0} ** 54,
     /// The result of this request. Set to zero by the client and filled-in by the primary when it
     /// accepts a reconfiguration request.
-    result: ReconfigurationResult,
+    result: ReconfigurationResult = .reserved,
 
     comptime {
         assert(@sizeOf(ReconfigurationRequest) == 256);
@@ -986,7 +986,23 @@ pub const ReconfigurationRequest = extern struct {
             standby_count: u8,
         },
     ) ReconfigurationResult {
-        assert(member_count(current.members) == current.replica_count + current.standby_count);
+        const current_node_count = current.replica_count + current.standby_count;
+
+        var current_members = current.members.*;
+        if (current.epoch == 0) {
+            // TODO: At the moment, we don't support adding new standbys dynamically. For this
+            // reason, `tigerbeetle format` creates a cluster with full membership, and the actual
+            // number of standbys is controlled by the number of addresses passed to `tigerbeetle
+            // start`. For the initial epoch, we truncate extraneous members here to make asserts
+            // work.
+            //
+            // Once reconfiguration fully works, `tigerbeetle format` will start with zero standbys,
+            // and this code could be replaced with
+            //
+            //     if (current.epoch == 0) assert(current.standby_count == 0)
+            for (current_members[current_node_count..]) |*id| id.* = 0;
+        }
+        assert(member_count(&current_members) == current_node_count);
 
         if (request.replica_count == 0) return .replica_count_zero;
         if (request.replica_count > constants.replicas_max) return .replica_count_max_exceeded;
@@ -1014,19 +1030,19 @@ pub const ReconfigurationRequest = extern struct {
 
         assert(request.epoch == current.epoch + 1);
 
-        assert(valid_members(current.members));
+        assert(valid_members(&current_members));
         assert(valid_members(&request.members));
-        assert(member_count(current.members) == member_count(&request.members));
+        assert(member_count(&current_members) >= member_count(&request.members));
         // We have just asserted that the sets have no duplicates and have equal lengths,
-        // so it's enough to check that current.members ⊂ request.members.
-        for (current.members) |member_current| {
+        // so it's enough to check that current_members ⊂ request.members.
+        for (current_members) |member_current| {
             if (member_current == 0) break;
             for (request.members) |member| {
                 if (member == member_current) break;
             } else return .different_member_set;
         }
 
-        if (std.meta.eql(request.members, current.members.*)) {
+        if (std.meta.eql(request.members, current_members)) {
             return .configuration_is_no_op;
         }
 

@@ -165,6 +165,7 @@ pub fn main() !void {
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
         .requests_max = constants.journal_slot_count * 3,
+        .request_reconfigure_probability = random.uintLessThan(u8, 10),
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
         .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
@@ -327,6 +328,7 @@ pub const Simulator = struct {
         /// The total number of requests to send. Does not count `register` messages.
         requests_max: usize,
         request_probability: u8, // percent
+        request_reconfigure_probability: u8, // percent
         request_idle_on_probability: u8, // percent
         request_idle_off_probability: u8, // percent
     };
@@ -595,8 +597,10 @@ pub const Simulator = struct {
                 commit.request.header.request,
             });
 
-            if (!commit.request.header.operation.vsr_reserved()) {
+            if (commit.request.header.operation != .register) {
                 simulator.requests_replied += 1;
+            }
+            if (!commit.request.header.operation.vsr_reserved()) {
                 simulator.workload.on_reply(
                     commit.client_index,
                     commit.reply.header.operation.cast(StateMachine),
@@ -646,26 +650,47 @@ pub const Simulator = struct {
         var request_message = client.get_message();
         defer client.unref(request_message);
 
-        const request_metadata = simulator.workload.build_request(
-            client_index,
-            request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
-        );
-        assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
+        if (chance(simulator.random, simulator.options.request_reconfigure_probability)) {
+            const reconfiguration = simulator.build_request_reconfigure();
+            simulator.cluster.request_reconfigure(client_index, &reconfiguration, request_message);
+        } else {
+            const request_metadata = simulator.workload.build_request(
+                client_index,
+                request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
+            );
+            assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
 
-        simulator.cluster.request(
-            client_index,
-            request_metadata.operation,
-            request_message,
-            request_metadata.size,
-        );
-        // Since we already checked the client's request queue for free space, `client.request()`
-        // should always queue the request.
-        assert(request_message == client.request_queue.tail_ptr().?.message);
-        assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
-        assert(request_message.header.operation.cast(StateMachine) == request_metadata.operation);
+            simulator.cluster.request(
+                client_index,
+                request_metadata.operation,
+                request_message,
+                request_metadata.size,
+            );
+
+            // Since we already checked the client's request queue for free space, `client.request()`
+            // should always queue the request.
+            assert(request_message == client.request_queue.tail_ptr().?.message);
+            assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
+            assert(request_message.header.operation.cast(StateMachine) == request_metadata.operation);
+        }
 
         simulator.requests_sent += 1;
         assert(simulator.requests_sent <= simulator.options.requests_max);
+    }
+
+    pub fn build_request_reconfigure(
+        simulator: *Simulator,
+    ) vsr.ReconfigurationRequest {
+        const member_count = simulator.cluster.replica_count + simulator.cluster.standby_count;
+        var members = vsr.root_members(simulator.options.cluster.cluster_id);
+        simulator.random.shuffle(u128, members[0..member_count]);
+        for (members[member_count..]) |*member| member.* = 0;
+        return .{
+            .members = members,
+            .epoch = 0,
+            .replica_count = simulator.cluster.replica_count,
+            .standby_count = simulator.cluster.standby_count,
+        };
     }
 
     fn tick_crash(simulator: *Simulator) void {
