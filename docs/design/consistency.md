@@ -1,7 +1,7 @@
 # Consistency
 
 TigerBeetle is designed to guard against bugs not only in its
-[own code](https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/TIGER_STYLE.md), but
+[own code](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), but
 at the boundaries, in the application code which interfaces with TigerBeetle.
 This is exhibited by the client's API design, which may be surprising (see [Retries](#retries)) when
 contrasted with a more conventional database.

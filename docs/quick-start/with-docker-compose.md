@@ -7,9 +7,9 @@ sidebar_position: 3
 First, provision the data file for each node:
 
 ```
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
 ```
 
 Then create a docker-compose.yml file:
@@ -33,21 +33,21 @@ version: "3.7"
 
 services:
   tigerbeetle_0:
-    image: ghcr.io/tigerbeetledb/tigerbeetle
+    image: ghcr.io/tigerbeetle/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
     network_mode: host
     volumes:
       - ./data:/data
 
   tigerbeetle_1:
-    image: ghcr.io/tigerbeetledb/tigerbeetle
+    image: ghcr.io/tigerbeetle/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_1.tigerbeetle"
     network_mode: host
     volumes:
       - ./data:/data
 
   tigerbeetle_2:
-    image: ghcr.io/tigerbeetledb/tigerbeetle
+    image: ghcr.io/tigerbeetle/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_2.tigerbeetle"
     network_mode: host
     volumes:
@@ -97,7 +97,7 @@ on macOS, you will need to add the `IPC_LOCK` capability.
 
 services:
   tigerbeetle_0:
-    image: ghcr.io/tigerbeetledb/tigerbeetle
+    image: ghcr.io/tigerbeetle/tigerbeetle
     command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
     network_mode: host
     cap_add:       # HERE
@@ -108,7 +108,7 @@ services:
 ... rest of docker-compose.yml ...
 ```
 
-See https://github.com/tigerbeetledb/tigerbeetle/issues/92 for discussion.
+See https://github.com/tigerbeetle/tigerbeetle/issues/92 for discussion.
 
 ## Debugging panics
 
@@ -117,5 +117,5 @@ better stack trace by switching to a debug image (by using the `:debug`
 Docker image tag).
 
 ```bash
-ghcr.io/tigerbeetledb/tigerbeetle:debug
+ghcr.io/tigerbeetle/tigerbeetle:debug
 ```

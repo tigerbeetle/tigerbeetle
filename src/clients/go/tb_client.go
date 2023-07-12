@@ -32,8 +32,8 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/tigerbeetledb/tigerbeetle-go/pkg/errors"
-	"github.com/tigerbeetledb/tigerbeetle-go/pkg/types"
+	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
+	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 ///////////////////////////////////////////////////////////////
