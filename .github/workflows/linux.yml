@@ -28,15 +28,115 @@ jobs:
       - uses: actions/checkout@v3
       - run: ./.github/ci/docs_check.sh
 
-  test:
+  test_on_alpine:
     if: inputs.version == ''
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        distro: [ubuntu, alpine]
     steps:
       - uses: actions/checkout@v3
-      - run: ./scripts/tests_on_${{ matrix.distro }}.sh
+      - run: ./.github/ci/tests_on_alpine.sh
+
+  test_on_ubuntu:
+    if: inputs.version == ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: |
+          COV=1 ./.github/ci/tests_on_ubuntu.sh && \
+          cp kcov-output/test.*/cobertura.xml cov-pr.xml
+      - name: Upload cov-pr.xml
+        uses: actions/upload-artifact@v3
+        with:
+          name: cov-pr.xml
+          path: cov-pr.xml
+
+  # Used to generate coverage information for the target of this PR.
+  test_on_ubuntu_main:
+    if: inputs.version == ''
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      # Check out the PR, copy the tests_on_ubuntu.sh from there, checkout main.
+      - uses: actions/checkout@v3
+      - run: cp ./.github/ci/tests_on_ubuntu.sh /tmp/tests_on_ubuntu.sh
+      - run: cp ./build.zig /tmp/build.zig
+      - uses: actions/checkout@v3
+        with:
+          ref: 'main'
+
+      - name: Fetch main commit
+        run: echo "main-sha=$(git rev-parse HEAD)" > $GITHUB_OUTPUT
+        id: main-sha
+
+      - name: Cache cov-main.xml for main commit
+        id: cache-cov
+        uses: actions/cache@v3
+        with:
+          path: cov-main.xml
+          key: cov-xml-${{ steps.main-sha.outputs.main-sha }}
+
+      - name: Generate cov-main.xml for main commit
+        if: steps.cache-cov.outputs.cache-hit != 'true'
+        run: |
+          cp /tmp/build.zig . && \
+          COV=1 /tmp/tests_on_ubuntu.sh && \
+          cp kcov-output/test.*/cobertura.xml cov-main.xml
+
+      - name: Upload cov-main.xml
+        uses: actions/upload-artifact@v3
+        with:
+          name: cov-main.xml
+          path: cov-main.xml
+
+  coverage:
+    if: inputs.version == ''
+    runs-on: ubuntu-latest
+    needs: [test_on_ubuntu, test_on_ubuntu_main]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
+        with:
+          ref: 'main'
+          path: 'tigerbeetle-main'
+
+      - name: Download cov-main.xml
+        uses: actions/download-artifact@v3
+        with:
+          name: cov-main.xml
+          path: cov-main.xml
+
+      - name: Download cov-pr.xml
+        uses: actions/download-artifact@v3
+        with:
+          name: cov-pr.xml
+          path: cov-pr.xml
+
+      # The sed command below is an inline patch which fixes pycobertura for our XML files. It's
+      # really weird that it's required at all.
+      # The || true is because pycobertura will exit with a non-zero exit code if it finds a diff
+      - run: |
+          pip install pycobertura==3.2.1 && \
+          sed -i "296s/for file_index in range(number_of_files)/for file_index in range(len(file_stats_dict['Filename']))/" ~/.local/lib/python3.10/site-packages/pycobertura/reporters.py && \
+
+          pycobertura show -f html -s ./src cov-pr.xml/cov-pr.xml -o coverage.html && \
+          (pycobertura diff -f html -o coverage-diff.html cov-main.xml/cov-main.xml cov-pr.xml/cov-pr.xml --source1 ${GITHUB_WORKSPACE}/tigerbeetle-main/src --source2 ./src || true) && \
+          echo "# Diff To Main" > ${GITHUB_STEP_SUMMARY} && \
+          (pycobertura diff --no-color -f markdown cov-main.xml/cov-main.xml cov-pr.xml/cov-pr.xml --source1 ${GITHUB_WORKSPACE}/tigerbeetle-main/src --source2 ./src || true) >> ${GITHUB_STEP_SUMMARY} && \
+          echo "# PR Coverage" >> ${GITHUB_STEP_SUMMARY} && \
+          pycobertura show -f markdown -s ./src cov-pr.xml/cov-pr.xml >> ${GITHUB_STEP_SUMMARY} && \
+          (pycobertura diff -f github-annotation --annotation-title=kcov --annotation-message="Not covered by unit test." cov-main.xml/cov-main.xml cov-pr.xml/cov-pr.xml --source1 ${GITHUB_WORKSPACE}/tigerbeetle-main/src --source2 ./src || true) | sed 's|^::notice file=|::notice file=src/|'
+
+      - name: Upload Test Coverage
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage.html
+          path: coverage.html
+
+      - name: Upload Test Coverage Diff
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-diff.html
+          path: coverage-diff.html
 
   benchmark:
     if: inputs.version == ''
