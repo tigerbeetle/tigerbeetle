@@ -140,13 +140,13 @@ pub fn StorageCheckerType(comptime Replica: type) type {
                 .checksum_grid = 0,
             };
 
-            inline for (.{ .manifest, .free_set, .client_sessions }) |trailer| {
-                const trailer_area = @field(superblock.areas, @tagName(trailer));
+            inline for (comptime std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
                 const trailer_size = @field(working, @tagName(trailer) ++ "_size");
                 var copy: u8 = 0;
                 while (copy < constants.superblock_copies) : (copy += 1) {
+                    const trailer_start = trailer.zone().start_for_copy(copy);
                     @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer)) |=
-                        vsr.checksum(storage.memory[trailer_area.offset(copy)..][0..trailer_size]);
+                        vsr.checksum(storage.memory[trailer_start..][0..trailer_size]);
                 }
             }
 
