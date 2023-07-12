@@ -46,12 +46,6 @@ jobs:
         with:
           dotnet-version: 6.0.x
 
-      - name: Check Client Dotnet
-        run: |
-          mkdir -p /tmp/dotnet && cd /tmp/dotnet && \
-          dotnet new console && \
-          dotnet add package tigerbeetle --version ${{ inputs.version }}
-
       - name: Check Client Go
         run: |
           mkdir -p /tmp/go && cd /tmp/go && \
@@ -76,6 +70,18 @@ jobs:
         run: |
           mkdir -p /tmp/node && cd /tmp/node && \
           npm install tigerbeetle-node@${{ inputs.version }}
+
+      # Dotnet done at the end, because nuget.org takes a bit to update. That's why we have retry logic here, too.
+      - name: Check Client Dotnet
+        run: |
+          mkdir -p /tmp/dotnet && cd /tmp/dotnet && \
+          dotnet new console && \
+          dotnet add package tigerbeetle --version ${{ inputs.version }} || \
+          (sleep 30 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 60 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 60 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 120 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 180 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }})
 
       - name: Alert if anything failed
         if: failure()
