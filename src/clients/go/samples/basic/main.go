@@ -6,8 +6,8 @@ import (
 	"os"
 	"reflect"
 
-	tb "github.com/tigerbeetledb/tigerbeetle-go"
-	tb_types "github.com/tigerbeetledb/tigerbeetle-go/pkg/types"
+	tb "github.com/tigerbeetle/tigerbeetle-go"
+	tb_types "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 func uint128(value string) tb_types.Uint128 {

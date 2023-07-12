@@ -680,7 +680,7 @@ const Generator = struct {
         mw.paragraph("In a POSIX shell run:");
         mw.commands(
             self.sprintf("{s}{s}", .{
-                \\git clone https://github.com/tigerbeetledb/tigerbeetle
+                \\git clone https://github.com/tigerbeetle/tigerbeetle
                 \\cd tigerbeetle
                 \\git submodule update --init --recursive
                 \\./scripts/install_zig.sh
@@ -696,7 +696,7 @@ const Generator = struct {
             mw.paragraph("In PowerShell run:");
             mw.commands(
                 self.sprintf("{s}{s}", .{
-                    \\git clone https://github.com/tigerbeetledb/tigerbeetle
+                    \\git clone https://github.com/tigerbeetle/tigerbeetle
                     \\cd tigerbeetle
                     \\git submodule update --init --recursive
                     \\.\scripts\install_zig.bat

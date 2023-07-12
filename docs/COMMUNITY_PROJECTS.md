@@ -25,4 +25,4 @@ clients may lag behind.
 
 Need a client for Go, Java, Node.js, or .NET? We've got you covered
 with [first-party
-clients](https://github.com/tigerbeetledb/tigerbeetle/tree/main/src/clients).
+clients](https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients).

@@ -47,7 +47,7 @@ done
 
 # The below are set for both client and replicas.
 # We fix our git URL, so we'll only ever run this on our own branches and not random PRs
-export NOMAD_VAR_git_url="https://github.com/tigerbeetledb/tigerbeetle.git"
+export NOMAD_VAR_git_url="https://github.com/tigerbeetle/tigerbeetle.git"
 export NOMAD_VAR_git_ref="${3}"
 
 # Build the address string

@@ -7,7 +7,7 @@ sidebar_position: 2
 First provision TigerBeetle's data directory.
 
 ```bash
-$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
+$ docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
@@ -16,7 +16,7 @@ info(io): allocating 660.140625MiB...
 Then run the server.
 
 ```bash
-$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle \
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
@@ -49,7 +49,7 @@ on macOS, you will need to do one of the following:
 }
 ```
 
-See https://github.com/tigerbeetledb/tigerbeetle/issues/92 for discussion.
+See https://github.com/tigerbeetle/tigerbeetle/issues/92 for discussion.
 
 ## Debugging panics
 
@@ -58,6 +58,6 @@ better stack trace by switching to a debug image (by using the `:debug`
 Docker image tag).
 
 ```bash
-$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetledb/tigerbeetle:debug \
+$ docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle:debug \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 ```

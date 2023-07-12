@@ -10,7 +10,7 @@ GitHub.
 ## Prebuilt Linux binary
 
 ```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
+$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ tigerbeetle version --verbose | head -n6
@@ -29,13 +29,13 @@ debug binary. To grab this binary, add `--debug` before the `.zip`
 extension:
 
 ```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly--debug.zip
+$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly--debug.zip
 ```
 
 ## Prebuilt macOS binary
 
 ```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
+$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip
 $ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
 $ tigerbeetle version --verbose | head -n6
@@ -54,7 +54,7 @@ debug binary. To grab this binary, add `--debug` before the `.zip`
 extension:
 
 ```bash
-$ curl -LO https://github.com/tigerbeetledb/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly--debug.zip
+$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly--debug.zip
 ```
 
 ## Building from source
@@ -65,7 +65,7 @@ the install script.
 You will need POSIX userland, curl or wget, tar, and xz.
 
 ```bash
-$ git clone https://github.com/tigerbeetledb/tigerbeetle.git
+$ git clone https://github.com/tigerbeetle/tigerbeetle.git
 $ git checkout 2022-11-16-weekly # Or latest tag
 $ cd tigerbeetle
 $ scripts/install.sh
