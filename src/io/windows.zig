@@ -1072,7 +1072,7 @@ pub const IO = struct {
 
         const kernel32 = struct {
             const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
-            const LOCKFILE_FAIL_IMMEDIATELY = 01;
+            const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
 
             extern "kernel32" fn LockFileEx(
                 hFile: os.windows.HANDLE,

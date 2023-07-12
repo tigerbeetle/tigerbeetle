@@ -62,7 +62,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const vsr_package = std.build.Pkg{
         .name = "vsr",
-        .path = .{ .path = "src/vsr.zig" },
+        .source = .{ .path = "src/vsr.zig" },
         .dependencies = &.{options.getPackage("vsr_options")},
     };
 
@@ -210,7 +210,7 @@ pub fn build(b: *std.build.Builder) void {
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
-        unit_tests.addIncludeDir("src/clients/c/");
+        unit_tests.addIncludePath("src/clients/c/");
 
         const unit_tests_step = b.step("test:unit", "Run the unit tests");
         unit_tests_step.dependOn(&unit_tests.step);
@@ -245,7 +245,7 @@ pub fn build(b: *std.build.Builder) void {
 
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests_exe.linkLibC();
-        unit_tests_exe.addIncludeDir("src/clients/c/");
+        unit_tests_exe.addIncludePath("src/clients/c/");
 
         const unit_tests_exe_step = b.step("test:build", "Build the unit tests");
         const install_unit_tests_exe = b.addInstallArtifact(unit_tests_exe);
@@ -540,7 +540,7 @@ fn link_tracer_backend(
                     "-fno-sanitize=undefined",
                 };
 
-            exe.addIncludeDir("./tools/tracy/public/tracy");
+            exe.addIncludePath("./tools/tracy/public/tracy");
             exe.addCSourceFile("./tools/tracy/public/TracyClient.cpp", tracy_c_flags);
             exe.linkLibC();
             exe.linkSystemLibraryName("c++");
@@ -749,7 +749,7 @@ fn node_client(
 
             // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
             // if you're running zig build node_client manually.
-            lib.addSystemIncludeDir("src/clients/node/node_modules/node-api-headers/include");
+            lib.addSystemIncludePath("src/clients/node/node_modules/node-api-headers/include");
             lib.setTarget(cross_target);
             lib.setBuildMode(mode);
             lib.linkLibC();
@@ -874,6 +874,8 @@ fn maybe_execute(
     binary_name: []const u8,
 ) void {
     var to_run = std.ArrayList([]const u8).init(allocator);
+    defer to_run.deinit();
+
     const sep = if (builtin.os.tag == .windows) "\\" else "/";
     const ext = if (builtin.os.tag == .windows) ".exe" else "";
     to_run.append(
@@ -890,10 +892,11 @@ fn maybe_execute(
         ) catch unreachable,
     ) catch unreachable;
 
-    var args = std.process.args();
+    var args = std.process.argsWithAllocator(allocator) catch unreachable;
+    defer args.deinit();
+
     var build_and_run = false;
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = arg_or_err catch unreachable;
+    while (args.next()) |arg| {
 
         if (std.mem.eql(u8, arg, "--")) {
             build_and_run = true;
@@ -1017,7 +1020,7 @@ const JniTestStep = struct {
             java_home,
             if (builtin.os.tag == .windows) "/lib" else "/lib/server",
         });
-        self.tests.addLibPath(libjvm_path);
+        self.tests.addLibraryPath(libjvm_path);
 
         switch (builtin.os.tag) {
             .windows => set_windows_dll(builder.allocator, java_home),

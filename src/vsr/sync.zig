@@ -238,7 +238,7 @@ test "sync: Trailer chunk sequence" {
 
         var chunk_offset: usize = 0;
         while (chunk_offset < total_want.len) {
-            const chunk_size = @minimum(chunk_step, total_want.len - chunk_offset);
+            const chunk_size = @min(chunk_step, total_want.len - chunk_offset);
             const result = trailer.write_chunk(.{
                 .buffer = total_got[0..],
                 .size = @intCast(u32, total_want.len),

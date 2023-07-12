@@ -144,7 +144,7 @@ const GenerateContext = struct {
         switch (fuzz_op_tag) {
             .insert_tables => {
                 // If there's no room for new tables, existing ones should be removed.
-                const insertable = @minimum(ctx.max_inserted - ctx.inserted, max_tables_per_insert);
+                const insertable = @min(ctx.max_inserted - ctx.inserted, max_tables_per_insert);
                 if (insertable == 0) {
                     // Decide whether to remove visible or invisible tables:
                     if (ctx.invisible > 0) return ctx.next(.remove_invisible);
@@ -364,7 +364,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 }
             } else std.math.maxInt(Key);
 
-            const max_delta = @minimum(32, next_key_min - 1 - new_key_min);
+            const max_delta = @min(32, next_key_min - 1 - new_key_min);
             const new_key_max = new_key_min + env.random.uintAtMostBiased(Key, max_delta);
 
             return .{

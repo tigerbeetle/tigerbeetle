@@ -20,43 +20,45 @@ const type_mappings = .{
 };
 
 fn resolve_c_type(comptime Type: type) []const u8 {
-    switch (@typeInfo(Type)) {
-        .Array => |info| return resolve_c_type(info.child),
-        .Enum => |info| return resolve_c_type(info.tag_type),
-        .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
-        .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
-            return switch (info.bits) {
-                8 => "uint8_t",
-                16 => "uint16_t",
-                32 => "uint32_t",
-                64 => "uint64_t",
-                128 => "tb_uint128_t",
-                else => @compileError("invalid int type"),
-            };
-        },
-        .Optional => |info| switch (@typeInfo(info.child)) {
-            .Pointer => return resolve_c_type(info.child),
-            else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
-        },
-        .Pointer => |info| {
-            std.debug.assert(info.size != .Slice);
-            std.debug.assert(!info.is_allowzero);
+    comptime {
+        switch (@typeInfo(Type)) {
+            .Array => |info| return resolve_c_type(info.child),
+            .Enum => |info| return resolve_c_type(info.tag_type),
+            .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .Int => |info| {
+                std.debug.assert(info.signedness == .unsigned);
+                return switch (info.bits) {
+                    8 => "uint8_t",
+                    16 => "uint16_t",
+                    32 => "uint32_t",
+                    64 => "uint64_t",
+                    128 => "tb_uint128_t",
+                    else => @compileError("invalid int type"),
+                };
+            },
+            .Optional => |info| switch (@typeInfo(info.child)) {
+                .Pointer => return resolve_c_type(info.child),
+                else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
+            },
+            .Pointer => |info| {
+                std.debug.assert(info.size != .Slice);
+                std.debug.assert(!info.is_allowzero);
 
-            inline for (type_mappings) |type_mapping| {
-                const ZigType = type_mapping[0];
-                const c_name = type_mapping[1];
+                inline for (type_mappings) |type_mapping| {
+                    const ZigType = type_mapping[0];
+                    const c_name = type_mapping[1];
 
-                if (info.child == ZigType) {
-                    const prefix = if (@typeInfo(ZigType) == .Struct) "struct " else "";
-                    return prefix ++ c_name ++ "*";
+                    if (info.child == ZigType) {
+                        const prefix = if (@typeInfo(ZigType) == .Struct) "struct " else "";
+                        return prefix ++ c_name ++ "*";
+                    }
                 }
-            }
 
-            return resolve_c_type(info.child) ++ "*";
-        },
-        .Void, .Opaque => return "void",
-        else => @compileError("Unhandled type: " ++ @typeName(Type)),
+                return resolve_c_type(info.child) ++ "*";
+            },
+            .Void, .Opaque => return "void",
+            else => @compileError("Unhandled type: " ++ @typeName(Type)),
+        }
     }
 }
 

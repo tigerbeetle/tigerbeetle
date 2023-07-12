@@ -369,7 +369,7 @@ fn create_report(allocator: mem.Allocator, bug: Bug, seed: u64) Report {
     var message = Report{
         .checksum = undefined,
         .bug = bug_type,
-        .seed = @bitCast([8]u8, @byteSwap(u64, seed)),
+        .seed = @bitCast([8]u8, @byteSwap(seed)),
         .commit = commit_byte_array,
     };
 

@@ -1420,7 +1420,7 @@ const ViewChangeHeadersSlice = struct {
         assert(Headers.dvc_header_type(head) == .valid);
 
         if (headers.command == .start_view) {
-            assert(headers.slice.len >= @minimum(
+            assert(headers.slice.len >= @min(
                 constants.view_change_headers_suffix_max,
                 head.op + 1, // +1 to include the head itself.
             ));

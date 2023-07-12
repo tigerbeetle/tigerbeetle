@@ -155,8 +155,8 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     const did_skip = args.skip();
     assert(did_skip);
 
-    const raw_command = try (args.next(allocator) orelse
-        fatal("no command provided, expected 'start', 'format', or 'version'", .{}));
+    const raw_command = args.next() orelse
+        fatal("no command provided, expected 'start', 'format', or 'version'", .{});
     defer allocator.free(raw_command);
 
     if (mem.eql(u8, raw_command, "-h") or mem.eql(u8, raw_command, "--help")) {
@@ -166,8 +166,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     const command = meta.stringToEnum(meta.Tag(Command), raw_command) orelse
         fatal("unknown command '{s}', expected 'start', 'format', or 'version'", .{raw_command});
 
-    while (args.next(allocator)) |parsed_arg| {
-        const arg = try parsed_arg;
+    while (args.next()) |arg| {
         try args_allocated.append(arg);
 
         if (mem.startsWith(u8, arg, "--cluster")) {

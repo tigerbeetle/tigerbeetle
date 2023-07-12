@@ -161,7 +161,7 @@ fn emit_enum(
     comptime int_type: []const u8,
     comptime value_fmt: []const u8,
 ) !void {
-    const is_packed_struct = @TypeOf(type_info) == std.builtin.TypeInfo.Struct;
+    const is_packed_struct = @TypeOf(type_info) == std.builtin.Type.Struct;
     if (is_packed_struct) {
         // Packed structs represented as Enum needs a Flags attribute:
         try buffer.writer().print("    [Flags]\n", .{});
