@@ -164,7 +164,7 @@ Read more about how two-phase transfers work with each client.
 
 Or take a look at how it works with real code.
 
-* [Node](/src/clients/dotnet/samples/two-phase/README.md)
+* [.NET](/src/clients/dotnet/samples/two-phase/README.md)
 * [Go](/src/clients/go/samples/two-phase/README.md)
 * [Java](/src/clients/java/samples/two-phase/README.md)
 * [Node](/src/clients/node/samples/two-phase/README.md)
