@@ -126,7 +126,7 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
         @alignOf(u8),
         0,
     );
-    try check_line_length(source, file_path);
+    defer gpa.free(source);
 
     var tree = try std.zig.parse(gpa, source);
     defer tree.deinit(gpa);
@@ -181,19 +181,4 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
         .function_count = function_count,
         .ratio = @intToFloat(f64, assert_count) / @intToFloat(f64, function_count),
     });
-}
-
-fn check_line_length(source: []const u8, path: []const u8) !void {
-    var i: usize = 0;
-    var line: u32 = 1;
-    while (mem.indexOfScalar(u8, source[i..], '\n')) |newline| : (line += 1) {
-        const line_length = std.unicode.utf8CountCodepoints(
-            source[i..][0..newline],
-        ) catch return error.NotUtf8;
-        if (line_length > 100 and !whitelisted(path, line)) {
-            const stderr = std.io.getStdErr().writer();
-            try stderr.print("{s}:{d} line exceeds 100 columns\n", .{ path, line });
-        }
-        i += newline + 1;
-    }
 }

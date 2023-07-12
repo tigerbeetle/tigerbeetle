@@ -1,4 +1,6 @@
 test {
+    _ = @import("tidy.zig");
+
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
     _ = @import("io.zig");
