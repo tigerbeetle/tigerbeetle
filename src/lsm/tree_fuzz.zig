@@ -7,6 +7,7 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
+const schema = @import("schema.zig");
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 const tracer = @import("../tracer.zig");
@@ -400,8 +401,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const actual_block = env.grid.superblock.storage.grid_block(repair.address);
             stdx.copy_disjoint(.exact, u8, block.*, actual_block);
 
-            const header_bytes = block.*[0..@sizeOf(vsr.Header)];
-            const header = std.mem.bytesAsValue(vsr.Header, header_bytes);
+            const header = schema.header_from_block(block.*);
             assert(header.op == repair.address);
             assert(header.checksum == repair.checksum);
 

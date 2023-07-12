@@ -29,6 +29,7 @@ const log = std.log.scoped(.manifest_log);
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const stdx = @import("../stdx.zig");
+const schema = @import("schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
@@ -403,7 +404,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 const block = manifest_log.blocks.get_ptr(i).?.*;
                 verify_block(block, null, null);
 
-                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+                const header = schema.header_from_block(block);
                 const address = Block.address(block);
                 assert(address > 0);
 
@@ -457,7 +458,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             const block = manifest_log.blocks.head_ptr().?;
             verify_block(block.*, null, null);
 
-            const header = mem.bytesAsValue(vsr.Header, block.*[0..@sizeOf(vsr.Header)]);
+            const header = schema.header_from_block(block.*);
             const address = Block.address(block.*);
             assert(address > 0);
 
@@ -744,7 +745,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            const header = schema.header_from_block(block);
             assert(BlockType.from(header.operation) == .manifest);
 
             if (constants.verify) {
@@ -805,8 +806,7 @@ fn ManifestLogBlockType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         pub fn entry_count(block: BlockPtrConst) u32 {
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            assert(header.command == .block);
+            const header = schema.header_from_block(block);
 
             const labels_size = entry_count_max * @sizeOf(Label);
             const tables_size = header.size - @sizeOf(vsr.Header) - labels_size;
