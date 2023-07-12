@@ -288,7 +288,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // value of @ctz() fits in a u5, but since we add 1 the return type of
             // our function must be a u6.
             comptime assert(31 + 1 <= math.maxInt(u6));
-            return @ctz(u32, x) + 1;
+            return @ctz(x) + 1;
         }
     };
 }

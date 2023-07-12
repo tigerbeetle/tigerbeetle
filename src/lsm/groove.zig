@@ -171,7 +171,7 @@ pub fn GrooveType(
     assert(@hasField(Object, "timestamp"));
     assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
-    comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -192,7 +192,7 @@ pub fn GrooveType(
                 field.field_type,
                 @field(groove_options.value_count_max, field.name),
             );
-            index_fields = index_fields ++ [_]std.builtin.TypeInfo.StructField{
+            index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
                     .name = field.name,
                     .field_type = IndexTree,
@@ -244,10 +244,10 @@ pub fn GrooveType(
         };
     }
 
-    comptime var index_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
     for (index_fields) |index_field| {
         const IndexTree = index_field.field_type;
-        index_options_fields = index_options_fields ++ [_]std.builtin.TypeInfo.StructField{
+        index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = index_field.name,
                 .field_type = IndexTree.Options,

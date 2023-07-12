@@ -387,7 +387,7 @@ const test_binary_search = struct {
     }
 
     fn random_sequence(allocator: std.mem.Allocator, random: std.rand.Random, iter: usize) ![]const u32 {
-        const keys_count = @minimum(
+        const keys_count = @min(
             @as(usize, 1E6),
             fuzz.random_int_exponential(random, usize, iter),
         );

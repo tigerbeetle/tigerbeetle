@@ -587,7 +587,7 @@ pub fn CompactionType(
 
             assert(values_in.len > 0);
 
-            const len = @minimum(values_in.len, values_out.len - values_out_index);
+            const len = @min(values_in.len, values_out.len - values_out_index);
             assert(len > 0);
             stdx.copy_disjoint(
                 .exact,

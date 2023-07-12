@@ -529,7 +529,7 @@ pub fn main() !void {
         .fault_atlas = &storage_fault_atlas,
     };
 
-    const fuzz_op_count = @minimum(
+    const fuzz_op_count = @min(
         fuzz_args.events_max orelse @as(usize, 1E7),
         fuzz.random_int_exponential(random, usize, 1E6),
     );

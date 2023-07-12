@@ -278,7 +278,7 @@ pub const PlotId = union(enum) {
     }
 };
 
-usingnamespace switch (constants.tracer_backend) {
+pub usingnamespace switch (constants.tracer_backend) {
     .none => TracerNone,
     .tracy => TracerTracy,
 };
@@ -426,8 +426,6 @@ const TracerTracy = struct {
     }
 
     pub fn end(slot: *?SpanStart, event: Event) void {
-        _ = event;
-
         // The event must already have been started.
         const tracy_context = slot.*.?;
         c.___tracy_fiber_enter(intern_name(event.fiber()));

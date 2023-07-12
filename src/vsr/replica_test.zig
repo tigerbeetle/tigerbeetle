@@ -1162,7 +1162,7 @@ const TestContext = struct {
         const replica_count = t.cluster.options.replica_count;
 
         var view: u32 = 0;
-        for (t.cluster.replicas) |*r| view = @maximum(view, r.view);
+        for (t.cluster.replicas) |*r| view = @max(view, r.view);
 
         var array = ProcessList{ .buffer = undefined };
         switch (selector) {

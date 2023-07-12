@@ -8215,7 +8215,7 @@ pub fn ReplicaType(
             assert(trailer_size > parameters.offset or
                 (trailer_size == 0 and parameters.offset == 0));
 
-            const body_size = @intCast(u32, @minimum(
+            const body_size = @intCast(u32, @min(
                 trailer_size - parameters.offset,
                 constants.sync_trailer_message_body_size_max,
             ));
@@ -8415,13 +8415,13 @@ const DVCQuorum = struct {
 
         const nacks = message.header.context;
         comptime assert(@TypeOf(nacks) == u128);
-        assert(@popCount(u128, nacks) <= headers.slice.len);
-        assert(@clz(u128, nacks) + headers.slice.len >= @bitSizeOf(u128));
+        assert(@popCount(nacks) <= headers.slice.len);
+        assert(@clz(nacks) + headers.slice.len >= @bitSizeOf(u128));
 
         const present = message.header.client;
         comptime assert(@TypeOf(present) == u128);
-        assert(@popCount(u128, present) <= headers.slice.len);
-        assert(@clz(u128, present) + headers.slice.len >= @bitSizeOf(u128));
+        assert(@popCount(present) <= headers.slice.len);
+        assert(@clz(present) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
