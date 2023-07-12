@@ -25,8 +25,10 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             };
         };
 
+        const RequestQueue = RingBuffer(Self.Request, constants.client_request_queue_max, .array);
+
         messages_available: u32 = constants.client_request_queue_max,
-        request_queue: RingBuffer(Self.Request, constants.client_request_queue_max, .array) = .{},
+        request_queue: RequestQueue = RequestQueue.init(),
         message_pool: *MessagePool,
 
         pub fn init(

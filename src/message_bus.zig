@@ -442,7 +442,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// Number of bytes of the current message that have already been sent.
             send_progress: usize = 0,
             /// The queue of messages to send to the client or replica peer.
-            send_queue: SendQueue = .{},
+            send_queue: SendQueue = SendQueue.init(),
 
             /// Attempt to connect to a replica.
             /// The slot in the Message.replicas slices is immediately reserved.

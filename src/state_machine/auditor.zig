@@ -10,7 +10,6 @@ const log = std.log.scoped(.test_auditor);
 const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
 // TODO(zig) This won't be necessary in Zig 0.10.
