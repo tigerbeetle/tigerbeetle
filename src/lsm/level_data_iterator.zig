@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
+const schema = @import("schema.zig");
 
 const constants = @import("../constants.zig");
 
@@ -9,7 +10,7 @@ const stdx = @import("../stdx.zig");
 const ManifestType = @import("manifest.zig").ManifestType;
 const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
-const schema = @import("schema.zig");
+const Direction = @import("direction.zig").Direction;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 
 // Iterates over the data blocks in a level B table. References to the level B
@@ -41,6 +42,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
 
             // `tables` contains TableInfo references from ManifestLevel.
             tables: []const Manifest.TableInfoReference,
+            direction: Direction,
         };
 
         pub const IndexCallback = fn (it: *LevelTableValueBlockIterator) void;
@@ -66,8 +68,8 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             table_next: Callback,
         },
 
-        pub fn init() !LevelTableValueBlockIterator {
-            var table_data_iterator = try TableDataIterator.init();
+        pub fn init() LevelTableValueBlockIterator {
+            var table_data_iterator = TableDataIterator.init();
             errdefer table_data_iterator.deinit();
 
             return LevelTableValueBlockIterator{
@@ -107,6 +109,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
                 .grid = context.grid,
                 .addresses = &.{},
                 .checksums = &.{},
+                .direction = context.direction,
             });
         }
 
@@ -150,6 +153,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
                 .grid = it.context.grid,
                 .addresses = index_schema.data_addresses_used(it.context.index_block),
                 .checksums = index_schema.data_checksums_used(it.context.index_block),
+                .direction = it.context.direction,
             });
             callback.on_index(it);
             it.table_index += 1;
