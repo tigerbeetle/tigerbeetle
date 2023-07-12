@@ -71,6 +71,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             message: *Message,
         };
 
+        const WriteQueue = RingBuffer(*Write, constants.client_replies_iops_write_max, .array);
+
         storage: *Storage,
         message_pool: *MessagePool,
         replica: u8,
@@ -88,7 +90,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
 
         /// Guard against multiple concurrent writes to the same slot.
         /// Pointers are into `writes`.
-        write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
+        write_queue: WriteQueue = WriteQueue.init(),
 
         ready_next_tick: Storage.NextTick = undefined,
         ready_callback: ?union(enum) {

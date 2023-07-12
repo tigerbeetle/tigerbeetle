@@ -17,7 +17,6 @@ const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExtent;

@@ -38,7 +38,6 @@ const Storage = @import("storage.zig").Storage;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const MessageBus = @import("message_bus.zig").MessageBusClient;
 const StateMachine = @import("state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
-const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 const vsr = @import("vsr.zig");
 const Client = vsr.Client(StateMachine, MessageBus);
 const tb = @import("tigerbeetle.zig");

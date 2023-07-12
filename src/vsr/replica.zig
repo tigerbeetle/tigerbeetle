@@ -8805,11 +8805,11 @@ const PipelineQueue = struct {
 
     /// Messages that are preparing (uncommitted, being written to the WAL (may already be written
     /// to the WAL) and replicated (may just be waiting for acks)).
-    prepare_queue: PrepareQueue = .{},
+    prepare_queue: PrepareQueue = PrepareQueue.init(),
     /// Messages that are accepted from the client, but not yet preparing.
     /// When `pipeline_prepare_queue_max + pipeline_request_queue_max = clients_max`, the request
     /// queue guards against clients starving one another.
-    request_queue: RequestQueue = .{},
+    request_queue: RequestQueue = RequestQueue.init(),
 
     fn deinit(pipeline: *PipelineQueue, message_pool: *MessagePool) void {
         while (pipeline.request_queue.pop()) |r| message_pool.unref(r.message);
