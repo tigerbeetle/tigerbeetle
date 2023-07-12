@@ -514,9 +514,7 @@ pub fn TableType(
                 const block_padding = block[data.padding_offset..][0..data.padding_size];
                 assert(compare_keys(key_from_value(&values[values.len - 1]), key_max) == .eq);
 
-                const header_bytes = block[0..@sizeOf(vsr.Header)];
-                const header = mem.bytesAsValue(vsr.Header, header_bytes);
-
+                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
                     .context = @bitCast(u128, schema.TableData.Context{
@@ -580,8 +578,7 @@ pub fn TableType(
                 assert(builder.data_block_empty());
                 assert(options.address > 0);
 
-                const header_bytes = builder.filter_block[0..@sizeOf(vsr.Header)];
-                const header = mem.bytesAsValue(vsr.Header, header_bytes);
+                const header = mem.bytesAsValue(vsr.Header, builder.filter_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
                     .context = @bitCast(u128, schema.TableFilter.Context{
@@ -634,10 +631,7 @@ pub fn TableType(
                 ));
 
                 const index_block = builder.index_block;
-
-                const header_bytes = index_block[0..@sizeOf(vsr.Header)];
-                const header = mem.bytesAsValue(vsr.Header, header_bytes);
-
+                const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
                     .context = @bitCast(u128, schema.TableIndex.Context{
@@ -740,7 +734,7 @@ pub fn TableType(
         }
 
         pub inline fn block_address(block: BlockPtrConst) u64 {
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            const header = schema.header_from_block(block);
             const address = header.op;
             assert(address > 0);
             return address;

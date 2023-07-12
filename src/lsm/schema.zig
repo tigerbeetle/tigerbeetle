@@ -58,6 +58,14 @@ const block_body_size = block_size - @sizeOf(vsr.Header);
 const BlockPtr = *align(constants.sector_size) [block_size]u8;
 const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 
+pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
+    const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+    assert(header.command == .block);
+    assert(header.op > 0);
+    assert(header.size <= block.len);
+    return header;
+}
+
 pub const TableIndex = struct {
     /// Every table has exactly one index block.
     const index_block_count = 1;
@@ -151,7 +159,7 @@ pub const TableIndex = struct {
     }
 
     pub fn from(index_block: BlockPtrConst) TableIndex {
-        const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
+        const header = header_from_block(index_block);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .index);
         assert(header.op > 0);
@@ -245,7 +253,7 @@ pub const TableIndex = struct {
     }
 
     inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
+        const header = header_from_block(index_block);
         const context = @bitCast(Context, header.context);
         const value = @intCast(u32, context.filter_block_count);
         assert(value > 0);
@@ -254,7 +262,7 @@ pub const TableIndex = struct {
     }
 
     pub inline fn data_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
+        const header = header_from_block(index_block);
         const context = @bitCast(Context, header.context);
         const value = @intCast(u32, context.data_block_count);
         assert(value > 0);
@@ -305,7 +313,7 @@ pub const TableFilter = struct {
     }
 
     pub fn from(filter_block: BlockPtrConst) TableFilter {
-        const header = mem.bytesAsValue(vsr.Header, filter_block[0..@sizeOf(vsr.Header)]);
+        const header = header_from_block(filter_block);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .filter);
         assert(header.op > 0);
@@ -390,7 +398,7 @@ pub const TableData = struct {
     }
 
     pub fn from(data_block: BlockPtrConst) TableData {
-        const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
+        const header = header_from_block(data_block);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .data);
         assert(header.op > 0);
@@ -416,7 +424,7 @@ pub const TableData = struct {
         schema: *const TableData,
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
-        const header = mem.bytesAsValue(vsr.Header, data_block[0..@sizeOf(vsr.Header)]);
+        const header = header_from_block(data_block);
         // TODO we should be able to cross-check this with the header size
         // for more safety.
         const used_values = @intCast(u32, header.request);
