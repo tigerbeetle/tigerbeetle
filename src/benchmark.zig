@@ -414,18 +414,13 @@ const Benchmark = struct {
     fn send_complete(
         user_data: u128,
         operation: StateMachine.Operation,
-        result: Client.Error![]const u8,
+        result: []const u8,
     ) void {
-        _ = operation;
-
-        const result_payload = result catch |err|
-            panic("Client returned error: {}", .{err});
-
         switch (operation) {
             .create_accounts => {
                 const create_accounts_results = std.mem.bytesAsSlice(
                     tb.CreateAccountsResult,
-                    result_payload,
+                    result,
                 );
                 if (create_accounts_results.len > 0) {
                     panic("CreateAccountsResults: {any}", .{create_accounts_results});
@@ -434,7 +429,7 @@ const Benchmark = struct {
             .create_transfers => {
                 const create_transfers_results = std.mem.bytesAsSlice(
                     tb.CreateTransfersResult,
-                    result_payload,
+                    result,
                 );
                 if (create_transfers_results.len > 0) {
                     panic("CreateTransfersResults: {any}", .{create_transfers_results});

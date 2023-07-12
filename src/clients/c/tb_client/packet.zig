@@ -17,40 +17,6 @@ pub const Packet = extern struct {
         invalid_data_size,
     };
 
-    /// Non thread-safe linked list.
-    pub const List = extern struct {
-        head: ?*Packet = null,
-        tail: ?*Packet = null,
-
-        pub fn from(packet: *Packet) List {
-            packet.next = null;
-            return List{
-                .head = packet,
-                .tail = packet,
-            };
-        }
-
-        pub fn push(self: *List, list: List) void {
-            const prev = if (self.tail) |tail| &tail.next else &self.head;
-            prev.* = list.head orelse return;
-            self.tail = list.tail orelse unreachable;
-        }
-
-        pub fn peek(self: List) ?*Packet {
-            return self.head orelse {
-                assert(self.tail == null);
-                return null;
-            };
-        }
-
-        pub fn pop(self: *List) ?*Packet {
-            const packet = self.head orelse return null;
-            self.head = packet.next;
-            if (self.head == null) self.tail = null;
-            return packet;
-        }
-    };
-
     /// Thread-safe stack optimized for 1 consumer (io thread) and N producers (client threads),
     /// `push` uses a spin lock, and `pop` is not thread-safe.
     pub const SubmissionStack = struct {

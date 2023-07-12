@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../../../stdx.zig");
 const assert = std.debug.assert;
 const mem = std.mem;
 
@@ -24,6 +25,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             };
         };
 
+        messages_available: u32 = constants.client_request_queue_max,
         request_queue: RingBuffer(Self.Request, constants.client_request_queue_max, .array) = .{},
         message_pool: *MessagePool,
 
@@ -73,10 +75,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .size = @intCast(u32, @sizeOf(Header) + message_body_size),
             };
 
-            if (self.request_queue.full()) {
-                callback(user_data, operation, error.TooManyOutstandingRequests);
-                return;
-            }
+            assert(!self.request_queue.full());
 
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
@@ -86,21 +85,32 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         pub fn get_message(self: *Self) *Message {
+            assert(self.messages_available > 0);
+            self.messages_available -= 1;
             return self.message_pool.get_message();
         }
 
         pub fn unref(self: *Self, message: *Message) void {
+            if (message.references == 1) {
+                self.messages_available += 1;
+            }
             self.message_pool.unref(message);
         }
 
         fn reply(self: *Self) void {
             while (self.request_queue.pop()) |inflight| {
-                defer self.unref(inflight.message);
+                const reply_message = self.message_pool.get_message();
+                defer self.message_pool.unref(reply_message);
+
+                stdx.copy_disjoint(.exact, u8, reply_message.buffer, inflight.message.buffer);
+                // Similarly to the real client, release the request message before invoking the
+                // callback. This necessitates a `copy_disjoint` above.
+                self.unref(inflight.message);
 
                 inflight.callback.?(
                     inflight.user_data,
-                    inflight.message.header.operation.cast(Self.StateMachine),
-                    inflight.message.body(),
+                    reply_message.header.operation.cast(Self.StateMachine),
+                    reply_message.body(),
                 );
             }
         }
