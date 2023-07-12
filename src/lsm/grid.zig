@@ -6,6 +6,7 @@ const mem = std.mem;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const free_set = @import("../vsr/superblock_free_set.zig");
+const schema = @import("schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
@@ -457,8 +458,7 @@ pub fn GridType(comptime Storage: type) type {
             block: *BlockPtr,
             address: u64,
         ) void {
-            const header_bytes = block.*[0..@sizeOf(vsr.Header)];
-            const header = mem.bytesAsValue(vsr.Header, header_bytes);
+            const header = schema.header_from_block(block.*);
 
             assert(address > 0);
             assert(address == header.op);
@@ -541,8 +541,7 @@ pub fn GridType(comptime Storage: type) type {
             if (completed_write.repair) {
                 // We wait until the write completes to resolve the repair queue, to prevent
                 // these writes from ever overlapping with compaction or checkpoints.
-                const header_bytes = cache_block.*[0..@sizeOf(vsr.Header)];
-                const header = mem.bytesAsValue(vsr.Header, header_bytes);
+                const header = schema.header_from_block(cache_block.*);
 
                 var read_ = grid.read_faulty_queue.peek();
                 while (read_) |read| : (read_ = read.next) {
@@ -636,7 +635,7 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.cache.get_index(read.address)) |cache_index| {
                 const cache_block = grid.cache_blocks[cache_index];
 
-                const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
+                const header = schema.header_from_block(cache_block);
                 assert(header.op == read.address);
 
                 if (header.checksum == read.checksum) {
@@ -761,8 +760,7 @@ pub fn GridType(comptime Storage: type) type {
             const checksum = expect.checksum;
             const block_type = expect.block_type;
 
-            const header_bytes = block[0..@sizeOf(vsr.Header)];
-            const header = mem.bytesAsValue(vsr.Header, header_bytes);
+            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
 
             if (!header.valid_checksum()) {
                 log.err("invalid checksum at address {} (expected={})", .{ address, checksum });
@@ -808,7 +806,7 @@ pub fn GridType(comptime Storage: type) type {
 
             assert(read.checkpoint_id == grid.superblock.working.checkpoint_id());
 
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            const header = schema.header_from_block(block);
             assert(header.op == read.address);
             assert(header.checksum == read.checksum);
 
@@ -872,7 +870,7 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.cache.get_index(read.address)) |cache_index| {
                 const cache_block = grid.cache_blocks[cache_index];
 
-                const header = mem.bytesAsValue(vsr.Header, cache_block[0..@sizeOf(vsr.Header)]);
+                const header = schema.header_from_block(cache_block);
                 assert(header.op == read.address);
 
                 if (grid.cache_coherent.isSet(cache_index)) {
@@ -914,7 +912,7 @@ pub fn GridType(comptime Storage: type) type {
 
         fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
             const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
-            const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
+            const header = schema.header_from_block(read.block);
 
             if (header.op > 0) {
                 read.callback(read, {});
