@@ -37,7 +37,7 @@ pub fn request(
     on_reply: fn (
         user_data: u128,
         operation: StateMachine.Operation,
-        results: Client.Error![]const u8,
+        results: []const u8,
     ) void,
 ) !void {
     const allocator = std.heap.page_allocator;
@@ -87,7 +87,7 @@ pub fn request(
 pub fn on_create_accounts(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -98,7 +98,7 @@ pub fn on_create_accounts(
 pub fn on_lookup_accounts(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -109,7 +109,7 @@ pub fn on_lookup_accounts(
 pub fn on_lookup_transfers(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -120,7 +120,7 @@ pub fn on_lookup_transfers(
 pub fn on_create_transfers(
     user_data: u128,
     operation: StateMachine.Operation,
-    results: Client.Error![]const u8,
+    results: []const u8,
 ) void {
     _ = user_data;
     _ = operation;
@@ -128,9 +128,8 @@ pub fn on_create_transfers(
     print_results(CreateTransfersResult, results);
 }
 
-fn print_results(comptime Results: type, results: Client.Error![]const u8) void {
-    const body = results catch unreachable;
-    const slice = std.mem.bytesAsSlice(Results, body);
+fn print_results(comptime Results: type, results: []const u8) void {
+    const slice = std.mem.bytesAsSlice(Results, results);
     for (slice) |result| {
         std.debug.print("{}\n", .{result});
     }

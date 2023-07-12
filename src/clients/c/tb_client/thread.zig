@@ -14,7 +14,6 @@ pub fn ThreadType(
 
         context: *Context,
 
-        retry: Packet.List,
         submitted: Packet.SubmissionStack,
 
         signal: Signal,
@@ -25,7 +24,6 @@ pub fn ThreadType(
             context: *Context,
         ) !void {
             self.context = context;
-            self.retry = .{};
             self.submitted = .{};
 
             log.debug("{}: init: initializing signal", .{context.client_id});
@@ -65,23 +63,9 @@ pub fn ThreadType(
             const self = @fieldParentPtr(Self, "signal", signal);
             self.context.tick();
 
-            // Consume all of retry here to avoid infinite loop
-            // if the code below pushes to self.retry while we're dequeueing.
-            var pending = self.retry;
-            self.retry = .{};
-
-            // The loop below can exit early without processing all of pending
-            // if available_messages becomes zero.
-            // In such a case we need to restore self.retry we consumed above
-            // with those that weren't processed.
-            defer {
-                pending.push(self.retry);
-                self.retry = pending;
-            }
-
             // Process packets from either pending or submitted as long as we have messages.
-            while (self.context.messages_available > 0) {
-                const packet = pending.pop() orelse self.submitted.pop() orelse break;
+            while (self.context.client.messages_available > 0) {
+                const packet = self.submitted.pop() orelse break;
                 self.context.request(packet);
             }
         }

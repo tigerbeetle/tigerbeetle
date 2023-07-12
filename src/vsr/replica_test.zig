@@ -1527,6 +1527,7 @@ const TestClients = struct {
                 if (client.request_queue.empty() and
                     t.context.client_requests[c] > client.request_number)
                 {
+                    assert(client.messages_available == constants.client_request_queue_max);
                     const message = client.get_message();
                     defer client.unref(message);
 
