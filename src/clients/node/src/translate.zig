@@ -70,7 +70,7 @@ pub fn value_external(
     return result;
 }
 
-pub const UserData = packed struct {
+pub const UserData = extern struct {
     env: c.napi_env,
     callback_reference: c.napi_ref,
 };

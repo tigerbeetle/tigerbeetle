@@ -1330,7 +1330,7 @@ test "quorums" {
 /// needlessly compromising the experience until reconfiguration is fully implemented, derive
 /// replica ids for the initial cluster deterministically.
 pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
-    const IdSeed = packed struct {
+    const IdSeed = extern struct {
         cluster_config_checksum: u128 = constants.config.cluster.checksum(),
         cluster: u32,
         replica: u8,
