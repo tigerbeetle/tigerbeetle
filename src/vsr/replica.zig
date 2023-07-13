@@ -8199,8 +8199,9 @@ pub fn ReplicaType(
             const trailer_buffer_all = self.superblock.trailer_buffer(trailer);
             const trailer_checksum = self.superblock.staging.trailer_checksum(trailer);
             const trailer_size = self.superblock.staging.trailer_size(trailer);
-            assert(trailer_size > parameters.offset);
             assert(trailer_size <= trailer.zone().size_max());
+            assert(trailer_size > parameters.offset or
+                (trailer_size == 0 and parameters.offset == 0));
 
             const body_size = @intCast(u32, @minimum(
                 trailer_size - parameters.offset,
