@@ -35,6 +35,7 @@ jobs:
     - uses: actions/checkout@v3
     - id: calculate_version
       run: |
+        pip install xq && \
         echo "version=$(./.github/ci/next_version.sh)" >> "$GITHUB_OUTPUT"
   
   draft_release:
