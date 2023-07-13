@@ -30,8 +30,8 @@ pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 // TODO Test grid corruption
 
-const Key = packed struct {
-    id: u64 align(@alignOf(u64)),
+const Key = extern struct {
+    id: u64,
 
     const Value = packed struct {
         id: u64,
