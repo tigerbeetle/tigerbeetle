@@ -6,6 +6,11 @@ const mem = std.mem;
 
 const log = std.log.scoped(.fuzz);
 
+// Use our own allocator in the global scope instead of testing.allocator
+// as the latter now @compileError()'s if referenced outside a `test` block.
+var fuzz_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub const fuzz_allocator = fuzz_gpa.allocator();
+
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
 pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T) T {
