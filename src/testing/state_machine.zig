@@ -129,7 +129,6 @@ pub fn StateMachineType(
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            _ = op;
             _ = operation;
             _ = input;
 
