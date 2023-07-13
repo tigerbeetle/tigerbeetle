@@ -282,7 +282,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Acquires a message from the message bus.
         ///
         /// The caller must ensure that a message is available.
-        // FIXME: change back to get_message.
         pub fn get_message(self: *Self) *Message {
             assert(self.messages_available > 0);
             self.messages_available -= 1;

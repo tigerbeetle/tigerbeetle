@@ -76,7 +76,6 @@ fn find_long_line(file_text: []const u8) !?usize {
 }
 
 const naughty_list = [_][]const u8{
-    "aof.zig",
     "benchmark.zig",
     "clients/c/tb_client_header_test.zig",
     "clients/c/tb_client_header.zig",
