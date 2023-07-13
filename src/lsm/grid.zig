@@ -912,7 +912,7 @@ pub fn GridType(comptime Storage: type) type {
 
         fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
             const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
-            const header = schema.header_from_block(read.block);
+            const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
 
             if (header.op > 0) {
                 read.callback(read, {});
