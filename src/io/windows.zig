@@ -72,7 +72,7 @@ pub const IO = struct {
                 // Round up sub-millisecond expire times to the next millisecond
                 const expires_ms = (expires_ns + (std.time.ns_per_ms / 2)) / std.time.ns_per_ms;
                 // Saturating cast to DWORD milliseconds
-                const expires = std.math.cast(os.windows.DWORD, expires_ms) catch std.math.maxInt(os.windows.DWORD);
+                const expires = std.math.cast(os.windows.DWORD, expires_ms) orelse std.math.maxInt(os.windows.DWORD);
                 // max DWORD is reserved for INFINITE so cap the cast at max - 1
                 timeout_ms = if (expires == os.windows.INFINITE) expires - 1 else expires;
             }
@@ -87,7 +87,7 @@ pub const IO = struct {
                 };
 
                 var events: [64]os.windows.OVERLAPPED_ENTRY = undefined;
-                const num_events = os.windows.GetQueuedCompletionStatusEx(
+                const num_events: u32 = os.windows.GetQueuedCompletionStatusEx(
                     self.iocp,
                     &events,
                     io_timeout,
@@ -160,7 +160,7 @@ pub const IO = struct {
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*anyopaque,
-        callback: fn (Context) void,
+        callback: *const fn (Context) void,
         operation: Operation,
 
         const Context = struct {
@@ -356,15 +356,13 @@ pub const IO = struct {
                     }
 
                     // destroy the client_socket we created if we get a non WouldBlock error
-                    errdefer |result| {
-                        _ = result catch |err| switch (err) {
-                            error.WouldBlock => {},
-                            else => {
-                                os.closeSocket(op.client_socket);
-                                op.client_socket = INVALID_SOCKET;
-                            },
-                        };
-                    }
+                    errdefer |err| switch (err) {
+                        error.WouldBlock => {},
+                        else => {
+                            os.closeSocket(op.client_socket);
+                            op.client_socket = INVALID_SOCKET;
+                        },
+                    };
 
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
@@ -453,7 +451,7 @@ pub const IO = struct {
                             else => |e| return e,
                         };
 
-                        const LPFN_CONNECTEX = fn (
+                        const LPFN_CONNECTEX = *const fn (
                             Socket: os.windows.ws2_32.SOCKET,
                             SockAddr: *const os.windows.ws2_32.sockaddr,
                             SockLen: os.socklen_t,
@@ -464,15 +462,27 @@ pub const IO = struct {
                         ) callconv(os.windows.WINAPI) os.windows.BOOL;
 
                         // Find the ConnectEx function by dynamically looking it up on the socket.
-                        const connect_ex = os.windows.loadWinsockExtensionFunction(
-                            LPFN_CONNECTEX,
+                        var connect_ex: LPFN_CONNECTEX = undefined;
+                        var num_bytes: os.windows.DWORD = undefined;
+                        const guid = os.windows.ws2_32.WSAID_CONNECTEX;
+                        switch (os.windows.ws2_32.WSAIoctl(
                             op.socket,
-                            os.windows.ws2_32.WSAID_CONNECTEX,
-                        ) catch |err| switch (err) {
-                            error.OperationNotSupported => unreachable,
-                            error.ShortRead => unreachable,
-                            else => |e| return e,
-                        };
+                            os.windows.ws2_32.SIO_GET_EXTENSION_FUNCTION_POINTER,
+                            @ptrCast(*const anyopaque, &guid),
+                            @sizeOf(os.windows.GUID),
+                            @ptrCast(*anyopaque, &connect_ex),
+                            @sizeOf(LPFN_CONNECTEX),
+                            &num_bytes,
+                            null,
+                            null,
+                        )) {
+                            os.windows.ws2_32.SOCKET_ERROR => switch (os.windows.ws2_32.WSAGetLastError()) {
+                                .WSAEOPNOTSUPP => unreachable,
+                                .WSAENOTSOCK => unreachable,
+                                else => |err| return os.windows.unexpectedWSAError(err),
+                            },
+                            else => assert(num_bytes == @sizeOf(LPFN_CONNECTEX)),
+                        }
 
                         op.pending = true;
                         op.overlapped = .{
