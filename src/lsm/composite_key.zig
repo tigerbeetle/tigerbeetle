@@ -15,16 +15,20 @@ pub fn CompositeKey(comptime Field: type) type {
 
         const tombstone_bit = 1 << 63;
 
-        // If zeroed padding is needed after the timestamp field.
-        const pad = Field == u128;
+        // The type if zeroed padding is needed after the timestamp field.
+        const pad = switch (Field) {
+            u128 => @as(u64, 0),
+            u64 => [0]u8{},
+            else => @compileError("invalid Field for CompositeKey: " ++ @typeName(Field)),
+        };
 
         pub const Value = Self;
 
-        field: Field align(@alignOf(Field)),
+        field: Field,
         /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64 align(@alignOf(u64)),
+        timestamp: u64,
         /// [0]u8 as zero-sized-type workaround for https://github.com/ziglang/zig/issues/16394.
-        padding: (if (pad) u64 else [0]u8) = 0,
+        padding: @TypeOf(pad) = pad,
 
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
