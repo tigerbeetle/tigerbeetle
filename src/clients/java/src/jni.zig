@@ -8,10 +8,10 @@
 ///! - Licensing issues redistributing the jni.h file (or even translating it).
 ///! - To avoid duplicated function definitions by using comptime generated signatures
 ///!   when calling the function table.
-///! - To mitigate the risk of human error by using explicit vtable indexes instead of a 
+///! - To mitigate the risk of human error by using explicit vtable indexes instead of a
 ///!   struct of function pointers sensitive to the fields ordering.
-///! 
-///! Additionally, each function is unit tested against a real JVM to validate if they are 
+///!
+///! Additionally, each function is unit tested against a real JVM to validate if they are
 ///! calling the correct vtable entry with the expected arguments.
 const std = @import("std");
 
@@ -755,7 +755,7 @@ pub const JNIEnv = opaque {
 
     /// The name argument is a fully-qualified class name or an array type signature.
     /// For example "java/lang/String"
-    /// Returns a class object from a fully-qualified name, or NULL if the class cannot be found.        
+    /// Returns a class object from a fully-qualified name, or NULL if the class cannot be found.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#findclass.
     pub inline fn find_class(
         env: *JNIEnv,
@@ -1041,8 +1041,8 @@ pub const JNIEnv = opaque {
         );
     }
 
-    /// Returns a Java object, or NULL if the object cannot be constructed.   
-    /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#newobject.  
+    /// Returns a Java object, or NULL if the object cannot be constructed.
+    /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#newobject.
     pub inline fn new_object(
         env: *JNIEnv,
         clazz: JClass,
@@ -2326,7 +2326,7 @@ pub const JNIEnv = opaque {
     /// Returns the body of the primitive array.
     /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
-    /// or it is set to false if no copy is made. 
+    /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
     pub inline fn get_boolean_array_elements(
         env: *JNIEnv,
@@ -2343,7 +2343,7 @@ pub const JNIEnv = opaque {
     /// Returns the body of the primitive array.
     /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
-    /// or it is set to false if no copy is made. 
+    /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
     pub inline fn get_byte_array_elements(
         env: *JNIEnv,
@@ -2358,7 +2358,7 @@ pub const JNIEnv = opaque {
     }
 
     /// Returns the body of the primitive array.
-    /// The result is valid until the corresponding release function is called.        
+    /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
     /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
@@ -2375,7 +2375,7 @@ pub const JNIEnv = opaque {
     }
 
     /// Returns the body of the primitive array.
-    /// The result is valid until the corresponding release function is called.        
+    /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
     /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
@@ -2392,7 +2392,7 @@ pub const JNIEnv = opaque {
     }
 
     /// Returns the body of the primitive array.
-    /// The result is valid until the corresponding release function is called.        
+    /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
     /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
@@ -2409,7 +2409,7 @@ pub const JNIEnv = opaque {
     }
 
     /// Returns the body of the primitive array.
-    /// The result is valid until the corresponding release function is called.        
+    /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
     /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
@@ -2426,7 +2426,7 @@ pub const JNIEnv = opaque {
     }
 
     /// Returns the body of the primitive array.
-    /// The result is valid until the corresponding release function is called.        
+    /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
     /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.
@@ -2444,7 +2444,7 @@ pub const JNIEnv = opaque {
 
     /// Index 190: GetDoubleArrayElements
     /// Returns the body of the primitive array.
-    /// The result is valid until the corresponding release function is called.        
+    /// The result is valid until the corresponding release function is called.
     /// If isCopy is not NULL, then *is_copy is set to true if a copy is made,
     /// or it is set to false if no copy is made.
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getprimitivetypearrayelements-routines.

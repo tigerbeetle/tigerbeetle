@@ -154,6 +154,25 @@ pub fn zeroed(bytes: []const u8) bool {
     return byte_bits == 0;
 }
 
+const Cut = struct {
+    prefix: []const u8,
+    suffix: []const u8,
+};
+
+/// Splits the `haystack` around the first occurrence of `needle`, returning parts before and after.
+///
+/// This is a Zig version of Go's `string.Cut` / Rust's `str::split_once`. Cut turns out to be a
+/// surprisingly versatile primitive for ad-hoc string processing. Often `std.mem.indexOf` and
+/// `std.mem.split` can be replaced with a shorter and clearer code using  `cut`.
+pub fn cut(haystack: []const u8, needle: []const u8) ?Cut {
+    const index = std.mem.indexOf(u8, haystack, needle) orelse return null;
+
+    return Cut{
+        .prefix = haystack[0..index],
+        .suffix = haystack[index + needle.len ..],
+    };
+}
+
 /// `maybe` is the dual of `assert`: it signals that condition is sometimes true
 ///  and sometimes false.
 ///

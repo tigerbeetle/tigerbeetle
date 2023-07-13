@@ -1,6 +1,7 @@
 //! Checks for various non-functional properties of the code itself.
 
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const fs = std.fs;
 const mem = std.mem;
 const math = std.math;
@@ -70,9 +71,19 @@ fn find_long_line(file_text: []const u8) !?usize {
     var line_number: usize = 0;
     while (line_iterator.next()) |line| : (line_number += 1) {
         const line_length = try std.unicode.utf8CountCodepoints(line);
-        if (line_length > 100) return line_number;
+        if (line_length > 100 and !is_url(line)) {
+            return line_number;
+        }
     }
     return null;
+}
+
+/// Heuristically checks if a `line` is a comment with an URL.
+fn is_url(line: []const u8) bool {
+    const cut = stdx.cut(line, "// https://") orelse return false;
+    for (cut.prefix) |c| if (!(c == ' ' or c == '/')) return false;
+    for (cut.suffix) |c| if (c == ' ') return false;
+    return true;
 }
 
 const naughty_list = [_][]const u8{
@@ -93,7 +104,6 @@ const naughty_list = [_][]const u8{
     "clients/java/java_bindings.zig",
     "clients/java/src/client.zig",
     "clients/java/src/jni_tests.zig",
-    "clients/java/src/jni.zig",
     "clients/node/docs.zig",
     "clients/node/node_bindings.zig",
     "clients/node/src/node.zig",
