@@ -503,7 +503,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const Context = struct {
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             caller: Caller,
 
             trailer: ?Trailer = null,
@@ -685,7 +685,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn format(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             options: FormatOptions,
         ) void {
@@ -760,7 +760,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn open(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
         ) void {
             assert(!superblock.opened);
@@ -783,7 +783,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// Must update the commit_min and commit_min_checksum.
         pub fn checkpoint(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             update: UpdateCheckpoint,
         ) void {
@@ -822,7 +822,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// The update must advance view/log_view (monotonically increasing).
         pub fn view_change(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             update: UpdateViewChange,
         ) void {
@@ -865,7 +865,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn sync(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             update: UpdateSync,
         ) void {

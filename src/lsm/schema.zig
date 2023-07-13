@@ -176,74 +176,74 @@ pub const TableIndex = struct {
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
-        return mem.bytesAsSlice(
+        return @alignCast(@alignOf(u64), mem.bytesAsSlice(
             u64,
             index_block[index.data_addresses_offset..][0..index.data_addresses_size],
-        );
+        ));
     }
 
     pub inline fn data_addresses_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u64 {
-        const slice = mem.bytesAsSlice(
+        const slice = @alignCast(@alignOf(u64), mem.bytesAsSlice(
             u64,
             index_block[index.data_addresses_offset..][0..index.data_addresses_size],
-        );
+        ));
         return slice[0..index.data_blocks_used(index_block)];
     }
 
     pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
-        return mem.bytesAsSlice(
+        return @alignCast(@alignOf(u128), mem.bytesAsSlice(
             u128,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
-        );
+        ));
     }
 
     pub inline fn data_checksums_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u128 {
-        const slice = mem.bytesAsSlice(
+        const slice = @alignCast(@alignOf(u128), mem.bytesAsSlice(
             u128,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
-        );
+        ));
         return slice[0..index.data_blocks_used(index_block)];
     }
 
     pub inline fn filter_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
-        return mem.bytesAsSlice(
+        return @alignCast(@alignOf(u64), mem.bytesAsSlice(
             u64,
             index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-        );
+        ));
     }
 
     pub inline fn filter_addresses_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u64 {
-        const slice = mem.bytesAsSlice(
+        const slice = @alignCast(@alignOf(u64), mem.bytesAsSlice(
             u64,
             index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-        );
+        ));
         return slice[0..index.filter_blocks_used(index_block)];
     }
 
     pub inline fn filter_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
-        return mem.bytesAsSlice(
+        return @alignCast(@alignOf(u128), mem.bytesAsSlice(
             u128,
             index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-        );
+        ));
     }
 
     pub inline fn filter_checksums_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u128 {
-        const slice = mem.bytesAsSlice(
+        const slice = @alignCast(@alignOf(u128), mem.bytesAsSlice(
             u128,
             index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-        );
+        ));
         return slice[0..index.filter_blocks_used(index_block)];
     }
 
@@ -410,14 +410,14 @@ pub const TableData = struct {
         schema: *const TableData,
         data_block: BlockPtr,
     ) []align(16) u8 {
-        return data_block[schema.values_offset..][0..schema.values_size];
+        return @alignCast(16, data_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_bytes_const(
         schema: *const TableData,
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
-        return data_block[schema.values_offset..][0..schema.values_size];
+        return @alignCast(16, data_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_used_bytes(

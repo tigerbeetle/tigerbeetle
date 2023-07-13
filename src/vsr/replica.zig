@@ -422,7 +422,7 @@ pub fn ReplicaType(
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque = null,
         /// Simulator hooks.
-        event_callback: ?fn (replica: *const Self, event: ReplicaEvent) void = null,
+        event_callback: ?*const fn (replica: *const Self, event: ReplicaEvent) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
