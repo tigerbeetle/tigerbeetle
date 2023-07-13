@@ -92,7 +92,7 @@ pub const Storage = struct {
     } = .always_asynchronous;
 
     pub const Read = struct {
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
         buffer: []u8,
         zone: vsr.Zone,
         /// Relative offset within the zone.
@@ -109,7 +109,7 @@ pub const Storage = struct {
     };
 
     pub const Write = struct {
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         buffer: []const u8,
         zone: vsr.Zone,
         /// Relative offset within the zone.
@@ -128,7 +128,7 @@ pub const Storage = struct {
     pub const NextTick = struct {
         next: ?*NextTick = null,
         source: NextTickSource,
-        callback: fn (next_tick: *NextTick) void,
+        callback: *const fn (next_tick: *NextTick) void,
     };
 
     pub const NextTickSource = enum { lsm, vsr };
@@ -284,7 +284,7 @@ pub const Storage = struct {
     pub fn on_next_tick(
         storage: *Storage,
         source: NextTickSource,
-        callback: fn (next_tick: *Storage.NextTick) void,
+        callback: *const fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
         next_tick.* = .{
@@ -308,7 +308,7 @@ pub const Storage = struct {
     /// * Verifies that the read targets sectors that have been written to.
     pub fn read_sectors(
         storage: *Storage,
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
         zone: vsr.Zone,
@@ -370,7 +370,7 @@ pub const Storage = struct {
 
     pub fn write_sectors(
         storage: *Storage,
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
         zone: vsr.Zone,

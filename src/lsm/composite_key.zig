@@ -24,15 +24,15 @@ pub fn CompositeKey(comptime Field: type) type {
 
         pub const Value = Self;
 
-        field: Field,
+        field: Field align(@alignOf(Field)),
         /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64,
+        timestamp: u64 align(@alignOf(u64)),
         /// [0]u8 as zero-sized-type workaround for https://github.com/ziglang/zig/issues/16394.
         padding: @TypeOf(pad) = pad,
 
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
-            assert(@alignOf(Self) == @alignOf(Field));
+            assert(@alignOf(Self) >= @alignOf(Field));
             assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
         }
 

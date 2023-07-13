@@ -18,7 +18,7 @@ pub const Storage = struct {
 
     pub const Read = struct {
         completion: IO.Completion,
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
 
         /// The buffer to read into, re-sliced and re-assigned as we go, e.g. after partial reads.
         buffer: []u8,
@@ -63,7 +63,7 @@ pub const Storage = struct {
 
     pub const Write = struct {
         completion: IO.Completion,
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         buffer: []const u8,
         offset: u64,
     };
@@ -71,7 +71,7 @@ pub const Storage = struct {
     pub const NextTick = struct {
         next: ?*NextTick = null,
         source: NextTickSource,
-        callback: fn (next_tick: *NextTick) void,
+        callback: *const fn (next_tick: *NextTick) void,
     };
 
     pub const NextTickSource = enum { lsm, vsr };
@@ -106,7 +106,7 @@ pub const Storage = struct {
     pub fn on_next_tick(
         storage: *Storage,
         source: NextTickSource,
-        callback: fn (next_tick: *Storage.NextTick) void,
+        callback: *const fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
         next_tick.* = .{
@@ -162,7 +162,7 @@ pub const Storage = struct {
 
     pub fn read_sectors(
         self: *Storage,
-        callback: fn (read: *Storage.Read) void,
+        callback: *const fn (read: *Storage.Read) void,
         read: *Storage.Read,
         buffer: []u8,
         zone: vsr.Zone,
@@ -313,7 +313,7 @@ pub const Storage = struct {
 
     pub fn write_sectors(
         self: *Storage,
-        callback: fn (write: *Storage.Write) void,
+        callback: *const fn (write: *Storage.Write) void,
         write: *Storage.Write,
         buffer: []const u8,
         zone: vsr.Zone,

@@ -95,7 +95,7 @@ pub fn CompactionType(
             table_info_a: TableInfoA,
             level_b: u8,
             range_b: CompactionRange,
-            callback: fn (*Compaction) void,
+            callback: *const fn (*Compaction) void,
         };
 
         const InputLevel = enum(u1) {
