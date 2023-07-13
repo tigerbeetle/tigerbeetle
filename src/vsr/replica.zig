@@ -2477,6 +2477,7 @@ pub fn ReplicaType(
             // We will decide below whether to reset or backoff the timeout.
             assert(self.status == .normal);
             assert(self.primary());
+            assert(self.prepare_timeout.ticking);
 
             const prepare = self.primary_pipeline_pending().?;
 
@@ -3361,6 +3362,7 @@ pub fn ReplicaType(
                     assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
                     assert(prepare.message.header.op == self.commit_min);
                     assert(prepare.message.header.op == self.commit_max);
+                    assert(prepare.ok_quorum_received);
                 }
 
                 if (self.pipeline.queue.pop_request()) |request| {
@@ -4230,7 +4232,7 @@ pub fn ReplicaType(
 
             // Don't accept more requests than will fit in the current checkpoint.
             // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
-            // when primary_pipeline_next() converts the request to a prepare.)
+            // when primary_pipeline_prepare() converts the request to a prepare.)
             if (self.op + self.pipeline.queue.request_queue.count == self.op_checkpoint_trigger()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
@@ -5053,7 +5055,7 @@ pub fn ReplicaType(
 
             assert(!self.ignore_request_message(message));
 
-            log.debug("{}: primary_pipeline_next: request checksum={} client={}", .{
+            log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
                 self.replica,
                 message.header.checksum,
                 message.header.client,
@@ -5101,7 +5103,7 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
+            log.debug("{}: primary_pipeline_prepare: prepare {}", .{ self.replica, message.header.checksum });
 
             if (self.primary_pipeline_pending()) |_| {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
@@ -5533,6 +5535,20 @@ pub fn ReplicaType(
                 parent = prepare.header.checksum;
             }
             assert(self.commit_max + pipeline_queue.prepare_queue.count == self.op);
+
+            // If we were already committing the op prior to our view change, it must have a quorum.
+            if (self.commit_prepare) |prepare_committing| {
+                if (pipeline_queue.prepare_queue.head_ptr()) |prepare_head| {
+                    if (prepare_head.message.header.op == prepare_committing.header.op) {
+                        assert(prepare_head.message.header.checksum ==
+                            prepare_committing.header.checksum);
+
+                        prepare_head.ok_quorum_received = true;
+                    } else {
+                        assert(prepare_head.message.header.op == prepare_committing.header.op + 1);
+                    }
+                }
+            }
 
             pipeline_queue.verify();
             return pipeline_queue;
@@ -6926,10 +6942,18 @@ pub fn ReplicaType(
                 }
 
                 var pipeline_prepares = pipeline_queue.prepare_queue.iterator();
-                while (pipeline_prepares.next()) |prepare| {
+                var i: u64 = 0;
+                while (pipeline_prepares.next()) |prepare| : (i += 1) {
                     assert(self.journal.has(prepare.message.header));
-                    assert(!prepare.ok_quorum_received);
                     assert(prepare.ok_from_all_replicas.count() == 0);
+                    assert(prepare.message.header.op == self.commit_min + 1 + i);
+                    if (prepare.ok_quorum_received) {
+                        // `primary_repair_pipeline_done()` sets `ok_quorum_received` if this
+                        // replica was already committing prior to the view change.
+                        assert(i == 0);
+                        assert(prepare.message.header.checksum ==
+                            self.commit_prepare.?.header.checksum);
+                    }
 
                     log.debug("{}: start_view_as_the_new_primary: pipeline " ++
                         "(op={} checksum={x} parent={x})", .{
@@ -7169,7 +7193,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
-                if (self.pipeline.queue.prepare_queue.count > 0) {
+                if (self.primary_pipeline_pending()) |_| {
                     self.prepare_timeout.start();
                     self.primary_abdicate_timeout.start();
                 }
