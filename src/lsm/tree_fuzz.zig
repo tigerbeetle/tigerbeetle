@@ -1,6 +1,5 @@
 const std = @import("std");
 const testing = std.testing;
-const allocator = testing.allocator;
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
@@ -8,6 +7,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
+const allocator = fuzz.fuzz_allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 const tracer = @import("../tracer.zig");
@@ -314,9 +314,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 // Apply fuzz_op to the tree and the model.
                 switch (fuzz_op) {
-                    .compact => |compact| {
-                        env.compact(compact.op);
-                        if (compact.checkpoint) env.checkpoint(compact.op);
+                    .compact => |c| {
+                        env.compact(c.op);
+                        if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
                         if (table_usage == .secondary_index) {
