@@ -986,9 +986,16 @@ pub const ReconfigurationRequest = extern struct {
         if (request.replica_count != current.replica_count) return .different_replica_count;
         if (request.standby_count != current.standby_count) return .different_standby_count;
 
-        if (current.epoch == std.math.maxInt(u32)) return .epoch_overflow;
         if (request.epoch < current.epoch) return .epoch_in_the_past;
-        if (request.epoch > current.epoch + 1) return .epoch_in_the_future;
+        if (request.epoch == current.epoch) {
+            return if (std.meta.eql(request.members, current.members.*))
+                .configuration_applied
+            else
+                .configuration_conflict;
+        }
+        if (request.epoch - current.epoch > 1) return .epoch_in_the_future;
+
+        assert(request.epoch == current.epoch + 1);
 
         assert(valid_members(current.members));
         assert(valid_members(&request.members));
@@ -1002,12 +1009,8 @@ pub const ReconfigurationRequest = extern struct {
             } else return .different_member_set;
         }
 
-        const identical_members = std.mem.eql(u128, &request.members, current.members);
-        if (request.epoch == current.epoch) {
-            return if (identical_members) .configuration_applied else .configuration_conflict;
-        } else {
-            assert(request.epoch == current.epoch + 1);
-            if (identical_members) return .configuration_is_no_op;
+        if (std.meta.eql(request.members, current.members.*)) {
+            return .configuration_is_no_op;
         }
 
         return .ok;
@@ -1045,25 +1048,23 @@ pub const ReconfigurationResult = enum(u32) {
     epoch_in_the_past = 9,
     /// epoch is too far in the future (larger than current epoch + 1).
     epoch_in_the_future = 10,
-    /// The epoch counter is saturated. No further reconfiguration is possible.
-    epoch_overflow = 11,
 
     /// Reconfiguration changes the number of replicas, that is not currently supported.
-    different_replica_count = 12,
+    different_replica_count = 11,
     /// Reconfiguration changes the number of standbys, that is not currently supported.
-    different_standby_count = 13,
+    different_standby_count = 12,
     /// members must be a permutation of the current set of cluster members.
-    different_member_set = 14,
+    different_member_set = 13,
 
     /// epoch is equal to the current epoch and configuration is the same.
     /// This is a duplicate request.
-    configuration_applied = 15,
+    configuration_applied = 14,
     /// epoch is equal to the current epoch but configuration is different.
     /// A conflicting reconfiguration request was accepted.
-    configuration_conflict = 16,
+    configuration_conflict = 15,
     /// The request is valid, but there's no need to advance the epoch, because / configuration
     /// exactly matches the current one.
-    configuration_is_no_op = 17,
+    configuration_is_no_op = 16,
 };
 
 test "ReconfigurationRequest" {
@@ -1134,6 +1135,16 @@ test "ReconfigurationRequest" {
     );
 
     try t.check(
+        stdx.update(r, .{ .epoch = 0, .members = Test.to_members(.{ 4, 1, 0, 2, 3 }) }),
+        .members_invalid,
+    );
+
+    try t.check(
+        stdx.update(r, .{ .epoch = 1, .members = Test.to_members(.{ 4, 1, 0, 2, 3 }) }),
+        .members_invalid,
+    );
+
+    try t.check(
         stdx.update(r, .{ .replica_count = 4 }),
         .members_count_invalid,
     );
@@ -1157,10 +1168,6 @@ test "ReconfigurationRequest" {
         stdx.update(r, .{ .epoch = 3 }),
         .epoch_in_the_future,
     );
-
-    t.epoch = std.math.maxInt(u32);
-    try t.check(r, .epoch_overflow);
-    t.epoch = 1;
 
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3 }), .replica_count = 2 }),
@@ -1195,6 +1202,17 @@ test "ReconfigurationRequest" {
     assert(t.tested.count() < ResultSet.initFull().count());
     t.tested.insert(.reserved);
     assert(t.tested.count() == ResultSet.initFull().count());
+
+    t.epoch = std.math.maxInt(u32);
+    try t.check(r, .epoch_in_the_past);
+    try t.check(stdx.update(r, .{ .epoch = std.math.maxInt(u32) }), .configuration_conflict);
+    try t.check(
+        stdx.update(r, .{
+            .epoch = std.math.maxInt(u32),
+            .members = Test.to_members(.{ 1, 2, 3, 4 }),
+        }),
+        .configuration_applied,
+    );
 }
 
 pub const Timeout = struct {
