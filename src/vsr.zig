@@ -1108,92 +1108,50 @@ test "ReconfigurationRequest" {
     };
 
     try t.check(r, .ok);
-
-    try t.check(
-        stdx.update(r, .{ .replica_count = 0 }),
-        .replica_count_zero,
-    );
-
-    try t.check(
-        stdx.update(r, .{ .replica_count = 255 }),
-        .replica_count_max_exceeded,
-    );
-
+    try t.check(stdx.update(r, .{ .replica_count = 0 }), .replica_count_zero);
+    try t.check(stdx.update(r, .{ .replica_count = 255 }), .replica_count_max_exceeded);
     try t.check(
         stdx.update(r, .{ .standby_count = constants.standbys_max + 1 }),
         .standby_count_max_exceeded,
     );
-
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 4, 1, 4, 3 }) }),
         .members_invalid,
     );
-
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 4, 1, 0, 2, 3 }) }),
         .members_invalid,
     );
-
     try t.check(
         stdx.update(r, .{ .epoch = 0, .members = Test.to_members(.{ 4, 1, 0, 2, 3 }) }),
         .members_invalid,
     );
-
     try t.check(
         stdx.update(r, .{ .epoch = 1, .members = Test.to_members(.{ 4, 1, 0, 2, 3 }) }),
         .members_invalid,
     );
-
-    try t.check(
-        stdx.update(r, .{ .replica_count = 4 }),
-        .members_count_invalid,
-    );
-
-    try t.check(
-        stdx.update(r, .{ .reserved = [_]u8{1} ** 42 }),
-        .reserved_field,
-    );
-
-    try t.check(
-        stdx.update(r, .{ .result = .ok }),
-        .result_must_be_reserved,
-    );
-
-    try t.check(
-        stdx.update(r, .{ .epoch = 0 }),
-        .epoch_in_the_past,
-    );
-
-    try t.check(
-        stdx.update(r, .{ .epoch = 3 }),
-        .epoch_in_the_future,
-    );
-
+    try t.check(stdx.update(r, .{ .replica_count = 4 }), .members_count_invalid);
+    try t.check(stdx.update(r, .{ .reserved = [_]u8{1} ** 42 }), .reserved_field);
+    try t.check(stdx.update(r, .{ .result = .ok }), .result_must_be_reserved);
+    try t.check(stdx.update(r, .{ .epoch = 0 }), .epoch_in_the_past);
+    try t.check(stdx.update(r, .{ .epoch = 3 }), .epoch_in_the_future);
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3 }), .replica_count = 2 }),
         .different_replica_count,
     );
-
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3, 4, 5 }), .standby_count = 2 }),
         .different_standby_count,
     );
-
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 8, 1, 2, 3 }) }),
         .different_member_set,
     );
-
     try t.check(
         stdx.update(r, .{ .epoch = 1, .members = Test.to_members(.{ 1, 2, 3, 4 }) }),
         .configuration_applied,
     );
-
-    try t.check(
-        stdx.update(r, .{ .epoch = 1 }),
-        .configuration_conflict,
-    );
-
+    try t.check(stdx.update(r, .{ .epoch = 1 }), .configuration_conflict);
     try t.check(
         stdx.update(r, .{ .members = Test.to_members(.{ 1, 2, 3, 4 }) }),
         .configuration_is_no_op,
