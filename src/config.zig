@@ -8,11 +8,49 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const assert = std.debug.assert;
 
 const root = @import("root");
-// Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root file.
-const build_options =
-    if (@hasDecl(root, "vsr_options")) root.vsr_options else @import("vsr_options");
+
+const BuildOptions = struct {
+    config_base: ConfigBase,
+    config_log_level: std.log.Level,
+    tracer_backend: TracerBackend,
+    hash_log_mode: HashLogMode,
+    config_aof_record: bool,
+    config_aof_recovery: bool,
+};
+
+// Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
+// file.
+const build_options: BuildOptions = blk: {
+    if (@hasDecl(root, "vsr_options")) {
+        break :blk root.vsr_options;
+    } else {
+        const vsr_options = @import("vsr_options");
+        // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
+        // but a different type from a nominal typing perspective.
+        var result: BuildOptions = undefined;
+        for (std.meta.fields(BuildOptions)) |field| {
+            @field(result, field.name) = launder_type(
+                field.field_type,
+                @field(vsr_options, field.name),
+            );
+        }
+        break :blk result;
+    }
+};
+
+fn launder_type(comptime T: type, comptime value: anytype) T {
+    if (T == bool) {
+        return value;
+    }
+    if (@typeInfo(T) == .Enum) {
+        assert(@typeInfo(@TypeOf(value)) == .Enum);
+        return @field(T, @tagName(value));
+    }
+    undefined;
+}
 
 const vsr = @import("vsr.zig");
 const sector_size = @import("constants.zig").sector_size;
@@ -245,12 +283,9 @@ pub const configs = struct {
         };
 
         // TODO Use additional build options to overwrite other fields.
-
-        // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
-        // but a different type from a nominal typing perspective.
-        base.process.log_level = @intToEnum(std.log.Level, @enumToInt(build_options.config_log_level));
-        base.process.tracer_backend = @intToEnum(TracerBackend, @enumToInt(build_options.tracer_backend));
-        base.process.hash_log_mode = @intToEnum(HashLogMode, @enumToInt(build_options.hash_log_mode));
+        base.process.log_level = build_options.config_log_level;
+        base.process.tracer_backend = build_options.tracer_backend;
+        base.process.hash_log_mode = build_options.hash_log_mode;
         base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
 

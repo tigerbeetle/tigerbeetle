@@ -16,7 +16,6 @@ pub const storage = @import("storage.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
-pub const config = @import("config.zig");
 pub const stdx = @import("stdx.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
@@ -1325,7 +1324,7 @@ test "quorums" {
 /// replica ids for the initial cluster deterministically.
 pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
     const IdSeed = packed struct {
-        cluster_config_checksum: u128 = config.configs.current.cluster.checksum(),
+        cluster_config_checksum: u128 = constants.config.cluster.checksum(),
         cluster: u32,
         replica: u8,
     };
