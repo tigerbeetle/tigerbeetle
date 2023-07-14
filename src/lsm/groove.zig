@@ -683,6 +683,7 @@ pub fn GrooveType(
 
             // Since lookup contexts are used one at a time, it's safe to access
             // the union's fields and reuse the same memory for all context instances.
+            // Can't use extern/packed as the next LookupContextes aren't ABI compliant.
             const LookupContext = union {
                 id: if (has_id) IdTree.LookupContext else void,
                 object: ObjectTree.LookupContext,
@@ -716,6 +717,9 @@ pub fn GrooveType(
                     worker.lookup_with_timestamp(id.*);
                     return;
                 }
+
+                // Set the union tag so access via &worker.lookup.id doesn't trap.
+                worker.lookup = .{ .id = undefined }; 
 
                 if (worker.context.groove.ids.lookup_from_memory(
                     worker.context.snapshot,
@@ -788,6 +792,9 @@ pub fn GrooveType(
                     worker.lookup_start_next();
                     return;
                 }
+
+                // Set the union tag so access via &worker.lookup.object doesn't trap.
+                worker.lookup = .{ .object = undefined };
 
                 worker.context.groove.objects.lookup_from_levels(
                     lookup_object_callback,

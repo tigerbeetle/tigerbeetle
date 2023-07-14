@@ -22,17 +22,21 @@ pub fn CompositeKey(comptime Field: type) type {
             else => @compileError("invalid Field for CompositeKey: " ++ @typeName(Field)),
         };
 
+        // u128 may be aligned to 8 instead of 16.
+        const ideal_field_alignment = @divExact(@bitSizeOf(Field), 8);
+
         pub const Value = Self;
 
-        field: Field align(@alignOf(Field)),
+        field: Field align(ideal_field_alignment),
         /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64 align(@alignOf(u64)),
+        timestamp: u64,
         /// [0]u8 as zero-sized-type workaround for https://github.com/ziglang/zig/issues/16394.
         padding: @TypeOf(pad) = pad,
 
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
             assert(@alignOf(Self) >= @alignOf(Field));
+            assert(@alignOf(Self) == ideal_field_alignment);
             assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
         }
 

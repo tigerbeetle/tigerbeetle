@@ -955,14 +955,14 @@ fn TestContext(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(random: std.rand.Random) !Self {
-            var pool = try TestPool.init(testing.allocator, TestArray.node_count_max);
-            errdefer pool.deinit(testing.allocator);
+        fn init(allocator: std.mem.Allocator, random: std.rand.Random) !Self {
+            var pool = try TestPool.init(allocator, TestArray.node_count_max);
+            errdefer pool.deinit(allocator);
 
-            var array = try TestArray.init(testing.allocator);
-            errdefer array.deinit(testing.allocator, &pool);
+            var array = try TestArray.init(allocator);
+            errdefer array.deinit(allocator, &pool);
 
-            var reference = std.ArrayList(T).init(testing.allocator);
+            var reference = std.ArrayList(T).init(allocator);
             errdefer reference.deinit();
 
             try reference.ensureTotalCapacity(element_count_max);
@@ -975,9 +975,9 @@ fn TestContext(
             };
         }
 
-        fn deinit(context: *Self) void {
-            context.array.deinit(testing.allocator, &context.pool);
-            context.pool.deinit(testing.allocator);
+        fn deinit(context: *Self, allocator: std.mem.Allocator) void {
+            context.array.deinit(allocator, &context.pool);
+            context.pool.deinit(allocator);
 
             context.reference.deinit();
         }
@@ -1238,7 +1238,7 @@ fn TestContext(
     };
 }
 
-pub fn run_tests(seed: u64, comptime options: Options) !void {
+pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Options) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
@@ -1321,8 +1321,8 @@ pub fn run_tests(seed: u64, comptime options: Options) !void {
                 options,
             );
 
-            var context = try Context.init(random);
-            defer context.deinit();
+            var context = try Context.init(allocator, random);
+            defer context.deinit(allocator);
 
             try context.run();
 
@@ -1337,5 +1337,5 @@ pub fn run_tests(seed: u64, comptime options: Options) !void {
 
 test "SegmentedArray" {
     const seed = 42;
-    try run_tests(seed, .{ .verify = true });
+    try run_tests(std.testing.allocator, seed, .{ .verify = true });
 }

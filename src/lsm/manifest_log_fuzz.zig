@@ -106,6 +106,8 @@ fn run_fuzz(
 
         env.open();
         env.wait(&env.manifest_log);
+        
+        env.reserve();
     }
 
     for (events) |event| {
@@ -161,7 +163,7 @@ fn generate_events(
         constants.lsm_levels * constants.journal_slot_count,
     );
 
-    log.info("event_distribution = {d:.2}", .{event_distribution});
+    log.info("event_distribution = {:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
     var tables = std.ArrayList(struct {
@@ -357,8 +359,6 @@ const Environment = struct {
 
         env.pending += 1;
         env.manifest_log.open(open_event, open_callback);
-        env.manifest_log.reserve();
-        env.manifest_log_reserved = true;
     }
 
     fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
@@ -373,6 +373,11 @@ const Environment = struct {
     fn open_callback(manifest_log: *ManifestLog) void {
         const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
         env.pending -= 1;
+    }
+
+    fn reserve(env: *Environment) void {
+        env.manifest_log.reserve();
+        env.manifest_log_reserved = true;
     }
 
     fn insert(env: *Environment, level: u7, table: *const TableInfo) !void {

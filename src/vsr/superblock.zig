@@ -1597,7 +1597,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 "commit_min_checksum={}..{} " ++
                 "log_view={}..{} " ++
                 "view={}..{} " ++
-                "head={}..{}", .{
+                "head={}..{?}", .{
                 @tagName(context.caller),
 
                 superblock.staging.vsr_state.commit_min,

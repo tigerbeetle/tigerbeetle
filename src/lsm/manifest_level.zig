@@ -492,12 +492,13 @@ pub fn ManifestLevelType(
             assert(compare_keys(key_min, key_max) != .gt);
 
             if (key_exclusive == null) {
-                return self.iterator(
+                var it = self.iterator(
                     .visible,
                     &snapshots,
                     direction,
                     KeyRange{ .key_min = key_min, .key_max = key_max },
-                ).next();
+                );
+                return it.next();
             }
 
             assert(compare_keys(key_exclusive.?, key_min) != .lt);
