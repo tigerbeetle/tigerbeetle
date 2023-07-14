@@ -19,6 +19,18 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Set up Dotnet
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      # Docker and GH releases reflect instantly. As does the Go client (since it's just a repo).
       - name: Check Docker Image
         run: docker pull ghcr.io/tigerbeetle/tigerbeetle:${{ inputs.version }}
 
@@ -41,11 +53,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Dotnet
-        uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version: 6.0.x
-
       - name: Check Client Go
         run: |
           mkdir -p /tmp/go && cd /tmp/go && \
@@ -53,25 +60,29 @@ jobs:
           go mod edit -require github.com/tigerbeetledb/tigerbeetle-go@v${{ inputs.version }} && \
           go mod tidy
 
-      - name: Set up Java
-        uses: actions/setup-java@v3
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-
+      # Java, Node and Dotnet might take a bit to reflect.
       - name: Check Client Java
         run: |
           mkdir -p /tmp/java && \
           cat src/clients/java/validation_pom.xml | sed 's|{{VERSION}}|${{ inputs.version }}|' > /tmp/java/pom.xml && \
-          cd /tmp/java && mvn dependency:copy-dependencies && \
-          test -e target/dependency/tigerbeetle-java-${{ inputs.version }}.jar
+          cd /tmp/java && \
+          mvn dependency:copy-dependencies || \
+          (sleep 30 && mvn -U dependency:copy-dependencies) || \
+          (sleep 60 && mvn -U dependency:copy-dependencies) || \
+          (sleep 60 && mvn -U dependency:copy-dependencies) || \
+          (sleep 120 && mvn -U dependency:copy-dependencies) || \
+          (sleep 180 && mvn -U dependency:copy-dependencies)
 
       - name: Check Client Node
         run: |
           mkdir -p /tmp/node && cd /tmp/node && \
-          npm install tigerbeetle-node@${{ inputs.version }}
+          npm install tigerbeetle-node@${{ inputs.version }} || \
+          (sleep 30 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 60 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 60 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 120 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 180 && npm install tigerbeetle-node@${{ inputs.version }})
 
-      # Dotnet done at the end, because nuget.org takes a bit to update. That's why we have retry logic here, too.
       - name: Check Client Dotnet
         run: |
           mkdir -p /tmp/dotnet && cd /tmp/dotnet && \
