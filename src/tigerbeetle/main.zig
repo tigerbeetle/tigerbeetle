@@ -10,7 +10,7 @@ const build_options = @import("vsr_options");
 
 const vsr = @import("vsr");
 const constants = vsr.constants;
-const config = vsr.config.configs.current;
+const config = constants.config;
 const tracer = vsr.tracer;
 
 const cli = @import("cli.zig");
