@@ -7,7 +7,8 @@ const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const tracer = @import("tracer.zig");
 const Config = @import("config.zig").Config;
-const config = @import("config.zig").configs.current;
+
+pub const config = @import("config.zig").configs.current;
 
 /// The maximum log level.
 /// One of: .err, .warn, .info, .debug
