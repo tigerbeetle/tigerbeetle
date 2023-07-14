@@ -5280,6 +5280,15 @@ pub fn ReplicaType(
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
                 if (self.journal.dirty.count == 0 and self.commit_min == self.commit_max) {
+                    if (self.commit_stage != .idle) {
+                        // If we still have a commit running, we started it the last time we were
+                        // primary, and its still running. Wait for it to finish before repairing
+                        // the pipeline so that it doesn't wind up in the new pipeline.
+                        assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+                        assert(self.commit_prepare.?.header.view < self.view);
+                        return;
+                    }
+
                     // Repair the pipeline, which may discover faulty prepares and drive more repairs.
                     switch (self.primary_repair_pipeline()) {
                         // primary_repair_pipeline() is already working.
