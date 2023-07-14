@@ -5284,7 +5284,8 @@ pub fn ReplicaType(
                         // If we still have a commit running, we started it the last time we were
                         // primary, and its still running. Wait for it to finish before repairing
                         // the pipeline so that it doesn't wind up in the new pipeline.
-                        assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+                        assert(self.commit_prepare.?.header.op >= self.commit_min);
+                        assert(self.commit_prepare.?.header.op <= self.commit_min + 1);
                         assert(self.commit_prepare.?.header.view < self.view);
                         return;
                     }
