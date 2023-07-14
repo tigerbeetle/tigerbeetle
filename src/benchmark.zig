@@ -154,7 +154,7 @@ fn parse_arg_addresses(
     const address_string_or_err = args.next(allocator) orelse
         panic("Expected an argument to {s}", .{arg_name});
     const address_string = try address_string_or_err;
-    arg_value.* = try vsr.parse_addresses(allocator, address_string, constants.nodes_max);
+    arg_value.* = try vsr.parse_addresses(allocator, address_string, constants.members_max);
     return true;
 }
 

@@ -379,7 +379,7 @@ pub const AOFReplayClient = struct {
 
 pub fn aof_merge(allocator: std.mem.Allocator, input_paths: [][]const u8, output_path: []const u8) !void {
     const stdout = std.io.getStdOut().writer();
-    var aofs: [constants.nodes_max]AOF.Iterator = undefined;
+    var aofs: [constants.members_max]AOF.Iterator = undefined;
 
     assert(input_paths.len < aofs.len);
 
@@ -653,7 +653,7 @@ pub fn main() !void {
 
     var action: ?[:0]const u8 = null;
     var addresses: ?[:0]const u8 = null;
-    var paths: [constants.nodes_max][:0]const u8 = undefined;
+    var paths: [constants.members_max][:0]const u8 = undefined;
     var count: usize = 0;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

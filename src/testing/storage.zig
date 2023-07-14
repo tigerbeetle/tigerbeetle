@@ -727,13 +727,13 @@ pub const ClusterFaultAtlas = struct {
     options: Options,
     faulty_superblock_areas: FaultySuperBlockAreas =
         FaultySuperBlockAreas.initFill(CopySet.initEmpty()),
-    faulty_wal_header_sectors: [constants.nodes_max]FaultyWALHeaders =
-        [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.nodes_max,
-    faulty_client_reply_slots: [constants.nodes_max]FaultyClientReplies =
-        [_]FaultyClientReplies{FaultyClientReplies.initEmpty()} ** constants.nodes_max,
+    faulty_wal_header_sectors: [constants.members_max]FaultyWALHeaders =
+        [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.members_max,
+    faulty_client_reply_slots: [constants.members_max]FaultyClientReplies =
+        [_]FaultyClientReplies{FaultyClientReplies.initEmpty()} ** constants.members_max,
     /// Bit 0 corresponds to address 1.
-    faulty_grid_blocks: [constants.nodes_max]FaultyGridBlocks =
-        [_]FaultyGridBlocks{FaultyGridBlocks.initEmpty()} ** constants.nodes_max,
+    faulty_grid_blocks: [constants.members_max]FaultyGridBlocks =
+        [_]FaultyGridBlocks{FaultyGridBlocks.initEmpty()} ** constants.members_max,
 
     pub fn init(replica_count: u8, random: std.rand.Random, options: Options) ClusterFaultAtlas {
         if (replica_count == 1) {
@@ -787,7 +787,7 @@ pub const ClusterFaultAtlas = struct {
 
         var block: usize = 0;
         while (block < superblock.grid_blocks_max) : (block += 1) {
-            var replicas = std.StaticBitSet(constants.nodes_max).initEmpty();
+            var replicas = std.StaticBitSet(constants.members_max).initEmpty();
             while (replicas.count() + 1 < quorums.replication) {
                 replicas.set(random.uintLessThan(usize, replica_count));
             }

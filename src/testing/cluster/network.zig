@@ -54,7 +54,7 @@ pub const Network = struct {
     ///
     /// At the moment, we require core members to have direct bidirectional connectivity, but this
     /// could be relaxed in the future to indirect connectivity.
-    pub const Core = std.StaticBitSet(constants.nodes_max);
+    pub const Core = std.StaticBitSet(constants.members_max);
 
     allocator: std.mem.Allocator,
 
@@ -160,7 +160,7 @@ pub const Network = struct {
         const raw_process = switch (process) {
             .replica => |replica| replica,
             .client => |client| blk: {
-                assert(client >= constants.nodes_max);
+                assert(client >= constants.members_max);
                 break :blk client;
             },
         };
@@ -298,9 +298,9 @@ pub const Network = struct {
 
     fn raw_process_to_process(raw: u128) Process {
         switch (raw) {
-            0...(constants.nodes_max - 1) => return .{ .replica = @intCast(u8, raw) },
+            0...(constants.members_max - 1) => return .{ .replica = @intCast(u8, raw) },
             else => {
-                assert(raw >= constants.nodes_max);
+                assert(raw >= constants.members_max);
                 return .{ .client = raw };
             },
         }

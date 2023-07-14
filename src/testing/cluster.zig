@@ -40,7 +40,7 @@ pub const Failure = enum(u8) {
 
 /// Shift the id-generating index because the simulator network expects client ids to never collide
 /// with a replica index.
-const client_id_permutation_shift = constants.nodes_max;
+const client_id_permutation_shift = constants.members_max;
 
 pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, comptime constants: anytype) type) type {
     return struct {
@@ -85,8 +85,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         replica_pools: []MessagePool,
         replica_health: []ReplicaHealth,
         replica_count: u8,
-        replica_diverged: std.StaticBitSet(constants.nodes_max) =
-            std.StaticBitSet(constants.nodes_max).initEmpty(),
+        replica_diverged: std.StaticBitSet(constants.members_max) =
+            std.StaticBitSet(constants.members_max).initEmpty(),
         standby_count: u8,
 
         clients: []Client,
@@ -570,7 +570,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         ) void {
             const replica = &cluster.replicas[replica_index];
 
-            var statuses = [_]u8{' '} ** constants.nodes_max;
+            var statuses = [_]u8{' '} ** constants.members_max;
             if (cluster.replica_health[replica_index] == .down) {
                 statuses[replica_index] = '#';
             } else {

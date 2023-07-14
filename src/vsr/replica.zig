@@ -717,7 +717,7 @@ pub fn ReplicaType(
             assert(replica_count > 0);
             assert(replica_count <= constants.replicas_max);
             assert(standby_count <= constants.standbys_max);
-            assert(node_count <= constants.nodes_max);
+            assert(node_count <= constants.members_max);
 
             const replica_index = options.replica_index;
             assert(replica_index < node_count);
@@ -3009,7 +3009,7 @@ pub fn ReplicaType(
         /// round-robin in order to avoid a resonance.
         fn choose_any_other_replica(self: *Self) u8 {
             assert(!self.solo());
-            comptime assert(constants.nodes_max * 2 < std.math.maxInt(u8));
+            comptime assert(constants.members_max * 2 < std.math.maxInt(u8));
 
             // Carefully select any replica if we are a standby,
             // and any different replica if we are active.
