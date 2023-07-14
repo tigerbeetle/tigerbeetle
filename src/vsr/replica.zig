@@ -2477,6 +2477,7 @@ pub fn ReplicaType(
             // We will decide below whether to reset or backoff the timeout.
             assert(self.status == .normal);
             assert(self.primary());
+            assert(self.prepare_timeout.ticking);
 
             const prepare = self.primary_pipeline_pending().?;
 
@@ -3361,6 +3362,7 @@ pub fn ReplicaType(
                     assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
                     assert(prepare.message.header.op == self.commit_min);
                     assert(prepare.message.header.op == self.commit_max);
+                    assert(prepare.ok_quorum_received);
                 }
 
                 if (self.pipeline.queue.pop_request()) |request| {
