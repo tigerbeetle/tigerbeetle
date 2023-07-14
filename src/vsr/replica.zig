@@ -4232,7 +4232,7 @@ pub fn ReplicaType(
 
             // Don't accept more requests than will fit in the current checkpoint.
             // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
-            // when primary_pipeline_next() converts the request to a prepare.)
+            // when primary_pipeline_prepare() converts the request to a prepare.)
             if (self.op + self.pipeline.queue.request_queue.count == self.op_checkpoint_trigger()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
@@ -5055,7 +5055,7 @@ pub fn ReplicaType(
 
             assert(!self.ignore_request_message(message));
 
-            log.debug("{}: primary_pipeline_next: request checksum={} client={}", .{
+            log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
                 self.replica,
                 message.header.checksum,
                 message.header.client,
@@ -5103,7 +5103,7 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
+            log.debug("{}: primary_pipeline_prepare: prepare {}", .{ self.replica, message.header.checksum });
 
             if (self.primary_pipeline_pending()) |_| {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
