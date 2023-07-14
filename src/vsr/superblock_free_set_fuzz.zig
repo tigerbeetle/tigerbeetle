@@ -142,7 +142,7 @@ fn generate_events(
     ));
     errdefer allocator.free(events);
 
-    log.info("event_distribution = {d:.2}", .{event_distribution});
+    log.info("event_distribution = {:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
     const reservation_blocks_mean = 1 + random.uintLessThan(usize, @divFloor(blocks_count, 20));
@@ -227,9 +227,10 @@ const FreeSetModel = struct {
     }
 
     pub fn highest_address_acquired(set: FreeSetModel) ?u64 {
-        const block = set.blocks_acquired.iterator(.{
+        var it = set.blocks_acquired.iterator(.{
             .direction = .reverse,
-        }).next() orelse return null;
+        });
+        const block = it.next() orelse return null;
         return block + 1;
     }
 

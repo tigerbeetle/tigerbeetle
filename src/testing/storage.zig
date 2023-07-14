@@ -546,7 +546,10 @@ pub const Storage = struct {
         assert(block_header.valid_checksum());
         assert(block_header.size <= constants.block_size);
 
-        return storage.memory[block_offset..][0..constants.block_size];
+        return @alignCast(
+            constants.sector_size,
+            storage.memory[block_offset..][0..constants.block_size],
+        );
     }
 
     pub fn log_pending_io(storage: *const Storage) void {

@@ -443,7 +443,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe do some gets.
         .get = if (random.boolean()) 0 else constants.lsm_batch_multiple,
     };
-    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
     log.info("puts_since_compact_max = {}", .{puts_since_compact_max});
     log.info("compacts_per_checkpoint = {}", .{compacts_per_checkpoint});

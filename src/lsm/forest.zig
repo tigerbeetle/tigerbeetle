@@ -76,7 +76,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
         const Grid = GridType(Storage);
 
-        const Callback = fn (*Forest) void;
+        const Callback = *const fn (*Forest) void;
         const JoinOp = enum {
             compacting,
             checkpoint,
@@ -183,7 +183,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
                 pub fn groove_callback(
                     comptime groove_field_name: []const u8,
-                ) fn (*GrooveFor(groove_field_name)) void {
+                ) *const fn (*GrooveFor(groove_field_name)) void {
                     return struct {
                         fn groove_cb(groove: *GrooveFor(groove_field_name)) void {
                             const grooves = @fieldParentPtr(Grooves, groove_field_name, groove);

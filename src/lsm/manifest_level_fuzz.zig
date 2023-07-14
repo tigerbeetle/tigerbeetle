@@ -122,7 +122,7 @@ fn generate_fuzz_ops(
         .remove_invisible = 3,
         .remove_visible = 3,
     };
-    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
     var ctx = GenerateContext{ .max_inserted = table_count_max, .random = random };
     for (fuzz_ops) |*fuzz_op| {

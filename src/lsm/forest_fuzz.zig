@@ -438,11 +438,11 @@ const Environment = struct {
 
     fn apply_op_action(env: *Environment, fuzz_op_action: FuzzOpAction, model: *Model) !void {
         switch (fuzz_op_action) {
-            .compact => |compact| {
-                try env.compact(compact.op);
-                if (compact.checkpoint) {
-                    try model.checkpoint(compact.op);
-                    try env.checkpoint(compact.op);
+            .compact => |c| {
+                try env.compact(c.op);
+                if (c.checkpoint) {
+                    try model.checkpoint(c.op);
+                    try env.checkpoint(c.op);
                 }
             },
             .put_account => |put| {
@@ -505,14 +505,14 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
     };
-    log.info("action_distribution = {d:.2}", .{action_distribution});
+    log.info("action_distribution = {:.2}", .{action_distribution});
 
     const modifier_distribution = fuzz.Distribution(FuzzOpModifierTag){
         .normal = 1,
         // Maybe crash and recover from the last checkpoint a few times per fuzzer run.
         .crash_after_ticks = if (random.boolean()) 0 else 1E-2,
     };
-    log.info("modifier_distribution = {d:.2}", .{modifier_distribution});
+    log.info("modifier_distribution = {:.2}", .{modifier_distribution});
 
     log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
     log.info("compacts_per_checkpoint = {}", .{Environment.compacts_per_checkpoint});
