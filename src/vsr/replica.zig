@@ -2477,6 +2477,7 @@ pub fn ReplicaType(
             // We will decide below whether to reset or backoff the timeout.
             assert(self.status == .normal);
             assert(self.primary());
+            assert(self.prepare_timeout.ticking);
 
             const prepare = self.primary_pipeline_pending().?;
 
@@ -3361,6 +3362,7 @@ pub fn ReplicaType(
                     assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
                     assert(prepare.message.header.op == self.commit_min);
                     assert(prepare.message.header.op == self.commit_max);
+                    assert(prepare.ok_quorum_received);
                 }
 
                 if (self.pipeline.queue.pop_request()) |request| {
@@ -4230,7 +4232,7 @@ pub fn ReplicaType(
 
             // Don't accept more requests than will fit in the current checkpoint.
             // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
-            // when primary_pipeline_next() converts the request to a prepare.)
+            // when primary_pipeline_prepare() converts the request to a prepare.)
             if (self.op + self.pipeline.queue.request_queue.count == self.op_checkpoint_trigger()) {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
@@ -5053,7 +5055,7 @@ pub fn ReplicaType(
 
             assert(!self.ignore_request_message(message));
 
-            log.debug("{}: primary_pipeline_next: request checksum={} client={}", .{
+            log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
                 self.replica,
                 message.header.checksum,
                 message.header.client,
@@ -5101,7 +5103,7 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            log.debug("{}: primary_pipeline_next: prepare {}", .{ self.replica, message.header.checksum });
+            log.debug("{}: primary_pipeline_prepare: prepare {}", .{ self.replica, message.header.checksum });
 
             if (self.primary_pipeline_pending()) |_| {
                 // Do not restart the prepare timeout as it is already ticking for another prepare.
@@ -5278,6 +5280,15 @@ pub fn ReplicaType(
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
                 if (self.journal.dirty.count == 0 and self.commit_min == self.commit_max) {
+                    if (self.commit_stage != .idle) {
+                        // If we still have a commit running, we started it the last time we were
+                        // primary, and its still running. Wait for it to finish before repairing
+                        // the pipeline so that it doesn't wind up in the new pipeline.
+                        assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+                        assert(self.commit_prepare.?.header.view < self.view);
+                        return;
+                    }
+
                     // Repair the pipeline, which may discover faulty prepares and drive more repairs.
                     switch (self.primary_repair_pipeline()) {
                         // primary_repair_pipeline() is already working.
