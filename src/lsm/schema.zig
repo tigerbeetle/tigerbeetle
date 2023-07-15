@@ -62,14 +62,13 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
+    assert(header.size >= @sizeOf(vsr.Header));
     assert(header.size <= block.len);
+    assert(BlockType.valid(header.operation));
     return header;
 }
 
 pub const TableIndex = struct {
-    /// Every table has exactly one index block.
-    const index_block_count = 1;
-
     /// Stored in every index block's header's `context` field.
     ///
     /// The max-counts are stored in the header despite being available (per-tree) at comptime:
@@ -247,9 +246,8 @@ pub const TableIndex = struct {
         return slice[0..index.filter_blocks_used(index_block)];
     }
 
-    inline fn blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        return index_block_count + index.filter_blocks_used(index_block) +
-            data_blocks_used(index_block);
+    pub inline fn content_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
+        return index.filter_blocks_used(index_block) + index.data_blocks_used(index_block);
     }
 
     inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {

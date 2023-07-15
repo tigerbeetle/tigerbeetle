@@ -114,7 +114,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Callback = fn (*Manifest) void;
 
         /// Here, we use a structure with indexes over the segmented array for performance.
-        const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
+        pub const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
         const KeyRange = Level.KeyRange;
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);

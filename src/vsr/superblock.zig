@@ -431,6 +431,11 @@ pub const data_file_size_min = blk: {
     break :blk superblock_zone_size + constants.journal_size_max;
 };
 
+pub const manifest_block_count_max = @divExact(
+    superblock_trailer_manifest_size_max,
+    SuperBlockManifest.BlockReferenceSize,
+);
+
 /// The maximum number of blocks in the grid.
 pub const grid_blocks_max = blk: {
     var size = constants.storage_size_max;
@@ -489,6 +494,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
     return struct {
         const SuperBlock = @This();
 
+        pub const Storage = Storage;
         pub const Manifest = SuperBlockManifest;
         pub const FreeSet = SuperBlockFreeSet;
         pub const ClientSessions = SuperBlockClientSessions;
@@ -601,10 +607,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var manifest = try Manifest.init(
                 allocator,
-                @divExact(
-                    superblock_trailer_manifest_size_max,
-                    Manifest.BlockReferenceSize,
-                ),
+                manifest_block_count_max,
                 @import("../lsm/tree.zig").table_count_max,
             );
             errdefer manifest.deinit(allocator);
@@ -1479,10 +1482,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     // We should have finished all pending superblock io before starting any more.
                     superblock.storage.assert_no_pending_reads(.superblock);
                     superblock.storage.assert_no_pending_writes(.superblock);
-                    if (context.caller != .view_change) {
-                        superblock.storage.assert_no_pending_writes(.grid);
-                        // (Pending repair-reads are possible.)
-                    }
                 }
 
                 if (context.caller == .open) {

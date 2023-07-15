@@ -1010,6 +1010,9 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 }
 
+// TODO use corruption to verify that sync is proactive
+//test "Cluster: sync: partition, lag, sync (entire )" {
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas

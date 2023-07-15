@@ -662,7 +662,7 @@ func get_open_issue_count() int {
 
 	res := do_github_request(
 		"GET",
-		repository_url+"/issues?filter=created&state=open",
+		repository_url+"/issues?state=open&creator=tigerbeetle-vopr",
 		nil,
 		nil,
 	)
