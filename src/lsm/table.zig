@@ -693,7 +693,7 @@ pub fn TableType(
             // want to return that data block. If the search does not find an exact match
             // it returns the index of the next greatest key, which again is the index of the
             // data block that may contain the key.
-            const data_block_index = binary_search.binary_search_keys_raw(
+            const data_block_index = binary_search.binary_search_keys_upsert_index(
                 Key,
                 compare_keys,
                 Table.index_data_keys_used(index_block),
