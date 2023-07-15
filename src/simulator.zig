@@ -540,16 +540,16 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 var fault_xor: u128 = 0;
-                var fault_iterator = replica.grid.read_faulty_queue.peek();
+                var fault_iterator = replica.grid.read_remote_queue.peek();
                 while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
                     fault_xor ^= faulty_read.checksum;
                 }
 
                 if (missing_block_count) |_| {
-                    assert(missing_block_count.? == replica.grid.read_faulty_queue.count);
+                    assert(missing_block_count.? == replica.grid.read_remote_queue.count);
                     assert(missing_block_xor.? == fault_xor);
                 } else {
-                    missing_block_count = replica.grid.read_faulty_queue.count;
+                    missing_block_count = replica.grid.read_remote_queue.count;
                     missing_block_xor = fault_xor;
                 }
             }

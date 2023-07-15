@@ -3,7 +3,9 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
+const maybe = stdx.maybe;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const lsm = @import("tree.zig");
 const binary_search = @import("binary_search.zig");
@@ -36,7 +38,36 @@ pub fn ManifestLevelType(
             .{},
         );
 
-        pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
+        pub const Tables = SortedSegmentedArray(
+            TableInfo,
+            NodePool,
+            table_count_max,
+            KeyAndSnapshot,
+            struct {
+                inline fn key_from_value(table_info: *const TableInfo) KeyAndSnapshot {
+                    return .{
+                        .key_max = table_info.key_max,
+                        .snapshot_min = table_info.snapshot_min,
+                    };
+                }
+            }.key_from_value,
+            struct {
+                inline fn compare_keys(key_a: KeyAndSnapshot, key_b: KeyAndSnapshot) math.Order {
+                    const order = compare_keys(key_a.key_max, key_b.key_max);
+                    if (order == .eq) {
+                        return std.math.order(key_a.snapshot_min, key_b.snapshot_min);
+                    } else {
+                        return order;
+                    }
+                }
+            }.compare_keys,
+            .{},
+        );
+
+        const KeyAndSnapshot = struct {
+            key_max: Key,
+            snapshot_min: u64,
+        };
 
         pub const TableInfoReference = struct { table_info: *TableInfo, generation: u32 };
 
@@ -110,12 +141,22 @@ pub fn ManifestLevelType(
             }
             assert(level.keys.len() == level.tables.len());
 
-            const absolute_index = level.keys.insert_element(node_pool, table.key_max);
-            assert(absolute_index < level.keys.len());
+            const absolute_index_keys = level.keys.insert_element(node_pool, table.key_max);
+            assert(absolute_index_keys < level.keys.len());
 
-            level.tables.insert_elements(node_pool, absolute_index, &[_]TableInfo{table.*});
+            const absolute_index_tables = level.tables.insert_element(node_pool, table.*);
+            assert(absolute_index_tables < level.tables.len());
+
+            // `keys` may have duplicate entries due to tables with the same key_max, but different
+            // snapshots.
+            maybe(absolute_index_keys != absolute_index_tables);
+
             if (constants.verify) {
                 assert(level.contains(table));
+                assert(std.meta.eql(
+                    level.keys.iterator_from_index(absolute_index_tables, .ascending).next().?.*,
+                    table.key_max,
+                ));
             }
 
             if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;

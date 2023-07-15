@@ -482,7 +482,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 write_block_callback,
                 &manifest_log.write,
                 block,
-                address,
+                .acquire,
             );
             manifest_log.blocks.advance_head();
         }

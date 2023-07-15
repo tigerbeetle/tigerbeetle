@@ -9,11 +9,13 @@ const stdx = @import("../stdx.zig");
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("../lsm/grid.zig").allocate_block;
 const GridType = @import("../lsm/grid.zig").GridType;
+const GridRepairQueueType = @import("./grid_repair_queue.zig").GridRepairQueueType;
 const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
+const GridScrubberType = @import("./grid_scrubber.zig").GridScrubberType;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -59,6 +61,7 @@ const CommitStage = enum {
     compact_state_machine,
     checkpoint_state_machine,
     checkpoint_client_replies,
+    checkpoint_grid_repair,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -118,6 +121,8 @@ pub fn ReplicaType(
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
+    const GridRepairQueue = GridRepairQueueType(Storage);
+    const GridScrubber = GridScrubberType(StateMachine.Forest);
     const SuperBlock = vsr.SuperBlockType(Storage);
 
     return struct {
@@ -211,9 +216,9 @@ pub fn ReplicaType(
         superblock_context_view_change: SuperBlock.Context = undefined,
 
         grid: Grid,
+        grid_repair_queue: GridRepairQueue,
+        grid_scrubber: GridScrubber,
         grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
-        grid_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
-        grid_write_blocks: [constants.grid_repair_writes_max]Grid.BlockPtr,
         grid_read_fault_next_tick: Grid.NextTick = undefined,
 
         opened: bool,
@@ -408,12 +413,15 @@ pub fn ReplicaType(
         repair_sync_timeout: Timeout,
 
         /// The number of ticks before sending a command=request_blocks.
-        /// (grid.read_faulty_queue.count>0)
+        /// (always running)
         grid_repair_message_timeout: Timeout,
 
         /// The number of ticks before sending a sync message (message types depend on syncing).
         /// (syncing≠idle)
         sync_message_timeout: Timeout,
+
+        /// (always running)
+        scrub_grid_timeout: Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
@@ -462,7 +470,7 @@ pub fn ReplicaType(
                 },
             );
 
-            // Once initialzed, the replica is in charge of calling superblock.deinit()
+            // Once initialized, the replica is in charge of calling superblock.deinit()
             var initialized = false;
             errdefer if (!initialized) self.superblock.deinit(allocator);
 
@@ -665,9 +673,11 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
+            assert(self.grid_scrubber.mode == .stop);
 
             log.debug("{}: state_machine_open_callback", .{self.replica});
 
+            self.grid_scrubber.open();
             self.state_machine_opened = true;
 
             if (self.solo()) {
@@ -797,11 +807,15 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
-            for (self.grid_write_blocks) |*block, i| {
-                errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
-                block.* = try allocate_block(allocator);
-            }
-            errdefer for (self.grid_write_blocks) |b| allocator.free(b);
+            self.grid_repair_queue = try GridRepairQueue.init(allocator, &self.grid);
+            errdefer self.grid_repair_queue.deinit(allocator);
+
+            self.grid_scrubber = try GridScrubber.init(
+                allocator,
+                &self.state_machine.forest,
+                .{ .replica_index = options.replica_index },
+            );
+            errdefer self.grid_scrubber.deinit(allocator);
 
             self.state_machine = try StateMachine.init(
                 allocator,
@@ -832,7 +846,8 @@ pub fn ReplicaType(
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
                 .grid = self.grid,
-                .grid_write_blocks = self.grid_write_blocks,
+                .grid_repair_queue = self.grid_repair_queue,
+                .grid_scrubber = self.grid_scrubber,
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
@@ -929,7 +944,7 @@ pub fn ReplicaType(
         }
 
         /// Free all memory and unref all messages held by the replica.
-        /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time.
+        /// This does not deinitialize the Storage or Time.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             assert(self.tracer_slot_checkpoint == null);
             assert(self.tracer_slot_commit == null);
@@ -941,6 +956,7 @@ pub fn ReplicaType(
             self.clock.deinit(allocator);
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
+            self.grid_repair_queue.deinit(allocator);
             self.grid.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
@@ -964,8 +980,6 @@ pub fn ReplicaType(
 
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
-
-            for (self.grid_write_blocks) |block| allocator.free(block);
 
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
@@ -1005,6 +1019,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.tick();
             self.grid_repair_message_timeout.tick();
             self.sync_message_timeout.tick();
+            self.scrub_grid_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
@@ -1020,6 +1035,7 @@ pub fn ReplicaType(
             if (self.repair_sync_timeout.fired()) self.on_repair_sync_timeout();
             if (self.grid_repair_message_timeout.fired()) self.on_grid_repair_message_timeout();
             if (self.sync_message_timeout.fired()) self.on_sync_message_timeout();
+            if (self.scrub_grid_timeout.fired()) self.on_scrub_grid_timeout();
 
             // None of the on_timeout() functions above should send a message to this replica.
             assert(self.loopback_queue == null);
@@ -2184,7 +2200,7 @@ pub fn ReplicaType(
             assert(requests.len > 0);
 
             request_loop: for (requests) |*request, i| {
-                for (std.mem.bytesAsSlice(u64, &request.reserved)) |word| assert(word == 0);
+                assert(stdx.zeroed(&request.reserved));
 
                 if (self.grid.faulty(request.block_address, null)) {
                     log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
@@ -2196,6 +2212,8 @@ pub fn ReplicaType(
                     });
                     continue;
                 }
+
+                // TODO check grid repair queue contains, too
 
                 var reads = self.grid_reads.iterate();
                 while (reads.next()) |read| {
@@ -2243,7 +2261,7 @@ pub fn ReplicaType(
                     .message = reply.ref(),
                 };
 
-                self.grid.read_block_repair(
+                self.grid.read_block_repair_from_cache_and_storage(
                     on_request_blocks_read_repair,
                     &read.read,
                     reply.buffer[0..constants.block_size],
@@ -2253,7 +2271,10 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_blocks_read_repair(grid_read: *Grid.ReadRepair, result: error{BlockNotFound}!void) void {
+        fn on_request_blocks_read_repair(
+            grid_read: *Grid.ReadRepair,
+            result: Grid.ReadBlockResult,
+        ) void {
             const read = @fieldParentPtr(BlockRead, "read", grid_read);
             const self = read.replica;
             defer {
@@ -2263,18 +2284,19 @@ pub fn ReplicaType(
 
             assert(read.destination != self.replica);
 
-            result catch {
-                log.debug("{}: on_request_blocks: block not found " ++
+            if (result != .valid) {
+                log.debug("{}: on_request_blocks: error: {s}: " ++
                     "(destination={} address={} checksum={})", .{
                     self.replica,
+                    @tagName(result),
                     read.destination,
                     grid_read.address,
                     grid_read.checksum,
                 });
                 return;
-            };
+            }
 
-            log.debug("{}: on_request_blocks: block found " ++
+            log.debug("{}: on_request_blocks: success: " ++
                 "(destination={} address={} checksum={})", .{
                 self.replica,
                 read.destination,
@@ -2296,87 +2318,129 @@ pub fn ReplicaType(
             assert(message.header.size <= constants.block_size);
             assert(message.header.op > 0); // op holds the block's address.
 
-            // TODO State sync
+            //if (!self.grid.faulty(message.header.op, message.header.checksum)) {
+            //    log.debug("{}: on_block: ignoring; block not repairing (address={} checksum={})", .{
+            //        self.replica,
+            //        message.header.op,
+            //        message.header.checksum,
+            //    });
+            //    return;
+            //}
+            ////assert(self.grid_repair_message_timeout.ticking);
+            //
+            //if (self.grid.canceling != null) {
+            //    log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={}", .{
+            //        self.replica,
+            //        message.header.op,
+            //        message.header.checksum,
+            //    });
+            //    return;
+            //}
 
-            if (!self.grid.faulty(message.header.op, message.header.checksum)) {
-                log.debug("{}: on_block: ignoring; block not repairing (address={} checksum={})", .{
-                    self.replica,
-                    message.header.op,
-                    message.header.checksum,
-                });
-                return;
-            }
-            assert(self.grid_repair_message_timeout.ticking);
+            //switch (self.grid.writing(message.header.op, null)) {
+            //    .init => unreachable,
+            //    .repair => {
+            //        log.debug("{}: on_block: ignoring; already writing block (address={} checksum={})", .{
+            //            self.replica,
+            //            message.header.op,
+            //            message.header.checksum,
+            //        });
+            //        return;
+            //    },
+            //    .none => {},
+            //}
+            //const block_address = message.header.op;
+            const block = message.buffer[0..constants.block_size];
 
-            if (self.grid.canceling != null) {
-                log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={}", .{
-                    self.replica,
-                    message.header.op,
-                    message.header.checksum,
-                });
-                return;
-            }
+            //const grid_fulfill = self.grid.faulty(block_address, message.header.checksum);
+            const grid_fulfill = self.grid.fulfill_block(block);
+            const grid_repair = self.grid_repair_queue.repair(block);
+                //self.grid_repair_queue.contains(block_address, message.header.checksum);
+            //    self.grid_repair_queue.repair(block) catch |err| {
+            //        log.debug("{}: on_block: ignoring; grid repair queue {} " ++
+            //            "(address={} checksum={})", .{
+            //            self.replica,
+            //            err,
+            //            message.header.address,
+            //            message.header.checksum,
+            //        });
+            //    };
 
-            switch (self.grid.writing(message.header.op, null)) {
-                .init => unreachable,
-                .repair => {
-                    log.debug("{}: on_block: ignoring; already writing block (address={} checksum={})", .{
-                        self.replica,
-                        message.header.op,
-                        message.header.checksum,
-                    });
-                    return;
-                },
-                .none => {},
-            }
-
-            const write = self.grid_writes.acquire() orelse {
-                log.debug("{}: on_block: ignoring; no write available (address={} checksum={})", .{
-                    self.replica,
-                    message.header.op,
-                    message.header.checksum,
-                });
-                return;
-            };
-
-            log.debug("{}: on_block: repairing block (address={} checksum={})", .{
+            log.debug("{}: on_block: address={} checksum={} grid_fulfill={} grid_repair={}", .{
                 self.replica,
                 message.header.op,
                 message.header.checksum,
+                grid_fulfill,
+                grid_repair,
             });
 
-            write.* = .{
-                .replica = self,
-                .write = undefined,
-            };
+            //if (grid_repair_queue) {
+            //    self.grid_repair_queue.repair(block) catch |err| {
+            //        log.debug("{}: on_block: ignoring; grid repair queue {} " ++
+            //            "(address={} checksum={})", .{
+            //            self.replica,
+            //            err,
+            //            message.header.address,
+            //            message.header.checksum,
+            //        });
+            //    };
+            //} else {
+            //    if (!grid_fulfill) {
+            //        log.debug("{}: on_block: ignoring; clean (address={} checksum={})", .{
+            //            self.replica,
+            //            message.header.address,
+            //            message.header.checksum,
+            //        });
+            //    }
+            //}
 
-            const block = &self.grid_write_blocks[self.grid_writes.index(write)];
-            stdx.copy_disjoint(.inexact, u8, block.*, message.buffer[0..message.header.size]);
-
-            self.grid.write_block_repair(
-                on_block_write_repair,
-                &write.write,
-                block,
-                message.header.op,
-            );
+            //const write = self.grid_writes.acquire() orelse {
+            //    log.debug("{}: on_block: ignoring; no write available (address={} checksum={})", .{
+            //        self.replica,
+            //        message.header.op,
+            //        message.header.checksum,
+            //    });
+            //    return;
+            //};
+            //
+            //log.debug("{}: on_block: repairing block (address={} checksum={})", .{
+            //    self.replica,
+            //    message.header.op,
+            //    message.header.checksum,
+            //});
+            //
+            //write.* = .{
+            //    .replica = self,
+            //    .write = undefined,
+            //};
+            //
+            //const block = &self.grid_write_blocks[self.grid_writes.index(write)];
+            //stdx.copy_disjoint(.inexact, u8, block.*, message.buffer[0..message.header.size]);
+            //
+            //self.grid.write_block_repair(
+            //    on_block_write_repair,
+            //    &write.write,
+            //    block,
+            //    message.header.op,
+            //);
         }
 
-        fn on_block_write_repair(grid_write: *Grid.Write) void {
-            const write = @fieldParentPtr(BlockWrite, "write", grid_write);
-            const self = write.replica;
-            assert(self.grid_repair_message_timeout.ticking);
-
-            defer self.grid_writes.release(write);
-
-            log.debug("{}: on_block: wrote address={}", .{
-                self.replica,
-                grid_write.address,
-            });
-
-            if (self.grid.read_faulty_queue.empty()) {
-                self.grid_repair_message_timeout.stop();
-            }
-        }
+        //fn on_block_write_repair(grid_write: *Grid.Write) void {
+        //    const write = @fieldParentPtr(BlockWrite, "write", grid_write);
+        //    const self = write.replica;
+        //    assert(self.grid_repair_message_timeout.ticking);
+        //
+        //    defer self.grid_writes.release(write);
+        //
+        //    log.debug("{}: on_block: wrote address={}", .{
+        //        self.replica,
+        //        grid_write.address,
+        //    });
+        //
+        //    if (self.grid.read_remote_queue.empty()) {
+        //        self.grid_repair_message_timeout.stop();
+        //    }
+        //}
 
         fn on_request_sync_trailer(self: *Self, message: *Message) void {
             assert(message.header.command == .request_sync_manifest or
@@ -2727,6 +2791,7 @@ pub fn ReplicaType(
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
             if (self.commit_stage == .checkpoint_superblock) return;
+            if (self.commit_stage == .checkpoint_grid_repair) return;
 
             // TODO Test connectivity to cluster to rule out a network partition.
 
@@ -2758,7 +2823,7 @@ pub fn ReplicaType(
                     commit_next < primary_repair_min and
                     (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
 
-                const stuck_grid = !self.grid.read_faulty_queue.empty();
+                const stuck_grid = !self.grid.read_remote_queue.empty();
 
                 if (!stuck_header and !stuck_prepare and !stuck_grid) return;
             }
@@ -2786,7 +2851,7 @@ pub fn ReplicaType(
 
         fn on_grid_repair_message_timeout(self: *Self) void {
             assert(self.grid_repair_message_timeout.ticking);
-            assert(!self.grid.read_faulty_queue.empty());
+            //assert(!self.grid.read_remote_queue.empty());
             maybe(self.state_machine_opened);
 
             self.grid_repair_message_timeout.reset();
@@ -2819,6 +2884,52 @@ pub fn ReplicaType(
                     }
                 },
             }
+        }
+
+        fn on_scrub_grid_timeout(self: *Self) void {
+            assert(self.scrub_grid_timeout.ticking);
+
+            self.scrub_grid_timeout.reset();
+            self.scrub_grid_timeout.after = std.math.clamp(
+                @divFloor(
+                    constants.grid_scrubber_cycle_ticks,
+                    self.superblock.free_set.count_acquired(),
+                ),
+                constants.grid_scrubber_interval_ticks_min,
+                constants.grid_scrubber_interval_ticks_max,
+            );
+
+            while (!self.grid_repair_queue.full()) {
+                const fault = self.grid_scrubber.next_fault() orelse break;
+
+                log.debug("{}: on_scrub_grid_timeout: fault found: " ++
+                    "block_address={} block_checksum={} block_type={s}", .{
+                    self.replica,
+                    fault.block_address,
+                    fault.block_checksum,
+                    @tagName(fault.block_type);
+                });
+
+                self.grid_repair_queue.queue_fault(fault) catch |err| {
+                    assert(err == error.Faulty);
+
+                    log.debug("{}: on_scrub_grid_timeout: ignoring (already faulty)", .{
+                        self.replica,
+                    });
+                };
+            }
+
+            self.grid_scrubber.read_next();
+            //switch () {
+            //    .read => {},
+            //    .busy => {},
+            //    .done => {
+            //        self.grid_scrubber.configure(grid_scrubber_config.background);
+            //
+            //        log.info("{}: on_scrub_grid_timeout: sync-scrub complete", .{
+            //        });
+            //    },
+            //}
         }
 
         fn primary_receive_do_view_change(self: *Self, message: *Message) void {
@@ -3074,6 +3185,7 @@ pub fn ReplicaType(
                 .checkpoint_client_replies => {
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
+                .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3421,10 +3533,9 @@ pub fn ReplicaType(
                 );
                 if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
-                assert(self.grid.read_queue.empty());
-                assert(self.grid.read_faulty_queue.empty());
-                assert(self.grid.write_queue.empty());
-                assert(self.grid.write_iops.executing() == 0);
+                // TODO(Compaction pacing) Move this out of the conditional once there is no IO
+                // between beats.
+                self.grid.assert_only_repairing();
 
                 self.commit_dispatch(.checkpoint_state_machine);
             } else {
@@ -3438,10 +3549,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid.write_iops.executing() == 0);
+            self.grid.assert_only_repairing();
 
             self.commit_dispatch(.checkpoint_client_replies);
         }
@@ -3449,6 +3557,21 @@ pub fn ReplicaType(
         fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_stage == .checkpoint_client_replies);
+
+            self.commit_dispatch(.checkpoint_grid_repair);
+        }
+
+        fn commit_op_checkpoint_grid_repair(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
+
+            self.grid_repair_queue.checkpoint(commit_op_checkpoint_grid_repair_callback);
+        }
+
+        fn commit_op_checkpoint_grid_repair_callback(grid_repair_queue: *GridRepairQueue) void {
+            const self = @fieldParentPtr(Self, "grid_repair_queue", grid_repair_queue);
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
 
             self.commit_dispatch(.checkpoint_superblock);
         }
@@ -3458,12 +3581,9 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid.write_iops.executing() == 0);
             assert(self.op_checkpoint_trigger() == self.op);
             assert(self.op_checkpoint_trigger() <= self.commit_max);
+            self.grid.assert_only_repairing();
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
@@ -3477,13 +3597,34 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
+            const vsr_state_op_unsynced = unsynced: {
+                if (self.grid_scrubber.mode == .sync) {
+                    assert(self.superblock.staging.vsr_state.op_unsynced_min > 0);
+                    assert(self.superblock.staging.vsr_state.op_unsynced_max > 0);
+
+                    break :unsynced .{
+                        .min = self.superblock.staging.vsr_state.op_unsynced_min,
+                        .max = self.superblock.staging.vsr_state.op_unsynced_max,
+                    };
+                } else {
+                    break :unsynced .{
+                        .min = 0,
+                        .max = 0,
+                    };
+                }
+            };
+
+            self.grid_scrubber.checkpoint();
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
                 .{
-                    .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
+                    .commit_min_checksum =
+                        self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                     .commit_min = vsr_state_commit_min,
                     .commit_max = self.commit_max,
+                    .op_unsynced_min = ,
+                    .op_unsynced_max = ,
                 },
             );
         }
@@ -3497,6 +3638,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.commit_min - constants.lsm_batch_multiple);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+            self.grid.assert_only_repairing();
 
             log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{
                 self.replica,
@@ -7005,6 +7147,7 @@ pub fn ReplicaType(
             self.request_start_view_message_timeout.stop();
             self.repair_timeout.stop();
             self.repair_sync_timeout.stop();
+            self.grid_repair_message_timeout.start();
 
             if (self.pipeline == .queue) {
                 // Convert the pipeline queue into a cache.
@@ -7058,6 +7201,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
+                self.grid_repair_message_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
                 self.pipeline = .{ .queue = .{} };
@@ -7085,6 +7229,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
+                self.grid_repair_message_timeout.start();
             }
         }
 
@@ -7135,6 +7280,7 @@ pub fn ReplicaType(
             self.start_view_change_message_timeout.start();
             self.repair_timeout.start();
             self.repair_sync_timeout.start();
+            self.grid_repair_message_timeout.start();
         }
 
         fn transition_to_normal_from_view_change_status(self: *Self, view_new: u32) void {
@@ -7179,6 +7325,7 @@ pub fn ReplicaType(
                 self.do_view_change_message_timeout.stop();
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
+                self.grid_repair_message_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
                 if (self.pipeline.queue.prepare_queue.count > 0) {
@@ -7218,6 +7365,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
+                self.grid_repair_message_timeout.start();
             }
 
             self.heartbeat_timestamp = 0;
@@ -7356,6 +7504,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
+            self.grid_repair_message_timeout.start();
 
             if (self.primary_index(self.view) == self.replica) {
                 self.request_start_view_message_timeout.stop();
@@ -7414,6 +7563,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7529,10 +7679,9 @@ pub fn ReplicaType(
                 .idle => {},
                 .canceling_commit => {}, // Waiting for an uninterruptible commit step.
                 .canceling_grid => {
-                    self.grid_repair_message_timeout.stop();
                     self.grid.cancel(sync_cancel_grid_callback);
 
-                    assert(self.grid.read_faulty_queue.empty());
+                    assert(self.grid.read_remote_queue.empty());
                 },
                 .requesting_target => {}, // Waiting for a usable sync target.
                 .requesting_trailers => self.sync_message_timeout.start(),
@@ -7557,6 +7706,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => {},
             }
@@ -7564,7 +7714,7 @@ pub fn ReplicaType(
             // Even though the commit flow has been stopped, there may still be pending IO
             // between beats.
             // TODO Compaction pacing: If there is no grid IO between beats, we can transition
-            // to stage=requesting_target.
+            // to stage=requesting_target. (But will still need to reset the GridRepairQueue.)
             self.sync_dispatch(.canceling_grid);
         }
 
@@ -7572,7 +7722,10 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(self.syncing == .canceling_grid);
             assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_remote_queue.empty());
+            assert(self.grid.write_queue.empty());
+            assert(self.grid.read_iops.executing() == 0);
+            assert(self.grid.write_iops.executing() == 0);
 
             if (self.commit_stage == .idle) {
                 assert(self.commit_prepare == null);
@@ -7590,10 +7743,12 @@ pub fn ReplicaType(
                 self.grid_reads.release(grid_read);
             }
 
-            var grid_writes = self.grid_writes.iterate();
-            while (grid_writes.next()) |grid_write| {
-                self.grid_writes.release(grid_write);
-            }
+            // TODO disable grid scrubbing during state sync
+
+            //var grid_writes = self.grid_writes.iterate();
+            //while (grid_writes.next()) |grid_write| {
+            //    self.grid_writes.release(grid_write);
+            //}
 
             self.sync_dispatch(.requesting_target);
         }
@@ -7604,12 +7759,11 @@ pub fn ReplicaType(
             assert(!self.superblock.updating(.checkpoint));
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
-            assert(!self.grid_repair_message_timeout.ticking);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_pending_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
-            assert(self.grid_writes.executing() == 0);
+            assert(self.grid_repair_queue.writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
             const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
@@ -7643,6 +7797,9 @@ pub fn ReplicaType(
             maybe(self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
+
+            self.grid_repair_queue.cancel();
+            self.grid_scrubber.stop();
 
             self.state_machine_opened = false;
             self.state_machine.reset();
@@ -8077,12 +8234,12 @@ pub fn ReplicaType(
         fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
             // `read` is *not* a BlockRead.read; we cannot use @fieldParentPtr() on it.
             const self = @fieldParentPtr(Self, "grid", grid);
-            assert(!self.grid.read_faulty_queue.empty());
+            assert(!self.grid.read_remote_queue.empty());
             assert(self.syncing != .canceling_grid);
             assert(!self.superblock.free_set.is_free(read.address));
             maybe(self.state_machine_opened);
 
-            log.warn("{}: on_grid_read_fault: address={} checksum={} block_type={}", .{
+            log.debug("{}: on_grid_read_fault: address={} checksum={} block_type={}", .{
                 self.replica,
                 read.address,
                 read.checksum,
@@ -8091,70 +8248,71 @@ pub fn ReplicaType(
 
             if (self.solo()) @panic("grid is corrupt");
 
-            if (!self.grid_repair_message_timeout.ticking) {
-                assert(self.grid.read_faulty_queue.count == 1);
-
-                self.grid_repair_message_timeout.start();
-                self.superblock.storage.on_next_tick(
-                    .vsr,
-                    on_grid_read_fault_next_tick,
-                    &self.grid_read_fault_next_tick,
-                );
-            }
-        }
-
-        fn on_grid_read_fault_next_tick(next_tick: *Grid.NextTick) void {
-            const self = @fieldParentPtr(Self, "grid_read_fault_next_tick", next_tick);
-            if (self.grid.read_faulty_queue.empty()) {
-                // Very unlikely, but possibly we wrote the block before next_tick fired.
-            } else {
-                self.send_request_blocks();
-            }
+            self.grid_repair_queue.queue_fault(
+                read.address,
+                read.checksum,
+                if (read.block_type == .index) .table else .block,
+            ) catch |err| {
+                log.debug("{}: on_grid_read_fault: queue error: error={} address={} checksum={}", .{
+                    self.replica,
+                    err,
+                    read.address,
+                    read.checksum,
+                });
+            };
         }
 
         fn send_request_blocks(self: *Self) void {
-            assert(!self.solo());
             assert(self.grid_repair_message_timeout.ticking);
-            assert(!self.grid.read_faulty_queue.empty());
             maybe(self.state_machine_opened);
 
             var message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
-            var requests_count: u32 = 0;
-            var requests = std.mem.bytesAsSlice(
+            const requests = std.mem.bytesAsSlice(
                 vsr.BlockRequest,
                 message.buffer[@sizeOf(Header)..],
-            );
+            )[0..constants.grid_repair_request_max];
 
-            var reads = self.grid.read_faulty_queue.peek();
-            while (reads) |read| : (reads = read.next) {
-                assert(read.address > 0);
-                assert(!self.superblock.free_set.is_free(read.address));
-                if (self.grid.writing(read.address, null) != .none) continue;
+            const request_faults_count = @minimum(self.grid.read_remote_queue.count, requests.len);
+            const request_repairs_count =
+                self.grid_repair_queue.block_requests(requests[request_faults_count..]);
 
+            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
+            // continue.
+            // (Note that many – but not all – of these blocks are also in the GridRepairQueue.
+            // The `read_remote_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
+            // TODO avoid duplicate requests
+            for (requests[0..request_faults_count]) |*request| {
+                // Pop-push the FIFO to cycle the faulty queue so that successive requests
+                // rotate through all stalled blocks (approximately) evenly.
+                const read_fault = self.grid.read_remote_queue.pop().?;
+                self.grid.read_remote_queue.push(read_fault);
+
+                request.* = .{
+                    .block_address = read_fault.address,
+                    .block_checksum = read_fault.checksum,
+                };
+            }
+
+            const requests_count = request_faults_count + request_repairs_count;
+            if (requests_count == 0) return;
+
+            for (requests[0..requests_count]) |*request| {
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
                     self.replica,
-                    read.address,
-                    read.checksum,
+                    request.block_address,
+                    request.block_checksum,
                 });
 
-                requests[requests_count] = .{
-                    .block_checksum = read.checksum,
-                    .block_address = read.address,
-                };
-                requests_count += 1;
-
-                if (requests_count == constants.grid_repair_request_max) break;
+                assert(!self.superblock.free_set.is_free(request.block_address));
             }
-            assert(requests_count <= constants.grid_repair_request_max);
-            if (requests_count == 0) return;
 
             message.header.* = .{
                 .command = .request_blocks,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
+                .size = @sizeOf(Header) + @intCast(u32, requests_count) * @sizeOf(vsr.BlockRequest),
             };
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();

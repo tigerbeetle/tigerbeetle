@@ -53,6 +53,9 @@ fn launder_type(comptime T: type, comptime value: anytype) T {
 }
 
 const vsr = @import("vsr.zig");
+
+// Most constants are derived from the config.
+// But these are fixed, so can be imported without a circular dependency:
 const sector_size = @import("constants.zig").sector_size;
 
 pub const Config = struct {
@@ -70,6 +73,7 @@ pub const Config = struct {
 /// - Replica configs can change between restarts.
 ///
 /// Fields are documented within constants.zig.
+// TODO: Some of these could be runtime parameters (e.g. grid_scrubber_cycle_ms).
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
     tracer_backend: TracerBackend = .none,
@@ -111,8 +115,13 @@ const ConfigProcess = struct {
     grid_iops_write_max: u64 = 16,
     grid_repair_request_max: usize = 8,
     grid_repair_reads_max: usize = 8,
-    grid_repair_writes_max: usize = 8,
     grid_cache_size_default: u64 = 1024 * 1024 * 1024,
+    grid_repair_blocks_max: usize = 30,
+    grid_repair_tables_max: usize = 3,
+    grid_scrubber_reads_max: usize = 1,
+    grid_scrubber_cycle_ms: usize = std.time.ms_per_week,
+    grid_scrubber_interval_min_ms: usize = std.time.ms_per_s / 20,
+    grid_scrubber_interval_max_ms: usize = std.time.ms_per_s,
     aof_record: bool = false,
     aof_recovery: bool = false,
     /// When null, this defaults to message_body_size_max.
@@ -240,7 +249,8 @@ pub const configs = struct {
             .cache_transfers_posted_size_default = @sizeOf(u256) * 2048,
             .grid_repair_request_max = 4,
             .grid_repair_reads_max = 4,
-            .grid_repair_writes_max = 1,
+            .grid_repair_blocks_max = 3,
+            .grid_repair_tables_max = 2,
             .verify = true,
             // Set to a small value to ensure the multipart trailer sync is easily tested.
             .sync_trailer_message_body_size_max = 129,

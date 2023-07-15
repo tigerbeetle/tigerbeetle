@@ -772,12 +772,7 @@ pub fn CompactionType(
                         .index => &compaction.table_builder.index_block,
                     };
                     compaction.state.tables_writing.pending += 1;
-                    compaction.context.grid.write_block(
-                        on_write,
-                        write,
-                        block,
-                        Table.block_address(block.*),
-                    );
+                    compaction.context.grid.write_block(on_write, write, block, .acquire);
                 }
 
                 fn on_write(write: *Grid.Write) void {

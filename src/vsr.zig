@@ -804,6 +804,7 @@ pub const Header = extern struct {
 
     fn invalid_block(self: *const Header) ?[]const u8 {
         assert(self.command == .block);
+        if (self.size > constants.block_size) return "size > block_size";
         if (self.parent != 0) return "parent != 0";
         if (self.client != 0) return "client != 0";
         if (self.view != 0) return "view != 0";

@@ -309,6 +309,11 @@ pub const FreeSet = struct {
         return !set.blocks.isSet(block);
     }
 
+    pub fn is_released(set: *const FreeSet, address: u64) bool {
+        const block = address - 1;
+        return set.staging.isSet(block);
+    }
+
     /// Leave the address allocated for now, but free it at the next checkpoint.
     /// This ensures that it will not be overwritten during the current checkpoint — the block may
     /// still be needed if we crash and recover from the current checkpoint.
