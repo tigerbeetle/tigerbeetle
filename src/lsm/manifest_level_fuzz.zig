@@ -317,7 +317,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
 
             // Insert the generated tables into the Environment for reference:
             for (tables) |*table| {
-                const index = binary_search.binary_search_values_raw(
+                const index = binary_search.binary_search_values_upsert_index(
                     Key,
                     TableInfo,
                     key_min_from_table,
@@ -340,7 +340,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             var new_key_min = key + env.random.uintLessThanBiased(Key, 31) + 1;
             assert(compare_keys(new_key_min, key) == .gt);
 
-            var i = binary_search.binary_search_values_raw(
+            var i = binary_search.binary_search_values_upsert_index(
                 Key,
                 TableInfo,
                 key_min_from_table,
@@ -416,7 +416,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
         }
 
         fn find_exact(env: *Environment, level_table: *const TableInfo) *TableInfo {
-            const index = binary_search.binary_search_values_raw(
+            const index = binary_search.binary_search_values_upsert_index(
                 Key,
                 TableInfo,
                 key_min_from_table,

@@ -2,8 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-const binary_search_keys_raw = @import("./binary_search.zig").binary_search_keys_raw;
-const binary_search_values_raw = @import("./binary_search.zig").binary_search_values_raw;
+const binary_search_keys_upsert_index = @import("./binary_search.zig").binary_search_keys_upsert_index;
+const binary_search_values_upsert_index = @import("./binary_search.zig").binary_search_values_upsert_index;
 const eytzinger = @import("./eytzinger.zig").eytzinger;
 
 const GiB = 1 << 30;
@@ -106,7 +106,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
             const page = &pages[page_index];
             const bounds = Eytzinger.search_values(K, V, V.key_compare, &page.keys, &page.values, target);
             const hit = bounds[
-                binary_search_values_raw(
+                binary_search_values_upsert_index(
                     K,
                     V,
                     V.key_from_value,
@@ -147,7 +147,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
             const target = value_picker[v % value_picker.len];
             const page = &pages[page_picker[i % page_picker.len]];
             const hit = page.values[
-                binary_search_values_raw(
+                binary_search_values_upsert_index(
                     K,
                     V,
                     V.key_from_value,
@@ -320,7 +320,7 @@ fn binary_search_keys(
     assert(keys.len == layout.keys_count);
     assert(values.len == layout.values_count);
 
-    const key_index = binary_search_keys_raw(Key, compare_keys, keys, key, .{});
+    const key_index = binary_search_keys_upsert_index(Key, compare_keys, keys, key, .{});
     const key_stride = layout.values_count / layout.keys_count;
     const high = key_index * key_stride;
     if (key_index < keys.len and keys[key_index] == key) {
