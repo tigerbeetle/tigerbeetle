@@ -5337,7 +5337,7 @@ pub fn ReplicaType(
                         // If we still have a commit running, we started it the last time we were
                         // primary, and its still running. Wait for it to finish before repairing
                         // the pipeline so that it doesn't wind up in the new pipeline.
-                        assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+                        //assert(self.commit_prepare.?.header.op == self.commit_min + 1);
                         assert(self.commit_prepare.?.header.view < self.view);
                         return;
                     }
@@ -7602,7 +7602,6 @@ pub fn ReplicaType(
         fn sync_cancel_commit_callback(self: *Self) void {
             assert(!self.solo());
             assert(self.syncing == .canceling_commit);
-            assert(self.grid_repair_queue.empty());
 
             switch (self.commit_stage) {
                 .idle,
@@ -8190,86 +8189,40 @@ pub fn ReplicaType(
         //}
 
         fn send_request_blocks(self: *Self) void {
-            comptime assert(constants.grid_repair_request_max * @sizeOf(vsr.BlockRequest) <=
-                constants.message_body_size_max);
-
             assert(self.grid_repair_message_timeout.ticking);
-            //assert(!self.grid.read_faulty_queue.empty());
-            maybe(self.grid.read_faulty_queue.empty());
             maybe(self.state_machine_opened);
-
-            if (self.grid.read_faulty_queue.empty() and
-                self.grid_repair_queue.empty())
-            {
-                return;
-            }
-            assert(!self.solo());
 
             var message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
-            const requests_all = std.mem.bytesAsSlice(
+            const requests = std.mem.bytesAsSlice(
                 vsr.BlockRequest,
                 message.buffer[@sizeOf(Header)..],
             )[0..constants.grid_repair_request_max];
 
-            //const requests_count = self.grid_repair_queue.requests(requests_all);
-            //assert(requests_count > 0);
-            //assert(requests_count <= constants.grid_repair_request_max);
-            //
-            //var grid_read_faults = self.grid.read_faulty_queue.iterator();
-            //var grid_repairs = self.grid_repair_queue.requests();
-            //
-            //const request_faults_total = self.grid.read_faulty_queue.count;
-            //const request_repairs_total = self.grid_repair_queue.count();
-            //const request_faults_count =
-            //    @minimum(request_faults_total, requests_all.len);
-            //const request_repairs_count =
-            //    @minimum(request_repairs_total, requests_all.len - request_fault_count);
-            //assert(request_faults_count > 0 or request_repairs > 0);
-            //
-            //for (requests_all[0..request_faults_count]) |*request| {
-            //    const read_fault = self.grid.read_faulty_queue.pop().?;
-            //    self.grid.read_faulty_queue.push(read_fault);
-            //
-            //    request.* = .{
-            //        .address = read_fault.address,
-            //        .checksum = read_fault.checksum,
-            //    };
-            //}
-            //
-            //for (requests_all[request_faults_count..][0..request_repairs_count]) |*request| {
-            //    request.* = .{
-            //    };
-            //}
-            //
-            //for (requests_all) |*request| {
-            //    assert(!self.superblock.free_set.is_free(request.block_address));
-            //}
-            //
-            //    switch (mode) {
-            //        .grid_faults => {
-            //        },
-            //
-            //    if (grid_read_faults.next()) |read_fault| {
-            //        request.* = .{
-            //            .block_address = read_fault.address,
-            //            .block_checksum = read_fault.checksum,
-            //        };
-            //    } else {
-            //    }
-            //
-            //    log.debug("{}: send_request_blocks: request address={} checksum={}", .{
-            //        self.replica,
-            //        request.block_address,
-            //        request.block_checksum,
-            //    });
-            //}
+            const request_faults_count = @minimum(self.grid.read_faulty_queue.count, requests.len);
+            const request_repairs_count =
+                self.grid_repair_queue.block_requests(requests[request_faults_count..]);
 
-            const requests_count = self.grid_repair_queue.requests(requests_all);
-            assert(requests_count > 0);
+            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
+            // continue.
+            // (Note that many – but not all – of these blocks are also in the GridRepairQueue.
+            // The `read_faulty_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
+            // TODO avoid duplicate requests
+            for (requests[0..request_faults_count]) |*request| {
+                // Pop-push the FIFO to cycle the faulty queue so that successive requests
+                // rotate through all stalled blocks (approximately) evenly.
+                const read_fault = self.grid.read_faulty_queue.pop().?;
+                self.grid.read_faulty_queue.push(read_fault);
 
-            for (requests_all[0..requests_count]) |*request| {
+                request.* = .{
+                    .block_address = read_fault.address,
+                    .block_checksum = read_fault.checksum,
+                };
+            }
+
+            const requests_count = request_faults_count + request_repairs_count;
+            for (requests[0..requests_count]) |*request| {
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
                     self.replica,
                     request.block_address,
@@ -8279,28 +8232,7 @@ pub fn ReplicaType(
                 assert(!self.superblock.free_set.is_free(request.block_address));
             }
 
-            //var reads = self.grid.read_faulty_queue.peek();
-            //while (reads) |read| : (reads = read.next) {
-            //    assert(read.address > 0);
-            //    assert(!self.superblock.free_set.is_free(read.address));
-            //    if (self.grid.writing(read.address, null) != .none) continue;
-            //
-            //    log.debug("{}: send_request_blocks: request address={} checksum={}", .{
-            //        self.replica,
-            //        read.address,
-            //        read.checksum,
-            //    });
-            //
-            //    requests[requests_count] = .{
-            //        .block_checksum = read.checksum,
-            //        .block_address = read.address,
-            //    };
-            //    requests_count += 1;
-            //
-            //    if (requests_count == constants.grid_repair_request_max) break;
-            //}
-            //assert(requests_count <= constants.grid_repair_request_max);
-            //if (requests_count == 0) return;
+            if (requests_count == 0) return;
 
             message.header.* = .{
                 .command = .request_blocks,

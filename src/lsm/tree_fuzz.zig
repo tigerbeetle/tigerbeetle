@@ -405,12 +405,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(header.op == repair.address);
             assert(header.checksum == repair.checksum);
 
-            env.grid.write_block_repair(
-                on_block_write_repair,
-                &env.grid_repair_write,
-                block,
-                repair.address,
-            );
+            env.grid.write_block(on_block_write_repair, &env.grid_repair_write, block, .repair);
         }
     };
 }

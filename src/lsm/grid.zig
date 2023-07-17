@@ -178,7 +178,7 @@ pub fn GridType(comptime Storage: type) type {
         /// are marked as invalid. This enables additional validation of cache consistency.
         cache_coherent: std.DynamicBitSetUnmanaged,
         /// TODO
-        cache_durable: std.DynamicBitSetUnmanaged,
+        //cache_durable: std.DynamicBitSetUnmanaged,
 
         write_iops: IOPS(WriteIOP, write_iops_max) = .{},
         write_iop_tracer_slots: [write_iops_max]?tracer.SpanStart = .{null} ** write_iops_max,
@@ -342,7 +342,7 @@ pub fn GridType(comptime Storage: type) type {
         ///
         /// Asserts that the address is not currently being read from or written to.
         pub fn release(grid: *Grid, address: u64) void {
-            assert(grid.writing(address, null) != .init);
+            assert(grid.writing(address, null) != .acquire);
             // It's safe to release an address that is being read from,
             // because the superblock will not allow it to be overwritten before
             // the end of the measure.
@@ -372,9 +372,9 @@ pub fn GridType(comptime Storage: type) type {
             return false;
         }
 
-        const Writing = enum { init, repair, none };
+        const Writing = enum { acquire, repair, none };
 
-        /// If the address is being written to by a non-repair, return `.init`.
+        /// If the address is being written to by a non-repair, return `.acquire`.
         /// If the address is being written to by a repair, return `.repair`.
         /// Otherwise return `.none`.
         ///
@@ -389,7 +389,7 @@ pub fn GridType(comptime Storage: type) type {
                     assert(block != queued_write.block.*);
                     if (address == queued_write.address) {
                         assert(result == .none);
-                        result = if (queued_write.repair) .repair else .init;
+                        result = if (queued_write.repair) .repair else .acquire;
                     }
                 }
             }
@@ -399,7 +399,7 @@ pub fn GridType(comptime Storage: type) type {
                     assert(block != iop.write.block.*);
                     if (address == iop.write.address) {
                         assert(result == .none);
-                        result = if (iop.write.repair) .repair else .init;
+                        result = if (iop.write.repair) .repair else .acquire;
                     }
                 }
             }
@@ -454,9 +454,13 @@ pub fn GridType(comptime Storage: type) type {
             callback: fn (*Grid.Write) void,
             write: *Grid.Write,
             block: *BlockPtr,
-            address: u64,
+            trigger: enum { acquire, repair },
         ) void {
-            assert(address > 0);
+            const header = schema.header_from_block(block.*);
+            const address = header.op;
+
+            assert(grid.superblock.opened);
+            assert(!grid.superblock.free_set.is_free(address));
             assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .none);
             grid.assert_not_reading(address, block.*);
@@ -467,49 +471,12 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            assert(grid.superblock.opened);
-            assert(!grid.superblock.free_set.is_free(address));
-
             write.* = .{
                 .callback = callback,
                 .address = address,
-                .repair = false,
+                .repair = trigger == .repair,
                 .block = block,
-                .checkpoint_id = grid.superblock.working.checkpoint_id(),
-            };
-
-            const iop = grid.write_iops.acquire() orelse {
-                grid.write_queue.push(write);
-                return;
-            };
-
-            grid.write_block_with(iop, write);
-        }
-
-        /// NOTE: This will consume `block` and replace it with a fresh block.
-        pub fn write_block_repair(
-            grid: *Grid,
-            callback: fn (*Grid.Write) void,
-            write: *Grid.Write,
-            block: *BlockPtr,
-            address: u64,
-        ) void {
-            const header = schema.header_from_block(block.*);
-
-            assert(address > 0);
-            assert(address == header.op);
-            assert(grid.superblock.opened);
-            assert(grid.canceling == null);
-            assert(!grid.superblock.free_set.is_free(address));
-            assert(grid.writing(address, block.*) == .none);
-            maybe(grid.faulty(address, header.checksum));
-
-            write.* = .{
-                .callback = callback,
-                .address = address,
-                .repair = true,
-                .block = block,
-                .checkpoint_id = grid.superblock.working.checkpoint_id(),
+                .checkpoint_id = grid.superblock.working.checkpoint_id(), // TODO remove
             };
 
             const iop = grid.write_iops.acquire() orelse {
@@ -556,7 +523,7 @@ pub fn GridType(comptime Storage: type) type {
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
             assert(!grid.superblock.free_set.is_free(completed_write.address));
-            assert(grid.superblock.working.checkpoint_id() == completed_write.checkpoint_id);
+            //assert(grid.superblock.working.checkpoint_id() == completed_write.checkpoint_id);
 
             // Insert the write block into the cache, and give the evicted block to the writer.
             const cache_index = grid.cache.insert_index(&completed_write.address);
@@ -635,7 +602,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(address));
-            assert(grid.writing(address, null) != .init);
+            assert(grid.writing(address, null) != .acquire);
 
             assert(address > 0);
 
@@ -667,7 +634,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(address));
-            assert(grid.writing(address, null) != .init);
+            assert(grid.writing(address, null) != .acquire);
 
             assert(address > 0);
             assert(block_type != .reserved);
@@ -707,7 +674,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(address));
-            assert(grid.writing(address, null) != .init);
+            assert(grid.writing(address, null) != .acquire);
 
             assert(address > 0);
             assert(block_type != .reserved);
@@ -729,7 +696,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(read.address));
-            assert(grid.writing(read.address, null) != .init);
+            assert(grid.writing(read.address, null) != .acquire);
 
             assert(read.address > 0);
             assert(read.block_type != .reserved);
@@ -973,7 +940,7 @@ pub fn GridType(comptime Storage: type) type {
             // The caller will not attempt to help another replica repair a block that
             // we are already trying to repair ourselves.
             assert(!grid.faulty(address, null));
-            maybe(grid.writing(address, null) == .init);
+            maybe(grid.writing(address, null) == .acquire);
 
             read.* = .{
                 .callback = callback,

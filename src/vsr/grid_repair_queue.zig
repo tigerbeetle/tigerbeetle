@@ -106,44 +106,18 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             queue.* = undefined;
         }
 
-        pub fn empty(queue: *const GridRepairQueue) bool {
-            return queue.faulty_blocks.count() == 0;
-        }
-
         /// When the queue wants more blocks than fit in a single request message, successive calls
         /// to `requests()` return different BlockRequests.
-        pub fn requests(queue: *GridRepairQueue, requests_all: []vsr.BlockRequest) usize {
-            const request_faults_total = queue.grid.read_faulty_queue.count;
+        pub fn block_requests(queue: *GridRepairQueue, requests: []vsr.BlockRequest) usize {
             const request_repairs_total = queue.faulty_blocks.count();
-
-            const request_faults_count =
-                @minimum(request_faults_total, requests_all.len);
-            const request_repairs_count =
-                @minimum(request_repairs_total, requests_all.len - request_faults_count);
-            assert(request_faults_count > 0 or request_repairs_count > 0);
+            const request_repairs_count = @minimum(request_repairs_total, requests.len);
 
             const faulty_block_addresses = queue.faulty_blocks.entries.items(.key);
             const faulty_block_data = queue.faulty_blocks.entries.items(.value);
 
-            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
-            // continue.
-            // (Note that many – but not all – of these blocks are also in the GridRepairQueue.
-            // The `read_faulty_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
-            for (requests_all[0..request_faults_count]) |*request| {
-                // Pop-push the FIFO to cycle the faulty queue so that successive calls to
-                // GridRepairQueue.requests() fetches all stalled blocks (approximately) evenly.
-                const read_fault = queue.grid.read_faulty_queue.pop().?;
-                queue.grid.read_faulty_queue.push(read_fault);
-
-                request.* = .{
-                    .block_address = read_fault.address,
-                    .block_checksum = read_fault.checksum,
-                };
-            }
-
             var repair_index =
                 @minimum(request_repairs_total -| 1, queue.faulty_blocks_repair_index);
-            for (requests_all[request_faults_count..][0..request_repairs_count]) |*request| {
+            for (requests[0..request_repairs_count]) |*request| {
                 request.* = .{
                     .block_address = faulty_block_addresses[repair_index],
                     .block_checksum = faulty_block_data[repair_index].checksum,
@@ -154,7 +128,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             }
             queue.faulty_blocks_repair_index = repair_index;
 
-            return request_faults_count + request_repairs_count;
+            return request_repairs_count;
         }
 
         /// Queue a faulty block for repair.
@@ -196,8 +170,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             index_block_data: Grid.BlockPtrConst,
         ) error{ Faulty, Full }!void {
             //const index_header = schema.block_header // TODO
-            const index_block_header =
-                std.mem.bytesAsValue(vsr.Header, index_block_data[0..@sizeOf(vsr.Header)]);
+            const index_block_header = schema.block_header(index_block_data);
             assert(BlockType.from(index_block_header.operation) == .index);
 
             const index_schema = schema.TableIndex.from(index_block_data);
@@ -296,11 +269,11 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 .faulty_table = faulty_block.table,
             };
 
-            queue.grid.write_block_repair(
+            queue.grid.write_block(
                 repair_write_block_callback,
                 &write.write,
                 &queue.write_blocks[write_index],
-                block_header.op,
+                .repair,
             );
         }
 
@@ -329,11 +302,11 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                         .faulty_table = null,
                     };
 
-                    queue.grid.write_block_repair(
+                    queue.grid.write_block(
                         repair_write_block_callback,
                         &write.write,
                         &queue.write_blocks[write_index],
-                        faulty_table.index_address,
+                        .repair,
                     );
                     return;
                 }
