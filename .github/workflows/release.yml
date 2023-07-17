@@ -95,7 +95,7 @@ jobs:
   alert_failure:
     runs-on: ubuntu-latest
     needs: [version, draft_release, release, finalize_release]
-    if: failure()
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
     steps:
       - name: Alert if anything failed
         run: |
