@@ -203,7 +203,7 @@ pub const SuperBlockHeader = extern struct {
             }
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
-            assert(meta.eql(old.members, new.members));
+            assert(stdx.equal_bytewise([constants.nodes_max]u128, &old.members, &new.members));
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
@@ -216,7 +216,7 @@ pub const SuperBlockHeader = extern struct {
         pub fn would_be_updated_by(old: VSRState, new: VSRState) bool {
             assert(monotonic(old, new));
 
-            return !meta.eql(old, new);
+            return !stdx.equal_bytewise(VSRState, &old, &new);
         }
 
         /// Compaction is one bar ahead of superblock's commit_min.
@@ -326,12 +326,20 @@ pub const SuperBlockHeader = extern struct {
         if (a.manifest_checksum != b.manifest_checksum) return false;
         if (a.free_set_checksum != b.free_set_checksum) return false;
         if (a.client_sessions_checksum != b.client_sessions_checksum) return false;
-        if (!meta.eql(a.vsr_state, b.vsr_state)) return false;
-        if (!meta.eql(a.snapshots, b.snapshots)) return false;
+        if (!stdx.equal_bytewise(VSRState, &a.vsr_state, &b.vsr_state)) return false;
+        if (!stdx.equal_bytewise(
+            [constants.lsm_snapshots_max]Snapshot,
+            &a.snapshots,
+            &b.snapshots,
+        )) return false;
         if (a.manifest_size != b.manifest_size) return false;
         if (a.free_set_size != b.free_set_size) return false;
         if (a.vsr_headers_count != b.vsr_headers_count) return false;
-        if (!meta.eql(a.vsr_headers_all, b.vsr_headers_all)) return false;
+        if (!stdx.equal_bytewise(
+            [constants.view_change_headers_max]vsr.Header,
+            &a.vsr_headers_all,
+            &b.vsr_headers_all,
+        )) return false;
 
         return true;
     }
@@ -1522,8 +1530,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .view_change,
                 .sync,
                 => {
-                    assert(meta.eql(superblock.staging.vsr_state, context.vsr_state.?));
-                    assert(meta.eql(superblock.working.vsr_state, context.vsr_state.?));
+                    assert(stdx.equal_bytewise(
+                        SuperBlockHeader.VSRState,
+                        &superblock.staging.vsr_state,
+                        &context.vsr_state.?,
+                    ));
+                    assert(stdx.equal_bytewise(
+                        SuperBlockHeader.VSRState,
+                        &superblock.working.vsr_state,
+                        &context.vsr_state.?,
+                    ));
                 },
             }
 
