@@ -145,7 +145,8 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     var verbose: ?bool = null;
 
     var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    // NOTE: do not deinit() as we return the path and this could free/invalidate it.
+    // defer args.deinit();
 
     // Keep track of the args from the ArgIterator above that were allocated
     // then free them all at the end of the scope.

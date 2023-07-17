@@ -278,7 +278,7 @@ fn print_value(
             field,
             std.fmt.fmtSliceEscapeLower(value),
         }),
-        else => try std.fmt.format(writer, "{s}={}\n", .{
+        else => try std.fmt.format(writer, "{s}={any}\n", .{
             field,
             value,
         }),

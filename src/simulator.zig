@@ -594,7 +594,7 @@ pub const Simulator = struct {
                 commit.request.header.request,
             });
 
-            if (!commit.request.header.operation.reserved()) {
+            if (!commit.request.header.operation.vsr_reserved()) {
                 simulator.requests_replied += 1;
                 simulator.workload.on_reply(
                     commit.client_index,
