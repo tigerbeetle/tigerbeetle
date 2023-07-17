@@ -1647,14 +1647,16 @@ pub fn ReplicaType(
                 self.op_checkpoint());
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
-            const op_head = switch (DVCQuorum.quorum_headers(
+            // Store in a var so that `.complete_valid` can capture a mutable pointer in switch.
+            var headers = DVCQuorum.quorum_headers(
                 self.do_view_change_from_all_replicas,
                 .{
                     .quorum_nack_prepare = self.quorum_nack_prepare,
                     .quorum_view_change = self.quorum_view_change,
                     .replica_count = self.replica_count,
                 },
-            )) {
+            );
+            const op_head = switch (headers) {
                 .awaiting_quorum => {
                     log.debug("{}: on_do_view_change: view={} waiting for quorum", .{
                         self.replica,
@@ -3317,7 +3319,7 @@ pub fn ReplicaType(
                 @src(),
             );
 
-            if (prepare.header.operation.reserved()) {
+            if (prepare.header.operation.vsr_reserved()) {
                 // NOTE: this inline callback is fine because the next stage of committing,
                 // `.setup_client_replies`, is always async.
                 commit_op_prefetch_callback(&self.state_machine);
@@ -3599,7 +3601,7 @@ pub fn ReplicaType(
                 }) catch @panic("aof failure");
             }
 
-            const reply_body_size = if (prepare.header.operation.reserved())
+            const reply_body_size = if (prepare.header.operation.vsr_reserved())
                 0
             else
                 @intCast(u32, self.state_machine.commit(
@@ -5073,7 +5075,7 @@ pub fn ReplicaType(
             );
             assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
 
-            if (!message.header.operation.reserved()) {
+            if (!message.header.operation.vsr_reserved()) {
                 self.state_machine.prepare(
                     message.header.operation.cast(StateMachine),
                     message.body(),
@@ -7470,7 +7472,7 @@ pub fn ReplicaType(
         /// sync_dispatch() is called between every sync-state transition.
         fn sync_dispatch(self: *Self, state_new: SyncStage) void {
             assert(!self.solo());
-            assert(self.syncing.valid_transition(state_new));
+            assert(SyncStage.valid_transition(self.syncing, state_new));
             if (self.op < self.commit_min) assert(self.status == .recovering_head);
 
             const state_old = self.syncing;

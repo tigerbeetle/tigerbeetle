@@ -76,20 +76,20 @@ pub fn main() !void {
     // free and re-alloc internally and this will free that.
     defer allocator.free(addresses);
 
-    var args = std.process.args();
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
     // Discard executable name.
-    _ = try args.next(allocator).?;
+    _ = args.next().?;
 
     // Parse arguments.
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = try arg_or_err;
-        _ = (try parse_arg_usize(allocator, &args, arg, "--account-count", &account_count)) or
-            (try parse_arg_usize(allocator, &args, arg, "--transfer-count", &transfer_count)) or
-            (try parse_arg_usize(allocator, &args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
+    while (args.next()) |arg| {
+        _ = (try parse_arg_usize(&args, arg, "--account-count", &account_count)) or
+            (try parse_arg_usize(&args, arg, "--transfer-count", &transfer_count)) or
+            (try parse_arg_usize(&args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
             (try parse_arg_addresses(allocator, &args, arg, "--addresses", &addresses)) or
-            (try parse_arg_bool(allocator, &args, arg, "--print-batch-timings", &print_batch_timings)) or
-            (try parse_arg_bool(allocator, &args, arg, "--statsd", &enable_statsd)) or
+            (try parse_arg_bool(&args, arg, "--print-batch-timings", &print_batch_timings)) or
+            (try parse_arg_bool(&args, arg, "--statsd", &enable_statsd)) or
             panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
     }
 
@@ -121,6 +121,8 @@ pub fn main() !void {
         },
     );
 
+    var statsd: StatsD = undefined;
+
     var benchmark = Benchmark{
         .io = &io,
         .message_pool = &message_pool,
@@ -146,11 +148,14 @@ pub fn main() !void {
         .message = null,
         .callback = null,
         .done = false,
-        .statsd = if (enable_statsd) &try StatsD.init(
-            allocator,
-            &io,
-            std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
-        ) else null,
+        .statsd = if (enable_statsd) blk: {
+            statsd = try StatsD.init(
+                allocator,
+                &io,
+                std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
+            );
+            break :blk &statsd;
+         } else null,
         .print_batch_timings = print_batch_timings,
     };
 
@@ -175,15 +180,13 @@ fn parse_arg_addresses(
 
     allocator.free(arg_value.*);
 
-    const address_string_or_err = args.next(allocator) orelse
+    const address_string = args.next() orelse
         panic("Expected an argument to {s}", .{arg_name});
-    const address_string = try address_string_or_err;
     arg_value.* = try vsr.parse_addresses(allocator, address_string, constants.nodes_max);
     return true;
 }
 
 fn parse_arg_usize(
-    allocator: std.mem.Allocator,
     args: *std.process.ArgIterator,
     arg: []const u8,
     arg_name: []const u8,
@@ -191,9 +194,8 @@ fn parse_arg_usize(
 ) !bool {
     if (!std.mem.eql(u8, arg, arg_name)) return false;
 
-    const int_string_or_err = args.next(allocator) orelse
+    const int_string = args.next() orelse
         panic("Expected an argument to {s}", .{arg_name});
-    const int_string = try int_string_or_err;
     arg_value.* = std.fmt.parseInt(usize, int_string, 10) catch |err|
         panic(
         "Could not parse \"{}\" as an integer: {}",
@@ -203,7 +205,6 @@ fn parse_arg_usize(
 }
 
 fn parse_arg_bool(
-    allocator: std.mem.Allocator,
     args: *std.process.ArgIterator,
     arg: []const u8,
     arg_name: []const u8,
@@ -211,9 +212,8 @@ fn parse_arg_bool(
 ) !bool {
     if (!std.mem.eql(u8, arg, arg_name)) return false;
 
-    const bool_string_or_err = args.next(allocator) orelse
+    const bool_string = args.next() orelse
         panic("Expected an argument to {s}", .{arg_name});
-    const bool_string = try bool_string_or_err;
     arg_value.* = std.mem.eql(u8, bool_string, "true");
 
     return true;
@@ -242,7 +242,7 @@ const Benchmark = struct {
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
     message: ?*MessagePool.Message,
-    callback: ?fn (*Benchmark) void,
+    callback: ?*const fn (*Benchmark) void,
     done: bool,
     statsd: ?*StatsD,
     print_batch_timings: bool,
@@ -261,7 +261,7 @@ const Benchmark = struct {
             b.batch_accounts.items.len < account_count_per_batch)
         {
             b.batch_accounts.appendAssumeCapacity(.{
-                .id = @bitReverse(u128, b.account_index + 1),
+                .id = @bitReverse(@as(u128, b.account_index + 1)),
                 .user_data = 0,
                 .reserved = [_]u8{0} ** 48,
                 .ledger = 2,
@@ -317,9 +317,9 @@ const Benchmark = struct {
             assert(debit_account_index != credit_account_index);
             b.batch_transfers.appendAssumeCapacity(.{
                 // Reverse the bits to stress non-append-only index for `id`.
-                .id = @bitReverse(u128, b.transfer_index + 1),
-                .debit_account_id = @bitReverse(u128, debit_account_index + 1),
-                .credit_account_id = @bitReverse(u128, credit_account_index + 1),
+                .id = @bitReverse(@as(u128, b.transfer_index + 1)),
+                .debit_account_id = @bitReverse(@as(u128, debit_account_index + 1)),
+                .credit_account_id = @bitReverse(@as(u128, credit_account_index + 1)),
                 .user_data = random.int(u128),
                 .reserved = 0,
                 // TODO Benchmark posting/voiding pending transfers.
@@ -412,7 +412,7 @@ const Benchmark = struct {
 
     fn send(
         b: *Benchmark,
-        callback: fn (*Benchmark) void,
+        callback: *const fn (*Benchmark) void,
         operation: StateMachine.Operation,
         payload: []u8,
     ) void {

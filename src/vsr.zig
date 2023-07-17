@@ -174,7 +174,7 @@ pub const Operation = enum(u8) {
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
         assert(self.valid(StateMachine));
-        assert(!self.reserved());
+        assert(!self.vsr_reserved());
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
@@ -193,7 +193,7 @@ pub const Operation = enum(u8) {
         return false;
     }
 
-    pub fn reserved(self: Operation) bool {
+    pub fn vsr_reserved(self: Operation) bool {
         return @enumToInt(self) < constants.vsr_operations_reserved;
     }
 

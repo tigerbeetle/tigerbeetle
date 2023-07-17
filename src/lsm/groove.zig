@@ -683,7 +683,7 @@ pub fn GrooveType(
 
             // Since lookup contexts are used one at a time, it's safe to access
             // the union's fields and reuse the same memory for all context instances.
-            // Can't use extern/packed as the next LookupContextes aren't ABI compliant.
+            // Can't use extern/packed union as the LookupContextes aren't ABI compliant.
             const LookupContext = union {
                 id: if (has_id) IdTree.LookupContext else void,
                 object: ObjectTree.LookupContext,

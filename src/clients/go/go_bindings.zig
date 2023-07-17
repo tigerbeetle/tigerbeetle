@@ -103,7 +103,7 @@ fn emit_enum(
     const type_info = @typeInfo(Type).Enum;
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
-        const enum_name = prefix ++ to_pascal_case(field.name, min_len);
+        const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
         try buffer.writer().print("\t{s} {s} = {d}\n", .{
             enum_name,
             name,
@@ -118,7 +118,7 @@ fn emit_enum(
     });
 
     inline for (type_info.fields) |field| {
-        const enum_name = prefix ++ to_pascal_case(field.name, null);
+        const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
         try buffer.writer().print("\tcase {s}:\n" ++
             "\t\treturn \"{s}\"\n", .{
             enum_name,

@@ -21,7 +21,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub const StateMachine = StateMachine_;
 
         pub const Request = struct {
-            pub const Callback = fn (
+            pub const Callback = *const fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
                 results: []const u8,
@@ -96,7 +96,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
-        on_reply_callback: ?fn (
+        on_reply_callback: ?*const fn (
             client: *Self,
             request: *Message,
             reply: *Message,
@@ -250,7 +250,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             callback: Request.Callback,
             message: *Message,
         ) void {
-            assert(!message.header.operation.reserved());
+            assert(!message.header.operation.vsr_reserved());
             const operation = message.header.operation.cast(StateMachine);
 
             self.register();
@@ -437,7 +437,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             if (inflight.callback) |callback| {
-                assert(!inflight_operation.reserved());
+                assert(!inflight_operation.vsr_reserved());
 
                 callback(
                     inflight.user_data,
