@@ -90,4 +90,15 @@ jobs:
 
         # Propagate token into environment
         env:
+          EDITOR: vi
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  alert_failure:
+    runs-on: ubuntu-latest
+    needs: [version, draft_release, release, finalize_release]
+    if: failure()
+    steps:
+      - name: Alert if anything failed
+        run: |
+          export URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" && \
+          curl -d "text=Release process for ${{ inputs.version }} failed! See ${URL} for more information." -d "channel=C04RWHT9EP5" -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" -X POST https://slack.com/api/chat.postMessage
