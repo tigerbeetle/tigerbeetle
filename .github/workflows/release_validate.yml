@@ -71,7 +71,9 @@ jobs:
           (sleep 60 && mvn -U dependency:copy-dependencies) || \
           (sleep 60 && mvn -U dependency:copy-dependencies) || \
           (sleep 120 && mvn -U dependency:copy-dependencies) || \
-          (sleep 180 && mvn -U dependency:copy-dependencies)
+          (sleep 180 && mvn -U dependency:copy-dependencies) || \
+          (sleep 300 && mvn -U dependency:copy-dependencies) || \
+          (sleep 600 && mvn -U dependency:copy-dependencies)
 
       - name: Check Client Node
         run: |
@@ -81,7 +83,9 @@ jobs:
           (sleep 60 && npm install tigerbeetle-node@${{ inputs.version }}) || \
           (sleep 60 && npm install tigerbeetle-node@${{ inputs.version }}) || \
           (sleep 120 && npm install tigerbeetle-node@${{ inputs.version }}) || \
-          (sleep 180 && npm install tigerbeetle-node@${{ inputs.version }})
+          (sleep 180 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 300 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 600 && npm install tigerbeetle-node@${{ inputs.version }})
 
       - name: Check Client Dotnet
         run: |
@@ -92,10 +96,6 @@ jobs:
           (sleep 60 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
           (sleep 60 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
           (sleep 120 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
-          (sleep 180 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }})
-
-      - name: Alert if anything failed
-        if: failure()
-        run: |
-          export URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" && \
-          curl -d "text=Release process for ${{ inputs.version }} failed! See ${URL} for more information." -d "channel=C04RWHT9EP5" -H "Authorization: Bearer ${{ secrets.SLACK_TOKEN }}" -X POST https://slack.com/api/chat.postMessage
+          (sleep 180 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 300 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 600 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }})
