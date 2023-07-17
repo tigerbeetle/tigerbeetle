@@ -1600,7 +1600,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 context.vsr_state.?.view,
 
                 superblock.staging.vsr_headers().slice[0].checksum,
-                if (context.vsr_headers) |headers|
+                if (context.vsr_headers) |*headers|
                     @as(?u128, headers.array.get(0).checksum)
                 else
                     null,
