@@ -237,6 +237,55 @@ pub const log = if (builtin.is_test)
 else
     std.log;
 
+/// Compare two values by directly comparing the underlying memory.
+///
+/// Assert at compile time that this is a reasonable thing to do for a given `T`. That is, check
+/// that:
+///   - `T` doesn't have any non-deterministic padding,
+///   - `T` doesn't embed any pointers.
+pub fn equal_bytewise(comptime T: type, a: *const T, b: *const T) bool {
+    comptime assert(std.meta.trait.hasUniqueRepresentation(T));
+    comptime assert(!has_pointers(T));
+    comptime assert(@sizeOf(T) * 8 == @bitSizeOf(T));
+
+    // Pick the biggest "word" for word-wise comparison, and don't try to early-return on the first
+    // mismatch, so that a compiler can vectorize the loop.
+
+    const Word = inline for (.{ u64, u32, u16, u8 }) |Word| {
+        if (@alignOf(T) >= @alignOf(Word) and @sizeOf(T) % @sizeOf(Word) == 0) break Word;
+    } else unreachable;
+
+    const a_words = std.mem.bytesAsSlice(Word, std.mem.asBytes(a));
+    const b_words = std.mem.bytesAsSlice(Word, std.mem.asBytes(b));
+    assert(a_words.len == b_words.len);
+
+    var total: Word = 0;
+    for (a_words) |a_word, i| {
+        const b_word = b_words[i];
+        total |= a_word ^ b_word;
+    }
+
+    return total == 0;
+}
+
+fn has_pointers(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        .Pointer => return true,
+        // Be conservative.
+        else => return true,
+
+        .Bool, .Int, .Enum => return false,
+
+        .Array => |info| return comptime has_pointers(info.child),
+        .Struct => |info| {
+            inline for (info.fields) |field| {
+                if (comptime has_pointers(field.field_type)) return true;
+            }
+            return false;
+        },
+    }
+}
+
 pub inline fn hash_inline(value: anytype) u64 {
     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
         .Struct, .Int => std.mem.asBytes(&value),
