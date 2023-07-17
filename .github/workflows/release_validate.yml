@@ -2,9 +2,6 @@ name: "Release (validate)"
 
 on:
   workflow_call:
-    secrets:
-      SLACK_TOKEN:
-        required: true
     inputs:
       version:
         required: true
