@@ -85,6 +85,7 @@ jobs:
       - run: |
           hub release edit \
             --draft=false \
+            -m "" \
             "${{ needs.version.outputs.version }}"
 
         # Propagate token into environment
