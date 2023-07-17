@@ -148,7 +148,7 @@ const Command = struct {
             aof = try AOF.from_absolute_path(aof_path);
         }
 
-        const grid_cache_size = args.cache_grid_blocks * constants.block_size;
+        const grid_cache_size = @as(u64, args.cache_grid_blocks) * constants.block_size;
         const grid_cache_size_warn = 1024 * 1024 * 1024;
         if (grid_cache_size <= grid_cache_size_warn) {
             log_main.warn("Grid cache size of {}MB is small. See --cache-grid", .{
