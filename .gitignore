@@ -1,6 +1,3 @@
-demos/bitcast/bench-decode
-demos/bitcast/decode
-demos/bitcast/transfers
 src/clients/c/lib
 dist/
 journal
@@ -13,6 +10,8 @@ zig/
 zig-cache/
 zig-out/
 tools/tracy
+# It is occasionally useful to dump LLVM IR to an `.ll` file to investigate per problems.
+.ll
 # By convention, logs from simulator use .vopr extension.
 *.vopr
 
