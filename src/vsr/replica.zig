@@ -2415,7 +2415,7 @@ pub fn ReplicaType(
         //        grid_write.address,
         //    });
         //
-        //    if (self.grid.read_faulty_queue.empty()) {
+        //    if (self.grid.read_remote_queue.empty()) {
         //        self.grid_repair_message_timeout.stop();
         //    }
         //}
@@ -2801,7 +2801,7 @@ pub fn ReplicaType(
                     commit_next < primary_repair_min and
                     (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
 
-                const stuck_grid = !self.grid.read_faulty_queue.empty();
+                const stuck_grid = !self.grid.read_remote_queue.empty();
 
                 if (!stuck_header and !stuck_prepare and !stuck_grid) return;
             }
@@ -2829,7 +2829,7 @@ pub fn ReplicaType(
 
         fn on_grid_repair_message_timeout(self: *Self) void {
             assert(self.grid_repair_message_timeout.ticking);
-            //assert(!self.grid.read_faulty_queue.empty());
+            //assert(!self.grid.read_remote_queue.empty());
             maybe(self.state_machine_opened);
 
             self.grid_repair_message_timeout.reset();
@@ -7591,7 +7591,7 @@ pub fn ReplicaType(
                 .canceling_grid => {
                     self.grid.cancel(sync_cancel_grid_callback);
 
-                    assert(self.grid.read_faulty_queue.empty());
+                    assert(self.grid.read_remote_queue.empty());
                 },
                 .requesting_target => {}, // Waiting for a usable sync target.
                 .requesting_trailers => self.sync_message_timeout.start(),
@@ -7632,7 +7632,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(self.syncing == .canceling_grid);
             assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid.read_iops.executing() == 0);
             assert(self.grid.write_iops.executing() == 0);
@@ -7673,7 +7673,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare == null);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_pending_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid_repair_queue.writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
@@ -8143,7 +8143,7 @@ pub fn ReplicaType(
         fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
             // `read` is *not* a BlockRead.read; we cannot use @fieldParentPtr() on it.
             const self = @fieldParentPtr(Self, "grid", grid);
-            assert(!self.grid.read_faulty_queue.empty());
+            assert(!self.grid.read_remote_queue.empty());
             assert(self.syncing != .canceling_grid);
             assert(!self.superblock.free_set.is_free(read.address));
             maybe(self.state_machine_opened);
@@ -8158,7 +8158,7 @@ pub fn ReplicaType(
             if (self.solo()) @panic("grid is corrupt");
 
             // TODO queue_table
-            self.grid_repair_queue.queue_block(read.address, read.checksum) catch |err| {
+            self.grid_repair_queue.queue_repair(read.address, read.checksum, .block) catch |err| {
                 log.debug("{}: on_grid_read_fault: queue error: error={} address={} checksum={}", .{
                     self.replica,
                     err,
@@ -8168,7 +8168,7 @@ pub fn ReplicaType(
             };
 
             //if (!self.grid_repair_message_timeout.ticking) {
-            //    assert(self.grid.read_faulty_queue.count == 1);
+            //    assert(self.grid.read_remote_queue.count == 1);
             //
             //    self.grid_repair_message_timeout.start();
             //    self.superblock.storage.on_next_tick(
@@ -8181,7 +8181,7 @@ pub fn ReplicaType(
 
         //fn on_grid_read_fault_next_tick(next_tick: *Grid.NextTick) void {
         //    const self = @fieldParentPtr(Self, "grid_read_fault_next_tick", next_tick);
-        //    if (self.grid.read_faulty_queue.empty()) {
+        //    if (self.grid.read_remote_queue.empty()) {
         //        // Very unlikely, but possibly we wrote the block before next_tick fired.
         //    } else {
         //        self.send_request_blocks();
@@ -8200,20 +8200,20 @@ pub fn ReplicaType(
                 message.buffer[@sizeOf(Header)..],
             )[0..constants.grid_repair_request_max];
 
-            const request_faults_count = @minimum(self.grid.read_faulty_queue.count, requests.len);
+            const request_faults_count = @minimum(self.grid.read_remote_queue.count, requests.len);
             const request_repairs_count =
                 self.grid_repair_queue.block_requests(requests[request_faults_count..]);
 
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
             // continue.
             // (Note that many – but not all – of these blocks are also in the GridRepairQueue.
-            // The `read_faulty_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
+            // The `read_remote_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
             // TODO avoid duplicate requests
             for (requests[0..request_faults_count]) |*request| {
                 // Pop-push the FIFO to cycle the faulty queue so that successive requests
                 // rotate through all stalled blocks (approximately) evenly.
-                const read_fault = self.grid.read_faulty_queue.pop().?;
-                self.grid.read_faulty_queue.push(read_fault);
+                const read_fault = self.grid.read_remote_queue.pop().?;
+                self.grid.read_remote_queue.push(read_fault);
 
                 request.* = .{
                     .block_address = read_fault.address,

@@ -17,6 +17,10 @@ const IOPS = @import("../iops.zig").IOPS;
 /// table blocks.
 const grid_repair_writes_max = constants.grid_iops_write_max;
 
+comptime {
+    assert(grid_repair_writes_max <= constants.grid_repair_blocks_max);
+}
+
 // TODO explain TCP vs....
 /// Track and repair faulty grid blocks.
 ///
@@ -27,29 +31,38 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
     return struct {
         const GridRepairQueue = @This();
         const Grid = GridType(Storage);
+        const WriteSet = std.StaticBitSet(grid_repair_writes_max);
 
         const Write = struct {
             queue: *GridRepairQueue,
             checksum: u128,
             /// Non-null when writing a table's content block.
-            faulty_table: ?*FaultyTable,
+            //faulty_table: ?*FaultyTable,
             write: Grid.Write = undefined,
         };
 
         const FaultyBlocks = std.AutoArrayHashMapUnmanaged(u64, struct {
             checksum: u128,
-            table: ?*FaultyTable,
+            // TODO rename
+            status: FaultStatus,
+            received: bool = false,
         });
+
+        const FaultStatus = union(enum) {
+            // TODO s/awaiting_//
+            awaiting_block,
+            awaiting_table_index: *FaultyTable,
+            awaiting_table_content: *FaultyTable,
+        };
 
         const FaultyTable = struct {
             index_address: u64,
             index_checksum: u128,
             content_blocks_written: usize = 0,
-            content_blocks_total: usize,
+            // When null, the table is awaiting an index block.
+            // When non-null, the table is awaiting content blocks.
+            content_blocks_total: ?usize = null,
         };
-
-        const CheckpointWritesPending = std.StaticBitSet(grid_repair_writes_max);
-        const FaultyTablesFree = std.StaticBitSet(constants.grid_repair_tables_max);
 
         grid: *Grid,
 
@@ -66,7 +79,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         checkpoint_tick_context: Grid.NextTick = undefined,
         checkpoint_progress: ?struct {
             /// Set bits correspond to `writes` that must complete before invoking `callback`.
-            writes_pending: CheckpointWritesPending,
+            writes_pending: WriteSet,
             callback: fn(*GridRepairQueue) void,
         } = null,
 
@@ -109,34 +122,44 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         /// When the queue wants more blocks than fit in a single request message, successive calls
         /// to `requests()` return different BlockRequests.
         pub fn block_requests(queue: *GridRepairQueue, requests: []vsr.BlockRequest) usize {
-            const request_repairs_total = queue.faulty_blocks.count();
-            const request_repairs_count = @minimum(request_repairs_total, requests.len);
+            const faults_total = queue.faulty_blocks.count();
+            if (faults_total == 0) return 0;
 
             const faulty_block_addresses = queue.faulty_blocks.entries.items(.key);
             const faulty_block_data = queue.faulty_blocks.entries.items(.value);
 
-            var repair_index =
-                @minimum(request_repairs_total -| 1, queue.faulty_blocks_repair_index);
-            for (requests[0..request_repairs_count]) |*request| {
-                request.* = .{
-                    .block_address = faulty_block_addresses[repair_index],
-                    .block_checksum = faulty_block_data[repair_index].checksum,
-                };
+            var requests_count: usize = 0;
+            var fault_offset: usize = 0;
+            while (fault_offset < faults_total and requests_count < requests.len) :
+                (fault_offset += 1)
+            {
+                const fault_index =
+                    (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
+                const fault = &faulty_block_data[fault_index];
 
-                repair_index += 1;
-                repair_index %= request_repairs_total;
+                if (!fault.received) {
+                    requests[requests_count] = .{
+                        .block_address = faulty_block_addresses[fault_index],
+                        .block_checksum = faulty_block_data[fault_index].checksum,
+                    };
+                    requests_count += 1;
+                }
             }
-            queue.faulty_blocks_repair_index = repair_index;
+            queue.faulty_blocks_repair_index =
+                (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
 
-            return request_repairs_count;
+            return requests_count;
         }
 
         /// Queue a faulty block for repair.
-        pub fn queue_block(queue: *GridRepairQueue, address: u64, checksum: u128) error{
+        pub fn queue_repair(
+            queue: *GridRepairQueue,
+            address: u64,
+            checksum: u128,
+            repair_strategy: enum { block, table },
+        ) error{
             /// The block is already marked as faulty.
             Faulty,
-            /// The faulty block is already being written.
-            Writing,
             /// The queue has insufficient capacity to queue the fault.
             Full,
         }!void {
@@ -144,12 +167,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             assert(!queue.grid.superblock.free_set.is_free(address));
             assert(address > 0);
 
-            var writes = queue.writes.iterate();
-            while (writes.next()) |write| {
-                if (write.write.address == address) {
-                    assert(write.checksum == checksum);
-                    return error.Writing;
-                }
+            if (queue.faulty_blocks.count() == queue.faulty_blocks.capacity()) {
+                return error.Full;
             }
 
             if (queue.faulty_blocks.get(address)) |faulty_block| {
@@ -157,57 +176,34 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 return error.Faulty;
             }
 
-            if (queue.faulty_blocks.count() == queue.faulty_blocks.capacity()) return error.Full;
+            const status: FaultStatus = switch (repair_strategy) {
+                .block => .awaiting_block,
+                .table => status: {
+                    const table = queue.faulty_tables.acquire() orelse return error.Full;
+                    table.* = .{ .index_address = address, .index_checksum = checksum };
+                    break :status .{ .awaiting_table_index = table };
+                },
+            };
 
             queue.faulty_blocks.putAssumeCapacityNoClobber(address, .{
                 .checksum = checksum,
-                .table = null,
+                .status = status,
             });
         }
 
-        pub fn queue_table(
+        fn queue_table_content(
             queue: *GridRepairQueue,
             index_block_data: Grid.BlockPtrConst,
-        ) error{ Faulty, Full }!void {
-            //const index_header = schema.block_header // TODO
-            const index_block_header = schema.block_header(index_block_data);
-            assert(BlockType.from(index_block_header.operation) == .index);
-
+            table: *FaultyTable,
+        ) error{ Faulty, Busy }!void {
             const index_schema = schema.TableIndex.from(index_block_data);
             assert(index_schema.content_blocks_used(index_block_data) > 0);
-
-            {
-                var faulty_tables = queue.faulty_tables.iterator();
-                while (faulty_tables.next()) |faulty_table| {
-                    if (faulty_table.address == index_block_header.address and
-                        faulty_table.checksum == index_block_header.checksum)
-                    {
-                        return error.Faulty;
-                    }
-                }
-            }
 
             if (queue.faulty_blocks.capacity() <
                 queue.faulty_blocks.count() + index_schema.content_blocks_used(index_block_data))
             {
-                return error.Full;
+                return error.Busy;
             }
-
-            const faulty_table = queue.faulty_tables.acquire() orelse return error.Full;
-            const faulty_table_index = queue.faulty_tables.index(faulty_table);
-
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                queue.faulty_table_blocks[faulty_table_index],
-                index_block_data[0..index_block_header.size],
-            );
-
-            faulty_table.* = .{
-                .index_address = index_block_header.op,
-                .index_checksum = index_block_header.checksum,
-                .content_blocks_total = index_schema.content_blocks_used(index_block_data),
-            };
 
             for ([_]struct {
                 checksums: []const u128,
@@ -226,81 +222,76 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 assert(content.checksums.len == content.addresses.len);
 
                 for (content.checksums) |content_checksum, i| {
-                    const content_address = content.addresses[i];
-                    if (queue.faulty_blocks.fetchPutAssumeCapacity(content_address, .{
+                    queue.faulty_blocks.putAssumeCapacityNoClobber(content.addresses[i], .{
                         .checksum = content_checksum,
-                        .table = faulty_table,
-                    })) |replaced| {
-                        assert(replaced.value.table == null);
-                    }
+                        .status = .{ .awaiting_table_content = table },
+                    });
+                }
+            }
+        }
+
+        fn queue_remove(queue: *GridRepairQueue, index: usize) void {
+            queue.faulty_blocks.swapRemoveAt(index);
+
+            if (queue.faulty_blocks_repair_index == queue.faulty_blocks.count()) {
+                queue.faulty_blocks_repair_index = 0;
+            } else {
+                if (queue.faulty_blocks_repair_index > index) {
+                    queue.faulty_blocks_repair_index -= 1;
                 }
             }
         }
 
         pub fn repair(queue: *GridRepairQueue, block_data: Grid.BlockPtrConst) error{
+            Canceling,
             /// The block is faulty and needs repair, but the queue is too busy right now.
             Busy,
             /// The block is not faulty; no need to repair it.
             Clean,
+            Faulty,
         }!void {
             assert(queue.checkpoint_progress == null);
+
+            if (queue.grid.canceling) |_| return error.Canceling;
 
             const block_header = schema.header_from_block(block_data);
 
             const faulty_block_index =
                 queue.faulty_blocks.getIndex(block_header.op) orelse return error.Clean;
-            const faulty_block = queue.faulty_blocks.entries.items(.value)[faulty_block_index];
+            const faulty_block = &queue.faulty_blocks.entries.items(.value)[faulty_block_index];
             if (faulty_block.checksum != block_header.checksum) return error.Clean;
+            if (faulty_block.received) return error.Clean;
+            faulty_block.received = true;
 
-            assert(queue.grid.writing(block_header.op, null) == .none);
+            switch (faulty_block.status) {
+                .awaiting_table_index => |table| {
+                    assert(table.content_blocks_total == null);
+                    assert(block_header.checksum == table.index_checksum);
+                    assert(BlockType.from(block_header.operation) == .index);
 
-            const write = queue.writes.acquire() orelse return error.Busy;
-            const write_index = queue.writes.index(write);
+                    try queue.queue_table_content(block_data, table);
 
-            queue.faulty_blocks.swapRemoveAt(faulty_block_index);
-            if (queue.faulty_blocks_repair_index > faulty_block_index) {
-                queue.faulty_blocks_repair_index -= 1;
-            }
-
-            stdx.copy_disjoint(.inexact, u8, queue.write_blocks[write_index], block_data);
-            write.* = .{
-                .queue = queue,
-                .checksum = block_header.checksum,
-                .faulty_table = faulty_block.table,
-            };
-
-            queue.grid.write_block(
-                repair_write_block_callback,
-                &write.write,
-                &queue.write_blocks[write_index],
-                .repair,
-            );
-        }
-
-        fn repair_write_block_callback(grid_write: *Grid.Write) void {
-            const write = @fieldParentPtr(Write, "write", grid_write);
-            const queue = write.queue;
-            const write_index = queue.writes.index(write);
-
-            if (write.faulty_table) |faulty_table| {
-                assert(write.checksum != faulty_table.index_checksum);
-                assert(faulty_table.content_blocks_written < faulty_table.content_blocks_total);
-
-                faulty_table.content_blocks_written += 1;
-                if (faulty_table.content_blocks_written == faulty_table.content_blocks_total) {
-                    defer queue.faulty_tables.release(faulty_table);
-
-                    std.mem.swap(
-                        Grid.BlockPtr,
-                        &queue.faulty_table_blocks[queue.faulty_tables.index(faulty_table)],
-                        &queue.write_blocks[write_index],
+                    stdx.copy_disjoint(
+                        .inexact,
+                        u8,
+                        queue.faulty_table_blocks[queue.faulty_tables.index(table)],
+                        block_data[0..block_header.size],
                     );
 
-                    write.* = .{
-                        .queue = queue,
-                        .checksum = faulty_table.index_checksum,
-                        .faulty_table = null,
-                    };
+                    const index_schema = schema.TableIndex.from(block_data);
+                    table.content_blocks_total = index_schema.content_blocks_used(block_data);
+                    queue.queue_remove(faulty_block_index);
+                    return;
+                },
+
+                .awaiting_block,
+                .awaiting_table_content,
+                => {
+                    const write = queue.writes.acquire() orelse return error.Busy;
+                    const write_index = queue.writes.index(write);
+
+                    stdx.copy_disjoint(.inexact, u8, queue.write_blocks[write_index], block_data);
+                    write.* = .{ .queue = queue, .checksum = block_header.checksum };
 
                     queue.grid.write_block(
                         repair_write_block_callback,
@@ -308,8 +299,58 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                         &queue.write_blocks[write_index],
                         .repair,
                     );
-                    return;
-                }
+                },
+            }
+        }
+
+        fn repair_write_block_callback(grid_write: *Grid.Write) void {
+            const write = @fieldParentPtr(Write, "write", grid_write);
+            const write_index = write.queue.writes.index(write);
+            const queue = write.queue;
+
+            if (queue.grid.canceling) |_| return;
+
+            const faulty_block_index = queue.faulty_blocks.getIndex(grid_write.address).?;
+            const fault = queue.faulty_blocks.entries.items(.value)[faulty_block_index];
+            assert(fault.received);
+
+            queue.queue_remove(faulty_block_index);
+
+            switch (fault.status) {
+                .awaiting_block => {},
+                .awaiting_table_index => |table| {
+                    //assert(BlockType.from(faulty_block_header.operation) == .index);
+                    assert(table.content_blocks_total.? > 0);
+                    assert(table.content_blocks_total.? == table.content_blocks_written);
+                    //assert(table.index_checksum == faulty_block_header.checksum);
+                    //assert(table.index_address == faulty_block_header.op);
+
+                    queue.faulty_tables.release(table);
+                },
+                .awaiting_table_content => |table| {
+                    //assert(BlockType.from(faulty_block_header.operation) == .filter or
+                    //    BlockType.from(faulty_block_header.operation) == .data);
+                    assert(table.content_blocks_written < table.content_blocks_total.?);
+
+                    table.content_blocks_written += 1;
+                    if (table.content_blocks_written == table.content_blocks_total.?) {
+                        std.mem.swap(
+                            Grid.BlockPtr,
+                            &queue.faulty_table_blocks[queue.faulty_tables.index(table)],
+                            &queue.write_blocks[write_index],
+                        );
+
+                        write.* = .{ .queue = queue, .checksum = table.index_checksum };
+
+                        queue.grid.write_block(
+                            repair_write_block_callback,
+                            &write.write,
+                            &queue.write_blocks[write_index],
+                            .repair,
+                        );
+                        return;
+                    }
+                },
             }
 
             queue.writes.release(write);
@@ -329,8 +370,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             queue.faulty_blocks_repair_index = 0;
 
             var faulty_tables_iterator = queue.faulty_tables.iterate();
-            while (faulty_tables_iterator.next()) |faulty_table| {
-                queue.faulty_tables.release(faulty_table);
+            while (faulty_tables_iterator.next()) |table| {
+                queue.faulty_tables.release(table);
             }
 
             // Release the writes manually. GridRepairQueue.cancel() is invoked after Grid.cancel()
@@ -358,13 +399,13 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             }
 
             var faulty_tables = queue.faulty_tables.iterate();
-            while (faulty_tables.next()) |faulty_table| {
-                if (queue.grid.superblock.free_set.is_released(faulty_table.index_address)) {
-                    queue.faulty_tables.release(faulty_table);
+            while (faulty_tables.next()) |table| {
+                if (queue.grid.superblock.free_set.is_released(table.index_address)) {
+                    queue.faulty_tables.release(table);
                 }
             }
 
-            var writes_pending = CheckpointWritesPending.initEmpty();
+            var writes_pending = WriteSet.initEmpty();
             var writes = queue.writes.iterate();
             while (writes.next()) |write| {
                 if (queue.grid.superblock.free_set.is_released(write.write.address)) {
