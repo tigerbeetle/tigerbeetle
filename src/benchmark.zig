@@ -69,7 +69,7 @@ pub fn main() !void {
             panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
     }
 
-    if (account_count < 2) panic("Need at least two acconts, got {}", .{account_count});
+    if (account_count < 2) panic("Need at least two accounts, got {}", .{account_count});
 
     const transfer_arrival_rate_ns = @divTrunc(
         std.time.ns_per_s,
