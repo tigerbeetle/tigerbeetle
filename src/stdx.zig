@@ -243,7 +243,7 @@ else
 /// that:
 ///   - `T` doesn't have any non-deterministic padding,
 ///   - `T` doesn't embed any pointers.
-pub fn equal_bytewise(comptime T: type, a: *const T, b: *const T) bool {
+pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     comptime assert(std.meta.trait.hasUniqueRepresentation(T));
     comptime assert(!has_pointers(T));
     comptime assert(@sizeOf(T) * 8 == @bitSizeOf(T));
