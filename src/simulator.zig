@@ -647,10 +647,7 @@ pub const Simulator = struct {
 
         const request_metadata = simulator.workload.build_request(
             client_index,
-            @alignCast(
-                @alignOf(vsr.Header),
-                request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
-            ),
+            request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
         );
         assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
 
