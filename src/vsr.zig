@@ -1380,8 +1380,9 @@ pub const Headers = struct {
     pub fn dvc_header_type(header: *const Header) enum { blank, valid } {
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
 
-        assert(header.command == .prepare);
         if (constants.verify) assert(header.valid_checksum());
+        assert(header.command == .prepare);
+        assert(header.invalid() == null);
         return .valid;
     }
 };
@@ -1511,7 +1512,10 @@ test "Headers.ViewChangeSlice.view_for_op" {
     var headers_array = [_]Header{
         std.mem.zeroInit(Header, .{
             .checksum = undefined,
+            .client = 6,
+            .request = 7,
             .command = .prepare,
+            .operation = @intToEnum(Operation, constants.vsr_operations_reserved + 8),
             .op = 9,
             .view = 10,
             .timestamp = 11,
@@ -1520,7 +1524,10 @@ test "Headers.ViewChangeSlice.view_for_op" {
         Headers.dvc_blank(7),
         std.mem.zeroInit(Header, .{
             .checksum = undefined,
+            .client = 3,
+            .request = 4,
             .command = .prepare,
+            .operation = @intToEnum(Operation, constants.vsr_operations_reserved + 5),
             .op = 6,
             .view = 7,
             .timestamp = 8,
