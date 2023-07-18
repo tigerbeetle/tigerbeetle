@@ -763,7 +763,7 @@ pub fn TestContext(
             }
 
             for (buffer[0..count]) |table| {
-                const index = binary_search.binary_search_values_raw(
+                const index = binary_search.binary_search_values_upsert_index(
                     Key,
                     TableInfo,
                     key_min_from_table,
@@ -789,7 +789,7 @@ pub fn TestContext(
 
             assert(compare_keys(new_key_min, key) == .gt);
 
-            var i = binary_search.binary_search_values_raw(
+            var i = binary_search.binary_search_values_upsert_index(
                 Key,
                 TableInfo,
                 key_min_from_table,
