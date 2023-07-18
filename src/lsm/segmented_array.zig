@@ -6,7 +6,7 @@ const mem = std.mem;
 
 const stdx = @import("../stdx.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
-const binary_search_values_raw = @import("binary_search.zig").binary_search_values_raw;
+const binary_search_values_upsert_index = @import("binary_search.zig").binary_search_values_upsert_index;
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;
 const Direction = @import("direction.zig").Direction;
 
@@ -890,7 +890,7 @@ fn SegmentedArrayType(
                 const node = @intCast(u32, offset);
                 assert(node < array.node_count);
 
-                const relative_index = binary_search_values_raw(
+                const relative_index = binary_search_values_upsert_index(
                     K,
                     T,
                     key_from_value,
@@ -1225,7 +1225,7 @@ fn TestContext(
         }
 
         fn reference_index(context: *const Self, key: Key) u32 {
-            return binary_search_values_raw(
+            return binary_search_values_upsert_index(
                 Key,
                 T,
                 key_from_value,
