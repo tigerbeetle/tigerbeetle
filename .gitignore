@@ -12,6 +12,8 @@ simulator
 zig/
 zig-cache/
 zig-out/
+kcov-output/
+
 tools/tracy
 # By convention, logs from simulator use .vopr extension.
 *.vopr
