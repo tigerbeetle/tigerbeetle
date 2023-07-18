@@ -102,7 +102,7 @@ pub const ClientSessions = struct {
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
-        for (client_sessions.entries) |entry| {
+        for (client_sessions.entries) |*entry| {
             stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entry.header));
             size += @sizeOf(vsr.Header);
         }
@@ -112,7 +112,7 @@ pub const ClientSessions = struct {
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
-        for (client_sessions.entries) |entry| {
+        for (client_sessions.entries) |*entry| {
             stdx.copy_disjoint(.inexact, u8, target[size..], mem.asBytes(&entry.session));
             size += @sizeOf(u64);
         }
