@@ -20,6 +20,7 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets:
       TIGERBEETLE_NODE_PUBLISH_KEY: ${{secrets.TIGERBEETLE_NODE_PUBLISH_KEY}}
+      TIGERBEETLE_DOCS_PUBLISH_KEY: ${{secrets.TIGERBEETLE_DOCS_PUBLISH_KEY}}
       NUGET_KEY: ${{secrets.NUGET_KEY}}
       MAVEN_GPG_SECRET_KEY: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
       MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
