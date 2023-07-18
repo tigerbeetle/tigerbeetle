@@ -5,6 +5,7 @@ const math = std.math;
 const constants = @import("../constants.zig");
 
 pub const Config = struct {
+    verify_sorted: bool = false,
     mode: enum { lower_bound, upper_bound } = .lower_bound,
 };
 
@@ -37,7 +38,7 @@ pub fn binary_search_values_upsert_index(
 ) u32 {
     if (values.len == 0) return 0;
 
-    if (constants.verify) {
+    if (config.verify_sorted) {
         // Input must be sorted by key.
         for (values) |_, i| {
             assert(i == 0 or
@@ -164,6 +165,10 @@ pub inline fn binary_search_keys(
     };
 }
 
+pub const ConfigRange = struct {
+    verify_sorted: bool = false,
+};
+
 pub const BinarySearchRangeUpsertIndexes = struct {
     start: u32,
     end: u32,
@@ -186,6 +191,7 @@ pub inline fn binary_search_values_range_upsert_indexes(
     values: []const Value,
     key_min: Key,
     key_max: Key,
+    comptime config: ConfigRange,
 ) BinarySearchRangeUpsertIndexes {
     assert(compare_keys(key_min, key_max) != .gt);
 
@@ -196,7 +202,7 @@ pub inline fn binary_search_values_range_upsert_indexes(
         compare_keys,
         values,
         key_min,
-        .{ .mode = .lower_bound },
+        .{ .verify_sorted = config.verify_sorted, .mode = .lower_bound },
     );
 
     if (start == values.len) return .{
@@ -211,7 +217,7 @@ pub inline fn binary_search_values_range_upsert_indexes(
         compare_keys,
         values[start..],
         key_max,
-        .{ .mode = .upper_bound },
+        .{ .verify_sorted = config.verify_sorted, .mode = .upper_bound },
     );
 
     return .{
@@ -226,6 +232,7 @@ pub inline fn binary_search_keys_range_upsert_indexes(
     keys: []const Key,
     key_min: Key,
     key_max: Key,
+    comptime config: ConfigRange,
 ) BinarySearchRangeUpsertIndexes {
     return binary_search_values_range_upsert_indexes(
         Key,
@@ -239,6 +246,7 @@ pub inline fn binary_search_keys_range_upsert_indexes(
         keys,
         key_min,
         key_max,
+        config,
     );
 }
 
@@ -261,6 +269,7 @@ pub inline fn binary_search_values_range(
     values: []const Value,
     key_min: Key,
     key_max: Key,
+    comptime config: ConfigRange,
 ) BinarySearchRange {
     const upsert_indexes = binary_search_values_range_upsert_indexes(
         Key,
@@ -270,6 +279,7 @@ pub inline fn binary_search_values_range(
         values,
         key_min,
         key_max,
+        config,
     );
 
     if (upsert_indexes.start == values.len) return .{
@@ -293,6 +303,7 @@ pub inline fn binary_search_keys_range(
     keys: []const Key,
     key_min: Key,
     key_max: Key,
+    comptime config: ConfigRange,
 ) BinarySearchRange {
     return binary_search_values_range(
         Key,
@@ -306,6 +317,7 @@ pub inline fn binary_search_keys_range(
         keys,
         key_min,
         key_max,
+        config,
     );
 }
 
@@ -357,7 +369,7 @@ const test_binary_search = struct {
                 compare_keys,
                 keys,
                 target_key,
-                .{ .mode = mode },
+                .{ .verify_sorted = true, .mode = mode },
             );
 
             if (log) std.debug.print("expected: {}, actual: {}\n", .{ expect, actual });
@@ -387,7 +399,10 @@ const test_binary_search = struct {
                 compare_keys,
                 keys,
                 target_key,
-                .{ .mode = mode },
+                .{
+                    .verify_sorted = true,
+                    .mode = mode,
+                },
             );
             try std.testing.expectEqual(expect.index, actual.index);
             try std.testing.expectEqual(expect.exact, actual.exact);
@@ -431,7 +446,7 @@ const test_binary_search = struct {
             compare_keys,
             keys,
             target_key,
-            .{ .mode = mode },
+            .{ .verify_sorted = true, .mode = mode },
         );
 
         if (log) std.debug.print("expected: {}, actual: {}\n", .{ expect, actual });
@@ -451,6 +466,7 @@ const test_binary_search = struct {
             sequence,
             key_min,
             key_max,
+            .{ .verify_sorted = true },
         );
 
         try std.testing.expectEqual(expected.start, actual.start);
@@ -515,6 +531,7 @@ const test_binary_search = struct {
             keys,
             target_range.key_min,
             target_range.key_max,
+            .{ .verify_sorted = true },
         );
 
         if (log) std.debug.print("expected: {?}, actual: {?}\n", .{ expect, actual });
