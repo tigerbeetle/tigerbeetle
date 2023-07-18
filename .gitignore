@@ -10,7 +10,7 @@ zig/
 zig-cache/
 zig-out/
 tools/tracy
-# It is occasionally useful to dump LLVM IR to an `.ll` file to investigate per problems.
+# It is occasionally useful to dump LLVM IR to an `.ll` file to investigate perf problems.
 .ll
 # By convention, logs from simulator use .vopr extension.
 *.vopr
