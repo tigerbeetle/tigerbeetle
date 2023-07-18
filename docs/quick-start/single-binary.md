@@ -3,86 +3,22 @@ sidebar_position: 1
 ---
 
 # Single-node cluster with a single binary
-Production
-Install TigerBeetle by grabbing the latest release from
-GitHub.
 
-## Prebuilt Linux binary
+First, download a prebuilt copy of TigerBeetle.
 
-```bash
-$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-Linux-x64-2022-11-16-weekly.zip
-$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
-$ tigerbeetle version --verbose | head -n6
-TigerBeetle version experimental
+On macOS/Linux:
 
-git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
-
-zig_version=0.9.1
-mode=Mode.ReleaseSafe
+```console
+$ git clone https://github.com/tigerbeetle/tigerbeetle; ./tigerbeetle/bootstrap.sh
 ```
 
-### Debugging panics
+On Windows:
 
-If you run into panics, you can get more information by using the
-debug binary. To grab this binary, add `--debug` before the `.zip`
-extension:
-
-```bash
-$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-Linux-x64-2022-11-16-weekly--debug.zip
+```console
+$ git clone https://github.com/tigerbeetle/tigerbeetle; .\tigerbeetle\bootstrap.ps1
 ```
 
-## Prebuilt macOS binary
-
-```bash
-$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly.zip
-$ unzip tigerbeetle-macOS-x64-2022-11-16-weekly.zip
-$ sudo cp tigerbeetle /usr/local/bin/tigerbeetle
-$ tigerbeetle version --verbose | head -n6
-TigerBeetle version experimental
-
-git_commit="b47292aaf2492e6b56a977009b85f7fca6e66775"
-
-zig_version=0.9.1
-mode=Mode.ReleaseSafe
-```
-
-### Debugging panics
-
-If you run into panics, you can get more information by using the
-debug binary. To grab this binary, add `--debug` before the `.zip`
-extension:
-
-```bash
-$ curl -LO https://github.com/tigerbeetle/tigerbeetle/releases/download/2022-11-16-weekly/tigerbeetle-macOS-x64-2022-11-16-weekly--debug.zip
-```
-
-## Building from source
-
-Or to build from source, clone the repo, checkout a release, and run
-the install script.
-
-You will need POSIX userland, curl or wget, tar, and xz.
-
-```bash
-$ git clone https://github.com/tigerbeetle/tigerbeetle.git
-$ git checkout 2022-11-16-weekly # Or latest tag
-$ cd tigerbeetle
-$ scripts/install.sh
-```
-
-Don't worry, this will only make changes within the `tigerbeetle`
-directory. No global changes. The result will place the compiled
-`tigerbeetle` binary into the current directory.
-
-### Debugging panics
-
-If you run into panics, you can get more information by using the
-debug binary:
-
-```
-$ DEBUG=true ./scripts/install.sh
-```
+Want to build from source locally? Add `-build` as an argument to the bootstrap script.
 
 ## Running TigerBeetle
 
