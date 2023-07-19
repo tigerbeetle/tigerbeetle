@@ -5,7 +5,7 @@
 //!
 //! Pass the resulting .ll file to copyhound:
 //!
-//!     zig run -Drelease-safe src/copyhound.zig -- --threshold-bytes 128 < tigerbeetle.ll \
+//!     zig run -Drelease-safe src/copyhound.zig -- --memcpy-bytes 128 < tigerbeetle.ll \
 //!        | sort -n -k 1
 //!
 //! This only detects memory copies with comptime-know size (eg, when you copy a `T`, rather than a
@@ -21,28 +21,36 @@ pub const log_level: std.log.Level = .info;
 const size_thershold = 1024;
 
 const CliArgs = struct {
-    threshold: u32,
+    memcpy_bytes: u32,
+    code_size: bool,
 
     fn parse(arena: std.mem.Allocator) !CliArgs {
         var args = try std.process.argsWithAllocator(arena);
         assert(args.skip());
 
-        var threshold: u32 = 1024;
+        var memcpy_bytes: ?u32 = null;
+        var code_size: bool = false;
         while (args.next(arena)) |arg_or_err| {
             const arg = try arg_or_err;
 
-            if (std.mem.eql(u8, arg, "--threshold-bytes")) {
+            if (std.mem.eql(u8, arg, "--memcpy-bytes")) {
                 const arg_value_or_err = args.next(arena) orelse
-                    fatal("expected a value for --threshold", .{});
+                    fatal("expected a value for --memcpy-bytes", .{});
                 const arg_value = try arg_value_or_err;
-                threshold = std.fmt.parseInt(u32, arg_value, 10) catch
-                    fatal("expected an integer value for --threshold, got '{s}'", .{arg_value});
+                memcpy_bytes = std.fmt.parseInt(u32, arg_value, 10) catch
+                    fatal("expected an integer value for --memcpy-bytes, got '{s}'", .{arg_value});
+            } else if (std.mem.eql(u8, arg, "--code-size")) {
+                code_size = true;
             } else {
                 fatal("unexpected argument '{s}'", .{arg});
             }
         }
+        if ((memcpy_bytes == null and !code_size) or (memcpy_bytes != null and code_size)) {
+            fatal("expected one of --memcpy-bytes or --code-size", .{});
+        }
         return CliArgs{
-            .threshold = threshold,
+            .memcpy_bytes = memcpy_bytes orelse std.math.maxInt(u32),
+            .code_size = code_size,
         };
     }
 };
@@ -69,6 +77,7 @@ pub fn main() !void {
     var out_stream = buf_writer.writer();
 
     var current_function: ?[]const u8 = null;
+    var current_function_size: u32 = 0;
     while (try in_stream.readUntilDelimiterOrEof(line_buffer, '\n')) |line| {
         if (std.mem.startsWith(u8, line, "define ")) {
             current_function = extract_function_name(line, func_buf) orelse {
@@ -80,15 +89,20 @@ pub fn main() !void {
 
         if (current_function) |func| {
             if (std.mem.eql(u8, line, "}")) {
+                if (cli_args.code_size) {
+                    try out_stream.print("size {} {s} \n", .{ current_function_size, func });
+                }
                 current_function = null;
+                current_function_size = 0;
                 continue;
             }
+            current_function_size += 1;
             if (stdx.cut(line, "@llvm.memcpy")) |cut| {
                 const size = extract_memcpy_size(cut.suffix) orelse {
                     log.err("can't parse memcpy call line={s}", .{line});
                     return error.BadMemcpy;
                 };
-                if (size > cli_args.threshold) {
+                if (size > cli_args.memcpy_bytes) {
                     try out_stream.print("memcpy {:<8} {s}\n", .{ size, func });
                 }
             }
