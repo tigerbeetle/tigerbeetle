@@ -1,5 +1,6 @@
 test {
     _ = @import("aof.zig");
+    _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
     _ = @import("hash_map.zig");
