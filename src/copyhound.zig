@@ -1,15 +1,33 @@
-//! Analyze LLVM IR to find large copies.
+//! Analyze LLVM IR to find:
+//! - large memcpy calls
+//! - functions with many copies due to monomorphisation and big total size
 //!
 //! To get a file with IR, use `-femit-llvm-ir` cli argument for `zig build-exe` or
-//! `-Demit-llvm-ir` for `zig build`.
 //!
-//! Pass the resulting .ll file to copyhound:
+//!     $ zig build -Drelease-safe -Demit-llvm-ir
 //!
-//!     zig run -Drelease-safe src/copyhound.zig -- --threshold-bytes 128 < tigerbeetle.ll \
-//!        | sort -n -k 1
+//! Pass the resulting .ll file to copyhound on stdin.
+//!
+//! ## Needless memcpy
+//!
+//! Run:
+//!
+//!     $ zig run -Drelease-safe src/copyhound.zig -- memcpy --bytes 128 < tigerbeetle.ll \
+//!        | sort -n -k 2
 //!
 //! This only detects memory copies with comptime-know size (eg, when you copy a `T`, rather than a
 //! `[]T`).
+//!
+//! ## Code size
+//!
+//! Run:
+//!
+//!     $ zig run -Drelease-safe src/copyhound.zig -- funcsize < tigerbeetle.ll \
+//!        | awk '{a[$1] += $2; b[$1] += 1} END {for (i in a) print i, b[i], a[i]}' \
+//!        | sort -n -k 3
+//!
+//! This will print every function name (first column), number of times it was monomorphized (second
+//! column) and the total size of all monorphisations (third column).
 
 const std = @import("std");
 const stdx = @import("./stdx.zig");
@@ -20,31 +38,54 @@ pub const log_level: std.log.Level = .info;
 
 const size_thershold = 1024;
 
-const CliArgs = struct {
-    threshold: u32,
+const CliArgs = union(enum) {
+    memcpy: struct { bytes: u32 },
+    funcsize,
 
     fn parse(arena: std.mem.Allocator) !CliArgs {
         var args = try std.process.argsWithAllocator(arena);
         assert(args.skip());
 
-        var threshold: u32 = 1024;
+        var subcommand: ?std.meta.Tag(CliArgs) = null;
+        var memcpy_bytes: ?u32 = null;
+
         while (args.next(arena)) |arg_or_err| {
             const arg = try arg_or_err;
 
-            if (std.mem.eql(u8, arg, "--threshold-bytes")) {
-                const arg_value_or_err = args.next(arena) orelse
-                    fatal("expected a value for --threshold-bytes", .{});
-                const arg_value = try arg_value_or_err;
-                threshold = std.fmt.parseInt(u32, arg_value, 10) catch fatal(
-                    "expected an integer value for --threshold-bytes, got '{s}'",
-                    .{arg_value},
-                );
-            } else {
-                fatal("unexpected argument '{s}'", .{arg});
+            if (subcommand == null) {
+                inline for (comptime std.enums.values(std.meta.Tag(CliArgs))) |tag| {
+                    if (std.mem.eql(u8, arg, @tagName(tag))) {
+                        subcommand = tag;
+                        break;
+                    }
+                } else fatal("unknown subcommand: '{s}'", .{arg});
+
+                continue;
             }
+
+            if (subcommand != null and subcommand.? == .memcpy and
+                std.mem.eql(u8, arg, "--bytes"))
+            {
+                if (memcpy_bytes != null) fatal("duplicate argument: --bytes", .{});
+
+                const arg_value = try (args.next(arena) orelse
+                    fatal("expected a value for an argument: --bytes", .{}));
+
+                memcpy_bytes = std.fmt.parseInt(u32, arg_value, 10) catch
+                    fatal("expected an integer argument: --bytes {s}", .{arg_value});
+
+                continue;
+            }
+
+            fatal("unexpected argument: {s}", .{arg});
         }
-        return CliArgs{
-            .threshold = threshold,
+
+        if (subcommand == null) fatal("subcommand required", .{});
+        return switch (subcommand.?) {
+            .memcpy => .{ .memcpy = .{
+                .bytes = memcpy_bytes orelse fatal("argument required: --bytes", .{}),
+            } },
+            .funcsize => .funcsize,
         };
     }
 };
@@ -71,6 +112,7 @@ pub fn main() !void {
     var out_stream = buf_writer.writer();
 
     var current_function: ?[]const u8 = null;
+    var current_function_size: u32 = 0;
     while (try in_stream.readUntilDelimiterOrEof(line_buffer, '\n')) |line| {
         if (std.mem.startsWith(u8, line, "define ")) {
             current_function = extract_function_name(line, func_buf) orelse {
@@ -80,18 +122,25 @@ pub fn main() !void {
             continue;
         }
 
-        if (current_function) |func| {
+        if (current_function) |function| {
             if (std.mem.eql(u8, line, "}")) {
+                if (cli_args == .funcsize) {
+                    try out_stream.print("{s} {}\n", .{ function, current_function_size });
+                }
                 current_function = null;
+                current_function_size = 0;
                 continue;
             }
+            current_function_size += 1;
             if (stdx.cut(line, "@llvm.memcpy")) |cut| {
                 const size = extract_memcpy_size(cut.suffix) orelse {
                     log.err("can't parse memcpy call line={s}", .{line});
                     return error.BadMemcpy;
                 };
-                if (size > cli_args.threshold) {
-                    try out_stream.print("memcpy {:<8} {s}\n", .{ size, func });
+                if (cli_args == .memcpy) {
+                    if (size > cli_args.memcpy.bytes) {
+                        try out_stream.print("{s} {}\n", .{ function, size });
+                    }
                 }
             }
         }
