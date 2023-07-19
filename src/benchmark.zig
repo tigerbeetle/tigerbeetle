@@ -1,3 +1,28 @@
+//! This script is a Zig TigerBeetle client that connects to a TigerBeetle
+//! cluster and runs a workload on it (described below) while measuring
+//! (and at the end, printing) observed latencies and throughput.
+//! 
+//! It uses a single client to 1) create `account_count` accounts then 2)
+//! generate `transfer_count` transfers between random different
+//! accounts. It does not attempt to create more than
+//! `transfer_count_per_second` transfers per second, however it may reach
+//! less than this rate since it will wait at least as long as it takes
+//! for the cluster to respond before creating more transfers. It does not
+//! validate that the transfers succeed.
+//! 
+//! `./scripts/benchmark.sh` (and `.\scripts\benchmark.bat` on Windows)
+//! are helpers that spin up a single TigerBeetle replica on a free port
+//! and run the benchmark `./scripts/build.sh benchmark` (and
+//! `.\scripts\build.bat benchmark` on Windows) against the replica. To
+//! run against a cluster of TigerBeetle replicas, use `./scripts/build.sh
+//! benchmark --addresses=X` where `X` is the list of replica
+//! addresses. It is the same format for the `--addresses=X` flag on the
+//! `tigerbeetle start` command.
+
+const account_count_default: usize = 10_000;
+const transfer_count_default: usize = 10_000_000;
+const transfer_count_per_second_default: usize = 1_000_000;
+
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
@@ -39,9 +64,9 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    var account_count: usize = 10_000;
-    var transfer_count: usize = 10_000_000;
-    var transfer_count_per_second: usize = 1_000_000;
+    var account_count = account_count_default;
+    var transfer_count = transfer_count_default;
+    var transfer_count_per_second = transfer_count_per_second_default;
     var print_batch_timings = false;
     var enable_statsd = false;
 
