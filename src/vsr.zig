@@ -464,6 +464,13 @@ pub const Header = extern struct {
             .sync_manifest => self.invalid_sync_manifest(),
             .sync_free_set => self.invalid_sync_free_set(),
             .sync_client_sessions => self.invalid_sync_client_sessions(),
+            // The `Command` enum is exhaustive, so we can't write an "else" branch here. An unknown
+            // command is a possibility, but that means that someone has send us a message with
+            // matching cluster, matching version, correct checksum, and a command we don't know
+            // about. Ignoring unknown commands might be unsafe, so the replica intentionally
+            // crashes here, which is guaranteed by Zig's ReleaseSafe semantics.
+            //
+            // _ => unreachable
         };
     }
 
