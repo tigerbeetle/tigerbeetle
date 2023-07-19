@@ -1,12 +1,13 @@
 test {
-    _ = @import("tidy.zig");
-
+    _ = @import("aof.zig");
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
+    _ = @import("hash_map.zig");
     _ = @import("io.zig");
     _ = @import("ring_buffer.zig");
+    _ = @import("shell.zig");
     _ = @import("stdx.zig");
-    _ = @import("hash_map.zig");
+    _ = @import("tidy.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
@@ -51,8 +52,4 @@ test {
     _ = @import("vsr/superblock_manifest.zig");
     _ = @import("vsr/superblock_quorums.zig");
     _ = @import("vsr/sync.zig");
-
-    _ = @import("aof.zig");
-
-    _ = @import("shell.zig");
 }
