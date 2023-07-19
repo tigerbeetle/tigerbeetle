@@ -1102,6 +1102,7 @@ pub fn ReplicaType(
                     return;
                 },
                 .reserved => unreachable,
+                _ => unreachable,
             }
 
             if (self.loopback_queue) |loopback_message| {
@@ -6445,6 +6446,7 @@ pub fn ReplicaType(
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
+                _ => unreachable,
             }
 
             if (replica != self.replica) {

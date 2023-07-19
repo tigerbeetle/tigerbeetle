@@ -143,6 +143,7 @@ pub const Command = enum(u8) {
     sync_manifest = 24,
     sync_free_set = 25,
     sync_client_sessions = 26,
+    _,
 
     comptime {
         for (std.enums.values(Command)) |result, index| {
@@ -464,6 +465,10 @@ pub const Header = extern struct {
             .sync_manifest => self.invalid_sync_manifest(),
             .sync_free_set => self.invalid_sync_free_set(),
             .sync_client_sessions => self.invalid_sync_client_sessions(),
+            _ => {
+                log.err("header with a matching version and unknown command: {}", .{ self });
+                @panic("unknown command");
+            },
         };
     }
 

@@ -51,7 +51,33 @@ pub const Path = struct {
     target: u8,
 };
 
-pub const LinkFilter = std.enums.EnumSet(vsr.Command);
+pub const LinkFilter = struct {
+    const Bits = std.StaticBitSet(blk: {
+        var command_max = 0;
+        for (std.enums.values(vsr.Command)) |command| {
+            command_max = @maximum(command_max, @enumToInt(command));
+        }
+        break :blk command_max;
+    });
+
+    bits: Bits = Bits.initEmpty(),
+
+    pub fn initFull() LinkFilter {
+        return .{ .bits = Bits.initFull() };
+    }
+
+    pub fn insert(filter: *LinkFilter, command: vsr.Command) void {
+        filter.bits.set(@enumToInt(command));
+    }
+
+    pub fn remove(filter: *LinkFilter, command: vsr.Command) void {
+        filter.bits.unset(@enumToInt(command));
+    }
+
+    pub fn contains(filter: *const LinkFilter, command: vsr.Command) bool {
+        return filter.bits.isSet(@enumToInt(command));
+    }
+};
 
 /// Determines how the partitions are created. Partitions
 /// are two-way, i.e. if i cannot communicate with j, then
