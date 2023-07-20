@@ -7,6 +7,8 @@ on:
     secrets:
       TIGERBEETLE_NODE_PUBLISH_KEY:
         required: true
+      TIGERBEETLE_DOCS_PUBLISH_KEY:
+        required: true
       NUGET_KEY:
         required: true
       MAVEN_GPG_SECRET_KEY:
@@ -93,9 +95,19 @@ jobs:
           EDITOR: vi
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  docs:
+    needs: [release, version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./.github/ci/publish_docs.sh
+      env:
+        TIGERBEETLE_COMMIT: ${{needs.version.outputs.version}}
+        TIGERBEETLE_DOCS_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_DOCS_DEPLOY_KEY }}
+
   alert_failure:
     runs-on: ubuntu-latest
-    needs: [version, draft_release, release, finalize_release]
+    needs: [version, draft_release, release, finalize_release, docs]
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     steps:
       - name: Alert if anything failed
