@@ -44,11 +44,11 @@ func assertAccountBalances(client tb.Client, accounts []tb_types.Account, debugM
 				requested = true
 				assert(account.DebitsPosted, account_found.DebitsPosted,
 					fmt.Sprintf("account %s debits, %s", account.ID, debugMsg))
-				assert(account.CreditsPosted,account_found.DebitsPosted,
+				assert(account.CreditsPosted,account_found.CreditsPosted,
 					fmt.Sprintf("account %s credits, %s", account.ID, debugMsg))
-				assert(account.DebitsPending, account_found.DebitsPosted,
+				assert(account.DebitsPending, account_found.DebitsPending,
 					fmt.Sprintf("account %s debits pending, %s", account.ID, debugMsg))
-				assert(account.CreditsPending, account_found.DebitsPosted,
+				assert(account.CreditsPending, account_found.CreditsPending,
 					fmt.Sprintf("account %s credits pending, %s", account.ID, debugMsg))
 			}
 		}
