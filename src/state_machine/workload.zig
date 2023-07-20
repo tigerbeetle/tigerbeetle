@@ -29,8 +29,7 @@ const Auditor = accounting_auditor.AccountingAuditor;
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 const fuzz = @import("../testing/fuzz.zig");
 
-// TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
+const PriorityQueue = std.PriorityQueue;
 
 const TransferOutcome = enum {
     /// The transfer is guaranteed to commit.
@@ -167,12 +166,20 @@ const transfer_templates = table: {
 pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     const Operation = AccountingStateMachine.Operation;
 
-    const Action = enum(u8) {
-        create_accounts = @enumToInt(Operation.create_accounts),
-        create_transfers = @enumToInt(Operation.create_transfers),
-        lookup_accounts = @enumToInt(Operation.lookup_accounts),
-        lookup_transfers = @enumToInt(Operation.lookup_transfers),
-    };
+    const Action = @Type(.{
+        .Enum = .{
+            .layout = .Auto,
+            .tag_type = u8,
+            .fields = &[_]std.builtin.Type.EnumField{
+                .{ .name = "create_accounts", .value = @enumToInt(Operation.create_accounts) },
+                .{ .name = "create_transfers", .value = @enumToInt(Operation.create_transfers) },
+                .{ .name = "lookup_accounts", .value = @enumToInt(Operation.lookup_accounts) },
+                .{ .name = "lookup_transfers", .value = @enumToInt(Operation.lookup_transfers) },
+            },
+            .decls = &.{},
+            .is_exhaustive = true,
+        },
+    });
 
     return struct {
         const Self = @This();
