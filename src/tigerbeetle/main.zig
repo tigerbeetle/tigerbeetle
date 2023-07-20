@@ -269,8 +269,8 @@ const Command = struct {
 
 fn print_value(
     writer: anytype,
-    comptime field: []const u8,
-    comptime value: anytype,
+    field: []const u8,
+    value: anytype,
 ) !void {
     switch (@typeInfo(@TypeOf(value))) {
         .Fn => {}, // Ignore the log() function.
