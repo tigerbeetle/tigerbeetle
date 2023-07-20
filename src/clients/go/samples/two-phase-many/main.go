@@ -164,7 +164,7 @@ func main() {
 			CreditsPosted: uint64(0),
 			DebitsPending: uint64(0),
 			CreditsPending: uint64(1500),
-		}
+		},
 	}, "after starting 5 pending transfers")
 
 	// Create a 6th transfer posting the 1st transfer
@@ -203,7 +203,7 @@ func main() {
 			CreditsPosted: uint64(100),
 			DebitsPending: uint64(0),
 			CreditsPending: uint64(1400),
-		}
+		},
 	}, "after completing 1 pending transfer")
 
 	// Create a 7th transfer voiding the 2nd transfer
@@ -242,7 +242,7 @@ func main() {
 			CreditsPosted: uint64(100),
 			DebitsPending: uint64(0),
 			CreditsPending: uint64(1200),
-		}
+		},
 	}, "after completing 2 pending transfers")
 
 	// Create a 8th transfer posting the 3rd transfer
@@ -281,7 +281,7 @@ func main() {
 			CreditsPosted: uint64(400),
 			DebitsPending: uint64(0),
 			CreditsPending: uint64(900),
-		}
+		},
 	}, "after completing 3 pending transfers")
 
 	// Create a 9th transfer voiding the 4th transfer
@@ -320,7 +320,7 @@ func main() {
 			CreditsPosted: uint64(400),
 			DebitsPending: uint64(0),
 			CreditsPending: uint64(500),
-		}
+		},
 	}, "after completing 4 pending transfers")
 
 	// Create a 10th transfer voiding the 5th transfer
@@ -359,7 +359,7 @@ func main() {
 			CreditsPosted: uint64(900),
 			DebitsPending: uint64(0),
 			CreditsPending: uint64(0),
-		}
+		},
 	}, "after completing 5 pending transfers")
 
 	fmt.Println("ok")
