@@ -65,7 +65,7 @@ jobs:
         fetch-depth: 0
 
     - name: Build tigerbeetle
-      run: ./scripts/install.sh ${{ matrix.debug }}
+      run: ./scripts/install.sh ${{ matrix.debug }} -Dversion=${{ needs.version.outputs.version }}
       env:
         TARGET: ${{ matrix.target }}
         CPU: ${{ matrix.target == 'aarch64-linux' && 'baseline+aes+neon' || matrix.target == 'aarch64-macos' && 'baseline+aes+neon' || 'x86_64_v3+aes' }}
@@ -107,13 +107,13 @@ jobs:
         fetch-depth: 0
 
     - name: Build tigerbeetle (aarch64)
-      run: ./scripts/install.sh ${{ matrix.debug }} && mv tigerbeetle tigerbeetle-aarch64
+      run: ./scripts/install.sh ${{ matrix.debug }} -Dversion=${{ needs.version.outputs.version }} && mv tigerbeetle tigerbeetle-aarch64
       env:
         TARGET: aarch64-macos
         CPU: baseline+aes+neon
 
     - name: Build tigerbeetle (x86_64)
-      run: ./scripts/install.sh ${{ matrix.debug }} && mv tigerbeetle tigerbeetle-x86_64
+      run: ./scripts/install.sh ${{ matrix.debug }} -Dversion=${{ needs.version.outputs.version }} && mv tigerbeetle tigerbeetle-x86_64
       env:
         TARGET: x86_64-macos
         CPU: x86_64_v3+aes
