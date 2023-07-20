@@ -7,6 +7,26 @@ const client = createClient({
   replica_addresses: [process.env.TB_ADDRESS || '3000'],
 });
 
+async function assertAccountBalances(client, accounts) {
+  let found = await client.lookupAccounts([1n, 2n]);
+  assert.equal(found.length, accounts.length);
+
+  let requested = false;
+  for (const foundAccount of found) {
+    if (account.id === foundAccount.id) {
+      requested = true;
+      assert.equal(account.debits_posted, foundAccount.debits_posted);
+      assert.equal(account.credits_posted, foundAccount.credits_posted);
+      assert.equal(account.debits_pending, foundAccount.debits_pending);
+      assert.equal(account.credits_pending, foundAccount.credits_pending);
+    }
+  }
+
+  if (!requested) {
+    assert.fail("Unexpected account: " + JSON.stringify(account, null, 2));
+  }
+}
+
 async function main() {
   // Create two accounts
   let accountErrors = await client.createAccounts([
@@ -59,23 +79,22 @@ async function main() {
   assert.equal(transferErrors.length, 0);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-  let accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
-  for (let account of accounts) {
-    if (account.id === 1n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 500);
-      assert.equal(account.credits_pending, 0);
-    } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 500);
-    } else {
-      assert.fail("Unexpected account: " + JSON.stringify(account, null, 2));
-    }
-  }
+  await assertAccountBalances(client, [
+    {
+      id: 1n,
+      debits_posted: 0,
+      credits_posted: 0,
+      debits_pending: 500,
+      credits_pending: 0,
+    },
+    {
+      id: 2n,
+      debits_posted: 0,
+      credits_posted: 0,
+      debits_pending: 0,
+      credits_pending: 500,
+    },
+  ]);
 
   // Create a second transfer simply posting the first transfer
   transferErrors = await client.createTransfers([
@@ -110,23 +129,22 @@ async function main() {
   }
 
   // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-  accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
-  for (let account of accounts) {
-    if (account.id === 1n) {
-      assert.equal(account.debits_posted, 500);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 0);
-    } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 500);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 0);
-    } else {
-      assert.fail("Unexpected account: " + account.id);
-    }
-  }
+  await assertAccountBalances(client, [
+    {
+      id: 1n,
+      debits_posted: 500,
+      credits_posted: 0,
+      debits_pending: 0,
+      credits_pending: 0,
+    },
+    {
+      id: 2n,
+      debits_posted: 0,
+      credits_posted: 500,
+      debits_pending: 0,
+      credits_pending: 0,
+    },
+  ]);
   
   console.log('ok');
 }
