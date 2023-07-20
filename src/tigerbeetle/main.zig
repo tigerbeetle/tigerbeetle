@@ -232,7 +232,7 @@ const Command = struct {
         const stdout = stdout_buffer.writer();
         try std.fmt.format(
             stdout,
-            "TigerBeetle version {s}",
+            "TigerBeetle version {s}\n",
             .{build_options.git_tag orelse "experimental"},
         );
 
