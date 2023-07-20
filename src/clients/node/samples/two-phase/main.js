@@ -1,6 +1,11 @@
 const assert = require("assert");
 
-const { createClient, TransferFlags } = require("tigerbeetle-node");
+const {
+    createClient,
+    CreateAccountError,
+    CreateTransferError,
+    TransferFlags,
+} = require("tigerbeetle-node");
 
 const client = createClient({
   cluster_id: 0,
@@ -37,6 +42,9 @@ async function main() {
       timestamp: 0n,
     },
   ]);
+  for (const error of accountErrors) {
+    console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
+  }
   assert.equal(accountErrors.length, 0);
 
   // Start a pending transfer
@@ -56,6 +64,9 @@ async function main() {
       amount: 500n,
     },
   ]);
+  for (const error of transferErrors) {
+    console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
+  }
   assert.equal(transferErrors.length, 0);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
@@ -94,6 +105,9 @@ async function main() {
       amount: 500n,
     },
   ]);
+  for (const error of transferErrors) {
+    console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
+  }
   assert.equal(transferErrors.length, 0);
 
   // Validate the contents of all transfers
