@@ -89,6 +89,8 @@ pub fn ManifestLevelType(
                     assert(table != null);
                     self.key_range.?.key_min = table.?.key_min;
                 }
+                assert(self.key_range != null);
+                assert(compare_keys(self.key_range.?.key_min, self.key_range.?.key_max) != .gt);
             }
 
             fn include(self: *LevelKeyRange, include_range: KeyRange) void {
@@ -103,6 +105,9 @@ pub fn ManifestLevelType(
                     self.key_range = include_range;
                 }
                 assert(self.key_range != null);
+                assert(compare_keys(self.key_range.?.key_min, self.key_range.?.key_max) != .gt);
+                assert(compare_keys(self.key_range.?.key_min, include_range.key_min) != .gt and
+                    compare_keys(self.key_range.?.key_max, include_range.key_max) != .lt);
             }
 
             inline fn contains(self: *const LevelKeyRange, key: Key) bool {
