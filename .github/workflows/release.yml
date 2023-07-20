@@ -101,9 +101,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./.github/ci/publish_docs.sh
-      env:
-        TIGERBEETLE_COMMIT: ${{needs.version.outputs.version}}
-        TIGERBEETLE_DOCS_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_DOCS_DEPLOY_KEY }}
+        env:
+          TIGERBEETLE_COMMIT: ${{needs.version.outputs.version}}
+          TIGERBEETLE_DOCS_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_DOCS_DEPLOY_KEY }}
 
   alert_failure:
     runs-on: ubuntu-latest
