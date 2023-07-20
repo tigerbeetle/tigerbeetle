@@ -37,7 +37,7 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.equal(accountErrors.length, 0);
+  assert.deepEqual(accountErrors, []);
 
   // Start a pending transfer
   let transferErrors = await client.createTransfers([
@@ -56,7 +56,7 @@ async function main() {
       amount: 500n,
     },
   ]);
-  assert.equal(transferErrors.length, 0);
+  assert.deepEqual(transferErrors, []);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
   let accounts = await client.lookupAccounts([1n, 2n]);
@@ -94,7 +94,7 @@ async function main() {
       amount: 500n,
     },
   ]);
-  assert.equal(transferErrors.length, 0);
+  assert.deepEqual(transferErrors, []);
 
   // Validate the contents of all transfers
   let transfers = await client.lookupTransfers([1n, 2n]);
@@ -127,7 +127,7 @@ async function main() {
       assert.fail("Unexpected account: " + account.id);
     }
   }
-  
+
   console.log('ok');
 }
 

@@ -36,7 +36,7 @@ async function main() {
       timestamp: 0n,
     },
   ]);
-  assert.equal(accountErrors.length, 0);
+  assert.deepEqual(accountErrors, []);
 
   let transferErrors = await client.createTransfers([
     {
@@ -54,7 +54,7 @@ async function main() {
       amount: 10n,
     },
   ]);
-  assert.equal(transferErrors.length, 0);
+  assert.deepEqual(transferErrors, []);
 
   let accounts = await client.lookupAccounts([1n, 2n]);
   assert.equal(accounts.length, 2);
