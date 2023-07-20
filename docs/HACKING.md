@@ -20,6 +20,11 @@ With TigerBeetle installed, you are ready to benchmark!
 scripts/benchmark.sh
 ```
 
+If you're on Windows, run `.\scripts\benchmark.bat`.
+
+See comments at the top of [/src/benchmark.zig](/src/benchmark.zig)
+for exactly what we're benchmarking.
+
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
 ## Running the server
