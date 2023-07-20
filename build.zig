@@ -9,6 +9,7 @@ const Shell = @import("./src/shell.zig");
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
+    const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
 
     const options = b.addOptions();
 
@@ -68,6 +69,7 @@ pub fn build(b: *std.build.Builder) void {
     const tigerbeetle = b.addExecutable("tigerbeetle", "src/tigerbeetle/main.zig");
     tigerbeetle.setTarget(target);
     tigerbeetle.setBuildMode(mode);
+    tigerbeetle.emit_llvm_ir = if (emit_llvm_ir) .emit else .default;
     tigerbeetle.addPackage(vsr_package);
     tigerbeetle.install();
     // Ensure that we get stack traces even in release builds.
