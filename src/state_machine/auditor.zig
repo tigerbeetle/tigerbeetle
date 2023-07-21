@@ -12,8 +12,7 @@ const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
-// TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
+const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 

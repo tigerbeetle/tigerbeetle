@@ -954,23 +954,7 @@ pub const IO = struct {
 
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
-    /// Opens or creates a journal file:
-    /// - For reading and writing.
-    /// - For Direct I/O (required on windows).
-    /// - Obtains an advisory exclusive lock to the file descriptor.
-    /// - Allocates the file contiguously on disk if this is supported by the file system.
-    /// - Ensures that the file data is durable on disk.
-    ///   The caller is responsible for ensuring that the parent directory inode is durable.
-    /// - Verifies that the file size matches the expected file size before returning.
-    pub fn open_file(
-        dir_handle: os.fd_t,
-        relative_path: []const u8,
-        size: u64,
-        method: enum { create, create_or_open, open },
-    ) !os.fd_t {
-        assert(relative_path.len > 0);
-        assert(size % constants.sector_size == 0);
-
+    fn open_file_handle(relative_path: []const u8, method: enum{create, open}) !os.fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
@@ -980,12 +964,9 @@ pub const IO = struct {
                 creation_disposition = os.windows.FILE_CREATE;
                 log.info("creating \"{s}\"...", .{relative_path});
             },
-            .create_or_open => {
-                @panic("create_or_open is unsupported on Windows.");
-            },
             .open => {
-                log.info("opening \"{s}\"...", .{relative_path});
                 creation_disposition = os.windows.OPEN_EXISTING;
+                log.info("opening \"{s}\"...", .{relative_path});
             },
         }
 
@@ -1030,6 +1011,34 @@ pub const IO = struct {
             };
         }
 
+        return handle;
+    }
+
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (required on windows).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
+    pub fn open_file(
+        dir_handle: os.fd_t,
+        relative_path: []const u8,
+        size: u64,
+        method: enum { create, create_or_open, open },
+    ) !os.fd_t {
+        assert(relative_path.len > 0);
+        assert(size % constants.sector_size == 0);
+
+        const handle = switch (method) {
+            .open => try open_file_handle(relative_path, .open),
+            .create => try open_file_handle(relative_path, .create),
+            .create_or_open => open_file_handle(relative_path, .open) catch |err| switch (err) {
+                error.FileNotFound => try open_file_handle(relative_path, .create),
+                else => return err,
+            },
+        };
         errdefer os.windows.CloseHandle(handle);
 
         // Obtain an advisory exclusive lock
