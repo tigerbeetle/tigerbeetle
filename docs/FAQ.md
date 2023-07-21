@@ -144,3 +144,32 @@ TigerBeetle](https://github.com/tigerbeetle/tigerbeetle#quickstart),
 [follow our
 development](https://github.com/tigerbeetle/tigerbeetle#short-term-roadmap),
 and [give feedback](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)!
+
+## Is TigerBeetle ACID-compliant?
+
+Yes. Let's discuss each part:
+
+1. Atomicity: TigerBeetle allows events within a batch to be
+   [linked](./reference/transfers.md#flagslinked). When an event fails
+   within a linked chain of events, all events are rolled back.
+
+2. Consistency: Consistency, in the ACID sense, is provided by
+   TigerBeetle guaranteeing strict serializability. However, financial
+   consistency requires more than this. TigerBeetle exposes a
+   double-entry accounting API where money is never created or
+   destroyed, only transferred between accounts. And transfer history
+   is immutable. You can read more about our consistency guarantees
+   [here](./design/consistency.md).
+
+3. Isolation: All events within a batch, across all clients, are
+   serialized into TigerBeetle's state machine. There are no
+   concurrent events in TigerBeetle, even across clients.
+
+4. Durability: Absolute durability is impossible, because all hardware
+   can ultimately fail. Data we write today might not be available
+   tomorrow. TigerBeetle embraces limited disk reliability and
+   maximizes data durability in spite of imperfect disks. We actively
+   work against such entropy by taking advantage of cluster-wide
+   storage. A bit of data would need to get corrupted on all replicas
+   in a cluster to get lost, and even in that case the system would
+   safely halt.
