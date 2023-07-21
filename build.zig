@@ -7,6 +7,9 @@ const config = @import("./src/config.zig");
 const Shell = @import("./src/shell.zig");
 
 pub fn build(b: *std.build.Builder) void {
+    // A stack trace of 10 is arbitrary in size but helps with debugging.
+    b.reference_trace = 10;
+
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
     const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
