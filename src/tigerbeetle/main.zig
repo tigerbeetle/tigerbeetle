@@ -251,16 +251,15 @@ const Command = struct {
                 try print_value(stdout, "build." ++ declaration, @field(builtin, declaration));
             }
 
-            // TODO(Zig): Use meta.fieldNames() after upgrading to 0.10.
-            // See: https://github.com/ziglang/zig/issues/10235
+            // Zig 0.10 doesn't see field_name as comptime if this `comptime` isn't used.
             try stdout.writeAll("\n");
-            inline for (std.meta.fields(@TypeOf(config.cluster))) |field| {
-                try print_value(stdout, "cluster." ++ field.name, @field(config.cluster, field.name));
+            inline for (comptime std.meta.fieldNames(@TypeOf(config.cluster))) |field_name| {
+                try print_value(stdout, "cluster." ++ field_name, @field(config.cluster, field_name));
             }
 
             try stdout.writeAll("\n");
-            inline for (std.meta.fields(@TypeOf(config.process))) |field| {
-                try print_value(stdout, "process." ++ field.name, @field(config.process, field.name));
+            inline for (comptime std.meta.fieldNames(@TypeOf(config.process))) |field_name| {
+                try print_value(stdout, "process." ++ field_name, @field(config.process, field_name));
             }
         }
         try stdout_buffer.flush();

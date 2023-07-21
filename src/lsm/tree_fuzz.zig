@@ -543,11 +543,8 @@ pub fn main() !void {
 
     // TODO Use inline switch after upgrading to zig 0.10
     switch (table_usage) {
-        .general => {
-            try EnvironmentType(.general).run(&storage, fuzz_ops);
-        },
-        .secondary_index => {
-            try EnvironmentType(.secondary_index).run(&storage, fuzz_ops);
+        inline else => |usage| {
+            try EnvironmentType(usage).run(&storage, fuzz_ops);
         },
     }
 

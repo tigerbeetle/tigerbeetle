@@ -913,12 +913,7 @@ pub fn GrooveType(
                 }
             }
 
-            // TODO(zig) Replace this with a call to removeByPtr() after upgrading to 0.10.
-            // removeByPtr() replaces an unnecessary lookup here with some pointer arithmetic.
-            assert(groove.prefetch_objects.removeAdapted(
-                @field(object, primary_field),
-                PrefetchObjectsAdapter{},
-            ));
+            groove.prefetch_objects.removeByPtr(object);
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).

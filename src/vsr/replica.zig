@@ -944,10 +944,8 @@ pub fn ReplicaType(
             self.grid.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
-            // TODO(Zig) 0.10: inline-switch.
             switch (self.pipeline) {
-                .queue => |*pipeline| pipeline.deinit(self.message_bus.pool),
-                .cache => |*pipeline| pipeline.deinit(self.message_bus.pool),
+                inline else => |*pipeline| pipeline.deinit(self.message_bus.pool),
             }
 
             if (self.loopback_queue) |loopback_message| {
