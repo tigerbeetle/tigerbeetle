@@ -7,7 +7,7 @@ const config = @import("./src/config.zig");
 const Shell = @import("./src/shell.zig");
 
 pub fn build(b: *std.build.Builder) void {
-    // A stack trace of 10 is arbitrary in size but helps with debugging.
+    // A compile error stack trace of 10 is arbitrary in size but helps with debugging.
     b.reference_trace = 10;
 
     const target = b.standardTargetOptions(.{});
