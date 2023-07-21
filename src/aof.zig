@@ -79,14 +79,14 @@ pub const AOFEntry = extern struct {
         // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid
         // chain. Still, log when that happens. The `aof merge` command can generate a consistent
         // file from entries like these.
-        log.debug("{}: from_message: parent {} (should == {}) our checksum {}", .{
+        log.debug("{}: from_message: parent {} (should == {?}) our checksum {}", .{
             options.replica,
             message.header.parent,
             last_checksum.*,
             message.header.checksum,
         });
         if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
-            log.info("{}: from_message: parent {}, expected {} instead", .{
+            log.info("{}: from_message: parent {}, expected {?} instead", .{
                 options.replica,
                 message.header.parent,
                 last_checksum.*,
@@ -276,9 +276,9 @@ pub const AOF = struct {
     /// that both the header and body checksums of the read entry are valid, and that
     /// all checksums chain correctly.
     pub fn iterator(path: []const u8) !Iterator {
-        const file = try std.fs.cwd().openFile(path, .{ .read = true });
+        const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
         errdefer file.close();
-
+        
         const size = (try file.stat()).size;
 
         return Iterator{ .file = file, .size = size };
@@ -613,6 +613,7 @@ test "aof write / read" {
     demo_message.header.set_checksum();
 
     try aof.write(demo_message, .{ .replica = 1, .primary = 1 });
+    aof.close();
 
     var it = try AOF.iterator(aof_file);
     defer it.close();

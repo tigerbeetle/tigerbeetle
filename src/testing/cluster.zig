@@ -69,7 +69,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
         allocator: mem.Allocator,
         options: Options,
-        on_client_reply: fn (
+        on_client_reply: *const fn (
             cluster: *Self,
             client: usize,
             request: *Message,
@@ -102,7 +102,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         pub fn init(
             allocator: mem.Allocator,
             /// Includes command=register messages.
-            on_client_reply: fn (
+            on_client_reply: *const fn (
                 cluster: *Self,
                 client: usize,
                 request: *Message,

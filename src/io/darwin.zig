@@ -292,7 +292,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: AcceptError!os.socket_t,
@@ -350,7 +350,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: CloseError!void,
@@ -386,7 +386,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: ConnectError!void,
@@ -437,7 +437,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: ReadError!usize,
@@ -497,7 +497,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: RecvError!usize,
@@ -530,7 +530,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: SendError!usize,
@@ -563,7 +563,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: TimeoutError!void,
@@ -612,7 +612,7 @@ pub const IO = struct {
         self: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: *const fn (
+        comptime callback: fn (
             context: Context,
             completion: *Completion,
             result: WriteError!usize,

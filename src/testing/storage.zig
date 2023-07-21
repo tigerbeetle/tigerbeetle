@@ -35,7 +35,7 @@ const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
 const stdx = @import("../stdx.zig");
-const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
+const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
 const hash_log = @import("./hash_log.zig");
 
@@ -506,13 +506,19 @@ pub const Storage = struct {
     ) *const superblock.SuperBlockHeader {
         const offset = vsr.Zone.superblock.offset(superblock.SuperBlockZone.header.start_for_copy(copy_));
         const bytes = storage.memory[offset..][0..comptime superblock.SuperBlockZone.header.size_max()];
-        return mem.bytesAsValue(superblock.SuperBlockHeader, bytes);
+        return @alignCast(
+            @alignOf(superblock.SuperBlockHeader),
+            mem.bytesAsValue(superblock.SuperBlockHeader, bytes),
+        );
     }
 
     pub fn wal_headers(storage: *const Storage) []const vsr.Header {
         const offset = vsr.Zone.wal_headers.offset(0);
         const size = vsr.Zone.wal_headers.size().?;
-        return mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]);
+        return @alignCast(
+            @alignOf(vsr.Header),
+            mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]),
+        );
     }
 
     const MessageRaw = extern struct {
@@ -528,7 +534,10 @@ pub const Storage = struct {
     pub fn wal_prepares(storage: *const Storage) []const MessageRaw {
         const offset = vsr.Zone.wal_prepares.offset(0);
         const size = vsr.Zone.wal_prepares.size().?;
-        return mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]);
+        return @alignCast(
+            @alignOf(MessageRaw),
+            mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]),
+        );
     }
 
     pub fn grid_block(

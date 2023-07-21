@@ -4204,7 +4204,7 @@ pub fn ReplicaType(
             }
 
             if (self.status != .normal) {
-                log.debug("{}: on_request: ignoring ({s})", .{ self.replica, self.status });
+                log.debug("{}: on_request: ignoring ({})", .{ self.replica, self.status });
                 return true;
             }
 
@@ -5989,7 +5989,7 @@ pub fn ReplicaType(
                 received.* = null;
             }
             assert(count <= self.replica_count);
-            log.debug("{}: reset {} {s} message(s) from view={}", .{
+            log.debug("{}: reset {} {s} message(s) from view={?}", .{
                 self.replica,
                 count,
                 @tagName(command),
