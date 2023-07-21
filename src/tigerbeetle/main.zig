@@ -156,11 +156,7 @@ const Command = struct {
             });
         }
 
-        const nonce = while (true) {
-            // `random.uintLessThan` does not work for u128 as of Zig 0.9.1.x.
-            const nonce_or_zero = std.crypto.random.int(u128);
-            if (nonce_or_zero != 0) break nonce_or_zero;
-        } else unreachable;
+        const nonce = std.crypto.random.int(u128) +| 1;
         assert(nonce != 0);
 
         var replica: Replica = undefined;
