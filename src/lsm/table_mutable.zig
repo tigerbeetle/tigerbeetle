@@ -70,6 +70,10 @@ pub fn TableMutableType(comptime Table: type) type {
         // The value type will be []u8 and this will be shared by trees with the same value size."
         values_cache: ?*ValuesCache,
 
+        // TODO temporary hack allowing range queries over mutable table.
+        // This MUST be replaced once mutable table API stabilizes.
+        values_buffer: []Value,
+
         pub fn init(
             allocator: mem.Allocator,
             values_cache: ?*ValuesCache,
@@ -78,14 +82,19 @@ pub fn TableMutableType(comptime Table: type) type {
             try values.ensureTotalCapacity(allocator, value_count_max);
             errdefer values.deinit(allocator);
 
+            var values_buffer = try allocator.alloc(Value, value_count_max);
+            errdefer allocator.free(values_buffer);
+
             return TableMutable{
                 .values = values,
                 .values_cache = values_cache,
+                .values_buffer = values_buffer,
             };
         }
 
         pub fn deinit(table: *TableMutable, allocator: mem.Allocator) void {
             table.values.deinit(allocator);
+            allocator.free(table.values_buffer);
         }
 
         pub fn get(table: *const TableMutable, key: Key) ?*const Value {
@@ -169,6 +178,25 @@ pub fn TableMutableType(comptime Table: type) type {
             const value = @intCast(u32, table.values.count());
             assert(value <= value_count_max);
             return value;
+        }
+
+        pub fn sort_into_values(
+            table: *TableMutable,
+        ) []const Value {
+            assert(table.count() <= value_count_max);
+            assert(table.count() <= table.values_buffer.len);
+
+            var i: usize = 0;
+            var it = table.values.keyIterator();
+            while (it.next()) |value| : (i += 1) {
+                table.values_buffer[i] = value.*;
+            }
+
+            const values = table.values_buffer[0..i];
+            assert(values.len == table.count());
+            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+
+            return values;
         }
 
         /// The returned slice is invalidated whenever this is called for any tree.

@@ -456,6 +456,7 @@ pub fn ManifestLevelType(
                 if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
+                            // TODO(zig) use @constCast.
                             .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
                             .generation = level_a.generation,
                         },

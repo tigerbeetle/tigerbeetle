@@ -11,6 +11,9 @@ const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 
+const Direction = @import("lsm/direction.zig").Direction;
+const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
+
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
 
@@ -340,6 +343,14 @@ pub fn StateMachineType(
         compact_callback: ?fn (*StateMachine) void = null,
         checkpoint_callback: ?fn (*StateMachine) void = null,
 
+        // EXPERIMENTAL, not for real-world usage:
+        scan_context: TransfersGroove.ScanGroove.Scan.Context = .{ .callback = on_scan_read },
+        scan_direction: Direction = .descending,
+        scan_count: u32 = 0,
+        scan_timestamp_last: ?u64 = null,
+        scan_fetcher_context: TransfersGroove.ScanGroove.Fetcher.Context = .{ .callback = on_scan_fetcher_read },
+        scan_fetcher_buffer: [64]Transfer = undefined,
+
         tracer_slot: ?tracer.SpanStart = null,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !StateMachine {
@@ -521,10 +532,126 @@ pub fn StateMachineType(
                 }
             }
 
-            self.forest.grooves.transfers.prefetch(
-                prefetch_create_transfers_callback_transfers,
-                &self.prefetch_context.transfers,
+            // EXPERIMENTAL, not for real-world usage:
+
+            // Shared buffer for the entire forest.
+            const scan_buffer_pool = &self.forest.scan_buffer_pool;
+
+            // Scan abstraction over any index of the groove.
+            const scan_transfers: *TransfersGroove.ScanGroove = &self.forest.grooves.transfers.scan;
+
+            // Arbitrary id.
+            const id = transfers[0].debit_account_id;
+
+            // Timestamp range min..max, inclusive.
+            const timestamp_range = TimestampRange.all();
+
+            // Initializes a Scan with the criteria equivalent to
+            // `WHERE credit_account_id = $id OR debit_account_id = $id`.
+            const scan = scan_transfers.set_union(
+                &.{
+                    // credit_account_id = $id
+                    scan_transfers.equal(
+                        .credit_account_id,
+                        scan_buffer_pool.buffer_acquire(),
+                        snapshot_latest,
+                        id,
+                        timestamp_range,
+                        self.scan_direction,
+                    ),
+                    // debit_account_id = $id
+                    scan_transfers.equal(
+                        .debit_account_id,
+                        scan_buffer_pool.buffer_acquire(),
+                        snapshot_latest,
+                        id,
+                        timestamp_range,
+                        self.scan_direction,
+                    ),
+                },
+                self.scan_direction,
             );
+
+            // Using the scan directly...
+            //scan.read(&self.scan_context);
+
+            // Fetching transfers from it...
+            var fetcher = scan_transfers.fetch(scan, snapshot_latest);
+            fetcher.read(&self.scan_fetcher_context, &self.scan_fetcher_buffer);
+        }
+
+        fn on_scan_fetcher_read(context: *TransfersGroove.ScanGroove.Fetcher.Context, fetcher: *TransfersGroove.ScanGroove.Fetcher) void {
+            var self = @fieldParentPtr(StateMachine, "scan_fetcher_context", context);
+            const transfers = fetcher.slice();
+
+            for (transfers) |transfer| {
+                // Asserting if we are iterating in the expected direction.
+                if (self.scan_timestamp_last) |timestamp_last| {
+                    switch (self.scan_direction) {
+                        .ascending => assert(transfer.timestamp > timestamp_last),
+                        .descending => assert(transfer.timestamp < timestamp_last),
+                    }
+                }
+                self.scan_timestamp_last = transfer.timestamp;
+                self.scan_count += 1;
+
+                std.log.err(
+                    "transfer={}, code={}, amount={}",
+                    .{ transfer.id, transfer.code, transfer.amount },
+                );
+            }
+
+            if (fetcher.has_more()) {
+                // The provided buffer was exhausted, we need to read again.
+                fetcher.read(&self.scan_fetcher_context, &self.scan_fetcher_buffer);
+            } else {
+                std.log.err("Found {} transfer(s)\n\n", .{self.scan_count});
+                // Reset my buffers to be reused.
+                self.forest.scan_buffer_pool.reset();
+                self.forest.grooves.transfers.scan.reset();
+                self.scan_count = 0;
+                self.scan_timestamp_last = null;
+
+                // Resume prefetching transfers.
+                self.forest.grooves.transfers.prefetch(
+                    prefetch_create_transfers_callback_transfers,
+                    &self.prefetch_context.transfers,
+                );
+            }
+        }
+
+        fn on_scan_read(context: *TransfersGroove.ScanGroove.Scan.Context, scan: *TransfersGroove.ScanGroove.Scan) void {
+            var self = @fieldParentPtr(StateMachine, "scan_context", context);
+
+            while (scan.next() catch |err| switch (err) {
+                error.ReadAgain => return scan.read(&self.scan_context),
+            }) |value| {
+                // Asserting if we are iterating in the expected direction.
+                if (self.scan_timestamp_last) |timestamp_last| {
+                    switch (self.scan_direction) {
+                        .ascending => assert(value > timestamp_last),
+                        .descending => assert(value < timestamp_last),
+                    }
+                }
+
+                self.scan_count += 1;
+                self.scan_timestamp_last = value;
+            } else {
+                self.forest.scan_buffer_pool.reset();
+                self.forest.grooves.transfers.scan.reset();
+
+                if (self.scan_count > 0) {
+                    std.log.err("Found {} transfers", .{self.scan_count});
+                    self.scan_count = 0;
+                    self.scan_timestamp_last = null;
+                }
+
+                // Resume prefetching transfers.
+                self.forest.grooves.transfers.prefetch(
+                    prefetch_create_transfers_callback_transfers,
+                    &self.prefetch_context.transfers,
+                );
+            }
         }
 
         fn prefetch_create_transfers_callback_transfers(completion: *TransfersGroove.PrefetchContext) void {

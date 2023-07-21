@@ -9,6 +9,7 @@ const vsr = @import("../vsr.zig");
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const tracer = @import("../tracer.zig");
+const lsm = @import("tree.zig");
 
 const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
@@ -16,6 +17,8 @@ const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const GridType = @import("grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
+const TimestampRange = @import("timestamp_range.zig").TimestampRange;
+const Direction = @import("direction.zig").Direction;
 const Forest = StateMachine.Forest;
 
 const Grid = GridType(Storage);
@@ -34,6 +37,7 @@ const FuzzOpAction = union(enum) {
         account: Account,
     },
     get_account: u128,
+    scan_account_immutable: ScanParams,
 };
 const FuzzOpActionTag = std.meta.Tag(FuzzOpAction);
 
@@ -46,6 +50,30 @@ const FuzzOpModifierTag = std.meta.Tag(FuzzOpModifier);
 const FuzzOp = struct {
     action: FuzzOpAction,
     modifier: FuzzOpModifier,
+};
+
+const AccountImmutableGroove = std.meta.fieldInfo(Forest.Grooves, .accounts_immutable).field_type;
+const ScanParams = struct {
+    index: std.meta.FieldEnum(AccountImmutableGroove.IndexTrees),
+    min: u128, // Type-erased field min.
+    max: u128, // Type-erased field min.
+    direction: Direction,
+
+    fn fuzz_op_action(random: std.rand.Random, index: anytype, comptime Prefix: type) FuzzOpAction {
+        var min = random_id(random, Prefix);
+        var max = if (random.boolean()) min else random_id(random, Prefix);
+        if (min > max) std.mem.swap(Prefix, &min, &max);
+        assert(min <= max);
+
+        return FuzzOpAction{
+            .scan_account_immutable = .{
+                .index = index,
+                .min = min,
+                .max = max,
+                .direction = random.enumValue(Direction),
+            },
+        };
+    }
 };
 
 const Environment = struct {
@@ -97,6 +125,7 @@ const Environment = struct {
     forest: Forest,
     checkpoint_op: ?u64,
     ticks_remaining: usize,
+    scan_account_immutable_buffer: []StateMachine.AccountImmutable,
 
     fn init(env: *Environment, storage: *Storage) !void {
         env.storage = storage;
@@ -110,6 +139,11 @@ const Environment = struct {
             .superblock = &env.superblock,
         });
 
+        env.scan_account_immutable_buffer = try allocator.alloc(
+            StateMachine.AccountImmutable,
+            StateMachine.constants.batch_max.create_accounts,
+        );
+
         env.forest = undefined;
         env.checkpoint_op = null;
         env.ticks_remaining = std.math.maxInt(usize);
@@ -118,6 +152,7 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         env.superblock.deinit(allocator);
         env.grid.deinit(allocator);
+        allocator.free(env.scan_account_immutable_buffer);
     }
 
     pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
@@ -288,6 +323,73 @@ const Environment = struct {
         const immut = env.forest.grooves.accounts_immutable.get(id) orelse return null;
         const mut = env.forest.grooves.accounts_mutable.get(immut.timestamp).?;
         return StateMachine.into_account(immut, mut);
+    }
+
+    fn scan_account_immutable(env_: *Environment, params_: ScanParams) ![]const StateMachine.AccountImmutable {
+        const Scanner = struct {
+            const Fetcher = AccountImmutableGroove.ScanGroove.Fetcher;
+            context: Fetcher.Context = .{ .callback = on_scan_read },
+            result: ?[]const StateMachine.AccountImmutable = null,
+
+            fn on_scan_read(context: *Fetcher.Context, fetcher: *Fetcher) void {
+                const scanner = @fieldParentPtr(@This(), "context", context);
+                assert(scanner.result == null);
+                scanner.result = fetcher.slice();
+            }
+
+            fn scan(
+                self: *@This(),
+                comptime index: std.meta.FieldEnum(AccountImmutableGroove.IndexTrees),
+                env: *Environment,
+                params: ScanParams,
+            ) !void {
+                const Tree = std.meta.fieldInfo(AccountImmutableGroove.IndexTrees, index).field_type;
+                const Prefix = std.meta.fieldInfo(Tree.Table.Key, .field).field_type;
+
+                var min = @intCast(Prefix, params.min);
+                var max = @intCast(Prefix, params.max);
+                assert(min <= max);
+
+                env.forest.grooves.accounts_immutable.prefetch_setup(null);
+
+                const scan_buffer_pool = &env.forest.scan_buffer_pool;
+                const scan_groove = &env.forest.grooves.accounts_immutable.scan;
+                defer {
+                    scan_buffer_pool.reset();
+                    scan_groove.reset();
+                }
+
+                // TODO: add support for timestamp ranges.
+                var fetcher = scan_groove.fetch(scan_groove.between(
+                    index,
+                    scan_buffer_pool.buffer_acquire(),
+                    lsm.snapshot_latest,
+                    min,
+                    max,
+                    TimestampRange.all(),
+                    params.direction,
+                ), lsm.snapshot_latest);
+
+                fetcher.read(&self.context, env.scan_account_immutable_buffer);
+
+                while (self.result == null) {
+                    if (env.ticks_remaining == 0) return error.OutOfTicks;
+                    env.ticks_remaining -= 1;
+                    env.storage.tick();
+                }
+            }
+        };
+
+        // TODO: using `inline for(meta.fields(Index))` crashes the compiler for some reason.
+        // Use inline switch when it's available.
+        var scanner = Scanner{};
+        try switch (params_.index) {
+            .code => scanner.scan(.code, env_, params_),
+            .ledger => scanner.scan(.ledger, env_, params_),
+            .user_data => scanner.scan(.user_data, env_, params_),
+        };
+
+        return scanner.result.?;
     }
 
     // The forest should behave like a simple key-value data-structure.
@@ -468,6 +570,63 @@ const Environment = struct {
                     ));
                 }
             },
+            .scan_account_immutable => |params| {
+                const accounts_immutable = try env.scan_account_immutable(params);
+
+                const exatct_match = params.min == params.max;
+                var timestamp_last: ?u64 = null;
+                var prefix_last: ?u128 = null;
+
+                // Asserting the positive space:
+                // all objects found by the scan must exist in our model.
+                for (accounts_immutable) |account_immutable| {
+                    const model_account = model.get_account(account_immutable.id) orelse unreachable;
+                    assert(model_account.id == account_immutable.id);
+                    assert(model_account.user_data == account_immutable.user_data);
+                    assert(model_account.timestamp == account_immutable.timestamp);
+                    assert(model_account.ledger == account_immutable.ledger);
+                    assert(model_account.code == account_immutable.code);
+                    assert(std.meta.eql(model_account.flags, account_immutable.flags));
+
+                    if (exatct_match) {
+                        // If exact match, it's expected to be sorted by timestamp.
+                        if (timestamp_last) |timestamp| {
+                            switch (params.direction) {
+                                .ascending => assert(account_immutable.timestamp > timestamp),
+                                .descending => assert(account_immutable.timestamp < timestamp),
+                            }
+                        }
+                        timestamp_last = account_immutable.timestamp;
+                    } else {
+                        // If not exact, it's expected to be sorted by prefix and then timestamp.
+                        const prefix_current: u128 = switch (params.index) {
+                            .code => account_immutable.code,
+                            .ledger => account_immutable.ledger,
+                            .user_data => account_immutable.user_data,
+                        };
+
+                        if (prefix_last) |prefix| {
+                            switch (params.direction) {
+                                .ascending => assert(prefix_current >= prefix),
+                                .descending => assert(prefix_current <= prefix),
+                            }
+
+                            if (prefix_current == prefix) {
+                                if (timestamp_last) |timestamp| {
+                                    switch (params.direction) {
+                                        .ascending => assert(account_immutable.timestamp > timestamp),
+                                        .descending => assert(account_immutable.timestamp < timestamp),
+                                    }
+                                }
+                                timestamp_last = account_immutable.timestamp;
+                            } else {
+                                timestamp_last = null;
+                            }
+                        }
+                        prefix_last = prefix_current;
+                    }
+                }
+            },
         }
     }
 };
@@ -504,6 +663,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
         .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        // Maybe do some scans.
+        .scan_account_immutable = if (random.boolean()) 0 else constants.lsm_batch_multiple,
     };
     log.info("action_distribution = {d:.2}", .{action_distribution});
 
@@ -585,11 +746,23 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 } };
             },
             .get_account => FuzzOpAction{ .get_account = random_id(random, u128) },
+            .scan_account_immutable => blk: {
+                const Index = std.meta.FieldEnum(AccountImmutableGroove.IndexTrees);
+                const index = random.enumValue(Index);
+                // TODO: using `inline for(meta.fields(Index))` crashes the compiler for some reason.
+                // Use inline switch when it's available.
+                break :blk switch (index) {
+                    .code => ScanParams.fuzz_op_action(random, Index.ledger, u16),
+                    .ledger => ScanParams.fuzz_op_action(random, Index.ledger, u32),
+                    .user_data => ScanParams.fuzz_op_action(random, Index.ledger, u64),
+                };
+            },
         };
         switch (action) {
             .compact => puts_since_compact = 0,
             .put_account => puts_since_compact += 1,
             .get_account => {},
+            .scan_account_immutable => {},
         }
         // TODO(jamii)
         // Currently, crashing is only interesting during a compact.

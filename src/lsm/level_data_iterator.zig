@@ -41,11 +41,39 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             index_block: BlockPtr,
 
             // `tables` contains TableInfo references from ManifestLevel.
-            tables: []const Manifest.TableInfoReference,
+            tables: union(enum) {
+                // TODO rename compaction and scan
+                table_info_reference: []const Manifest.TableInfoReference,
+                table_info: ?*const Manifest.TableInfo,
+
+                inline fn len(self: @This()) usize {
+                    return switch (self) {
+                        .table_info_reference => |slice| slice.len,
+                        .table_info => |table_info| @boolToInt(table_info != null),
+                    };
+                }
+
+                inline fn get(self: @This(), index: usize) *const Manifest.TableInfo {
+                    return switch (self) {
+                        .table_info_reference => |slice| slice[index].table_info,
+                        .table_info => |table_info| blk: {
+                            assert(index == 0);
+                            break :blk table_info.?;
+                        },
+                    };
+                }
+            },
+
             direction: Direction,
         };
 
-        pub const IndexCallback = fn (it: *LevelTableValueBlockIterator) void;
+        pub const DataBlockAddresses = struct {
+            /// Table data block addresses.
+            addresses: []const u64,
+            /// Table data block checksums.
+            checksums: []const u128,
+        };
+        pub const IndexCallback = fn (it: *LevelTableValueBlockIterator) DataBlockAddresses;
         pub const DataCallback = fn (it: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void;
         pub const Callback = struct {
             on_index: IndexCallback,
@@ -120,15 +148,15 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             // If this is the last table that we're iterating and it.table_data_iterator.empty()
             // is true, it.table_data_iterator.next takes care of calling callback.on_data with
             // a null data block.
-            if (it.table_data_iterator.empty() and it.table_index < it.context.tables.len) {
+            if (it.table_data_iterator.empty() and it.table_index < it.context.tables.len()) {
                 // Refill `table_data_iterator` before calling `table_next`.
-                const table_ref = it.context.tables[it.table_index];
+                const table_info = it.context.tables.get(it.table_index);
                 it.callback = .{ .level_next = callback };
                 it.context.grid.read_block_from_cache_or_storage(
                     on_level_next,
                     &it.read,
-                    table_ref.table_info.address,
-                    table_ref.table_info.checksum,
+                    table_info.address,
+                    table_info.checksum,
                     .index,
                 );
             } else {
@@ -143,19 +171,20 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             const it = @fieldParentPtr(LevelTableValueBlockIterator, "read", read);
             assert(it.table_data_iterator.empty());
 
-            const index_schema = schema.TableIndex.from(index_block);
             const callback = it.callback.level_next;
             it.callback = .none;
             // `index_block` is only valid for this callback, so copy it's contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
             stdx.copy_disjoint(.exact, u8, it.context.index_block, index_block);
+            const data_block_addresses = callback.on_index(it);
+            assert(data_block_addresses.addresses.len == data_block_addresses.checksums.len);
             it.table_data_iterator.start(.{
                 .grid = it.context.grid,
-                .addresses = index_schema.data_addresses_used(it.context.index_block),
-                .checksums = index_schema.data_checksums_used(it.context.index_block),
+                .addresses = data_block_addresses.addresses,
+                .checksums = data_block_addresses.checksums,
                 .direction = it.context.direction,
             });
-            callback.on_index(it);
+
             it.table_index += 1;
             it.table_next(callback);
         }

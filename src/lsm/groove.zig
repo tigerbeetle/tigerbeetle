@@ -409,6 +409,11 @@ pub fn GrooveType(
         };
         const PrefetchObjects = std.HashMapUnmanaged(Object, void, PrefetchObjectsContext, 70);
 
+        pub const ScanGroove = if (std.meta.fields(IndexTrees).len > 0)
+            @import("scan_groove.zig").ScanGrooveType(Groove, Storage, 10)
+        else
+            void;
+
         join_op: ?JoinOp = null,
         join_pending: usize = 0,
         join_callback: ?Callback = null,
@@ -431,6 +436,8 @@ pub fn GrooveType(
 
         /// The snapshot to prefetch from.
         prefetch_snapshot: ?u64,
+
+        scan: ScanGroove,
 
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched by a batch.
@@ -515,6 +522,8 @@ pub fn GrooveType(
                 .prefetch_ids = prefetch_ids,
                 .prefetch_objects = prefetch_objects,
                 .prefetch_snapshot = null,
+
+                .scan = .{},
             };
         }
 
@@ -549,6 +558,7 @@ pub fn GrooveType(
                 .prefetch_ids = groove.prefetch_ids,
                 .prefetch_objects = groove.prefetch_objects,
                 .prefetch_snapshot = null,
+                .scan = .{},
             };
         }
 

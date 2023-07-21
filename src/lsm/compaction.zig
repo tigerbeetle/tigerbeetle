@@ -381,7 +381,7 @@ pub fn CompactionType(
                     .grid = context.grid,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .tables = compaction.context.range_b.tables.constSlice(),
+                    .tables = .{ .table_info_reference = compaction.context.range_b.tables.constSlice() },
                     .index_block = compaction.index_block_b,
                     .direction = .ascending,
                 });
@@ -462,10 +462,16 @@ pub fn CompactionType(
             }
         }
 
-        fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {
+        fn on_index_block(iterator_b: *LevelTableValueBlockIterator) LevelTableValueBlockIterator.DataBlockAddresses {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.release_table_blocks(compaction.index_block_b);
+
+            const index_schema = schema.TableIndex.from(iterator_b.context.index_block);
+            return .{
+                .addresses = index_schema.data_addresses_used(iterator_b.context.index_block),
+                .checksums = index_schema.data_checksums_used(iterator_b.context.index_block),
+            };
         }
 
         // TODO: Support for LSM snapshots would require us to only remove blocks

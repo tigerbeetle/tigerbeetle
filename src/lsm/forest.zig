@@ -75,6 +75,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         const Forest = @This();
 
         const Grid = GridType(Storage);
+        const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPoolType(Storage, 10);
 
         const Callback = fn (*Forest) void;
         const JoinOp = enum {
@@ -94,6 +95,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         grid: *Grid,
         grooves: Grooves,
         node_pool: *NodePool,
+        scan_buffer_pool: ScanBufferPool,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -134,10 +136,14 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                 grooves_initialized += 1;
             }
 
+            const scan_buffer_pool = try ScanBufferPool.init(allocator);
+            errdefer scan_buffer_pool.deinit(allocator);
+
             return Forest{
                 .grid = grid,
                 .grooves = grooves,
                 .node_pool = node_pool,
+                .scan_buffer_pool = scan_buffer_pool,
             };
         }
 
@@ -148,6 +154,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
             forest.node_pool.deinit(allocator);
             allocator.destroy(forest.node_pool);
+
+            forest.scan_buffer_pool.deinit(allocator);
         }
 
         pub fn reset(forest: *Forest) void {
@@ -156,12 +164,14 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             }
 
             forest.node_pool.reset();
+            forest.scan_buffer_pool.reset();
 
             forest.* = .{
                 // Don't reset the grid – replica is responsible for grid cancellation.
                 .grid = forest.grid,
                 .grooves = forest.grooves,
                 .node_pool = forest.node_pool,
+                .scan_buffer_pool = forest.scan_buffer_pool,
             };
         }
 
