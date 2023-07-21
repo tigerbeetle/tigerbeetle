@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ZIG_RELEASE_DEFAULT="0.9.1"
+ZIG_RELEASE_DEFAULT="0.10.1"
 # Default to the release build, or allow the latest dev build, or an explicit release version:
 ZIG_RELEASE=${1:-$ZIG_RELEASE_DEFAULT}
 if [ "$ZIG_RELEASE" = "latest" ]; then
