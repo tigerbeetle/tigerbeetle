@@ -1179,7 +1179,7 @@ test "TreeType" {
     );
 
     const Storage = @import("../storage.zig").Storage;
-    const Tree = TreeType(Table, Storage, "TestTree");
+    const Tree = TreeType(Table, Storage);
 
     _ = Tree.init;
     _ = Tree.deinit;
