@@ -3,7 +3,7 @@
 //!
 //! Fault Injection
 //!
-//! Storage injects faults that the cluster can (i.e. should be able to) recover from.
+//! Storage injects faults that a fully-connected cluster can (i.e. should be able to) recover from.
 //! Each zone can tolerate a different pattern of faults.
 //!
 //! - superblock:
@@ -18,7 +18,10 @@
 //!   - When replica_count=1, its WAL can only be corrupted by a crash, never a read/write.
 //!     (When replica_count=1, there are no other replicas to assist with repair).
 //!
-//! - grid: (TODO: Enable grid faults when grid repair is implemented).
+//! - grid:
+//!   - Similarly to prepares and headers, ClusterFaultAtlas ensures that at least one replica will
+//!     have a block.
+//!   - When replica_count≤2, grid faults are disabled.
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -788,7 +791,7 @@ pub const ClusterFaultAtlas = struct {
         var block: usize = 0;
         while (block < superblock.grid_blocks_max) : (block += 1) {
             var replicas = std.StaticBitSet(constants.nodes_max).initEmpty();
-            while (replicas.count() + 1 < quorums.replication) {
+            while (replicas.count() < faults_max) {
                 replicas.set(random.uintLessThan(usize, replica_count));
             }
 
