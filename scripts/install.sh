@@ -34,8 +34,8 @@ fi
 # shellcheck disable=SC2086
 if [ "$debug" = "true" ]; then
     echo "Building Tigerbeetle debug..."
-    ./scripts/build.sh install $cpu $target
+    zig/zig build install $cpu $target
 else
     echo "Building TigerBeetle..."
-    ./scripts/build.sh install -Drelease-safe $cpu $target
+    zig/zig build install -Drelease-safe $cpu $target
 fi

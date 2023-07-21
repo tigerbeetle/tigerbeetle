@@ -20,4 +20,4 @@ if [[ -n "$SOURCE_REPO" ]]; then
     REPO="${SOURCE_REPO}"
 fi
 
-( cd docs_website && npm install && ./scripts/build.sh "$BRANCH" "$REPO" )
+( cd docs_website && npm install && zig/zig build "$BRANCH" "$REPO" )
