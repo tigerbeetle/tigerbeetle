@@ -954,7 +954,7 @@ pub const IO = struct {
 
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
-    fn open_file_handle(relative_path: []const u8, method: enum{create, open}) !os.fd_t {
+    fn open_file_handle(relative_path: []const u8, method: enum { create, open }) !os.fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL

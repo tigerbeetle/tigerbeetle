@@ -155,7 +155,7 @@ pub fn main() !void {
                 std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
             );
             break :blk &statsd;
-         } else null,
+        } else null,
         .print_batch_timings = print_batch_timings,
     };
 

@@ -487,7 +487,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .accounts_immutable = undefined }; 
+            self.prefetch_context = .{ .accounts_immutable = undefined };
 
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_create_accounts_immutable_callback,
@@ -505,7 +505,7 @@ pub fn StateMachineType(
             // We still call prefetch() anyway to keep a valid/expected Groove state for commit().
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .accounts_mutable = undefined }; 
+            self.prefetch_context = .{ .accounts_mutable = undefined };
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_accounts_mutable_callback,
@@ -530,7 +530,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .transfers = undefined }; 
+            self.prefetch_context = .{ .transfers = undefined };
 
             self.forest.grooves.transfers.prefetch(
                 prefetch_create_transfers_callback_transfers,
@@ -555,7 +555,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .accounts_immutable = undefined }; 
+            self.prefetch_context = .{ .accounts_immutable = undefined };
 
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_create_transfers_callback_accounts_immutable,
@@ -592,7 +592,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .accounts_mutable = undefined }; 
+            self.prefetch_context = .{ .accounts_mutable = undefined };
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_transfers_callback_accounts_mutable,
@@ -604,7 +604,7 @@ pub fn StateMachineType(
             const self = PrefetchContext.parent(completion);
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .posted = undefined }; 
+            self.prefetch_context = .{ .posted = undefined };
 
             self.forest.grooves.posted.prefetch(
                 prefetch_create_transfers_callback_posted,
@@ -624,7 +624,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .accounts_immutable = undefined }; 
+            self.prefetch_context = .{ .accounts_immutable = undefined };
 
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_lookup_accounts_immutable_callback,
@@ -643,7 +643,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .accounts_mutable = undefined }; 
+            self.prefetch_context = .{ .accounts_mutable = undefined };
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_lookup_accounts_mutable_callback,
@@ -663,7 +663,7 @@ pub fn StateMachineType(
             }
 
             // Set the union tag so access via &self.prefetch_context.* doesn't trap.
-            self.prefetch_context = .{ .transfers = undefined }; 
+            self.prefetch_context = .{ .transfers = undefined };
 
             self.forest.grooves.transfers.prefetch(
                 prefetch_lookup_transfers_callback,
