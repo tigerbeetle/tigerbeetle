@@ -1431,7 +1431,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 context.copy = null;
                 superblock.repair(context);
             } else {
-                log.debug("open: read_trailer: {s}: corrupt (copy={})", .{ trailer, copy });
+                log.debug("open: read_trailer: {}: corrupt (copy={})", .{ trailer, copy });
                 if (copy + 1 == constants.superblock_copies) {
                     std.debug.panic("superblock {s} lost", .{@tagName(trailer)});
                 } else {
