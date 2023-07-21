@@ -278,7 +278,7 @@ pub const AOF = struct {
     pub fn iterator(path: []const u8) !Iterator {
         const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
         errdefer file.close();
-        
+
         const size = (try file.stat()).size;
 
         return Iterator{ .file = file, .size = size };

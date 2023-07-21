@@ -106,7 +106,7 @@ fn run_fuzz(
 
         env.open();
         env.wait(&env.manifest_log);
-        
+
         env.reserve();
     }
 

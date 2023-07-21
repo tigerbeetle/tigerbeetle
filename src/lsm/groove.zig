@@ -719,7 +719,7 @@ pub fn GrooveType(
                 }
 
                 // Set the union tag so access via &worker.lookup.id doesn't trap.
-                worker.lookup = .{ .id = undefined }; 
+                worker.lookup = .{ .id = undefined };
 
                 if (worker.context.groove.ids.lookup_from_memory(
                     worker.context.snapshot,
@@ -1076,7 +1076,6 @@ test "Groove" {
             .derived = .{},
         },
     );
-
 
     _ = Groove.init;
     _ = Groove.deinit;
