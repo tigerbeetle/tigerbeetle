@@ -31,12 +31,9 @@ pub const BlockType = enum(u8) {
     data = 4,
 
     pub fn valid(vsr_operation: vsr.Operation) bool {
-        inline for (comptime std.enums.values(BlockType)) |block_type| {
-            if (@enumToInt(vsr_operation) == @enumToInt(block_type)) {
-                return true;
-            }
-        }
-        return false;
+        _ = std.meta.intToEnum(BlockType) catch return false;
+
+        return true;
     }
 
     pub inline fn from(vsr_operation: vsr.Operation) BlockType {
@@ -126,6 +123,16 @@ pub fn GridType(comptime Storage: type) type {
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
             completion: Storage.Read = undefined,
+        };
+
+        pub const ReadBlockResult = enum {
+            valid,
+            invalid_checksum,
+            invalid_checksum_body,
+            /// The block appears to be valid, but it is not the block we expected.
+            unexpected_checksum,
+            /// Block header is valid, but its `command≠block`.
+            unexpected_command,
         };
 
         const ReadPending = struct {
@@ -464,7 +471,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(!grid.superblock.free_set.is_free(address));
             assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .none);
-            grid.assert_not_reading(address, block.*);
+
+            if (trigger == .acquire) {
+                grid.assert_not_reading(address, block.*);
+            }
 
             if (constants.verify) {
                 for (grid.cache_blocks) |cache_block| {
@@ -783,7 +793,6 @@ pub fn GridType(comptime Storage: type) type {
 
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index = grid.cache.insert_index(&read.address);
-            //std.debug.print("{}: INSERT2: {} {} {}\n", .{grid.superblock.working.vsr_state.replica_id,read.address, read.checksum, read.block_type});
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
             std.mem.set(u8, iop_block.*, 0);
@@ -807,22 +816,36 @@ pub fn GridType(comptime Storage: type) type {
             // Remove the "root" read so that the address is no longer actively reading / locked.
             grid.read_queue.remove(read);
 
-            // A valid block filled by storage means the reads for the address can be resolved.
-            if (read_block_valid(cache_block.*, .{
+            const result = read_block_validate(cache_block.*, .{
                 .address = read.address,
                 .checksum = read.checksum,
                 .block_type = read.block_type,
-            })) {
+            });
+
+            if (result == .valid) {
                 grid.read_block_resolve(read, cache_block.*);
                 return;
             }
+
+            log.err(
+                "{s}: expected address={} checksum={} block_type={}, " ++
+                    "found address={} checksum={} block_type={}",
+                .{
+                    @tagName(result),
+                    address,
+                    checksum,
+                    @enumToInt(block_type),
+                    header.op,
+                    header.checksum,
+                    @as(std.meta.Tag(BlockType), header.operation),
+                },
+            );
 
             // Don't cache a corrupt or incorrect block.
             grid.cache.remove(read.address);
             grid.cache_coherent.unset(cache_index);
             grid.cache_durable.unset(cache_index);
 
-            //std.debug.print("{}: PUSH: {} {}\n", .{grid.superblock.working.vsr_state.replica_id,read.address,read.checksum});
             // On the result of an invalid block, move the "root" read (and all others it
             // resolves) to recovery queue. Future reads on the same address will see the "root"
             // read in the recovery queue and enqueue to it.
@@ -834,48 +857,28 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        fn read_block_valid(block: BlockPtrConst, expect: struct {
+        fn read_block_validate(block: BlockPtrConst, expect: struct {
             address: u64,
             checksum: u128,
             block_type: ?BlockType,
-        }) bool {
-            const address = expect.address;
-            const checksum = expect.checksum;
-            const block_type = expect.block_type;
-
+        }) ReadBlockResult {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
 
-            if (!header.valid_checksum()) {
-                log.err("invalid checksum at address {} (expected={})", .{ address, checksum });
-                return false;
-            }
+            if (!header.valid_checksum()) return .invalid_checksum;
+            if (header.command != .block) return .unexpect_command;
 
-            if (!header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size])) {
-                log.err("invalid checksum body at address {} (expected={})", .{ address, checksum });
-                return false;
-            }
+            assert(header.size >= @sizeOf(vsr.Header));
+            assert(header.size <= constants.block_size);
 
-            if (header.checksum != checksum) {
-                log.err(
-                    "expected address={} checksum={} block_type={}, " ++
-                        "found address={} checksum={} block_type={}",
-                    .{
-                        address,
-                        checksum,
-                        block_type,
-                        header.op,
-                        header.checksum,
-                        @enumToInt(header.operation),
-                    },
-                );
-                return false;
-            }
+            const block_body = block[@sizeOf(vsr.Header)..header.size];
+            if (!header.valid_checksum_body(block_body)) return .invalid_checksum_body;
+            if (header.checksum != expect.checksum) return .unexpected_checksum;
 
-            assert(header.op == address);
-            if (block_type) |block_type_| {
-                assert(header.operation == block_type_.operation());
+            assert(header.op == expect.address);
+            if (expect.block_type) |expect_block_type| {
+                assert(header.operation == expect_block_type.operation());
             }
-            return true;
+            return .valid;
         }
 
         fn read_block_resolve(grid: *Grid, read: *Grid.Read, block: BlockPtrConst) void {
@@ -924,9 +927,91 @@ pub fn GridType(comptime Storage: type) type {
         /// - it would fill the cache with non-temporally-local blocks, and
         /// - it would force an extra memcpy.
         // TODO queue these reads. And use read_block_from_cache internally?
-        pub fn read_block_repair(
+        pub fn read_block_repair_from_cache_and_storage(
             grid: *Grid,
-            callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
+            callback: fn (*Grid.ReadRepair, ReadBlockResult) void,
+            read: *Grid.ReadRepair,
+            block: BlockPtr,
+            address: u64,
+            checksum: u128,
+        ) void {
+            assert(address > 0);
+
+            assert(grid.superblock.opened);
+            maybe(grid.canceling == null);
+            // We try to read the block even when it is free — if we recently released it,
+            // it might be found on disk anyway.
+            maybe(grid.superblock.free_set.is_free(address));
+            // The caller will not attempt to help another replica repair a block that
+            // we are already trying to repair ourselves.
+            assert(!grid.faulty(address, null));
+            maybe(grid.writing(address, null) == .acquire);
+
+            if (grid.cache.get_index(address)) |cache_index| {
+                const cache_block = grid.cache_blocks[cache_index];
+                const header = schema.header_from_block(cache_block);
+                assert(header.op == address);
+
+                if (constants.verify) {
+                    if (grid.cache_coherent.isSet(cache_index) and
+                        grid.cache_durable.isSet(cache_index))
+                    {
+                        grid.verify_read(address, cache_block);
+                    }
+                }
+
+                if (header.checksum == checksum) {
+                    stdx.copy_disjoint(.inexact, u8, block, cache_block[0..header.size]);
+                } else {
+                    // Signal to read_block_repair_tick_callback() that we found a block,
+                    // but not the one we wanted.
+                    std.mem.set(u8, block[0..header.size], 0);
+                }
+
+                if (header.checksum == checksum or
+                    grid.cache_coherent.isSet(cache_index))
+                {
+                    // Either:
+                    // - We found the exact block we were looking for, or
+                    // - We found a different block with the same address, and the cache is
+                    //   coherent, so we are sure that the requested block is unavailable on disk.
+                    // (Use "vsr" on_next_tick() because Grid.cancel() can run concurrently with
+                    // repairs.)
+
+                    read.* = .{
+                        .callback = callback,
+                        .address = address,
+                        .checksum = checksum,
+                        .block = block,
+                        .grid = grid,
+                    };
+
+                    grid.superblock.storage.on_next_tick(
+                        .vsr,
+                        read_block_repair_tick_callback,
+                        &read.next_tick,
+                    );
+                    return;
+                }
+            }
+
+            grid.read_block_repair_from_storage(callback, read, block, address, checksum);
+        }
+
+        fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
+            const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
+            const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
+
+            if (header.op > 0) {
+                read.callback(read, {});
+            } else {
+                read.callback(read, error.BlockNotFound);
+            }
+        }
+
+        pub fn read_block_repair_from_storage(
+            grid: *Grid,
+            callback: fn (*Grid.ReadRepair, ReadBlockResult) void,
             read: *Grid.ReadRepair,
             block: BlockPtr,
             address: u64,
@@ -952,48 +1037,8 @@ pub fn GridType(comptime Storage: type) type {
                 .grid = grid,
             };
 
-            if (grid.cache.get_index(read.address)) |cache_index| {
-                const cache_block = grid.cache_blocks[cache_index];
-
-                const header = schema.header_from_block(cache_block);
-                assert(header.op == read.address);
-
-                if (constants.verify) {
-                    if (grid.cache_coherent.isSet(cache_index) and
-                        grid.cache_durable.isSet(cache_index))
-                    {
-                        grid.verify_read(read.address, cache_block);
-                    }
-                }
-
-                if (header.checksum == read.checksum) {
-                    stdx.copy_disjoint(.inexact, u8, read.block, cache_block[0..header.size]);
-                } else {
-                    // Signal to read_block_repair_tick_callback() that we found a block,
-                    // but not the one we wanted.
-                    std.mem.set(u8, read.block[0..header.size], 0);
-                }
-
-                if (header.checksum == read.checksum or
-                    grid.cache_coherent.isSet(cache_index))
-                {
-                    // Either:
-                    // - We found the exact block we were looking for, or
-                    // - We found a different block with the same address, and the cache is
-                    //   coherent, so we are sure that the requested block is unavailable on disk.
-                    // (Use "vsr" on_next_tick() because Grid.cancel() can run concurrently with
-                    // repairs.)
-                    grid.superblock.storage.on_next_tick(
-                        .vsr,
-                        read_block_repair_tick_callback,
-                        &read.next_tick,
-                    );
-                    return;
-                }
-            }
-
             grid.superblock.storage.read_sectors(
-                read_block_repair_callback,
+                read_block_repair_from_storage_callback,
                 &read.completion,
                 read.block,
                 .grid,
@@ -1001,29 +1046,14 @@ pub fn GridType(comptime Storage: type) type {
             );
         }
 
-        fn read_block_repair_tick_callback(next_tick: *Grid.NextTick) void {
-            const read = @fieldParentPtr(ReadRepair, "next_tick", next_tick);
-            const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
-
-            if (header.op > 0) {
-                read.callback(read, {});
-            } else {
-                read.callback(read, error.BlockNotFound);
-            }
-        }
-
-        fn read_block_repair_callback(completion: *Storage.Read) void {
+        fn read_block_repair_from_storage_callback(completion: *Storage.Read) void {
             const read = @fieldParentPtr(ReadRepair, "completion", completion);
 
-            if (read_block_valid(read.block, .{
+            read.callback(read, read_block_validate(read.block, .{
                 .address = read.address,
                 .checksum = read.checksum,
                 .block_type = null,
-            })) {
-                read.callback(read, {});
-            } else {
-                read.callback(read, error.BlockNotFound);
-            }
+            }));
         }
 
         fn block_offset(address: u64) u64 {

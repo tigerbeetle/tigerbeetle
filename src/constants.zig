@@ -283,24 +283,20 @@ pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
 /// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
 pub const grid_cache_size_default = config.process.grid_cache_size_default;
 
-/// The multiple of `lsm_table_blocks_max` that is the GridRepairQueue's faulty block capacity.
-const grid_repair_tables_content_max = config.process.grid_repair_tables_content_max;
-
 /// The maximum capacity (in blocks) of the GridRepairQueue.
-/// This must be at least enough that an entire table's worth of blocks can be queued.
-///
+/// (TODO explain relation to manifest sync and grid_repair_tables_max)
 /// As this increases:
 /// - GridRepairQueue allocates more memory.
 /// - The "period" of GridRepairQueue's requests increases.
 ///   This makes the repair protocol more tolerant of network latency.
-pub const grid_repair_blocks_max = grid_repair_tables_content_max * lsm_table_blocks_max;
+pub const grid_repair_blocks_max = config.process.grid_repair_blocks_max;
 
 /// The number of tables that can be synced simultaneously.
 /// "Table" in this context is the number of table index blocks to hold in memory while syncing
 /// their content.
 ///
 /// As this increases:
-/// - GridRepairQueue allocates more memory (1 block for each).
+/// - GridRepairQueue allocates more memory (~2 block for each).
 /// - Syncing is more efficient, as more blocks can be fetched concurrently.
 pub const grid_repair_tables_max = config.process.grid_repair_tables_max;
 
@@ -311,11 +307,14 @@ comptime {
 
     assert(grid_repair_reads_max > 0);
 
-    assert(grid_repair_tables_content_max > 0);
     assert(grid_repair_blocks_max > 0);
-    assert(grid_repair_blocks_max >= lsm_table_blocks_max);
     assert(grid_repair_tables_max > 0);
 }
+
+pub const grid_scrubber_reads_max = config.process_scrubber_reads_max;
+pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
+pub const grid_scrubber_interval_ticks_min = config.process.grid_scrubber_interval_min_ms / tick_ms;
+pub const grid_scrubber_interval_ticks_max = config.process.grid_scrubber_interval_max_ms / tick_ms;
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
@@ -521,24 +520,6 @@ comptime {
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 
 pub const lsm_value_to_key_layout_ratio_min = config.cluster.lsm_value_to_key_layout_ratio_min;
-
-/// The maximum number of blocks that can possibly be referenced by any table index block.
-///
-/// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
-///   tree configuration.
-/// - This counts filter and data blocks, but does not count the index block itself.
-pub const lsm_table_blocks_max = table_blocks_max: {
-    const checksum_size = @sizeOf(u128);
-    const address_size = @sizeOf(u64);
-    break :table_blocks_max @divFloor(
-        block_size - @sizeOf(vsr.Header),
-        (checksum_size + address_size),
-    );
-};
-
-comptime {
-    assert(lsm_table_blocks_max > 0);
-}
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.

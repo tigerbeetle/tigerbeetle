@@ -250,6 +250,35 @@ pub const TableIndex = struct {
         return index.filter_blocks_used(index_block) + index.data_blocks_used(index_block);
     }
 
+    pub fn content_block(
+        index: *const TableIndex,
+        index_block: BlockPtrConst,
+        content_block_index: usize,
+    ) struct {
+        block_checksum: u128,
+        block_address: u64,
+        block_type: BlockType,
+    } {
+        assert(content_block_index < index.content_blocks_used());
+
+        const filter_blocks_used_ = index.filter_blocks_used(index_block)
+        if (filter_blocks_used_ > content_block_index) {
+            const filter_block_index = content_block_index;
+            return .{
+                .block_checksum = index.filter_checksums(index_block)[filter_block_index],
+                .block_address = index.filter_address(index_block)[filter_block_index],
+                .block_type = .filter,
+            };
+        } else {
+            const data_block_index = content_block_index - filter_blocks_used_;
+            return .{
+                .block_checksum = index.data_checksums(index_block)[data_block_index],
+                .block_address = index.data_address(index_block)[data_block_index],
+                .block_type = .data,
+            };
+        }
+    }
+
     inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
         const header = header_from_block(index_block);
         const context = @bitCast(Context, header.context);

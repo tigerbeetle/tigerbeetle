@@ -33,6 +33,8 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Slot = @import("superblock_client_sessions.zig").ReplySlot;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 
+// TODO mark all as faulty during sync
+
 const client_replies_iops_max =
     constants.client_replies_iops_read_max + constants.client_replies_iops_write_max;
 
