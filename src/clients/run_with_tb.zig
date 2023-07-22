@@ -7,7 +7,7 @@
 // Windows as well.
 //
 // Example: (run from the repo root)
-//   ./scripts/build.sh run_with_tb -- node myscript.js
+//   ./zig/zig build run_with_tb -- node myscript.js
 //
 
 const std = @import("std");

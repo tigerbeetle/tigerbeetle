@@ -13,5 +13,5 @@ if [ -n \"\${COV}\" ]; then
 fi
 
 ./scripts/install_zig.sh
-zig/zig build test
+./zig/zig build test
 "
