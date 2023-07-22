@@ -347,7 +347,7 @@ pub const AOFReplayClient = struct {
         while (try aof.next(&target)) |entry| {
             // Skip replaying reserved messages.
             const header = entry.header();
-            if (header.operation.reserved()) continue;
+            if (header.operation.vsr_reserved()) continue;
 
             const message = self.client.get_message();
             defer self.client.unref(message);
@@ -570,7 +570,7 @@ pub fn aof_merge(
     }
 
     try stdout.print(
-        "AOF {s} validated. Starting checksum: {} Ending checksum: {}\n",
+        "AOF {s} validated. Starting checksum: {?} Ending checksum: {?}\n",
         .{ output_path, first_checksum, last_checksum },
     );
 }
@@ -685,18 +685,18 @@ const usage =
 ;
 
 pub fn main() !void {
-    var args = std.process.args();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
     var action: ?[:0]const u8 = null;
     var addresses: ?[:0]const u8 = null;
     var paths: [constants.nodes_max][:0]const u8 = undefined;
     var count: usize = 0;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = try arg_or_err;
+    while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);
