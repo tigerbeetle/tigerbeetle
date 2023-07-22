@@ -202,11 +202,16 @@ pub fn ScanGrooveType(
             return @fieldParentPtr(Groove, "scan", self);
         }
 
-        inline fn tree(self: *Self, comptime field: std.meta.FieldEnum(Groove.IndexTrees)) *Tree(field) {
+        inline fn tree(
+            self: *Self,
+            comptime field: std.meta.FieldEnum(Groove.IndexTrees),
+        ) *Tree(field) {
             return &@field(self.groove().indexes, @tagName(field));
         }
 
-        fn index_to_dispatcher(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) std.meta.FieldEnum(Scan.Dispatcher) {
+        fn index_to_dispatcher(
+            comptime field: std.meta.FieldEnum(Groove.IndexTrees),
+        ) std.meta.FieldEnum(Scan.Dispatcher) {
             return std.meta.stringToEnum(
                 std.meta.FieldEnum(Scan.Dispatcher),
                 @tagName(field),
@@ -321,8 +326,9 @@ fn ScanType(
                 value.timestamp;
         }
 
-        /// Generates a tagged union with an specialized ScanTree field for each index on the groove,
-        /// plus one field for each `set` operation that shares the same interface.
+        /// Generates a tagged union with an specialized ScanTree field for each
+        /// index on the groove, plus one field for each `set` operation that shares
+        /// the same interface.
         /// 
         /// Example:
         /// ```
@@ -336,7 +342,7 @@ fn ScanType(
         /// };
         /// ```
         fn DispatcherType() type {
-            comptime var type_info = std.builtin.TypeInfo{
+            var type_info = std.builtin.TypeInfo{
                 .Union = .{
                     .layout = .Auto,
                     .tag_type = null,
@@ -349,7 +355,8 @@ fn ScanType(
             for (std.meta.fields(Groove.IndexTrees)) |field| {
                 const IndexTree = field.field_type;
                 const ScanTree = ScanTreeType(*Context, IndexTree, Storage);
-                type_info.Union.fields = type_info.Union.fields ++ [_]std.builtin.TypeInfo.UnionField{.{
+                type_info.Union.fields = type_info.Union.fields ++
+                    [_]std.builtin.TypeInfo.UnionField{.{
                     .name = field.name,
                     .field_type = ScanTree,
                     .alignment = @alignOf(ScanTree),
@@ -358,19 +365,22 @@ fn ScanType(
 
             // Add fields for set operations that share the same interface:
             const ScanMergeUnion = ScanMergeUnionType(Scan, scans_max);
-            type_info.Union.fields = type_info.Union.fields ++ [_]std.builtin.TypeInfo.UnionField{.{
+            type_info.Union.fields = type_info.Union.fields ++
+                [_]std.builtin.TypeInfo.UnionField{.{
                 .name = "set_union",
                 .field_type = ScanMergeUnion,
                 .alignment = @alignOf(ScanMergeUnion),
             }};
             const ScanMergeIntersection = ScanMergeIntersectionType(Scan, scans_max);
-            type_info.Union.fields = type_info.Union.fields ++ [_]std.builtin.TypeInfo.UnionField{.{
+            type_info.Union.fields = type_info.Union.fields ++
+                [_]std.builtin.TypeInfo.UnionField{.{
                 .name = "set_intersection",
                 .field_type = ScanMergeIntersection,
                 .alignment = @alignOf(ScanMergeIntersection),
             }};
             const ScanMergeDifference = ScanMergeDifferenceType(Scan);
-            type_info.Union.fields = type_info.Union.fields ++ [_]std.builtin.TypeInfo.UnionField{.{
+            type_info.Union.fields = type_info.Union.fields ++
+                [_]std.builtin.TypeInfo.UnionField{.{
                 .name = "set_difference",
                 .field_type = ScanMergeDifference,
                 .alignment = @alignOf(ScanMergeDifference),
@@ -378,8 +388,10 @@ fn ScanType(
 
             // We need a tagged union for dynamic dispatching.
             type_info.Union.tag_type = blk: {
-                comptime var tag_fields: [type_info.Union.fields.len]std.builtin.TypeInfo.EnumField = undefined;
-                for (type_info.Union.fields) |union_field, i| {
+                const union_fields = type_info.Union.fields;
+                var tag_fields: [union_fields.len]std.builtin.TypeInfo.EnumField =
+                    undefined;
+                for (union_fields) |union_field, i| {
                     tag_fields[i] = .{
                         .name = union_field.name,
                         .value = i,
@@ -741,7 +753,7 @@ fn FetcherType(comptime Scan: type, comptime Groove: type, comptime Storage: typ
             var self = @fieldParentPtr(Self, "scan_context", context);
             assert(self.state == .scan);
             assert(self.scan == scan);
-            
+
             self.state = .lookup;
             self.start_lookup();
         }

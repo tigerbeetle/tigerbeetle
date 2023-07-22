@@ -19,8 +19,9 @@ const Direction = @import("direction.zig").Direction;
 const GridType = @import("grid.zig").GridType;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
-const LevelTableValueBlockIteratorType = @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 const ScanBufferType = @import("scan_buffer.zig").ScanBufferType;
+const LevelTableValueBlockIteratorType =
+    @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
 /// Scans a range of keys over a IndexTree, in ascending or descending order.
 pub fn ScanTreeType(
@@ -94,29 +95,35 @@ pub fn ScanTreeType(
             // TODO It's a temporary solution until we can iterate over table mutable
             // in sorted order.
             const table_mutable_values = tree.table_mutable.sort_into_values();
-            const table_mutable_cursor = RangeCursor.init(binary_search.binary_search_values_range(
-                Key,
-                Value,
-                key_from_value,
-                compare_keys,
-                table_mutable_values,
-                key_min,
-                key_max,
-            ), direction);
+            const table_mutable_cursor = RangeCursor.init(
+                binary_search.binary_search_values_range(
+                    Key,
+                    Value,
+                    key_from_value,
+                    compare_keys,
+                    table_mutable_values,
+                    key_min,
+                    key_max,
+                ),
+                direction,
+            );
 
-            const table_immutable_cursor = RangeCursor.init(binary_search.binary_search_values_range(
-                Key,
-                Value,
-                key_from_value,
-                compare_keys,
-                if (!tree.table_immutable.free and
-                    tree.table_immutable.snapshot_min <= snapshot)
-                    tree.table_immutable.values
-                else
-                    &[_]Value{},
-                key_min,
-                key_max,
-            ), direction);
+            const table_immutable_cursor = RangeCursor.init(
+                binary_search.binary_search_values_range(
+                    Key,
+                    Value,
+                    key_from_value,
+                    compare_keys,
+                    if (!tree.table_immutable.free and
+                        tree.table_immutable.snapshot_min <= snapshot)
+                        tree.table_immutable.values
+                    else
+                        &[_]Value{},
+                    key_min,
+                    key_max,
+                ),
+                direction,
+            );
 
             return .{
                 .tree = tree,
@@ -315,7 +322,10 @@ pub fn ScanTreeType(
 fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
     return struct {
         const ScanTreeLevel = @This();
-        const LevelTableValueBlockIterator = LevelTableValueBlockIteratorType(ScanTree.Table, Storage);
+        const LevelTableValueBlockIterator = LevelTableValueBlockIteratorType(
+            ScanTree.Table,
+            Storage,
+        );
         const BlockPtr = ScanTree.Grid.BlockPtr;
         const BlockPtrConst = ScanTree.Grid.BlockPtrConst;
 
