@@ -272,7 +272,7 @@ jobs:
     - if: matrix.os == 'windows-latest'
       run: |
         $env:PATH += "$(pwd)/apache-maven-3.9.3/bin"
-        .\scripts\build.bat client_docs
+        .\zig\zig build client_docs
         .\zig-out\bin\client_docs --language java
 
     - if: matrix.os == 'ubuntu-latest'

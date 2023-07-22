@@ -900,7 +900,6 @@ fn maybe_execute(
 
     var build_and_run = false;
     while (args.next()) |arg| {
-
         if (std.mem.eql(u8, arg, "--")) {
             build_and_run = true;
             continue;

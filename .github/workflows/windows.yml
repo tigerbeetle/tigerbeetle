@@ -15,4 +15,4 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: .\scripts\install_zig.bat
-      - run: .\scripts\build.bat c_sample
+      - run: .\zig\zig build c_sample
