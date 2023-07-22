@@ -868,8 +868,8 @@ fn c_client_sample(
 }
 
 // Allows a build step to run the command it builds after it builds it if the user passes --.
-// e.g.: ./scripts/build.sh docs_generate --
-// Whereas `./scripts/build.sh docs_generate` would not run the command.
+// e.g.: ./zig/zig build docs_generate --
+// Whereas `./zig/zig build docs_generate` would not run the command.
 fn maybe_execute(
     b: *std.build.Builder,
     allocator: std.mem.Allocator,
@@ -962,7 +962,7 @@ fn client_docs(
     mode: Mode,
     target: CrossTarget,
 ) void {
-    const client_docs_build = b.step("client_docs", "Run sample integration tests for a client library");
+    const client_docs_build = b.step("client_docs", "Generate documentation for a client library");
     const binary = b.addExecutable("client_docs", "src/clients/docs_generate.zig");
     binary.setBuildMode(mode);
     binary.setTarget(target);

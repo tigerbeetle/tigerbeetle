@@ -267,7 +267,7 @@ jobs:
     - if: matrix.os != 'windows-latest'
       run: |
         export PATH="$PATH:$(pwd)/apache-maven-3.9.3/bin"
-        ./scripts/build.sh client_docs -- --language java
+        ./zig/zig build client_docs -- --language java
 
     - if: matrix.os == 'windows-latest'
       run: |

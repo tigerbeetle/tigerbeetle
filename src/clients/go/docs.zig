@@ -397,7 +397,7 @@ pub const GoDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_pwsh_commands = 
-    \\.\scripts\build.bat go_client -Drelease-safe
+    \\.\zig\zig build go_client -Drelease-safe
     \\cd src\clients\go
     \\if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
     ,

@@ -13,7 +13,7 @@ git clone git@github.com:tigerbeetle/docs.git ~/docs
 
 cd ~/docs
 
-./scripts/build.sh "${TIGERBEETLE_COMMIT}"
+./zig/zig build "${TIGERBEETLE_COMMIT}"
 git add -A
 git commit -m "Update docs for ${TIGERBEETLE_COMMIT}"
 git push origin main
