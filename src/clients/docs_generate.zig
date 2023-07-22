@@ -122,7 +122,7 @@ const MarkdownWriter = struct {
 
         const file = try std.fs.cwd().openFile(
             filename,
-            .{ .write = true },
+            .{ .mode = .write_only },
         );
         defer file.close();
 
@@ -333,7 +333,7 @@ const Generator = struct {
 
     const tests = [_]struct {
         name: []const u8,
-        validate: fn (Generator, bool) anyerror!void,
+        validate: *const fn (Generator, bool) anyerror!void,
     }{
         .{
             .name = "minimal",
@@ -709,7 +709,7 @@ const Generator = struct {
             mw.paragraph("Not yet supported.");
         }
 
-        const root = git_root(self.arena);
+        const root = try git_root(self.arena);
         try mw.save(self.sprintf("{s}/src/clients/{s}/README.md", .{ root, language.directory }));
     }
 
@@ -802,16 +802,14 @@ pub fn main() !void {
 
     var keepTmp = false;
 
-    var args = std.process.args();
-    _ = args.next(global_arena.allocator());
-    while (args.next(global_arena.allocator())) |arg_or_err| {
-        const arg = arg_or_err catch {
-            std.debug.print("Could not parse all arguments.\n", .{});
-            return error.CouldNotParseArguments;
-        };
+    var args = try std.process.argsWithAllocator(global_arena.allocator());
+    defer args.deinit();
 
+    std.debug.assert(args.skip());
+
+    while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--language")) {
-            var filter = try (args.next(global_arena.allocator()).?);
+            var filter = args.next().?;
             skipLanguage = [_]bool{true} ** languages.len;
             for (languages) |language, i| {
                 if (std.mem.eql(u8, filter, language.directory)) {
@@ -821,7 +819,7 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, arg, "--validate")) {
-            validateOnly = try (args.next(global_arena.allocator()).?);
+            validateOnly = args.next().?;
         }
 
         if (std.mem.eql(u8, arg, "--no-validate")) {
