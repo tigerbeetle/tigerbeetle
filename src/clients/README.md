@@ -34,7 +34,7 @@ script on Windows.
 To build and run the client docs generator:
 
 ```console
-$ ./scripts/build.[sh|bat] client_docs --
+$ ./zig/zig build client_docs --
 ```
 
 Note: Omitting the `--` will only build, not run the client_docs script.

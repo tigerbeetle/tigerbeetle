@@ -12,9 +12,9 @@
 //!
 //! `./scripts/benchmark.sh` (and `.\scripts\benchmark.bat` on Windows)
 //! are helpers that spin up a single TigerBeetle replica on a free port
-//! and run the benchmark `./scripts/build.sh benchmark` (and
-//! `.\scripts\build.bat benchmark` on Windows) against the replica. To
-//! run against a cluster of TigerBeetle replicas, use `./scripts/build.sh
+//! and run the benchmark `./zig/zig build benchmark` (and
+//! `.\zig\zig build benchmark` on Windows) against the replica. To
+//! run against a cluster of TigerBeetle replicas, use `./zig/zig build
 //! benchmark --addresses=X` where `X` is the list of replica
 //! addresses. It is the same format for the `--addresses=X` flag on the
 //! `tigerbeetle start` command.
