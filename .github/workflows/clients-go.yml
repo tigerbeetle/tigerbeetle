@@ -118,7 +118,7 @@ jobs:
       - if: matrix.os == 'windows-latest'
         run: |
           $env:CC = "$(pwd)\zig\zig.exe cc"
-          .\scripts\build.bat client_docs
+          .\zig\zig build client_docs
           .\zig-out\bin\client_docs --language go
 
       - if: matrix.os == 'ubuntu-latest'
