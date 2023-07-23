@@ -105,7 +105,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [2920]u8 = [_]u8{0} ** 2920,
+    reserved: [2904]u8 = [_]u8{0} ** 2904,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -155,7 +155,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [7]u8 = [_]u8{0} ** 7,
 
         comptime {
-            assert(@sizeOf(VSRState) == 272);
+            assert(@sizeOf(VSRState) == 288);
             // Assert that there is no implicit padding in the struct.
             assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
         }

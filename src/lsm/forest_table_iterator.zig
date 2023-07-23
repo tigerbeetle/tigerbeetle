@@ -1,7 +1,11 @@
-//! Iterate over every table index block address/checksum in the forest.
+//! Iterate over every TableInfo in the forest.
 //!
 //! The underlying level iterator is stable across ManifestLevel mutation and
 //! Forest.reset()/Forest.open(). (This is necessary for the scrubber, which is long-running).
+//!
+//! Stability invariants:
+//! - Tables inserted after the iterator starts *may* be iterated.
+//! - Tables inserted before the iterator starts *will* be iterated (unless they are removed).
 //!
 //! This iterator is conceptually simple, but it is a complex implementation due to the
 //! metaprogramming necessary to generalize over the different concrete Tree types, and the
@@ -20,7 +24,7 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 
-pub fn ForestTableIteratorType(comptime Forest: type) {
+pub fn ForestTableIteratorType(comptime Forest: type) type {
     // List of every TreeType(…) in the Forest.
     const tree_types = types: {
         var types: []const type = &[_]type{};
@@ -126,8 +130,8 @@ pub fn ForestTableIteratorType(comptime Forest: type) {
                     .checksum = table.checksum,
                     .address = table.address,
                     .flags = table.flags,
-                    .snapshot_min = snapshot_min,
-                    .snapshot_max = snapshot_max,
+                    .snapshot_min = table.snapshot_min,
+                    .snapshot_max = table.snapshot_max,
                 };
             } else {
                 assert(tree_iterator.done);
@@ -136,7 +140,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) {
             }
         }
     };
-};
+}
 
 /// Iterate over every table in a tree (i.e. every table in every ManifestLevel).
 /// The iterator is stable across ManifestLevel mutation and Manifest.reset()/Manifest.open().

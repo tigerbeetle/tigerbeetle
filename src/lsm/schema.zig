@@ -261,7 +261,7 @@ pub const TableIndex = struct {
     } {
         assert(content_block_index < index.content_blocks_used());
 
-        const filter_blocks_used_ = index.filter_blocks_used(index_block)
+        const filter_blocks_used_ = index.filter_blocks_used(index_block);
         if (filter_blocks_used_ > content_block_index) {
             const filter_block_index = content_block_index;
             return .{

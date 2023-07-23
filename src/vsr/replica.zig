@@ -2907,7 +2907,7 @@ pub fn ReplicaType(
                     self.replica,
                     fault.block_address,
                     fault.block_checksum,
-                    @tagName(fault.block_type);
+                    @tagName(fault.block_type),
                 });
 
                 self.grid_repair_queue.queue_fault(fault) catch |err| {
@@ -3623,8 +3623,8 @@ pub fn ReplicaType(
                         self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                     .commit_min = vsr_state_commit_min,
                     .commit_max = self.commit_max,
-                    .op_unsynced_min = ,
-                    .op_unsynced_max = ,
+                    .op_unsynced_min = vsr_state_op_unsynced.min,
+                    .op_unsynced_max = vsr_state_op_unsynced.max,
                 },
             );
         }

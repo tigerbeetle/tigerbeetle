@@ -30,7 +30,7 @@ const lsm_table_blocks_max = table_blocks_max: {
     const checksum_size = @sizeOf(u128);
     const address_size = @sizeOf(u64);
     break :table_blocks_max @divFloor(
-        block_size - @sizeOf(vsr.Header),
+        constants.block_size - @sizeOf(vsr.Header),
         (checksum_size + address_size),
     );
 };
@@ -169,7 +169,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             return requests_count;
         }
 
-        pub fn full() bool {
+        pub fn full(queue: *const GridRepairQueue) bool {
             const faulty_blocks_free =
                 queue.faulty_blocks.count() -
                 constants.grid_repair_tables_max * lsm_table_blocks_max;
@@ -186,8 +186,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             repair_strategy: enum { block, table },
         ) error{
             /// The block is already marked as faulty.
-            Faulty,
-            /// The queue has insufficient capacity to queue the fault.
+            Faulty
+            // The queue has insufficient capacity to queue the fault.
             //Full,
         }!void {
             assert(queue.checkpoint_progress == null);
@@ -200,7 +200,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             }
 
             const progress: FaultProgress = switch (repair_strategy) {
-                .block => progess: {
+                .block => progress: {
                     //const faulty_blocks_free =
                     //    queue.faulty_blocks.count() -
                     //    constants.grid_repair_tables_max * lsm_table_blocks_max;

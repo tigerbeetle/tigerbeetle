@@ -31,7 +31,7 @@ pub const BlockType = enum(u8) {
     data = 4,
 
     pub fn valid(vsr_operation: vsr.Operation) bool {
-        _ = std.meta.intToEnum(BlockType) catch return false;
+        _ = std.meta.intToEnum(BlockType, vsr_operation) catch return false;
 
         return true;
     }
@@ -827,14 +827,15 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             }
 
+            const header = mem.bytesAsValue(vsr.Header, cache_block.*[0..@sizeOf(vsr.Header)]);
             log.err(
                 "{s}: expected address={} checksum={} block_type={}, " ++
                     "found address={} checksum={} block_type={}",
                 .{
                     @tagName(result),
-                    address,
-                    checksum,
-                    @enumToInt(block_type),
+                    read.address,
+                    read.checksum,
+                    @enumToInt(read.block_type),
                     header.op,
                     header.checksum,
                     @as(std.meta.Tag(BlockType), header.operation),

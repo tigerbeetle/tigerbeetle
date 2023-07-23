@@ -5,11 +5,13 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.grid_scrubber);
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const IOPS = @import("../iops.zig").IOPS;
+const schema = @import("../lsm/schema.zig");
 
 const allocate_block = @import("../lsm/grid.zig").allocate_block;
 const BlockType = @import("../lsm/grid.zig").BlockType;
@@ -27,25 +29,46 @@ pub const Mode = union(enum) {
     },
 
     /// Scrub index blocks quickly to identify missing tables.
+    /// Only check tables created within the (inclusive) snapshot range.
     sync: struct {
         snapshot_min: u64,
         snapshot_max: u64,
     },
 
+    fn config(mode: *const Mode) *const Config {
+        return configs.getPtrConst(mode);
+    }
+
+    const Config = struct {
+        check_manifest_log: bool,
+        check_table_index: bool,
+        check_table_content: bool,
+        reads_max: usize,
+    };
+
     /// Mapping of which modes scrub which block types.
     /// Invariants:
     /// - When `table_content` is set, `table_index` must be set.
-    const checks = std.enums.EnumArray(
-        std.meta.Tag(Mode),
-        std.enums.EnumFieldStruct(enum {
-            manifest_log,
-            table_index,
-            table_content,
-        }),
-    ).init(.{
-        .stop = .{ .manifest_log = false, .table_index = false, .table_content = false },
-        .slow = .{ .manifest_log = true, .table_index = true, .table_content = true },
-        .sync = .{ .manifest_log = false, .table_index = true, .table_content = false },
+    /// - `reads_max ≤ constants.grid_scrubber_reads_max`
+    const configs = std.enums.EnumArray(std.meta.Tag(Mode), Config).init(.{
+        .stop = .{
+            .check_manifest_log = false,
+            .check_table_index = false,
+            .check_table_content = false,
+            .reads_max = 0,
+        },
+        .slow = .{
+            .check_manifest_log = true,
+            .check_table_index = true,
+            .check_table_content = true,
+            .reads_max = 1,
+        },
+        .sync = .{
+            .check_manifest_log = false,
+            .check_table_index = true,
+            .check_table_content = false,
+            .reads_max = constants.grid_scrubber_reads_max,
+        },
     });
 };
 
@@ -82,24 +105,22 @@ pub fn GridScrubberType(comptime Forest: type) type {
             replica_index: u8,
         };
 
-        pub const Config = struct {
-            check_manifest_log: bool,
-            check_table_index: bool,
-            check_table_content: bool,
-
-            /// Only scrub tables created within this (inclusive) range.
-            snapshot_min: u64 = 0,
-            snapshot_max: u64 = std.math.max(u64),
-
-            origin: u8,
-            reads_max: usize,
-        };
+        //pub const Config = struct {
+        //    check_manifest_log: bool,
+        //    check_table_index: bool,
+        //    check_table_content: bool,
+        //
+        //    /// Only scrub tables created within this (inclusive) range.
+        //    snapshot_min: u64 = 0,
+        //    snapshot_max: u64 = std.math.max(u64),
+        //
+        //    origin: u8,
+        //    reads_max: usize,
+        //};
 
         superblock: *SuperBlock,
         forest: *Forest,
         options: Options,
-
-        //config: Config,
 
         reads: IOPS(Read, constants.grid_scrubber_reads_max) = .{},
         read_blocks: [constants.grid_scrubber_reads_max]Grid.BlockPtr,
@@ -139,11 +160,14 @@ pub fn GridScrubberType(comptime Forest: type) type {
             assert(!forest.superblock.opened);
 
             var read_blocks: [constants.grid_scrubber_reads_max]Grid.BlockPtr = undefined;
-            for (read_buffer) |*buffer, i| {
-                errdefer for (read_buffer[0..i]) |b| allocator.free(b);
+            for (read_blocks) |*buffer, i| {
+                errdefer for (read_blocks[0..i]) |b| allocator.free(b);
                 buffer.* = try allocate_block(allocator);
             }
             errdefer for (read_blocks) |buffer| allocator.free(buffer);
+
+            var tour_index_block = try allocate_block(allocator);
+            errdefer allocator.free(tour_index_block);
 
             return .{
                 .superblock = forest.grid.superblock,
@@ -157,6 +181,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         pub fn deinit(scrubber: *GridScrubber, allocator: std.mem.Allocator) void {
+            allocator.free(scrubber.tour_index_block);
             for (scrubber.read_blocks) |buffer| allocator.free(buffer);
 
             scrubber.* = undefined;
@@ -166,8 +191,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
             assert(scrubber.mode == .stop);
             assert(scrubber.tour == .done);
 
-            const op_unsynced_min = forest.superblock.working.vsr_state.op_unsynced_min;
-            const op_unsynced_max = forest.superblock.working.vsr_state.op_unsynced_max;
+            const op_unsynced_min = scrubber.forest.superblock.working.vsr_state.op_unsynced_min;
+            const op_unsynced_max = scrubber.forest.superblock.working.vsr_state.op_unsynced_max;
             assert((op_unsynced_min == 0) == (op_unsynced_max == 0));
 
             if (op_unsynced_min == 0) {
@@ -181,15 +206,15 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.tour = .init;
         }
 
-        pub fn configure(scrubber: *GridScrubber, config_new: *const Config) void {
-            assert(config_new.reads_max <= constants.grid_scrubber_reads_max);
-            if (config.scrub_table_content) assert(config.scrub_table_index);
+        //pub fn configure(scrubber: *GridScrubber, config_new: *const Config) void {
+        //    assert(config_new.reads_max <= constants.grid_scrubber_reads_max);
+        //    if (config.scrub_table_content) assert(config.scrub_table_index);
+        //
+        //    scrubber.config = config_new.*;
+        //    scrubber.tour = .init;
+        //}
 
-            scrubber.config = config_new.*;
-            scrubber.tour = .init;
-        }
-
-        pub fn checkpoint(scrubber: *Scrubber) void {
+        pub fn checkpoint(scrubber: *GridScrubber) void {
             var reads = scrubber.reads.iterate();
             while (reads.next()) |read| {
                 if (scrubber.superblock.free_set.is_released(read.address)) {
@@ -206,7 +231,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.tour = .done;
         }
 
-        fn cancel_read(scrubber: *Scrubber, read: *Read) void {
+        fn cancel_read(scrubber: *GridScrubber, read: *Read) void {
             const read_index = scrubber.reads.index(read);
             assert(!scrubber.reads.free.isSet(read_index));
 
@@ -225,7 +250,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         pub fn read_next(scrubber: *GridScrubber) enum { read, busy, done } {
-            if (scrubber.reads.executing() >= scrubber.config.reads_max) {
+            if (scrubber.reads.executing() >= scrubber.mode.config().reads_max) {
                 return .busy;
             }
 
@@ -258,7 +283,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         fn read_next_callback(grid_read: *Grid.ReadRepair, result: Grid.ReadBlockResult) void {
-            const read = @fieldParentPtr(Read, "read", storage_read);
+            const read = @fieldParentPtr(Read, "read", grid_read);
             const read_index = read.scrubber.reads.index(read);
             const read_block = read.read_blocks[read_index];
             const scrubber = read.scrubber;
@@ -327,7 +352,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
 
             if (scrubber.tour == .table_content) {
-                assert(scrubber.config.table_content);
+                assert(scrubber.mode.config().table_content);
 
                 const index_block = scrubber.tour.table_content.block orelse return null;
                 const index_schema = schema.TableIndex.from(index_block);
@@ -348,10 +373,10 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
 
             if (scrubber.tour == .table_index) {
-                if (scrubber.config.table_index and
+                if (scrubber.mode.config().table_index and
                     scrubber.tour.table_index.tables.next(scrubber.forest)) |table_info|
                 {
-                    if (scrubber.config.table_content) {
+                    if (scrubber.mode.config().table_content) {
                         scrubber.tour =
                             .{ .table_content = .{ .tables = scrubber.tour.table_index.tables } };
                     }
@@ -367,11 +392,12 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
 
             if (scrubber.tour == .manifest_log) {
-                if (scrubber.config.manifest_log and
+                if (scrubber.mode.config().manifest_log and
                     scrubber.tour.manifest_log.index < scrubber.superblock.manifest.count)
                 {
                     defer scrubber.tour.manifest_log.index += 1;
 
+                    const manifest: *const SuperBlock.manifest = &scrubber.superlock.manifest;
                     return .{
                         .block_checksum = manifest.checksums[scrubber.tour.manifest_log.index],
                         .block_address = manifest.addresses[scrubber.tour.manifest_log.index],
