@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const assert = std.debug.assert;
 
 const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
@@ -805,7 +806,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(global_arena.allocator());
     defer args.deinit();
 
-    std.debug.assert(args.skip());
+    assert(args.skip());
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--language")) {
