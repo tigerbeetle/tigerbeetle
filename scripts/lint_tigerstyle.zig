@@ -2,6 +2,7 @@ const std = @import("std");
 const fs = std.fs;
 const math = std.math;
 const mem = std.mem;
+const assert = std.debug.assert;
 
 const whitelist = std.ComptimeStringMap([]const u32, .{
     .{ "src/cli.zig", &.{ 35, 39 } },
@@ -29,7 +30,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    std.debug.assert(args.skip());
+    assert(args.skip());
     while (args.next()) |raw_path| {
         const path = mem.span(raw_path);
         lint_file(path, fs.cwd(), path) catch |err| switch (err) {
