@@ -15,7 +15,7 @@ const QuorumsType = superblock_quorums.QuorumsType;
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 pub fn main() !void {
-    const allocator = fuzz.fuzz_allocator;
+    const allocator = fuzz.allocator;
     const fuzz_args = try fuzz.parse_fuzz_args(allocator);
     var prng = std.rand.DefaultPrng.init(fuzz_args.seed);
 

@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
-const allocator = fuzz.fuzz_allocator;
+const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const tracer = @import("../tracer.zig");

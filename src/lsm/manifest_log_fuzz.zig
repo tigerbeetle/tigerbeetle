@@ -33,7 +33,7 @@ const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).field_type.count_max;
 
 pub fn main() !void {
-    const allocator = fuzz.fuzz_allocator;
+    const allocator = fuzz.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
     var prng = std.rand.DefaultPrng.init(args.seed);

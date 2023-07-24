@@ -8,7 +8,7 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const allocator = fuzz.fuzz_allocator;
+const allocator = fuzz.allocator;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 

@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
-const allocator = fuzz.fuzz_allocator;
+const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 const tracer = @import("../tracer.zig");

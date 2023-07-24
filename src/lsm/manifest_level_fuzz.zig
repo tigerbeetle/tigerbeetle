@@ -31,7 +31,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const binary_search = @import("binary_search.zig");
 const lsm = @import("tree.zig");
-const allocator = fuzz.fuzz_allocator;
+const allocator = fuzz.allocator;
 
 const Key = u64;
 const Value = struct {

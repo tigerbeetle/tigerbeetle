@@ -8,8 +8,8 @@ const log = std.log.scoped(.fuzz);
 
 // Use our own allocator in the global scope instead of testing.allocator
 // as the latter now @compileError()'s if referenced outside a `test` block.
-var fuzz_gpa = std.heap.GeneralPurposeAllocator(.{}){};
-pub const fuzz_allocator = fuzz_gpa.allocator();
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub const allocator = gpa.allocator();
 
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
@@ -78,11 +78,11 @@ pub const FuzzArgs = struct {
 ///        Sets the seed used for the random number generator.
 ///    [--events-max usize]
 ///        Override the fuzzer's default maximum number of generated events.
-pub fn parse_fuzz_args(allocator: mem.Allocator) !FuzzArgs {
+pub fn parse_fuzz_args(args_allocator: mem.Allocator) !FuzzArgs {
     var seed: ?u64 = null;
     var events_max: ?usize = null;
 
-    var args = try std.process.argsWithAllocator(allocator);
+    var args = try std.process.argsWithAllocator(args_allocator);
     defer args.deinit();
 
     // Discard executable name.
