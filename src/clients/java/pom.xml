@@ -209,7 +209,10 @@
         <version>3.1.0</version>
         <configuration>
           <workingDirectory>${project.basedir}/../../../</workingDirectory>
-          <executable>${project.basedir}/../../../scripts/build${script.extension}</executable>         
+          <executable>${project.basedir}/../../../zig/zig</executable>
+          <arguments>
+            <argument>build</argument>
+          </arguments>  
         </configuration>           
         <executions>
           <execution>

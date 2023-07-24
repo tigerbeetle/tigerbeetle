@@ -196,7 +196,7 @@ jobs:
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
       # Build and run the integration tests
-      - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
+      - run: ./zig/zig build client_integration
       - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language dotnet --sample ${{ matrix.sample }}
 
   docs:
@@ -230,7 +230,7 @@ jobs:
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
         
-      - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_docs
+      - run: ./zig/zig build client_docs
       - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language dotnet
       
       - if: matrix.os == 'ubuntu-latest'
