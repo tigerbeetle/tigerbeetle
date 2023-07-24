@@ -12,7 +12,7 @@ const fuzz = @import("../testing/fuzz.zig");
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 pub fn main() !void {
-    const allocator = fuzz.fuzz_allocator;
+    const allocator = fuzz.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
     var prng = std.rand.DefaultPrng.init(args.seed);
