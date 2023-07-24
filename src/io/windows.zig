@@ -462,6 +462,8 @@ pub const IO = struct {
                         ) callconv(os.windows.WINAPI) os.windows.BOOL;
 
                         // Find the ConnectEx function by dynamically looking it up on the socket.
+                        // TODO: use `os.windows.loadWinsockExtensionFunction` once the function
+                        //       pointer is no longer required to be comptime.
                         var connect_ex: LPFN_CONNECTEX = undefined;
                         var num_bytes: os.windows.DWORD = undefined;
                         const guid = os.windows.ws2_32.WSAID_CONNECTEX;
