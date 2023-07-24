@@ -51,19 +51,19 @@ const NativeClient = struct {
         cluster_id: u32,
         addresses_obj: jni.JString,
         max_concurrency: u32,
-    ) *Context {
+    ) ?*Context {
         const addresses = JNIHelper.get_string_utf(env, addresses_obj) orelse {
             ReflectionHelper.initialization_exception_throw(
                 env,
                 tb.tb_status_t.address_invalid,
             );
-            return undefined;
+            return null;
         };
         defer env.release_string_utf_chars(addresses_obj, addresses.ptr);
 
         var context = global_allocator.create(Context) catch {
             ReflectionHelper.initialization_exception_throw(env, tb.tb_status_t.out_of_memory);
-            return undefined;
+            return null;
         };
         errdefer global_allocator.destroy(context);
 
@@ -78,7 +78,7 @@ const NativeClient = struct {
         ) catch |err| {
             const status = tb.init_error_to_status(err);
             ReflectionHelper.initialization_exception_throw(env, status);
-            return undefined;
+            return null;
         };
 
         context.* = .{

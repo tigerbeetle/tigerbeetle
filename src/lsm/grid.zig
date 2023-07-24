@@ -835,7 +835,7 @@ pub fn GridType(comptime Storage: type) type {
             if (header.checksum != checksum) {
                 log.err(
                     "expected address={} checksum={} block_type={?}, " ++
-                        "found address={} checksum={} block_type={?}",
+                        "found address={} checksum={} block_type={}",
                     .{
                         address,
                         checksum,
