@@ -166,6 +166,14 @@ const transfer_templates = table: {
 pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     const Operation = AccountingStateMachine.Operation;
 
+    // Create the enum using @Type reification. Previously, we were using enumToInt for the variant
+    // value (see below), but it was crashing the stage2 compiler (0.10.1) so we use @Type instead.
+    // ```
+    // const Action = enum(u8) {
+    //     create_accounts = @enumToInt(Operation.create_accounts), // An enum with one is fine.
+    //     create_transfers = @enumToInt(Operation.create_transfers), // But 2+ crashes stage2.
+    // };
+    // ```
     const Action = @Type(.{
         .Enum = .{
             .layout = .Auto,
