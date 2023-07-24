@@ -69,11 +69,16 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
                     pos_start = pos;
                     continue :next_pos;
                 }
+            } else {
+                pos += 1;
             }
+        } else {
+            pos += 1;
         }
-        pos += 1;
     }
-    fmt_ansi = fmt_ansi ++ fmt[pos_start..@min(pos, fmt.len)] ++ "\n";
+    // Note: We duplicate `pos += 1` above, otherwise this hits a compiler bug.
+    comptime assert(pos == fmt.len);
+    fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ "\n";
 
     std.debug.print(fmt_ansi, fmt_args);
 }
