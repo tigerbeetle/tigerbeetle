@@ -209,10 +209,7 @@
         <version>3.1.0</version>
         <configuration>
           <workingDirectory>${project.basedir}/../../../</workingDirectory>
-          <executable>${project.basedir}/../../../zig/zig</executable>
-          <arguments>
-            <argument>build</argument>
-          </arguments>  
+          <executable>${project.basedir}/../../../zig/zig</executable>         
         </configuration>           
         <executions>
           <execution>
@@ -228,6 +225,7 @@
                   <JAVA_HOME>${java.home}</JAVA_HOME>
               </environmentVariables>
               <arguments>
+                <argument>build</argument>
                 <argument>test:jni</argument>
               </arguments>
             </configuration>
@@ -242,6 +240,7 @@
             </goals>
             <configuration>
               <arguments>
+                <argument>build</argument>
                 <argument>java_client</argument>
                 <argument>-Drelease-safe</argument>
               </arguments>
