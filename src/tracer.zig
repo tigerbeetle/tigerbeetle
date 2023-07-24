@@ -409,7 +409,7 @@ const TracerTracy = struct {
     ) void {
         // The event must not already have been started.
         assert(slot.* == null);
-        c.___tracy_fiber_enter(intern_name(event.fiber()));
+        c.___tracy_fiber_enter(@ptrCast([*c]const u8, intern_name(event.fiber())));
         const name = intern_name(event);
         // TODO The alloc_srcloc here is not free and should be unnecessary,
         //      but the alloc-free version currently crashes:
@@ -428,7 +428,7 @@ const TracerTracy = struct {
     pub fn end(slot: *?SpanStart, event: Event) void {
         // The event must already have been started.
         const tracy_context = slot.*.?;
-        c.___tracy_fiber_enter(intern_name(event.fiber()));
+        c.___tracy_fiber_enter(@ptrCast([*c]const u8, intern_name(event.fiber())));
         c.___tracy_emit_zone_end(tracy_context);
         slot.* = null;
     }
@@ -436,7 +436,7 @@ const TracerTracy = struct {
     pub fn plot(plot_id: PlotId, value: f64) void {
         // TODO We almost always want staircase plots, but can't configure this from zig yet.
         //      See https://github.com/wolfpld/tracy/issues/537.
-        c.___tracy_emit_plot(intern_name(plot_id), value);
+        c.___tracy_emit_plot(@ptrCast([*c]const u8, intern_name(plot_id)), value);
     }
 
     pub fn log_fn(
@@ -456,7 +456,7 @@ const TracerTracy = struct {
             stdx.copy_disjoint(.exact, u8, message_buffer[message_buffer.len - dots.len ..], dots);
             break :message &message_buffer;
         };
-        c.___tracy_fiber_enter(intern_name(Fiber{ .main = {} }));
+        c.___tracy_fiber_enter(@ptrCast([*c]const u8, intern_name(Fiber{ .main = {} })));
         c.___tracy_emit_message(message.ptr, message.len, callstack_depth);
     }
 
