@@ -18,7 +18,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         const Grid = GridType(Storage);
         const BlockPtrConst = Grid.BlockPtrConst;
 
-        pub const Callback = fn (it: *TableDataIterator, data_block: ?BlockPtrConst) void;
+        pub const Callback = *const fn (it: *TableDataIterator, data_block: ?BlockPtrConst) void;
 
         pub const Context = struct {
             grid: *Grid,

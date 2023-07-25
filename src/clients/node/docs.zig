@@ -11,7 +11,7 @@ fn find_node_client_tar(arena: *std.heap.ArenaAllocator, root: []const u8) ![]co
 
         const node_dir = try std.fs.cwd().realpathAlloc(arena.allocator(), "src/clients/node");
 
-        var dir = try std.fs.cwd().openDir(node_dir, .{ .iterate = true });
+        var dir = try std.fs.cwd().openIterableDir(node_dir, .{});
         defer dir.close();
 
         var walker = try dir.walk(arena.allocator());

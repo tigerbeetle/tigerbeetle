@@ -110,16 +110,17 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub const TableInfo = TableInfoType(Table);
 
+        pub const LevelIterator = Level.Iterator;
+        pub const TableInfoReference = Level.TableInfoReference;
+        pub const KeyRange = Level.KeyRange;
+
         const Grid = GridType(Storage);
-        const Callback = fn (*Manifest) void;
+        const Callback = *const fn (*Manifest) void;
 
         /// Here, we use a structure with indexes over the segmented array for performance.
         const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
-        const KeyRange = Level.KeyRange;
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
-
-        pub const TableInfoReference = Level.TableInfoReference;
 
         const CompactionTableRange = struct {
             table_a: TableInfoReference,
@@ -134,6 +135,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // References to tables in level B that intersect with the chosen table in level A.
             tables: std.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
         };
+
         node_pool: *NodePool,
 
         levels: [constants.lsm_levels]Level,
@@ -240,8 +242,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         /// Updates the snapshot_max on the provided table for the given level.
-        /// The table provided could either be a pointer to the table (from_level) in the
-        /// ManifestLevel or a pointer to a copy of that table (copy).
         pub fn update_table(
             manifest: *Manifest,
             level: u8,
@@ -298,6 +298,28 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
+        /// Returns the key range spanned by all ManifestLevels.
+        pub fn key_range(manifest: *Manifest) ?KeyRange {
+            assert(manifest.manifest_log.opened);
+
+            var manifest_range: ?KeyRange = null;
+            for (manifest.levels) |*level| {
+                if (level.key_range.key_range) |level_range| {
+                    if (manifest_range) |*range| {
+                        if (compare_keys(level_range.key_min, range.key_min) == .lt) {
+                            range.key_min = level_range.key_min;
+                        }
+                        if (compare_keys(level_range.key_max, range.key_max) == .gt) {
+                            range.key_max = level_range.key_max;
+                        }
+                    } else {
+                        manifest_range = level_range;
+                    }
+                }
+            }
+            return manifest_range;
+        }
+
         pub fn remove_invisible_tables(
             manifest: *Manifest,
             level: u8,
@@ -334,12 +356,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
         }
 
-        /// Returns an iterator over tables that might contain `key` (but are not guaranteed to).
-        pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key) LookupIterator {
+        /// Returns an iterator over the tables visible to `snapshot` that may contain `key`
+        /// (but are not guaranteed to), across all levels > `level_min`.
+        pub fn lookup(manifest: *Manifest, snapshot: u64, key: Key, level_min: u8) LookupIterator {
             return .{
                 .manifest = manifest,
                 .snapshot = snapshot,
                 .key = key,
+                .level = level_min,
             };
         }
 
@@ -347,12 +371,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest: *const Manifest,
             snapshot: u64,
             key: Key,
-            level: u8 = 0,
+            level: u8,
             inner: ?Level.Iterator = null,
 
             pub fn next(it: *LookupIterator) ?*const TableInfo {
                 while (it.level < constants.lsm_levels) : (it.level += 1) {
                     const level = &it.manifest.levels[it.level];
+                    if (!level.key_range_contains(it.snapshot, it.key)) continue;
 
                     var inner = level.iterator(
                         .visible,

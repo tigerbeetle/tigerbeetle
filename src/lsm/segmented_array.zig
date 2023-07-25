@@ -389,7 +389,7 @@ fn SegmentedArrayType(
             source: []const T,
         ) void {
             assert(target + source.len <= a.len + b.len);
-            const target_a = a[@minimum(target, a.len)..@minimum(target + source.len, a.len)];
+            const target_a = a[@min(target, a.len)..@min(target + source.len, a.len)];
             const target_b = b[target -| a.len..(target + source.len) -| a.len];
             assert(target_a.len + target_b.len == source.len);
             const source_a = source[0..target_a.len];
@@ -955,14 +955,14 @@ fn TestContext(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(random: std.rand.Random) !Self {
-            var pool = try TestPool.init(testing.allocator, TestArray.node_count_max);
-            errdefer pool.deinit(testing.allocator);
+        fn init(allocator: std.mem.Allocator, random: std.rand.Random) !Self {
+            var pool = try TestPool.init(allocator, TestArray.node_count_max);
+            errdefer pool.deinit(allocator);
 
-            var array = try TestArray.init(testing.allocator);
-            errdefer array.deinit(testing.allocator, &pool);
+            var array = try TestArray.init(allocator);
+            errdefer array.deinit(allocator, &pool);
 
-            var reference = std.ArrayList(T).init(testing.allocator);
+            var reference = std.ArrayList(T).init(allocator);
             errdefer reference.deinit();
 
             try reference.ensureTotalCapacity(element_count_max);
@@ -975,9 +975,9 @@ fn TestContext(
             };
         }
 
-        fn deinit(context: *Self) void {
-            context.array.deinit(testing.allocator, &context.pool);
-            context.pool.deinit(testing.allocator);
+        fn deinit(context: *Self, allocator: std.mem.Allocator) void {
+            context.array.deinit(allocator, &context.pool);
+            context.pool.deinit(allocator);
 
             context.reference.deinit();
         }
@@ -1036,7 +1036,7 @@ fn TestContext(
             if (count_free == 0) return;
 
             var buffer: [TestArray.node_capacity * 3]T = undefined;
-            const count_max = @minimum(count_free, TestArray.node_capacity * 3);
+            const count_max = @min(count_free, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
             context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
 
@@ -1068,7 +1068,7 @@ fn TestContext(
             const reference_len = @intCast(u32, context.reference.items.len);
             if (reference_len == 0) return;
 
-            const count_max = @minimum(reference_len, TestArray.node_capacity * 3);
+            const count_max = @min(reference_len, TestArray.node_capacity * 3);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
             assert(context.reference.items.len <= element_count_max);
@@ -1238,7 +1238,7 @@ fn TestContext(
     };
 }
 
-pub fn run_tests(seed: u64, comptime options: Options) !void {
+pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Options) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
@@ -1321,8 +1321,8 @@ pub fn run_tests(seed: u64, comptime options: Options) !void {
                 options,
             );
 
-            var context = try Context.init(random);
-            defer context.deinit();
+            var context = try Context.init(allocator, random);
+            defer context.deinit(allocator);
 
             try context.run();
 
@@ -1337,5 +1337,5 @@ pub fn run_tests(seed: u64, comptime options: Options) !void {
 
 test "SegmentedArray" {
     const seed = 42;
-    try run_tests(seed, .{ .verify = true });
+    try run_tests(std.testing.allocator, seed, .{ .verify = true });
 }

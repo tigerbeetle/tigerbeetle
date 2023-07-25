@@ -503,7 +503,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const Context = struct {
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             caller: Caller,
 
             trailer: ?Trailer = null,
@@ -685,7 +685,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn format(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             options: FormatOptions,
         ) void {
@@ -760,7 +760,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn open(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
         ) void {
             assert(!superblock.opened);
@@ -783,7 +783,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// Must update the commit_min and commit_min_checksum.
         pub fn checkpoint(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             update: UpdateCheckpoint,
         ) void {
@@ -822,7 +822,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// The update must advance view/log_view (monotonically increasing).
         pub fn view_change(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             update: UpdateViewChange,
         ) void {
@@ -865,7 +865,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn sync(
             superblock: *SuperBlock,
-            callback: fn (context: *Context) void,
+            callback: *const fn (context: *Context) void,
             context: *Context,
             update: UpdateSync,
         ) void {
@@ -1431,7 +1431,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 context.copy = null;
                 superblock.repair(context);
             } else {
-                log.debug("open: read_trailer: {s}: corrupt (copy={})", .{ trailer, copy });
+                log.debug("open: read_trailer: {}: corrupt (copy={})", .{ trailer, copy });
                 if (copy + 1 == constants.superblock_copies) {
                     std.debug.panic("superblock {s} lost", .{@tagName(trailer)});
                 } else {
@@ -1597,7 +1597,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 "commit_min_checksum={}..{} " ++
                 "log_view={}..{} " ++
                 "view={}..{} " ++
-                "head={}..{}", .{
+                "head={}..{?}", .{
                 @tagName(context.caller),
 
                 superblock.staging.vsr_state.commit_min,

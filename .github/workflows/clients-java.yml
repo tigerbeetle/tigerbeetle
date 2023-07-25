@@ -225,7 +225,7 @@ jobs:
       run: echo "$(pwd)/apache-maven-3.9.3/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     # Run the tests
-    - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
+    - run: ./zig/zig build client_integration
     - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language java --sample ${{ matrix.sample }}
 
   docs:
@@ -267,12 +267,12 @@ jobs:
     - if: matrix.os != 'windows-latest'
       run: |
         export PATH="$PATH:$(pwd)/apache-maven-3.9.3/bin"
-        ./scripts/build.sh client_docs -- --language java
+        ./zig/zig build client_docs -- --language java
 
     - if: matrix.os == 'windows-latest'
       run: |
         $env:PATH += "$(pwd)/apache-maven-3.9.3/bin"
-        .\scripts\build.bat client_docs
+        .\zig\zig build client_docs
         .\zig-out\bin\client_docs --language java
 
     - if: matrix.os == 'ubuntu-latest'

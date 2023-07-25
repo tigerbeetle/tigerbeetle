@@ -67,7 +67,8 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             assert(pool.free.isSet(node_index));
             pool.free.unset(node_index);
 
-            return pool.buffer[node_index * node_size ..][0..node_size];
+            const node = pool.buffer[node_index * node_size ..][0..node_size];
+            return @alignCast(node_alignment, node);
         }
 
         pub fn release(pool: *Self, node: Node) void {

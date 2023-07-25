@@ -13,7 +13,7 @@ test "tidy: lines are under 100 characters long" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    var src_dir = try fs.cwd().openDir("./src", .{ .iterate = true });
+    var src_dir = try fs.cwd().openIterableDir("./src", .{});
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);
@@ -71,7 +71,14 @@ fn find_long_line(file_text: []const u8) !?usize {
     var line_number: usize = 0;
     while (line_iterator.next()) |line| : (line_number += 1) {
         const line_length = try std.unicode.utf8CountCodepoints(line);
-        if (line_length > 100 and !is_url(line)) {
+        if (line_length > 100) {
+            if (is_url(line)) continue;
+            // For multiline strings, we care that the _result_ fits 100 characters,
+            // but we don't mind indentation in the source.
+            if (parse_multiline_string(line)) |string_value| {
+                const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
+                if (string_value_length <= 100) continue;
+            }
             return line_number;
         }
     }
@@ -86,10 +93,16 @@ fn is_url(line: []const u8) bool {
     return true;
 }
 
+/// If a line is a `\\` string literal, extract its value.
+fn parse_multiline_string(line: []const u8) ?[]const u8 {
+    const cut = stdx.cut(line, "\\") orelse return null;
+    for (cut.prefix) |c| if (c != ' ') return null;
+    return cut.suffix;
+}
+
 const naughty_list = [_][]const u8{
     "benchmark.zig",
     "clients/c/tb_client_header_test.zig",
-    "clients/c/tb_client_header.zig",
     "clients/c/tb_client.zig",
     "clients/c/tb_client/context.zig",
     "clients/c/tb_client/signal.zig",

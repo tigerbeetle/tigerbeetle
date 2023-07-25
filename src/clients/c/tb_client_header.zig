@@ -20,7 +20,7 @@ const type_mappings = .{
 };
 
 fn resolve_c_type(comptime Type: type) []const u8 {
-    switch (@typeInfo(Type)) {
+    comptime switch (@typeInfo(Type)) {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
         .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
@@ -57,7 +57,7 @@ fn resolve_c_type(comptime Type: type) []const u8 {
         },
         .Void, .Opaque => return "void",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
-    }
+    };
 }
 
 fn to_uppercase(comptime input: []const u8) []const u8 {

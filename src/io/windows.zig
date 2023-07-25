@@ -72,7 +72,7 @@ pub const IO = struct {
                 // Round up sub-millisecond expire times to the next millisecond
                 const expires_ms = (expires_ns + (std.time.ns_per_ms / 2)) / std.time.ns_per_ms;
                 // Saturating cast to DWORD milliseconds
-                const expires = std.math.cast(os.windows.DWORD, expires_ms) catch std.math.maxInt(os.windows.DWORD);
+                const expires = std.math.cast(os.windows.DWORD, expires_ms) orelse std.math.maxInt(os.windows.DWORD);
                 // max DWORD is reserved for INFINITE so cap the cast at max - 1
                 timeout_ms = if (expires == os.windows.INFINITE) expires - 1 else expires;
             }
@@ -87,7 +87,7 @@ pub const IO = struct {
                 };
 
                 var events: [64]os.windows.OVERLAPPED_ENTRY = undefined;
-                const num_events = os.windows.GetQueuedCompletionStatusEx(
+                const num_events: u32 = os.windows.GetQueuedCompletionStatusEx(
                     self.iocp,
                     &events,
                     io_timeout,
@@ -160,7 +160,7 @@ pub const IO = struct {
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*anyopaque,
-        callback: fn (Context) void,
+        callback: *const fn (Context) void,
         operation: Operation,
 
         const Context = struct {
@@ -356,15 +356,13 @@ pub const IO = struct {
                     }
 
                     // destroy the client_socket we created if we get a non WouldBlock error
-                    errdefer |result| {
-                        _ = result catch |err| switch (err) {
-                            error.WouldBlock => {},
-                            else => {
-                                os.closeSocket(op.client_socket);
-                                op.client_socket = INVALID_SOCKET;
-                            },
-                        };
-                    }
+                    errdefer |err| switch (err) {
+                        error.WouldBlock => {},
+                        else => {
+                            os.closeSocket(op.client_socket);
+                            op.client_socket = INVALID_SOCKET;
+                        },
+                    };
 
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
@@ -453,7 +451,7 @@ pub const IO = struct {
                             else => |e| return e,
                         };
 
-                        const LPFN_CONNECTEX = fn (
+                        const LPFN_CONNECTEX = *const fn (
                             Socket: os.windows.ws2_32.SOCKET,
                             SockAddr: *const os.windows.ws2_32.sockaddr,
                             SockLen: os.socklen_t,
@@ -464,15 +462,29 @@ pub const IO = struct {
                         ) callconv(os.windows.WINAPI) os.windows.BOOL;
 
                         // Find the ConnectEx function by dynamically looking it up on the socket.
-                        const connect_ex = os.windows.loadWinsockExtensionFunction(
-                            LPFN_CONNECTEX,
+                        // TODO: use `os.windows.loadWinsockExtensionFunction` once the function
+                        //       pointer is no longer required to be comptime.
+                        var connect_ex: LPFN_CONNECTEX = undefined;
+                        var num_bytes: os.windows.DWORD = undefined;
+                        const guid = os.windows.ws2_32.WSAID_CONNECTEX;
+                        switch (os.windows.ws2_32.WSAIoctl(
                             op.socket,
-                            os.windows.ws2_32.WSAID_CONNECTEX,
-                        ) catch |err| switch (err) {
-                            error.OperationNotSupported => unreachable,
-                            error.ShortRead => unreachable,
-                            else => |e| return e,
-                        };
+                            os.windows.ws2_32.SIO_GET_EXTENSION_FUNCTION_POINTER,
+                            @ptrCast(*const anyopaque, &guid),
+                            @sizeOf(os.windows.GUID),
+                            @ptrCast(*anyopaque, &connect_ex),
+                            @sizeOf(LPFN_CONNECTEX),
+                            &num_bytes,
+                            null,
+                            null,
+                        )) {
+                            os.windows.ws2_32.SOCKET_ERROR => switch (os.windows.ws2_32.WSAGetLastError()) {
+                                .WSAEOPNOTSUPP => unreachable,
+                                .WSAENOTSOCK => unreachable,
+                                else => |err| return os.windows.unexpectedWSAError(err),
+                            },
+                            else => assert(num_bytes == @sizeOf(LPFN_CONNECTEX)),
+                        }
 
                         op.pending = true;
                         op.overlapped = .{
@@ -944,23 +956,7 @@ pub const IO = struct {
 
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
-    /// Opens or creates a journal file:
-    /// - For reading and writing.
-    /// - For Direct I/O (required on windows).
-    /// - Obtains an advisory exclusive lock to the file descriptor.
-    /// - Allocates the file contiguously on disk if this is supported by the file system.
-    /// - Ensures that the file data is durable on disk.
-    ///   The caller is responsible for ensuring that the parent directory inode is durable.
-    /// - Verifies that the file size matches the expected file size before returning.
-    pub fn open_file(
-        dir_handle: os.fd_t,
-        relative_path: []const u8,
-        size: u64,
-        method: enum { create, create_or_open, open },
-    ) !os.fd_t {
-        assert(relative_path.len > 0);
-        assert(size % constants.sector_size == 0);
-
+    fn open_file_handle(relative_path: []const u8, method: enum { create, open }) !os.fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
@@ -970,12 +966,9 @@ pub const IO = struct {
                 creation_disposition = os.windows.FILE_CREATE;
                 log.info("creating \"{s}\"...", .{relative_path});
             },
-            .create_or_open => {
-                @panic("create_or_open is unsupported on Windows.");
-            },
             .open => {
-                log.info("opening \"{s}\"...", .{relative_path});
                 creation_disposition = os.windows.OPEN_EXISTING;
+                log.info("opening \"{s}\"...", .{relative_path});
             },
         }
 
@@ -1020,6 +1013,34 @@ pub const IO = struct {
             };
         }
 
+        return handle;
+    }
+
+    /// Opens or creates a journal file:
+    /// - For reading and writing.
+    /// - For Direct I/O (required on windows).
+    /// - Obtains an advisory exclusive lock to the file descriptor.
+    /// - Allocates the file contiguously on disk if this is supported by the file system.
+    /// - Ensures that the file data is durable on disk.
+    ///   The caller is responsible for ensuring that the parent directory inode is durable.
+    /// - Verifies that the file size matches the expected file size before returning.
+    pub fn open_file(
+        dir_handle: os.fd_t,
+        relative_path: []const u8,
+        size: u64,
+        method: enum { create, create_or_open, open },
+    ) !os.fd_t {
+        assert(relative_path.len > 0);
+        assert(size % constants.sector_size == 0);
+
+        const handle = switch (method) {
+            .open => try open_file_handle(relative_path, .open),
+            .create => try open_file_handle(relative_path, .create),
+            .create_or_open => open_file_handle(relative_path, .open) catch |err| switch (err) {
+                error.FileNotFound => try open_file_handle(relative_path, .create),
+                else => return err,
+            },
+        };
         errdefer os.windows.CloseHandle(handle);
 
         // Obtain an advisory exclusive lock
@@ -1072,7 +1093,7 @@ pub const IO = struct {
 
         const kernel32 = struct {
             const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
-            const LOCKFILE_FAIL_IMMEDIATELY = 01;
+            const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
 
             extern "kernel32" fn LockFileEx(
                 hFile: os.windows.HANDLE,

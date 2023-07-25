@@ -458,7 +458,7 @@ fn emit_batch_accessors(
             .java_type = java_type(field.field_type),
             .property = to_case(field.name, .pascal),
             .batch_type = batch_type(field.field_type),
-            .return_expression = if (comptime trait.is(.Enum)(field.field_type))
+            .return_expression = comptime if (trait.is(.Enum)(field.field_type))
                 @as([]const u8, get_mapped_type_name(field.field_type).? ++ ".fromValue(value)")
             else
                 "value",

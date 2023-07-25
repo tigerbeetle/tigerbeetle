@@ -79,14 +79,14 @@ pub const AOFEntry = extern struct {
         // When writing, entries can backtrack / duplicate, so we don't necessarily have a valid
         // chain. Still, log when that happens. The `aof merge` command can generate a consistent
         // file from entries like these.
-        log.debug("{}: from_message: parent {} (should == {}) our checksum {}", .{
+        log.debug("{}: from_message: parent {} (should == {?}) our checksum {}", .{
             options.replica,
             message.header.parent,
             last_checksum.*,
             message.header.checksum,
         });
         if (last_checksum.* == null or last_checksum.*.? != message.header.parent) {
-            log.info("{}: from_message: parent {}, expected {} instead", .{
+            log.info("{}: from_message: parent {}, expected {?} instead", .{
                 options.replica,
                 message.header.parent,
                 last_checksum.*,
@@ -276,7 +276,7 @@ pub const AOF = struct {
     /// that both the header and body checksums of the read entry are valid, and that
     /// all checksums chain correctly.
     pub fn iterator(path: []const u8) !Iterator {
-        const file = try std.fs.cwd().openFile(path, .{ .read = true });
+        const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
         errdefer file.close();
 
         const size = (try file.stat()).size;
@@ -347,7 +347,7 @@ pub const AOFReplayClient = struct {
         while (try aof.next(&target)) |entry| {
             // Skip replaying reserved messages.
             const header = entry.header();
-            if (header.operation.reserved()) continue;
+            if (header.operation.vsr_reserved()) continue;
 
             const message = self.client.get_message();
             defer self.client.unref(message);
@@ -570,7 +570,7 @@ pub fn aof_merge(
     }
 
     try stdout.print(
-        "AOF {s} validated. Starting checksum: {} Ending checksum: {}\n",
+        "AOF {s} validated. Starting checksum: {?} Ending checksum: {?}\n",
         .{ output_path, first_checksum, last_checksum },
     );
 }
@@ -613,6 +613,7 @@ test "aof write / read" {
     demo_message.header.set_checksum();
 
     try aof.write(demo_message, .{ .replica = 1, .primary = 1 });
+    aof.close();
 
     var it = try AOF.iterator(aof_file);
     defer it.close();
@@ -684,18 +685,18 @@ const usage =
 ;
 
 pub fn main() !void {
-    var args = std.process.args();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
     var action: ?[:0]const u8 = null;
     var addresses: ?[:0]const u8 = null;
     var paths: [constants.nodes_max][:0]const u8 = undefined;
     var count: usize = 0;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = try arg_or_err;
+    while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
             std.io.getStdOut().writeAll(usage) catch os.exit(1);
             os.exit(0);

@@ -17,7 +17,6 @@ const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExtent;
@@ -34,7 +33,7 @@ const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).field_type.count_max;
 
 pub fn main() !void {
-    const allocator = std.testing.allocator;
+    const allocator = fuzz.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
     var prng = std.rand.DefaultPrng.init(args.seed);
@@ -107,6 +106,8 @@ fn run_fuzz(
 
         env.open();
         env.wait(&env.manifest_log);
+
+        env.reserve();
     }
 
     for (events) |event| {
@@ -162,7 +163,7 @@ fn generate_events(
         constants.lsm_levels * constants.journal_slot_count,
     );
 
-    log.info("event_distribution = {d:.2}", .{event_distribution});
+    log.info("event_distribution = {:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
     var tables = std.ArrayList(struct {
@@ -358,8 +359,6 @@ const Environment = struct {
 
         env.pending += 1;
         env.manifest_log.open(open_event, open_callback);
-        env.manifest_log.reserve();
-        env.manifest_log_reserved = true;
     }
 
     fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
@@ -374,6 +373,11 @@ const Environment = struct {
     fn open_callback(manifest_log: *ManifestLog) void {
         const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
         env.pending -= 1;
+    }
+
+    fn reserve(env: *Environment) void {
+        env.manifest_log.reserve();
+        env.manifest_log_reserved = true;
     }
 
     fn insert(env: *Environment, level: u7, table: *const TableInfo) !void {

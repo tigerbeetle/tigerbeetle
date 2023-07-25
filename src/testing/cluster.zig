@@ -69,7 +69,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
         allocator: mem.Allocator,
         options: Options,
-        on_client_reply: fn (
+        on_client_reply: *const fn (
             cluster: *Self,
             client: usize,
             request: *Message,
@@ -102,7 +102,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         pub fn init(
             allocator: mem.Allocator,
             /// Includes command=register messages.
-            on_client_reply: fn (
+            on_client_reply: *const fn (
                 cluster: *Self,
                 client: usize,
                 request: *Message,
@@ -618,7 +618,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
-                    "{[grid_blocks_free]:>7}Gf", .{
+                    "{[grid_blocks_free]:>7}Gf " ++
+                    "{[grid_blocks_faulty]:>2}G!", .{
                     .view = replica.view,
                     .commit_min = replica.commit_min,
                     .commit_max = replica.commit_max,
@@ -629,10 +630,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     .wal_op_min = wal_op_min,
                     .wal_op_max = wal_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
+                    .grid_blocks_faulty = replica.grid.read_faulty_queue.count,
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {
-                    pipeline = std.fmt.bufPrint(&pipeline_buffer, "{:>2}/{}Pp {:>2}/{}Pq", .{
+                    pipeline = std.fmt.bufPrint(&pipeline_buffer, "{:>2}/{}Pp {:>2}/{}Rq", .{
                         replica.pipeline.queue.prepare_queue.count,
                         constants.pipeline_prepare_queue_max,
                         replica.pipeline.queue.request_queue.count,

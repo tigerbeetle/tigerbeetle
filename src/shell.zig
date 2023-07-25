@@ -69,10 +69,15 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
                     pos_start = pos;
                     continue :next_pos;
                 }
+            } else {
+                pos += 1;
             }
+        } else {
+            pos += 1;
         }
-        pos += 1;
     }
+    // Note: We duplicate `pos += 1` above, otherwise this hits a compiler bug.
+    comptime assert(pos == fmt.len);
     fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ "\n";
 
     std.debug.print(fmt_ansi, fmt_args);
@@ -102,7 +107,7 @@ pub fn find(shell: *Shell, options: struct {
 
     const cwd = std.fs.cwd();
     for (options.where) |base_path| {
-        var base_dir = try cwd.openDir(base_path, .{ .iterate = true });
+        var base_dir = try cwd.openIterableDir(base_path, .{});
         defer base_dir.close();
 
         var walker = try base_dir.walk(shell.gpa);
@@ -137,9 +142,7 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     try expand_argv(&argv, cmd, cmd_args);
 
-    const child = try std.ChildProcess.init(argv.items, shell.gpa);
-    defer child.deinit();
-
+    var child = std.ChildProcess.init(argv.items, shell.gpa);
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;

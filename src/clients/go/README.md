@@ -20,7 +20,7 @@ support. But for ease of development we also support macOS and Windows.
 * Go >= 1.17
 
 **Additionally on Windows**: you must install [Zig
-0.9.1](https://ziglang.org/download/#release-0.9.1) and set the
+0.10.1](https://ziglang.org/download/#release-0.10.1) and set the
 `CC` environment variable to `zig.exe cc`. Use the full path for
 `zig.exe`.
 
@@ -478,7 +478,7 @@ $ git clone https://github.com/tigerbeetle/tigerbeetle
 $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh
-$ ./scripts/build.sh go_client -Drelease-safe
+$ ./zig/zig build go_client -Drelease-safe
 $ cd src/clients/go
 $ if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
 ```
@@ -492,7 +492,7 @@ $ git clone https://github.com/tigerbeetle/tigerbeetle
 $ cd tigerbeetle
 $ git submodule update --init --recursive
 $ .\scripts\install_zig.bat
-$ .\scripts\build.bat go_client -Drelease-safe
+$ .\zig\zig build go_client -Drelease-safe
 $ cd src\clients\go
 $ if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
 ```

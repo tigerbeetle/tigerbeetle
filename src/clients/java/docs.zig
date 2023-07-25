@@ -38,7 +38,7 @@ fn find_tigerbeetle_client_jar(arena: *std.heap.ArenaAllocator, root: []const u8
         }
     }
 
-    var dir = try std.fs.cwd().openDir(java_target_path, .{ .iterate = true });
+    var dir = try std.fs.cwd().openIterableDir(java_target_path, .{});
     defer dir.close();
 
     var walker = try dir.walk(arena.allocator());

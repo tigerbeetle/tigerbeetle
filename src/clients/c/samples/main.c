@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
         address,              // Cluster addresses.
         strlen(address),      //
         32,                   // ConcurrencyMax, could be 1, since it's a single-threaded example.
-        NULL,                 // No need for a global context.
+        (uintptr_t)NULL,      // No need for a global context.
         &on_completion        // Completion callback.
     );
 

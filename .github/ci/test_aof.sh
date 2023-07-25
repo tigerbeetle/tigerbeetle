@@ -3,13 +3,14 @@ set -eEuo pipefail
 
 # Install Zig if it does not already exist:
 if [ ! -d "zig" ]; then
-    scripts/install_zig.sh
+    ./scripts/install_zig.sh
 fi
 
-zig/zig build -Dconfig-aof-record=true
+# TODO: remove -Drelease-safe once we no longer use a lot of stack in Groove.zig
+./zig/zig build -Drelease-safe -Dconfig-aof-record=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof
 
-zig/zig build -Dconfig-aof-record=true -Dconfig-aof-recovery=true
+./zig/zig build -Drelease-safe -Dconfig-aof-record=true -Dconfig-aof-recovery=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof-recovery
 
 rm -f aof.log
@@ -41,11 +42,11 @@ rm -f aof-test.tigerbeetle.aof
 sleep 1
 
 echo "Running 'zig build benchmark' to populate AOF..."
-zig/zig build benchmark -- --transfer-count 400000 >> aof.log 2>&1
+./zig/zig build benchmark -- --transfer-count 400000 >> aof.log 2>&1
 
 echo ""
 echo "Running 'zig build aof -- debug aof-test.tigerbeetle.aof' to check AOF..."
-data_checksum_src=$(zig/zig build aof -- debug aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
+data_checksum_src=$(./zig/zig build aof -- debug aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
 echo "${data_checksum_src}"
 
 echo ""
@@ -72,18 +73,18 @@ cd ..
 
 sleep 1
 
-zig/zig build aof -- recover 127.0.0.1:3001,127.0.0.1:3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
+./zig/zig build aof -- recover 127.0.0.1:3001,127.0.0.1:3002 aof-test.tigerbeetle.aof >> aof.log 2>&1
 
 # Give replicas time to settle.
 sleep 10
 
 echo ""
 echo "Running 'zig build aof -- debug {1,2}/aof-test.tigerbeetle.aof' to check recovered AOF..."
-data_checksum_recovered_1=$(zig/zig build aof -- debug 1/aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
+data_checksum_recovered_1=$(./zig/zig build aof -- debug 1/aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
 echo "1: ${data_checksum_recovered_1}"
-data_checksum_recovered_2=$(zig/zig build aof -- debug 2/aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
+data_checksum_recovered_2=$(./zig/zig build aof -- debug 2/aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
 echo "2: ${data_checksum_recovered_2}"
-# data_checksum_recovered_3=$(zig/zig build aof -- debug 3/aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
+# data_checksum_recovered_3=$(./zig/zig build aof -- debug 3/aof-test.tigerbeetle.aof 2>&1 | tee -a aof.log | grep 'Data checksum chain:')
 # echo "3: ${data_checksum_recovered_3}"
 
 if [ "${data_checksum_src}" != "${data_checksum_recovered_1}" ] || [ "${data_checksum_src}" != "${data_checksum_recovered_2}" ]; then

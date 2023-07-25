@@ -95,7 +95,7 @@ pub fn CompactionType(
             table_info_a: TableInfoA,
             level_b: u8,
             range_b: CompactionRange,
-            callback: fn (*Compaction) void,
+            callback: *const fn (*Compaction) void,
         };
 
         const InputLevel = enum(u1) {
@@ -593,7 +593,7 @@ pub fn CompactionType(
 
             assert(values_in.len > 0);
 
-            const len = @minimum(values_in.len, values_out.len - values_out_index);
+            const len = @min(values_in.len, values_out.len - values_out_index);
             assert(len > 0);
             stdx.copy_disjoint(
                 .exact,

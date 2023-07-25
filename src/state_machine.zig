@@ -307,7 +307,8 @@ pub fn StateMachineType(
 
         // Since prefetch contexts are used one at a time, it's safe to access
         // the union's fields and reuse the same memory for all context instances.
-        const PrefetchContext = extern union {
+        // Can't use extern/packed union as the PrefetchContextes aren't ABI compliant.
+        const PrefetchContext = union(enum) {
             accounts_immutable: AccountsImmutableGroove.PrefetchContext,
             accounts_mutable: AccountsMutableGroove.PrefetchContext,
             transfers: TransfersGroove.PrefetchContext,
@@ -316,18 +317,17 @@ pub fn StateMachineType(
             // TODO(Zig): No need for this function once Zig is upgraded
             // and @fieldParentPtr() can be used for unions.
             // See: https://github.com/ziglang/zig/issues/6611.
-            pub inline fn parent(completion: anytype) *StateMachine {
-                const T = @TypeOf(completion);
-                comptime assert(T == *AccountsImmutableGroove.PrefetchContext or
-                    T == *AccountsMutableGroove.PrefetchContext or
-                    T == *TransfersGroove.PrefetchContext or
-                    T == *PostedGroove.PrefetchContext);
+            pub inline fn parent(
+                comptime field: std.meta.Tag(PrefetchContext),
+                completion: anytype,
+            ) *StateMachine {
+                var stub = @unionInit(PrefetchContext, @tagName(field), undefined);
+                const stub_field_ptr = &@field(stub, @tagName(field));
+                comptime assert(@TypeOf(stub_field_ptr) == @TypeOf(completion));
 
-                return @fieldParentPtr(
-                    StateMachine,
-                    "prefetch_context",
-                    @ptrCast(*PrefetchContext, completion),
-                );
+                const offset = @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
+                const context_ptr = @intToPtr(*PrefetchContext, @ptrToInt(completion) - offset);
+                return @fieldParentPtr(StateMachine, "prefetch_context", context_ptr);
             }
         };
 
@@ -336,12 +336,12 @@ pub fn StateMachineType(
         forest: Forest,
 
         prefetch_input: ?[]align(16) const u8 = null,
-        prefetch_callback: ?fn (*StateMachine) void = null,
+        prefetch_callback: ?*const fn (*StateMachine) void = null,
         prefetch_context: PrefetchContext = undefined,
 
-        open_callback: ?fn (*StateMachine) void = null,
-        compact_callback: ?fn (*StateMachine) void = null,
-        checkpoint_callback: ?fn (*StateMachine) void = null,
+        open_callback: ?*const fn (*StateMachine) void = null,
+        compact_callback: ?*const fn (*StateMachine) void = null,
+        checkpoint_callback: ?*const fn (*StateMachine) void = null,
 
         // EXPERIMENTAL, not for real-world usage:
         scan_context: TransfersGroove.ScanGroove.Scan.Context = .{ .callback = on_scan_read },
@@ -408,7 +408,7 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn open(self: *StateMachine, callback: fn (*StateMachine) void) void {
+        pub fn open(self: *StateMachine, callback: *const fn (*StateMachine) void) void {
             assert(self.open_callback == null);
             self.open_callback = callback;
 
@@ -436,7 +436,7 @@ pub fn StateMachineType(
 
         pub fn prefetch(
             self: *StateMachine,
-            callback: fn (*StateMachine) void,
+            callback: *const fn (*StateMachine) void,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
@@ -495,6 +495,10 @@ pub fn StateMachineType(
             for (accounts) |*a| {
                 self.forest.grooves.accounts_immutable.prefetch_enqueue(a.id);
             }
+
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .accounts_immutable = undefined };
+
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_create_accounts_immutable_callback,
                 &self.prefetch_context.accounts_immutable,
@@ -504,11 +508,14 @@ pub fn StateMachineType(
         fn prefetch_create_accounts_immutable_callback(
             completion: *AccountsImmutableGroove.PrefetchContext,
         ) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.accounts_immutable, completion);
 
             // Nothing to prefetch_enqueue() from accounts_mutable as accounts_immutable
             // is all that is needed to check for pre-existing accounts before creating one.
             // We still call prefetch() anyway to keep a valid/expected Groove state for commit().
+
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .accounts_mutable = undefined };
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_accounts_mutable_callback,
@@ -519,7 +526,7 @@ pub fn StateMachineType(
         fn prefetch_create_accounts_mutable_callback(
             completion: *AccountsMutableGroove.PrefetchContext,
         ) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.accounts_mutable, completion);
             self.prefetch_finish();
         }
 
@@ -612,6 +619,9 @@ pub fn StateMachineType(
                 self.scan_count = 0;
                 self.scan_timestamp_last = null;
 
+                // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+                self.prefetch_context = .{ .transfers = undefined };
+
                 // Resume prefetching transfers.
                 self.forest.grooves.transfers.prefetch(
                     prefetch_create_transfers_callback_transfers,
@@ -646,6 +656,9 @@ pub fn StateMachineType(
                     self.scan_timestamp_last = null;
                 }
 
+                // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+                self.prefetch_context = .{ .transfers = undefined };
+
                 // Resume prefetching transfers.
                 self.forest.grooves.transfers.prefetch(
                     prefetch_create_transfers_callback_transfers,
@@ -655,7 +668,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_create_transfers_callback_transfers(completion: *TransfersGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.transfers, completion);
 
             const transfers = mem.bytesAsSlice(Event(.create_transfers), self.prefetch_input.?);
             for (transfers) |*t| {
@@ -670,6 +683,9 @@ pub fn StateMachineType(
                 }
             }
 
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .accounts_immutable = undefined };
+
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_create_transfers_callback_accounts_immutable,
                 &self.prefetch_context.accounts_immutable,
@@ -677,7 +693,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_create_transfers_callback_accounts_immutable(completion: *AccountsImmutableGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.accounts_immutable, completion);
 
             const transfers = mem.bytesAsSlice(Event(.create_transfers), self.prefetch_input.?);
             for (transfers) |*t| {
@@ -704,6 +720,9 @@ pub fn StateMachineType(
                 }
             }
 
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .accounts_mutable = undefined };
+
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_transfers_callback_accounts_mutable,
                 &self.prefetch_context.accounts_mutable,
@@ -711,7 +730,10 @@ pub fn StateMachineType(
         }
 
         fn prefetch_create_transfers_callback_accounts_mutable(completion: *AccountsMutableGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.accounts_mutable, completion);
+
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .posted = undefined };
 
             self.forest.grooves.posted.prefetch(
                 prefetch_create_transfers_callback_posted,
@@ -720,7 +742,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_create_transfers_callback_posted(completion: *PostedGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.posted, completion);
 
             self.prefetch_finish();
         }
@@ -730,6 +752,9 @@ pub fn StateMachineType(
                 self.forest.grooves.accounts_immutable.prefetch_enqueue(id);
             }
 
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .accounts_immutable = undefined };
+
             self.forest.grooves.accounts_immutable.prefetch(
                 prefetch_lookup_accounts_immutable_callback,
                 &self.prefetch_context.accounts_immutable,
@@ -737,7 +762,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_lookup_accounts_immutable_callback(completion: *AccountsImmutableGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.accounts_immutable, completion);
 
             const ids = mem.bytesAsSlice(Event(.lookup_accounts), self.prefetch_input.?);
             for (ids) |id| {
@@ -746,6 +771,9 @@ pub fn StateMachineType(
                 }
             }
 
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .accounts_mutable = undefined };
+
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_lookup_accounts_mutable_callback,
                 &self.prefetch_context.accounts_mutable,
@@ -753,7 +781,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_lookup_accounts_mutable_callback(completion: *AccountsMutableGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.accounts_mutable, completion);
 
             self.prefetch_finish();
         }
@@ -763,6 +791,9 @@ pub fn StateMachineType(
                 self.forest.grooves.transfers.prefetch_enqueue(id);
             }
 
+            // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
+            self.prefetch_context = .{ .transfers = undefined };
+
             self.forest.grooves.transfers.prefetch(
                 prefetch_lookup_transfers_callback,
                 &self.prefetch_context.transfers,
@@ -770,7 +801,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_lookup_transfers_callback(completion: *TransfersGroove.PrefetchContext) void {
-            const self = PrefetchContext.parent(completion);
+            const self = PrefetchContext.parent(.transfers, completion);
             self.prefetch_finish();
         }
 
@@ -808,7 +839,7 @@ pub fn StateMachineType(
             return result;
         }
 
-        pub fn compact(self: *StateMachine, callback: fn (*StateMachine) void, op: u64) void {
+        pub fn compact(self: *StateMachine, callback: *const fn (*StateMachine) void, op: u64) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 
@@ -835,7 +866,7 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        pub fn checkpoint(self: *StateMachine, callback: fn (*StateMachine) void) void {
+        pub fn checkpoint(self: *StateMachine, callback: *const fn (*StateMachine) void) void {
             assert(self.compact_callback == null);
             assert(self.checkpoint_callback == null);
 

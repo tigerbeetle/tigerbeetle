@@ -1162,7 +1162,7 @@ const TestContext = struct {
         const replica_count = t.cluster.options.replica_count;
 
         var view: u32 = 0;
-        for (t.cluster.replicas) |*r| view = @maximum(view, r.view);
+        for (t.cluster.replicas) |*r| view = @max(view, r.view);
 
         var array = ProcessList{ .buffer = undefined };
         switch (selector) {
@@ -1212,14 +1212,14 @@ const TestReplicas = struct {
     cluster: *Cluster,
     replicas: std.BoundedArray(u8, constants.nodes_max),
 
-    pub fn stop(t: *TestReplicas) void {
+    pub fn stop(t: *const TestReplicas) void {
         for (t.replicas.constSlice()) |r| {
             log.info("{}: crash replica", .{r});
             t.cluster.crash_replica(r);
         }
     }
 
-    pub fn open(t: *TestReplicas) !void {
+    pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.constSlice()) |r| {
             log.info("{}: restart replica", .{r});
             t.cluster.restart_replica(r) catch |err| {

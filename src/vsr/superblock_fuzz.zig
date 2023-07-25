@@ -35,7 +35,7 @@ const replica = 0;
 const replica_count = 6;
 
 pub fn main() !void {
-    const allocator = std.testing.allocator;
+    const allocator = fuzz.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
     // Total calls to checkpoint() + view_change().

@@ -10,11 +10,9 @@ const log = std.log.scoped(.test_auditor);
 const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
-const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
 
-// TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("../testing/priority_queue.zig").PriorityQueue;
+const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 

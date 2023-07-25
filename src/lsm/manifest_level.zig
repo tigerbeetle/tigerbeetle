@@ -38,6 +38,7 @@ pub fn ManifestLevelType(
 
         pub const Tables = SegmentedArray(TableInfo, NodePool, table_count_max, .{});
 
+        // A direct reference to a TableInfo within the Tables array.
         pub const TableInfoReference = struct { table_info: *TableInfo, generation: u32 };
 
         pub const LeastOverlapTable = struct {
@@ -54,6 +55,68 @@ pub fn ManifestLevelType(
             tables: std.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
         };
 
+        pub const LevelKeyRange = struct {
+            key_range: ?KeyRange,
+
+            /// Excludes the specified range from the level's key range, i.e. if the specified range
+            /// contributes to the level's key_min/key_max, find a new key_min/key_max.
+            ///
+            /// This is achieved by querying the tables visible to snapshot_latest and updating level
+            /// key_min/key_max to the key_min/key_max of the first table returned by the iterator.
+            /// The query is guaranteed to only fetch non-snapshotted tables, since
+            /// tables visible to old snapshots that users have retained would have
+            /// snapshot_max set to a non math.maxInt(u64) value. Therefore, they wouldn't
+            /// be visible to queries with snapshot_latest (math.maxInt(u64 - 1)).
+            fn exclude(self: *LevelKeyRange, exclude_range: KeyRange) void {
+                assert(self.key_range != null);
+
+                var level = @fieldParentPtr(Self, "key_range", self);
+                if (level.table_count_visible == 0) {
+                    self.key_range = null;
+                    return;
+                }
+
+                const snapshots = &[1]u64{lsm.snapshot_latest};
+                if (compare_keys(exclude_range.key_max, self.key_range.?.key_max) == .eq) {
+                    var itr = level.iterator(.visible, snapshots, .descending, null);
+                    const table: ?*const TableInfo = itr.next();
+                    assert(table != null);
+                    self.key_range.?.key_max = table.?.key_max;
+                }
+                if (compare_keys(exclude_range.key_min, self.key_range.?.key_min) == .eq) {
+                    var itr = level.iterator(.visible, snapshots, .ascending, null);
+                    const table: ?*const TableInfo = itr.next();
+                    assert(table != null);
+                    self.key_range.?.key_min = table.?.key_min;
+                }
+                assert(self.key_range != null);
+                assert(compare_keys(self.key_range.?.key_min, self.key_range.?.key_max) != .gt);
+            }
+
+            fn include(self: *LevelKeyRange, include_range: KeyRange) void {
+                if (self.key_range) |*level_range| {
+                    if (compare_keys(include_range.key_min, level_range.key_min) == .lt) {
+                        level_range.key_min = include_range.key_min;
+                    }
+                    if (compare_keys(include_range.key_max, level_range.key_max) == .gt) {
+                        level_range.key_max = include_range.key_max;
+                    }
+                } else {
+                    self.key_range = include_range;
+                }
+                assert(self.key_range != null);
+                assert(compare_keys(self.key_range.?.key_min, self.key_range.?.key_max) != .gt);
+                assert(compare_keys(self.key_range.?.key_min, include_range.key_min) != .gt and
+                    compare_keys(self.key_range.?.key_max, include_range.key_max) != .lt);
+            }
+
+            inline fn contains(self: *const LevelKeyRange, key: Key) bool {
+                return (self.key_range != null) and
+                    compare_keys(key, self.key_range.?.key_min) != .lt and
+                    compare_keys(key, self.key_range.?.key_max) != .gt;
+            }
+        };
+
         // These two segmented arrays are parallel. That is, the absolute indexes of maximum key
         // and corresponding TableInfo are the same. However, the number of nodes, node index, and
         // relative index into the node differ as the elements per node are different.
@@ -61,6 +124,9 @@ pub fn ManifestLevelType(
         // Ordered by ascending (maximum) key. Keys may repeat due to snapshots.
         keys: Keys,
         tables: Tables,
+
+        /// The range of keys in this level covered by tables visible to snapshot_latest.
+        key_range: LevelKeyRange = .{ .key_range = null },
 
         /// The number of tables visible to snapshot_latest.
         /// Used to enforce table_count_max_for_level().
@@ -100,27 +166,27 @@ pub fn ManifestLevelType(
         }
 
         /// Inserts the given table into the ManifestLevel.
-        pub fn insert_table(
-            level: *Self,
-            node_pool: *NodePool,
-            table: *const TableInfo,
-        ) void {
+        pub fn insert_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             if (constants.verify) {
                 assert(!level.contains(table));
             }
             assert(level.keys.len() == level.tables.len());
-
             const absolute_index = level.keys.insert_element(node_pool, table.key_max);
             assert(absolute_index < level.keys.len());
 
             level.tables.insert_elements(node_pool, absolute_index, &[_]TableInfo{table.*});
-            if (constants.verify) {
-                assert(level.contains(table));
-            }
 
             if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
             level.generation +%= 1;
 
+            level.key_range.include(KeyRange{
+                .key_min = table.key_min,
+                .key_max = table.key_max,
+            });
+
+            if (constants.verify) {
+                assert(level.contains(table));
+            }
             assert(level.keys.len() == level.tables.len());
         }
 
@@ -130,18 +196,21 @@ pub fn ManifestLevelType(
         /// * Asserts that the table exists in the manifest.
         pub fn set_snapshot_max(level: *Self, snapshot: u64, table_ref: TableInfoReference) void {
             var table = table_ref.table_info;
-            const key_min = table.key_min;
-            const key_max = table.key_max;
+
             assert(table_ref.generation == level.generation);
             if (constants.verify) {
                 assert(level.contains(table));
             }
             assert(snapshot < lsm.snapshot_latest);
             assert(table.snapshot_max == math.maxInt(u64));
-            assert(compare_keys(key_min, key_max) != .gt);
+            assert(compare_keys(table.key_min, table.key_max) != .gt);
 
             table.snapshot_max = snapshot;
             level.table_count_visible -= 1;
+            level.key_range.exclude(KeyRange{
+                .key_min = table.key_min,
+                .key_max = table.key_max,
+            });
         }
 
         /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
@@ -156,6 +225,11 @@ pub fn ManifestLevelType(
 
             level.remove_table(node_pool, table);
             level.table_count_visible -= 1;
+            level.key_range.exclude(KeyRange{
+                .key_min = table.key_min,
+                .key_max = table.key_max,
+            });
+
             return table;
         }
 
@@ -169,6 +243,19 @@ pub fn ManifestLevelType(
         ) void {
             assert(table.invisible(snapshots));
             level.remove_table(node_pool, table);
+        }
+
+        /// Returns True if the given key may be present in the ManifestLevel,
+        /// False if the key is guaranteed to not be present.
+        ///
+        /// Our key range keeps track of tables that are visible to snapshot_latest, so it cannot
+        /// be relied upon for queries to older snapshots.
+        pub fn key_range_contains(level: *const Self, snapshot: u64, key: Key) bool {
+            if (snapshot == lsm.snapshot_latest) {
+                return level.key_range.contains(key);
+            } else {
+                return true;
+            }
         }
 
         fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
@@ -185,7 +272,9 @@ pub fn ManifestLevelType(
                     level.keys.remove_elements(node_pool, absolute_index, 1);
                     level.tables.remove_elements(node_pool, absolute_index, 1);
                     assert(level.keys.len() == level.tables.len());
+
                     level.generation +%= 1;
+
                     return;
                 }
             }
@@ -493,12 +582,13 @@ pub fn ManifestLevelType(
             assert(compare_keys(key_min, key_max) != .gt);
 
             if (key_exclusive == null) {
-                return self.iterator(
+                var it = self.iterator(
                     .visible,
                     &snapshots,
                     direction,
                     KeyRange{ .key_min = key_min, .key_max = key_max },
-                ).next();
+                );
+                return it.next();
             }
 
             assert(compare_keys(key_exclusive.?, key_min) != .lt);
@@ -747,7 +837,7 @@ pub fn TestContext(
 
             var buffer: [13]TableInfo = undefined;
 
-            const count_max = @minimum(count_free, 13);
+            const count_max = @min(count_free, 13);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
             {
@@ -814,7 +904,7 @@ pub fn TestContext(
                 }
             } else math.maxInt(Key);
 
-            const max_delta = @minimum(32, next_key_min - 1 - new_key_min);
+            const max_delta = @min(32, next_key_min - 1 - new_key_min);
             const new_key_max = new_key_min + context.random.uintAtMostBiased(Key, max_delta);
 
             return .{
@@ -884,7 +974,7 @@ pub fn TestContext(
             const reference_len = @intCast(u32, context.reference.items.len);
             if (reference_len == 0) return;
 
-            const count_max = @minimum(reference_len, 13);
+            const count_max = @min(reference_len, 13);
             const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
 
             assert(context.reference.items.len <= table_count_max);

@@ -19,9 +19,6 @@ pub fn RingBuffer(
         buffer: switch (buffer_type) {
             .array => [count_max]T,
             .pointer => *[count_max]T,
-        } = switch (buffer_type) {
-            .array => undefined,
-            .pointer => @compileError("init() must be used if buffer_type is .pointer!"),
         },
 
         /// The index of the slot with the first item, if any.
@@ -31,7 +28,11 @@ pub fn RingBuffer(
         count: usize = 0,
 
         pub usingnamespace switch (buffer_type) {
-            .array => struct {},
+            .array => struct {
+                pub fn init() Self {
+                    return .{ .buffer = undefined };
+                }
+            },
             .pointer => struct {
                 pub fn init(allocator: mem.Allocator) !Self {
                     const buffer = try allocator.create([count_max]T);
@@ -327,7 +328,7 @@ fn test_low_level_interface(comptime Ring: type, ring: *Ring) !void {
 
 test "RingBuffer: low level interface" {
     const ArrayRing = RingBuffer(u32, 2, .array);
-    var array_ring: ArrayRing = .{};
+    var array_ring = ArrayRing.init();
     try test_low_level_interface(ArrayRing, &array_ring);
 
     const PointerRing = RingBuffer(u32, 2, .pointer);
@@ -337,7 +338,7 @@ test "RingBuffer: low level interface" {
 }
 
 test "RingBuffer: push/pop high level interface" {
-    var fifo = RingBuffer(u32, 3, .array){};
+    var fifo = RingBuffer(u32, 3, .array).init();
 
     try testing.expect(!fifo.full());
     try testing.expect(fifo.empty());
@@ -384,7 +385,7 @@ test "RingBuffer: push/pop high level interface" {
 }
 
 test "RingBuffer: pop_tail" {
-    var lifo = RingBuffer(u32, 3, .array){};
+    var lifo = RingBuffer(u32, 3, .array).init();
     try lifo.push(1);
     try lifo.push(2);
     try lifo.push(3);

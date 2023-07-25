@@ -55,18 +55,9 @@ pub fn TableImmutableType(comptime Table: type) type {
         }
 
         pub fn clear(table: *TableImmutable) void {
-            // This hack works around the stage1 compiler's problematic handling of pointers to
-            // zero-bit types. In particular, `slice = slice[0..0]` is not equivalent to
-            // `slice.len = 0` but in fact sets `slice.ptr = undefined` as well. This happens
-            // since the type of `slice[0..0]` is `*[0]Value` which is a pointer to a zero-bit
-            // type. Using slice bounds that are not comptime known avoids the issue.
-            // See: https://github.com/ziglang/zig/issues/6706
-            // TODO(zig) Remove this hack when upgrading to 0.10.0.
-            var runtime_zero: usize = 0;
-
             table.* = .{
                 .snapshot_min = undefined,
-                .values = table.values[runtime_zero..runtime_zero],
+                .values = table.values[0..0],
                 .free = true,
             };
         }

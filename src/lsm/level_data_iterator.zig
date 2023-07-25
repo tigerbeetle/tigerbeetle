@@ -73,8 +73,8 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             /// Table data block checksums.
             checksums: []const u128,
         };
-        pub const IndexCallback = fn (it: *LevelTableValueBlockIterator) DataBlockAddresses;
-        pub const DataCallback = fn (it: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void;
+        pub const IndexCallback = *const fn (it: *LevelTableValueBlockIterator) DataBlockAddresses;
+        pub const DataCallback = *const fn (it: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void;
         pub const Callback = struct {
             on_index: IndexCallback,
             on_data: DataCallback,

@@ -247,7 +247,7 @@ pub const IO = struct {
         next: ?*Completion = null,
         operation: Operation,
         context: ?*anyopaque,
-        callback: fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
+        callback: *const fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
@@ -303,7 +303,7 @@ pub const IO = struct {
         fn complete(completion: *Completion, callback_tracer_slot: *?tracer.SpanStart) void {
             switch (completion.operation) {
                 .accept => {
-                    const result = blk: {
+                    const result: anyerror!os.socket_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -333,7 +333,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .close => {
-                    const result = blk: {
+                    const result: anyerror!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
@@ -351,7 +351,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .connect => {
-                    const result = blk: {
+                    const result: anyerror!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -385,7 +385,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .read => {
-                    const result = blk: {
+                    const result: anyerror!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -415,7 +415,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .recv => {
-                    const result = blk: {
+                    const result: anyerror!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -443,7 +443,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .send => {
-                    const result = blk: {
+                    const result: anyerror!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {
@@ -479,7 +479,7 @@ pub const IO = struct {
                 },
                 .timeout => {
                     assert(completion.result < 0);
-                    const result = switch (@intToEnum(os.E, -completion.result)) {
+                    const result: anyerror!void = switch (@intToEnum(os.E, -completion.result)) {
                         .INTR => {
                             completion.io.enqueue(completion);
                             return;
@@ -491,7 +491,7 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .write => {
-                    const result = blk: {
+                    const result: anyerror!usize = blk: {
                         if (completion.result < 0) {
                             const err = switch (@intToEnum(os.E, -completion.result)) {
                                 .INTR => {

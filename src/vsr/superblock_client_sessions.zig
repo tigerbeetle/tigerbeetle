@@ -134,10 +134,10 @@ pub const ClientSessions = struct {
         assert(source.len <= encode_size_max);
 
         size = std.mem.alignForward(size, @alignOf(vsr.Header));
-        const headers = mem.bytesAsSlice(
+        const headers = @alignCast(@alignOf(vsr.Header), mem.bytesAsSlice(
             vsr.Header,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
-        );
+        ));
         size += mem.sliceAsBytes(headers).len;
 
         size = std.mem.alignForward(size, @alignOf(u64));

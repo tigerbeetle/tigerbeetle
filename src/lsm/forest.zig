@@ -10,13 +10,13 @@ const vsr = @import("../vsr.zig");
 const GridType = @import("grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 
-pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type {
-    var groove_fields: []const std.builtin.TypeInfo.StructField = &.{};
-    var groove_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
+pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
+    var groove_fields: []const std.builtin.Type.StructField = &.{};
+    var groove_options_fields: []const std.builtin.Type.StructField = &.{};
 
-    for (std.meta.fields(@TypeOf(groove_config))) |field| {
-        const Groove = @field(groove_config, field.name);
-        groove_fields = groove_fields ++ [_]std.builtin.TypeInfo.StructField{
+    for (std.meta.fields(@TypeOf(groove_cfg))) |field| {
+        const Groove = @field(groove_cfg, field.name);
+        groove_fields = groove_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
                 .field_type = Groove,
@@ -26,7 +26,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             },
         };
 
-        groove_options_fields = groove_options_fields ++ [_]std.builtin.TypeInfo.StructField{
+        groove_options_fields = groove_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
                 .field_type = Groove.Options,
@@ -37,7 +37,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         };
     }
 
-    const Grooves = @Type(.{
+    const _Grooves = @Type(.{
         .Struct = .{
             .layout = .Auto,
             .fields = groove_fields,
@@ -59,7 +59,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         // Verify that every tree id is unique.
         comptime var ids: []const u128 = &.{};
 
-        inline for (std.meta.fields(Grooves)) |groove_field| {
+        inline for (std.meta.fields(_Grooves)) |groove_field| {
             const Groove = groove_field.field_type;
 
             for (std.meta.fields(@TypeOf(Groove.config.ids))) |field| {
@@ -77,15 +77,15 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         const Grid = GridType(Storage);
         const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPoolType(Storage, 10);
 
-        const Callback = fn (*Forest) void;
+        const Callback = *const fn (*Forest) void;
         const JoinOp = enum {
             compacting,
             checkpoint,
             open,
         };
 
-        pub const groove_config = groove_config;
-        pub const Grooves = Grooves;
+        pub const groove_config = groove_cfg;
+        pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;
 
         join_op: ?JoinOp = null,
@@ -193,7 +193,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
 
                 pub fn groove_callback(
                     comptime groove_field_name: []const u8,
-                ) fn (*GrooveFor(groove_field_name)) void {
+                ) *const fn (*GrooveFor(groove_field_name)) void {
                     return struct {
                         fn groove_cb(groove: *GrooveFor(groove_field_name)) void {
                             const grooves = @fieldParentPtr(Grooves, groove_field_name, groove);

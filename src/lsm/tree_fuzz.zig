@@ -1,6 +1,5 @@
 const std = @import("std");
 const testing = std.testing;
-const allocator = testing.allocator;
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
@@ -9,6 +8,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
+const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 const tracer = @import("../tracer.zig");
@@ -33,8 +33,8 @@ pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 // TODO Test grid corruption
 
-const Key = packed struct {
-    id: u64 align(@alignOf(u64)),
+const Key = extern struct {
+    id: u64,
 
     const Value = packed struct {
         id: u64,
@@ -87,6 +87,7 @@ const FuzzOp = union(enum) {
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
 const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
 const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
+const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const cluster = 32;
 const replica = 4;
@@ -298,13 +299,24 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn get(env: *Environment, key: Key) ?*const Key.Value {
             env.change_state(.fuzzing, .tree_lookup);
 
-            if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max.?, key)) |value| {
-                env.change_state(.tree_lookup, .fuzzing);
-                return Tree.unwrap_tombstone(value);
-            }
-
             env.lookup_value = null;
-            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max.?, key);
+            switch (env.tree.lookup_from_memory(snapshot_latest, key)) {
+                .negative => {
+                    get_callback(&env.lookup_context, null);
+                },
+                .positive => |value| {
+                    get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
+                },
+                .possible => |level_min| {
+                    env.tree.lookup_from_levels_storage(.{
+                        .callback = get_callback,
+                        .context = &env.lookup_context,
+                        .snapshot = env.tree.lookup_snapshot_max.?,
+                        .key = key,
+                        .level_min = level_min,
+                    });
+                },
+            }
             env.tick_until_state_change(.tree_lookup, .fuzzing);
             return env.lookup_value;
         }
@@ -369,9 +381,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 // Apply fuzz_op to the tree and the model.
                 switch (fuzz_op) {
-                    .compact => |compact| {
-                        env.compact(compact.op);
-                        if (compact.checkpoint) env.checkpoint(compact.op);
+                    .compact => |c| {
+                        env.compact(c.op);
+                        if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
                         if (table_usage == .secondary_index) {
@@ -631,7 +643,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe do some scans.
         .scan = if (random.boolean()) 0 else constants.lsm_batch_multiple,
     };
-    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
     log.info("puts_since_compact_max = {}", .{puts_since_compact_max});
     log.info("compacts_per_checkpoint = {}", .{compacts_per_checkpoint});
@@ -730,7 +742,7 @@ pub fn main() !void {
         .fault_atlas = &storage_fault_atlas,
     };
 
-    const fuzz_op_count = @minimum(
+    const fuzz_op_count = @min(
         fuzz_args.events_max orelse @as(usize, 1E7),
         fuzz.random_int_exponential(random, usize, 1E6),
     );
@@ -744,11 +756,8 @@ pub fn main() !void {
 
     // TODO Use inline switch after upgrading to zig 0.10
     switch (table_usage) {
-        .general => {
-            try EnvironmentType(.general).run(&storage, fuzz_ops);
-        },
-        .secondary_index => {
-            try EnvironmentType(.secondary_index).run(&storage, fuzz_ops);
+        inline else => |usage| {
+            try EnvironmentType(usage).run(&storage, fuzz_ops);
         },
     }
 

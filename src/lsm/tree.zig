@@ -5,12 +5,13 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const os = std.os;
+const maybe = stdx.maybe;
+const div_ceil = stdx.div_ceil;
 
 const log = std.log.scoped(.tree);
 const tracer = @import("../tracer.zig");
 
 const stdx = @import("../stdx.zig");
-const div_ceil = stdx.div_ceil;
 const constants = @import("../constants.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
@@ -86,11 +87,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         const Grid = @import("grid.zig").GridType(Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
+        const KeyRange = Manifest.KeyRange;
+
         pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
         const CompactionType = @import("compaction.zig").CompactionType;
         const Compaction = CompactionType(Table, Tree, Storage);
+        pub const LookupMemoryResult = union(enum) {
+            negative,
+            positive: *const Value,
+            possible: u8,
+        };
 
         grid: *Grid,
         config: Config,
@@ -124,7 +132,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// (When recovering from a checkpoint, compaction_op starts at op_checkpoint).
         compaction_op: ?u64 = null,
 
-        /// The maximum snapshot which is safe to prefetch from.
         /// The minimum snapshot which can see the mutable table.
         ///
         /// This field ensures that the tree never queries the output tables of a running
@@ -144,19 +151,22 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             none,
             /// We're at the end of a half-bar.
             /// Call this callback when all current compactions finish.
-            awaiting: fn (*Tree) void,
+            awaiting: *const fn (*Tree) void,
             /// We're at the end of some other beat.
             /// Call this on the next tick.
-            next_tick: fn (*Tree) void,
+            next_tick: *const fn (*Tree) void,
         } = .none,
         compaction_next_tick: Grid.NextTick = undefined,
 
-        checkpoint_callback: ?fn (*Tree) void = null,
-        open_callback: ?fn (*Tree) void = null,
+        checkpoint_callback: ?*const fn (*Tree) void = null,
+        open_callback: ?*const fn (*Tree) void = null,
 
         tracer_slot: ?tracer.SpanStart = null,
         filter_block_hits: u64 = 0,
         filter_block_misses: u64 = 0,
+
+        /// The range of keys in this tree at snapshot_latest.
+        key_range: ?KeyRange = null,
 
         /// (Constructed by the Forest.)
         pub const Config = struct {
@@ -283,13 +293,34 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.table_mutable.remove(value);
         }
 
+        pub fn key_range_update(tree: *Tree, key: Key) void {
+            if (tree.key_range) |*key_range| {
+                if (compare_keys(key, key_range.key_min) == .lt) key_range.key_min = key;
+                if (compare_keys(key, key_range.key_max) == .gt) key_range.key_max = key;
+            } else {
+                tree.key_range = KeyRange{ .key_min = key, .key_max = key };
+            }
+        }
+
+        /// Returns True if the given key may be present in the Tree, False if the key is
+        /// guaranteed to not be present.
+        ///
+        /// Specifically, it checks whether the key exists within the Tree's key range.
+        pub fn key_range_contains(tree: *const Tree, snapshot: u64, key: Key) bool {
+            if (snapshot == snapshot_latest) {
+                return tree.key_range != null and
+                    compare_keys(key, tree.key_range.?.key_min) != .lt and
+                    compare_keys(key, tree.key_range.?.key_max) != .gt;
+            } else {
+                return true;
+            }
+        }
+
         /// Returns the value from the mutable or immutable table (possibly a tombstone),
         /// if one is available for the specified snapshot.
-        pub fn lookup_from_memory(tree: *Tree, snapshot: u64, key: Key) ?*const Value {
-            assert(tree.lookup_snapshot_max.? >= snapshot);
-
-            if (tree.lookup_snapshot_max.? == snapshot) {
-                if (tree.table_mutable.get(key)) |value| return value;
+        pub fn lookup_from_memory(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
+            if (snapshot >= tree.lookup_snapshot_max.?) {
+                if (tree.table_mutable.get(key)) |value| return .{ .positive = value };
             } else {
                 // The mutable table is converted to an immutable table when a snapshot is created.
                 // This means that a past snapshot will never be able to see the mutable table.
@@ -297,38 +328,140 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             if (!tree.table_immutable.free and tree.table_immutable.snapshot_min <= snapshot) {
-                if (tree.table_immutable.get(key)) |value| return value;
+                if (tree.table_immutable.get(key)) |value| return .{ .positive = value };
             } else {
                 // If the immutable table is invisible, then the mutable table is also invisible.
                 assert(tree.table_immutable.free or snapshot != tree.lookup_snapshot_max.?);
             }
 
-            return null;
+            return tree.lookup_from_levels_cache(snapshot, key);
+        }
+
+        /// Returns:
+        /// - .negative if the key does not exist in the Manifest.
+        /// - .positive if the key exists in the Manifest, along with the associated value.
+        /// - .possible if the key may exist in the Manifest but its existence cannot be
+        ///  ascertained without IO, along with the level number at which IO must be performed.
+        ///
+        /// This function attempts to fetch the index, filter & data blocks for the tables that
+        /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
+        /// the existence of the key in the filter/data block. If any of the blocks needed to
+        /// ascertain the existence of the key are not in the Grid cache, it bails out.
+        fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
+            const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
+            var iterator = tree.manifest.lookup(snapshot, key, 0);
+            while (iterator.next()) |table| {
+                const index_block = tree.grid.read_block_from_cache(
+                    table.address,
+                    table.checksum,
+                ) orelse {
+                    // Index block not in cache. We cannot rule out existence without I/O,
+                    // and therefore bail out.
+                    return .{ .possible = iterator.level - 1 };
+                };
+
+                const key_blocks = Table.index_blocks_for_key(index_block, key);
+                switch (tree.cached_filter_block_search(
+                    key_blocks.filter_block_address,
+                    key_blocks.filter_block_checksum,
+                    fingerprint,
+                )) {
+                    .negative => {
+                        if (constants.verify) {
+                            assert(tree.cached_data_block_search(
+                                key_blocks.data_block_address,
+                                key_blocks.data_block_checksum,
+                                key,
+                            ) != .positive);
+                        }
+                        // Filter block indicates that the key is not present in the data block,
+                        // move on to the next table that could contain the key.
+                        continue;
+                    },
+                    .possible, .block_not_in_cache => {
+                        // Give yourself another fighting chance to rule out the existence of
+                        // the key; search for the data block in the grid cache.
+                    },
+                }
+
+                switch (tree.cached_data_block_search(
+                    key_blocks.data_block_address,
+                    key_blocks.data_block_checksum,
+                    key,
+                )) {
+                    .negative => {},
+                    // Key present in the data block.
+                    .positive => |value| return .{ .positive = value },
+                    // Data block was not found in the grid cache. We cannot rule out
+                    // the existence of the key without I/O, and therefore bail out.
+                    .block_not_in_cache => return .{ .possible = iterator.level - 1 },
+                }
+            }
+            // Key not present in the Manifest.
+            return .negative;
+        }
+
+        fn cached_filter_block_search(
+            tree: *Tree,
+            address: u64,
+            checksum: u128,
+            fingerprint: bloom_filter.Fingerprint,
+        ) enum { negative, possible, block_not_in_cache } {
+            if (tree.grid.read_block_from_cache(address, checksum)) |filter_block| {
+                const filter_schema = schema.TableFilter.from(filter_block);
+                const filter_bytes = filter_schema.block_filter_const(filter_block);
+                if (!bloom_filter.may_contain(fingerprint, filter_bytes)) {
+                    return .negative;
+                } else {
+                    return .possible;
+                }
+            } else {
+                return .block_not_in_cache;
+            }
+        }
+
+        fn cached_data_block_search(
+            tree: *Tree,
+            address: u64,
+            checksum: u128,
+            key: Key,
+        ) union(enum) {
+            positive: *const Value,
+            negative,
+            block_not_in_cache,
+        } {
+            if (tree.grid.read_block_from_cache(address, checksum)) |data_block| {
+                if (Table.data_block_search(data_block, key)) |value| {
+                    return .{ .positive = value };
+                } else {
+                    return .negative;
+                }
+            } else {
+                return .block_not_in_cache;
+            }
         }
 
         /// Call this function only after checking `lookup_from_memory()`.
-        pub fn lookup_from_levels(
-            tree: *Tree,
-            callback: fn (*LookupContext, ?*const Value) void,
+        pub fn lookup_from_levels_storage(tree: *Tree, parameters: struct {
+            callback: *const fn (*LookupContext, ?*const Value) void,
             context: *LookupContext,
             snapshot: u64,
             key: Key,
-        ) void {
-            assert(tree.lookup_snapshot_max.? >= snapshot);
-            if (constants.verify) {
-                // The caller is responsible for checking the mutable table.
-                assert(tree.lookup_from_memory(snapshot, key) == null);
-            }
-
+            level_min: u8,
+        }) void {
             var index_block_count: u8 = 0;
             var index_block_addresses: [constants.lsm_levels]u64 = undefined;
             var index_block_checksums: [constants.lsm_levels]u128 = undefined;
             {
-                var it = tree.manifest.lookup(snapshot, key);
+                var it = tree.manifest.lookup(
+                    parameters.snapshot,
+                    parameters.key,
+                    parameters.level_min,
+                );
                 while (it.next()) |table| : (index_block_count += 1) {
-                    assert(table.visible(snapshot));
-                    assert(compare_keys(table.key_min, key) != .gt);
-                    assert(compare_keys(table.key_max, key) != .lt);
+                    assert(table.visible(parameters.snapshot));
+                    assert(compare_keys(table.key_min, parameters.key) != .gt);
+                    assert(compare_keys(table.key_max, parameters.key) != .lt);
 
                     index_block_addresses[index_block_count] = table.address;
                     index_block_checksums[index_block_count] = table.checksum;
@@ -336,28 +469,28 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             if (index_block_count == 0) {
-                callback(context, null);
+                parameters.callback(parameters.context, null);
                 return;
             }
 
             // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
-            const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
+            const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(parameters.key));
 
-            context.* = .{
+            parameters.context.* = .{
                 .tree = tree,
                 .completion = undefined,
 
-                .key = key,
+                .key = parameters.key,
                 .fingerprint = fingerprint,
 
                 .index_block_count = index_block_count,
                 .index_block_addresses = index_block_addresses,
                 .index_block_checksums = index_block_checksums,
 
-                .callback = callback,
+                .callback = parameters.callback,
             };
 
-            context.read_index_block();
+            parameters.context.read_index_block();
         }
 
         pub const LookupContext = struct {
@@ -381,7 +514,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 checksum: u128,
             } = null,
 
-            callback: fn (*Tree.LookupContext, ?*const Value) void,
+            callback: *const fn (*Tree.LookupContext, ?*const Value) void,
 
             fn read_index_block(context: *LookupContext) void {
                 assert(context.data_block == null);
@@ -496,7 +629,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             return if (value == null or tombstone(value.?)) null else value.?;
         }
 
-        pub fn open(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn open(tree: *Tree, callback: *const fn (*Tree) void) void {
             assert(tree.open_callback == null);
             tree.open_callback = callback;
 
@@ -514,6 +647,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             const callback = tree.open_callback.?;
             tree.open_callback = null;
+
+            assert(tree.key_range == null);
+            tree.key_range = manifest.key_range();
+            maybe(tree.key_range == null);
+
             callback(tree);
         }
 
@@ -560,7 +698,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         ///
         /// Compactions start on the down beat of a half bar, using 0-based beats.
         /// For example, if there are 4 beats in a bar, start on beat 0 or beat 2.
-        pub fn compact(tree: *Tree, callback: fn (*Tree) void, op: u64) void {
+        pub fn compact(tree: *Tree, callback: *const fn (*Tree) void, op: u64) void {
             assert(tree.compaction_phase == .idle);
             assert(tree.compaction_callback == .none);
             assert(op != 0);
@@ -960,7 +1098,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(!tree.table_immutable.free);
         }
 
-        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn checkpoint(tree: *Tree, callback: *const fn (*Tree) void) void {
             // Assert no outstanding compact_tick() work.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == .none);
@@ -1022,7 +1160,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             snapshot: u64,
             query: RangeQuery,
 
-            pub fn next(callback: fn (result: ?Value) void) void {
+            pub fn next(callback: *const fn (result: ?Value) void) void {
                 _ = callback;
             }
         };
@@ -1162,4 +1300,34 @@ test "table_count_max_for_level/tree" {
     try expectEqual(@as(u32, 4680 + 32768), table_count_max_for_tree(8, 5));
     try expectEqual(@as(u32, 37448 + 262144), table_count_max_for_tree(8, 6));
     try expectEqual(@as(u32, 299592 + 2097152), table_count_max_for_tree(8, 7));
+}
+
+test "TreeType" {
+    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const Table = @import("table.zig").TableType(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+        constants.state_machine_config.lsm_batch_multiple * 1024,
+        .secondary_index,
+    );
+
+    const Storage = @import("../storage.zig").Storage;
+    const Tree = TreeType(Table, Storage);
+
+    _ = Tree.init;
+    _ = Tree.deinit;
+    _ = Tree.reset;
+    _ = Tree.put;
+    _ = Tree.remove;
+    _ = Tree.lookup_from_memory;
+    _ = Tree.lookup_from_levels_storage;
+    _ = Tree.open;
+    _ = Tree.compact;
+    _ = Tree.compact_end;
+    _ = Tree.checkpoint;
 }

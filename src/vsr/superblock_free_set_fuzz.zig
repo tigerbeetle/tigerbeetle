@@ -12,7 +12,7 @@ const fuzz = @import("../testing/fuzz.zig");
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 pub fn main() !void {
-    const allocator = std.testing.allocator;
+    const allocator = fuzz.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
     var prng = std.rand.DefaultPrng.init(args.seed);
@@ -142,7 +142,7 @@ fn generate_events(
     ));
     errdefer allocator.free(events);
 
-    log.info("event_distribution = {d:.2}", .{event_distribution});
+    log.info("event_distribution = {:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
     const reservation_blocks_mean = 1 + random.uintLessThan(usize, @divFloor(blocks_count, 20));
@@ -227,9 +227,10 @@ const FreeSetModel = struct {
     }
 
     pub fn highest_address_acquired(set: FreeSetModel) ?u64 {
-        const block = set.blocks_acquired.iterator(.{
+        var it = set.blocks_acquired.iterator(.{
             .direction = .reverse,
-        }).next() orelse return null;
+        });
+        const block = it.next() orelse return null;
         return block + 1;
     }
 
