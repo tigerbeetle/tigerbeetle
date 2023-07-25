@@ -25,7 +25,7 @@ const magic_number: u128 = 312960301372567410560647846651901451202;
 /// On-disk format for AOF Metadata.
 pub const AOFEntryMetadata = extern struct {
     comptime {
-        assert(@bitSizeOf(AOFEntryMetadata) == @sizeOf(AOFEntryMetadata) * 8);
+        assert(stdx.no_padding(AOFEntryMetadata));
     }
 
     primary: u64,
@@ -33,10 +33,9 @@ pub const AOFEntryMetadata = extern struct {
     reserved: [64]u8 = std.mem.zeroes([64]u8),
 };
 
-/// On-disk format for full AOF Entry.
 pub const AOFEntry = extern struct {
     comptime {
-        assert(@bitSizeOf(AOFEntry) == @sizeOf(AOFEntry) * 8);
+        assert(stdx.no_padding(AOFEntry));
     }
 
     /// In case of extreme corruption, start each entry with a fixed random integer,
