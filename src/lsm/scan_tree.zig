@@ -26,13 +26,13 @@ const LevelTableValueBlockIteratorType =
 /// Scans a range of keys over a IndexTree, in ascending or descending order.
 pub fn ScanTreeType(
     comptime Context: type,
-    comptime Tree: type,
+    comptime Tree_: type,
     comptime Storage: type,
 ) type {
     return struct {
         const ScanTree = @This();
 
-        pub const Callback = fn (context: Context, scan: *ScanTree) void;
+        pub const Callback = *const fn (context: Context, scan: *ScanTree) void;
 
         const Grid = GridType(Storage);
         const BlockPtr = Grid.BlockPtr;
@@ -43,7 +43,7 @@ pub fn ScanTreeType(
 
         const ScanBuffer = ScanBufferType(Storage);
 
-        const Tree = Tree;
+        const Tree = Tree_;
         const Table = Tree.Table;
         const Key = Table.Key;
         const Value = Table.Value;

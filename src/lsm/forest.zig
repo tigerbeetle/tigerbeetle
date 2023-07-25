@@ -197,7 +197,11 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                     return struct {
                         fn groove_cb(groove: *GrooveFor(groove_field_name)) void {
                             const grooves = @fieldParentPtr(Grooves, groove_field_name, groove);
-                            const forest = @fieldParentPtr(Forest, "grooves", grooves);
+                            const forest = @fieldParentPtr(
+                                Forest,
+                                "grooves",
+                                @alignCast(@alignOf(Grooves), grooves),
+                            );
 
                             assert(forest.join_op == join_op);
                             assert(forest.join_callback != null);

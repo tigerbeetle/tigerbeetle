@@ -431,15 +431,15 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                             }
                         }
                     },
-                    .scan => |scan| {
-                        const key_min = Key{ .id = scan.min };
-                        const key_max = Key{ .id = scan.max };
+                    .scan => |scan_range| {
+                        const key_min = Key{ .id = scan_range.min };
+                        const key_max = Key{ .id = scan_range.max };
                         assert(Key.compare_keys(key_min, key_max) != .gt);
 
                         const tree_values = env.scan(
                             key_min,
                             key_max,
-                            scan.direction,
+                            scan_range.direction,
                         );
 
                         // Asserting the positive space:
@@ -463,7 +463,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                             // Asserting direction.
                             if (tree_value_last) |value_last| {
-                                switch (scan.direction) {
+                                switch (scan_range.direction) {
                                     .ascending => assert(
                                         Table.compare_keys(
                                             Table.key_from_value(&tree_value),
@@ -506,7 +506,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                         // Asserting the negative space:
                         // All keys existing in our model must be checked against the scan range.
-                        if (scan.direction == .descending) std.sort.sort(
+                        if (scan_range.direction == .descending) std.sort.sort(
                             Key.Value,
                             tree_values,
                             {},
@@ -542,7 +542,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                                     // be less than the first element or greater than the last element,
                                     // depending on the scan direction.
                                     assert(tree_values.len == scan_results_max);
-                                    switch (scan.direction) {
+                                    switch (scan_range.direction) {
                                         .ascending => assert(Key.compare_keys(
                                             model_value_key,
                                             Key.key_from_value(&tree_values[tree_values.len - 1]),

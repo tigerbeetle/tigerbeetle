@@ -47,7 +47,7 @@ pub fn ScanGrooveType(
         /// Initializes a Scan over the index specified by `index`, searching for an exact match.
         /// Produces the criteria equivalent to
         /// `WHERE field = $value`.
-        /// 
+        ///
         /// Results are sorted by `direction`.
         pub fn equal(
             self: *Self,
@@ -77,7 +77,7 @@ pub fn ScanGrooveType(
         /// Initializes a Scan over the index specified by `field`, searching for a range.
         /// Produces the criteria equivalent to
         /// `WHERE field BETWEEN $min AND $max` (inclusive range).
-        /// 
+        ///
         /// Results are not sorted.
         pub fn between(
             self: *Self,
@@ -109,7 +109,7 @@ pub fn ScanGrooveType(
         /// E.g. S₁ ∪ S₂ ∪ Sₙ.
         /// Produces the criteria equivalent to
         /// `WHERE <condition_1> OR <condition_2> OR <condition_N>`.
-        /// 
+        ///
         /// All scans must yield results sorted in the same direction.
         pub fn set_union(
             self: *Self,
@@ -131,7 +131,7 @@ pub fn ScanGrooveType(
         /// E.g. S₁ ∩ S₂ ∩ Sₙ.
         /// Produces the criteria equivalent to
         /// WHERE <condition_1> AND <condition_2> AND <condition_N>`.
-        /// 
+        ///
         /// All scans must yield results sorted in the same direction.
         pub fn set_intersection(
             self: *Self,
@@ -153,7 +153,7 @@ pub fn ScanGrooveType(
         /// E.g. S₁ - S₂.
         /// Produces the criteria equivalent to
         /// `WHERE <condition_1> AND NOT <condition_2>`.
-        /// 
+        ///
         /// Both scans must yield results sorted in the same direction.
         pub fn set_difference(
             self: *Self,
@@ -221,7 +221,7 @@ pub fn ScanGrooveType(
 }
 
 /// Common `Scan` interface.
-/// 
+///
 /// Allows combining different underlying scans into a sigle output,
 /// for example `(A₁ ∪ A₂) ∩ B` produces the criteria equivalent to
 /// `WHERE (<condition_a1> OR <condition_a2>) AND <condition_b>`.
@@ -245,7 +245,7 @@ fn ScanType(
         /// var scan3: *Scan = scan_groove.set_union(scan1, scan2); // Merge both scans.
         /// scan3.read(&context); // This scan will be returned during the callback.
         /// ```
-        pub const Callback = fn (*Context, *Scan) void;
+        pub const Callback = *const fn (*Context, *Scan) void;
         pub const Context = struct {
             callback: Callback,
         };
@@ -255,68 +255,78 @@ fn ScanType(
         dispatcher: Dispatcher,
 
         pub inline fn read(scan: *Scan, context: *Context) void {
-            // TODO(zig): Replace with inline switch:
-            // https://github.com/ziglang/zig/issues/7224.
-            const Tag = std.meta.Tag(Dispatcher);
-            const active_tag = std.meta.activeTag(scan.dispatcher);
-            inline for (std.meta.fields(Tag)) |field| {
-                if (active_tag == @intToEnum(Tag, field.value)) {
-                    var scan_tree = &@field(scan.dispatcher, field.name);
-                    read_dispatch(scan_tree, context);
-                }
+            switch (scan.dispatcher) {
+                inline else => |*scan_tree, tag| read_dispatch(
+                    tag,
+                    scan_tree,
+                    context,
+                ),
             }
         }
 
-        pub inline fn next(scan: *Scan) error{ReadAgain}!?u64 {
-            // TODO(zig): Replace with inline switch:
-            // https://github.com/ziglang/zig/issues/7224.
-            const Tag = std.meta.Tag(Dispatcher);
-            const active_tag = std.meta.activeTag(scan.dispatcher);
-            inline for (std.meta.fields(Tag)) |field| {
-                if (active_tag == @intToEnum(Tag, field.value)) {
-                    var scan_tree = &@field(scan.dispatcher, field.name);
-                    return if (try scan_tree.next()) |value| timestamp(value) else null;
+        // Comptime generates an specialized callback function for each type.
+        // TODO(Zig): it'd be nice to remove this function and mode this logic to `read`,
+        // but for some reason, the Zig compiler can't resolve the correct type.
+        inline fn read_dispatch(
+            comptime tag: std.meta.Tag(Dispatcher),
+            scan_tree: *std.meta.fieldInfo(Dispatcher, tag).field_type,
+            context: *Context,
+        ) void {
+            const Impl = *std.meta.fieldInfo(Dispatcher, tag).field_type;
+
+            scan_tree.read(context, struct {
+                fn on_read_callback(ctx: *Context, ptr: Impl) void {
+                    ctx.callback(ctx, parent(tag, ptr));
                 }
-            } else unreachable;
+            }.on_read_callback);
+        }
+
+        pub inline fn next(scan: *Scan) error{ReadAgain}!?u64 {
+            return switch (scan.dispatcher) {
+                // Comptime generates an specialized callback function for each type.
+                inline else => |*scan_tree| if (try scan_tree.next()) |value|
+                    timestamp(value)
+                else
+                    null,
+            };
         }
 
         /// Returns the direction of the output timestamp values,
         /// or null if the scan can't yield sorted timestamps.
         inline fn timestamp_direction(scan: *Scan) ?Direction {
-            // TODO(zig): Replace with inline switch:
-            // https://github.com/ziglang/zig/issues/7224.
-            const Tag = std.meta.Tag(Dispatcher);
-            const active_tag = std.meta.activeTag(scan.dispatcher);
-            inline for (std.meta.fields(Tag)) |field| {
-                if (active_tag == @intToEnum(Tag, field.value)) {
-                    const ScanTree = @TypeOf(@field(scan.dispatcher, field.name));
-                    var scan_tree = &@field(scan.dispatcher, field.name);
-                    if (@hasField(ScanTree, "key_min") and @hasField(ScanTree, "key_max")) {
+            switch (scan.dispatcher) {
+                inline else => |*scan_tree| {
+                    const ScanTree = @TypeOf(scan_tree.*);
+                    if (@hasField(ScanTree, "key_min") and
+                        @hasField(ScanTree, "key_max"))
+                    {
                         const exact_match = scan_tree.key_min.field == scan_tree.key_max.field;
                         return if (exact_match) scan_tree.direction else null;
                     } else {
                         return scan_tree.direction;
                     }
-                }
-            } else unreachable;
+                },
+            }
         }
 
-        /// Comptime generates an specialized callback function for each type.
-        inline fn read_dispatch(impl: anytype, context: *Context) void {
-            const Impl = @TypeOf(impl);
-            comptime assert(std.meta.trait.isSingleItemPtr(Impl));
+        // TODO(batiati): Move this function to stdx, so we can share the same
+        // logic with PrefetchContext unions.
+        //
+        // TODO(Zig): No need for this cast once Zig is upgraded
+        // and @fieldParentPtr() can be used for unions.
+        // See: https://github.com/ziglang/zig/issues/6611.
+        inline fn parent(
+            comptime field: std.meta.Tag(Dispatcher),
+            impl: anytype,
+        ) *Scan {
+            var stub = @unionInit(Dispatcher, @tagName(field), undefined);
+            const stub_field_ptr = &@field(stub, @tagName(field));
+            comptime assert(@TypeOf(stub_field_ptr) == @TypeOf(impl));
 
-            impl.read(context, struct {
-                fn on_read_callback(ctx: *Context, ptr: Impl) void {
-                    // TODO(Zig): No need for this cast once Zig is upgraded
-                    // and @fieldParentPtr() can be used for unions.
-                    // See: https://github.com/ziglang/zig/issues/6611.
-                    const dispatcher =
-                        @ptrCast(*Dispatcher, @alignCast(@alignOf(Dispatcher), ptr));
-                    const scan = @fieldParentPtr(Scan, "dispatcher", dispatcher);
-                    ctx.callback(ctx, scan);
-                }
-            }.on_read_callback);
+            const offset = @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
+            const dispatcher_ptr = @intToPtr(*Dispatcher, @ptrToInt(impl) - offset);
+
+            return @fieldParentPtr(Scan, "dispatcher", dispatcher_ptr);
         }
 
         inline fn timestamp(value: anytype) u64 {
@@ -329,7 +339,7 @@ fn ScanType(
         /// Generates a tagged union with an specialized ScanTree field for each
         /// index on the groove, plus one field for each `set` operation that shares
         /// the same interface.
-        /// 
+        ///
         /// Example:
         /// ```
         /// const Dispatcher = union(enum) {
@@ -342,7 +352,7 @@ fn ScanType(
         /// };
         /// ```
         fn DispatcherType() type {
-            var type_info = std.builtin.TypeInfo{
+            var type_info = std.builtin.Type{
                 .Union = .{
                     .layout = .Auto,
                     .tag_type = null,
@@ -356,7 +366,7 @@ fn ScanType(
                 const IndexTree = field.field_type;
                 const ScanTree = ScanTreeType(*Context, IndexTree, Storage);
                 type_info.Union.fields = type_info.Union.fields ++
-                    [_]std.builtin.TypeInfo.UnionField{.{
+                    [_]std.builtin.Type.UnionField{.{
                     .name = field.name,
                     .field_type = ScanTree,
                     .alignment = @alignOf(ScanTree),
@@ -366,21 +376,21 @@ fn ScanType(
             // Add fields for set operations that share the same interface:
             const ScanMergeUnion = ScanMergeUnionType(Scan, scans_max);
             type_info.Union.fields = type_info.Union.fields ++
-                [_]std.builtin.TypeInfo.UnionField{.{
+                [_]std.builtin.Type.UnionField{.{
                 .name = "set_union",
                 .field_type = ScanMergeUnion,
                 .alignment = @alignOf(ScanMergeUnion),
             }};
             const ScanMergeIntersection = ScanMergeIntersectionType(Scan, scans_max);
             type_info.Union.fields = type_info.Union.fields ++
-                [_]std.builtin.TypeInfo.UnionField{.{
+                [_]std.builtin.Type.UnionField{.{
                 .name = "set_intersection",
                 .field_type = ScanMergeIntersection,
                 .alignment = @alignOf(ScanMergeIntersection),
             }};
             const ScanMergeDifference = ScanMergeDifferenceType(Scan);
             type_info.Union.fields = type_info.Union.fields ++
-                [_]std.builtin.TypeInfo.UnionField{.{
+                [_]std.builtin.Type.UnionField{.{
                 .name = "set_difference",
                 .field_type = ScanMergeDifference,
                 .alignment = @alignOf(ScanMergeDifference),
@@ -389,7 +399,7 @@ fn ScanType(
             // We need a tagged union for dynamic dispatching.
             type_info.Union.tag_type = blk: {
                 const union_fields = type_info.Union.fields;
-                var tag_fields: [union_fields.len]std.builtin.TypeInfo.EnumField =
+                var tag_fields: [union_fields.len]std.builtin.Type.EnumField =
                     undefined;
                 for (union_fields) |union_field, i| {
                     tag_fields[i] = .{
@@ -419,7 +429,7 @@ fn ScanMergeUnionType(
 ) type {
     return struct {
         const Self = @This();
-        pub const Callback = fn (context: *Scan.Context, self: *Self) void;
+        pub const Callback = *const fn (context: *Scan.Context, self: *Self) void;
 
         const BoundedArray = std.BoundedArray(struct {
             scan: *Scan,
@@ -595,7 +605,7 @@ fn FetcherType(comptime Scan: type, comptime Groove: type, comptime Storage: typ
 
         pub const Object = Groove.ObjectTree.Table.Value;
 
-        pub const Callback = fn (*Context, *Self) void;
+        pub const Callback = *const fn (*Context, *Self) void;
         pub const Context = struct {
             callback: Callback,
         };
@@ -606,66 +616,82 @@ fn FetcherType(comptime Scan: type, comptime Groove: type, comptime Storage: typ
             index_produced: ?usize = null,
 
             fn next(lookup: *Lookup) void {
-                // We need to keep the order of the results, so each `Fetcher` acquires the index
-                // which will place the result into the buffer.
-                if (lookup.index_produced) |index| {
-                    lookup.parent.buffer_produced_len = std.math.max(
-                        lookup.parent.buffer_produced_len,
-                        index + 1,
-                    );
-                    assert(lookup.parent.buffer_produced_len <= lookup.parent.buffer.len);
-                }
+                while (true) {
+                    // We need to keep the order of the results, so each `Fetcher` acquires
+                    // the index which will place the result into the buffer.
+                    if (lookup.index_produced) |index| {
+                        lookup.parent.buffer_produced_len = std.math.max(
+                            lookup.parent.buffer_produced_len,
+                            index + 1,
+                        );
+                        assert(lookup.parent.buffer_produced_len <= lookup.parent.buffer.len);
+                    }
 
-                switch (lookup.parent.state) {
-                    .idle => unreachable,
-                    .scan, .finished => return lookup.parent.lookup_finished(),
-                    .lookup => {
-                        lookup.index_produced = blk: {
-                            const index_next = lookup.parent.buffer_producing_index + 1;
-                            if (index_next > lookup.parent.buffer.len) {
-                                // The provided buffer was exhausted.
+                    switch (lookup.parent.state) {
+                        .idle => unreachable,
+                        .scan, .finished => {
+                            lookup.parent.lookup_finished();
+                            return;
+                        },
+                        .lookup => {
+                            lookup.index_produced = blk: {
+                                const index_next = lookup.parent.buffer_producing_index + 1;
+                                if (index_next > lookup.parent.buffer.len) {
+                                    // The provided buffer was exhausted.
+                                    lookup.parent.lookup_finished();
+                                    return;
+                                }
+                                defer lookup.parent.buffer_producing_index = index_next;
+                                break :blk lookup.parent.buffer_producing_index;
+                            };
+
+                            const timestamp = lookup.parent.scan.next() catch |err| switch (err) {
+                                error.ReadAgain => {
+                                    // The scan needs to be buffered again.
+                                    lookup.parent.state = .scan;
+                                    lookup.parent.lookup_finished();
+                                    return;
+                                },
+                            } orelse {
+                                // Reached the end of the scan.
+                                lookup.parent.state = .finished;
                                 lookup.parent.lookup_finished();
                                 return;
+                            };
+
+                            switch (lookup.parent.groove.objects.lookup_from_memory(
+                                lookup.lookup_snapshot(),
+                                timestamp,
+                            )) {
+                                // Since the scan already found the key,
+                                // we don't expected `negative` here.
+                                .negative => unreachable,
+
+                                // Object cached in memory,
+                                // just continue the loop to fetch the next one.
+                                .positive => |object| {
+                                    lookup.parent.buffer[lookup.index_produced.?] = object.*;
+                                    continue;
+                                },
+
+                                // Object need to be loaded from storage.
+                                .possible => |level_min| {
+                                    lookup.parent.groove.objects.lookup_from_levels_storage(.{
+                                        .callback = lookup_callback,
+                                        .context = &lookup.lookup_context,
+                                        .snapshot = lookup.lookup_snapshot(),
+                                        .key = timestamp,
+                                        .level_min = level_min,
+                                    });
+                                    return;
+                                },
                             }
-                            defer lookup.parent.buffer_producing_index = index_next;
-                            break :blk lookup.parent.buffer_producing_index;
-                        };
+                        },
+                    }
 
-                        const timestamp = lookup.parent.scan.next() catch |err| switch (err) {
-                            error.ReadAgain => {
-                                // The scan needs to be buffered again.
-                                lookup.parent.state = .scan;
-                                return lookup.parent.lookup_finished();
-                            },
-                        } orelse {
-                            // Reached the end of the scan.
-                            lookup.parent.state = .finished;
-                            return lookup.parent.lookup_finished();
-                        };
-
-                        lookup.lookup_with_timestamp(timestamp);
-                    },
+                    // We can't run infinite loop.
+                    unreachable;
                 }
-            }
-
-            fn lookup_with_timestamp(lookup: *Lookup, timestamp: u64) void {
-                assert(lookup.index_produced != null);
-
-                if (lookup.parent.groove.objects.lookup_from_memory(
-                    lookup.lookup_snapshot(),
-                    timestamp,
-                )) |object| {
-                    lookup.parent.buffer[lookup.index_produced.?] = object.*;
-                    lookup.next();
-                    return;
-                }
-
-                lookup.parent.groove.objects.lookup_from_levels(
-                    lookup_callback,
-                    &lookup.lookup_context,
-                    lookup.lookup_snapshot(),
-                    timestamp,
-                );
             }
 
             fn lookup_callback(

@@ -528,7 +528,7 @@ pub fn GrooveType(
                 .prefetch_objects = prefetch_objects,
                 .prefetch_snapshot = null,
 
-                .scan = .{},
+                .scan = if (ScanGroove == void) {} else .{},
             };
         }
 
@@ -563,7 +563,7 @@ pub fn GrooveType(
                 .prefetch_keys = groove.prefetch_keys,
                 .prefetch_objects = groove.prefetch_objects,
                 .prefetch_snapshot = null,
-                .scan = .{},
+                .scan = if (ScanGroove == void) {} else .{},
             };
         }
 

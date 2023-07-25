@@ -77,7 +77,7 @@ pub fn ScanBufferPoolType(comptime Storage: type, comptime scan_max: comptime_in
                 errdefer for (scan_buffers[0..i]) |*buffer| buffer.deinit(allocator);
                 scan_buffer.* = try ScanBuffer.init(allocator);
             }
-            errdefer for (scan_contexts[0..i]) |*context| context.deinit(allocator);
+            errdefer for (scan_buffers) |*buffer| buffer.deinit(allocator);
 
             return ScanBufferPool{
                 .scan_buffers = scan_buffers,

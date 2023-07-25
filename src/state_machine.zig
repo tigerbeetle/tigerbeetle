@@ -344,11 +344,11 @@ pub fn StateMachineType(
         checkpoint_callback: ?*const fn (*StateMachine) void = null,
 
         // EXPERIMENTAL, not for real-world usage:
-        scan_context: TransfersGroove.ScanGroove.Scan.Context = .{ .callback = on_scan_read },
+        scan_context: TransfersGroove.ScanGroove.Scan.Context = .{ .callback = &on_scan_read },
         scan_direction: Direction = .descending,
         scan_count: u32 = 0,
         scan_timestamp_last: ?u64 = null,
-        scan_fetcher_context: TransfersGroove.ScanGroove.Fetcher.Context = .{ .callback = on_scan_fetcher_read },
+        scan_fetcher_context: TransfersGroove.ScanGroove.Fetcher.Context = .{ .callback = &on_scan_fetcher_read },
         scan_fetcher_buffer: [64]Transfer = undefined,
 
         tracer_slot: ?tracer.SpanStart = null,
@@ -556,7 +556,7 @@ pub fn StateMachineType(
             // Initializes a Scan with the criteria equivalent to
             // `WHERE credit_account_id = $id OR debit_account_id = $id`.
             const scan = scan_transfers.set_union(
-                &.{
+                &[_]*TransfersGroove.ScanGroove.Scan{
                     // credit_account_id = $id
                     scan_transfers.equal(
                         .credit_account_id,
