@@ -720,6 +720,7 @@ pub fn TestContext(
 
             comptime {
                 assert(stdx.no_padding(Value));
+                assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
             }
         };
 
