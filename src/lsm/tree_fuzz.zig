@@ -754,7 +754,6 @@ pub fn main() !void {
     var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
     defer storage.deinit(allocator);
 
-    // TODO Use inline switch after upgrading to zig 0.10
     switch (table_usage) {
         inline else => |usage| {
             try EnvironmentType(usage).run(&storage, fuzz_ops);

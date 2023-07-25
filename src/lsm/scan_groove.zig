@@ -11,7 +11,7 @@ const TimestampRange = @import("timestamp_range.zig").TimestampRange;
 pub fn ScanGrooveType(
     comptime Groove: type,
     comptime Storage: type,
-    comptime scan_max: comptime_int,
+    comptime scans_max: comptime_int,
 ) type {
     comptime assert(std.meta.fields(Groove.IndexTrees).len > 0);
 
@@ -19,10 +19,10 @@ pub fn ScanGrooveType(
         const Self = @This();
         const ScanBuffer = ScanBufferType(Storage);
 
-        pub const Scan = ScanType(Groove, Storage, scan_max);
+        pub const Scan = ScanType(Groove, Storage, scans_max);
         pub const Fetcher = FetcherType(Scan, Groove, Storage);
 
-        slots: [scan_max]Scan = undefined,
+        slots: [scans_max]Scan = undefined,
         slots_used: u32 = 0,
 
         fetcher: Fetcher = undefined,
@@ -187,7 +187,7 @@ pub fn ScanGrooveType(
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
             init_expression: ScanImplType(field),
         ) *Scan {
-            assert(self.slots_used < scan_max);
+            assert(self.slots_used < scans_max);
             self.slots[self.slots_used].dispatcher = @unionInit(
                 Scan.Dispatcher,
                 @tagName(field),

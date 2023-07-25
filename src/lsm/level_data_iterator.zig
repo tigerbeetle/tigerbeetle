@@ -42,21 +42,20 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
 
             // `tables` contains TableInfo references from ManifestLevel.
             tables: union(enum) {
-                // TODO rename compaction and scan
-                table_info_reference: []const Manifest.TableInfoReference,
-                table_info: ?*const Manifest.TableInfo,
+                compaction: []const Manifest.TableInfoReference,
+                scan: ?*const Manifest.TableInfo,
 
                 inline fn len(self: @This()) usize {
                     return switch (self) {
-                        .table_info_reference => |slice| slice.len,
-                        .table_info => |table_info| @boolToInt(table_info != null),
+                        .compaction => |slice| slice.len,
+                        .scan => |table_info| @boolToInt(table_info != null),
                     };
                 }
 
                 inline fn get(self: @This(), index: usize) *const Manifest.TableInfo {
                     return switch (self) {
-                        .table_info_reference => |slice| slice[index].table_info,
-                        .table_info => |table_info| blk: {
+                        .compaction => |slice| slice[index].table_info,
+                        .scan => |table_info| blk: {
                             assert(index == 0);
                             break :blk table_info.?;
                         },

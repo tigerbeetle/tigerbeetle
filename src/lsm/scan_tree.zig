@@ -23,7 +23,7 @@ const ScanBufferType = @import("scan_buffer.zig").ScanBufferType;
 const LevelTableValueBlockIteratorType =
     @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
-/// Scans a range of keys over a IndexTree, in ascending or descending order.
+/// Scans a range of keys over a Tree, in ascending or descending order.
 pub fn ScanTreeType(
     comptime Context: type,
     comptime Tree_: type,
@@ -412,16 +412,14 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 }
             };
 
-            level.iterator.start(
-                .{
-                    .grid = scan.tree.grid,
-                    .level = level.level_index,
-                    .snapshot = scan.snapshot,
-                    .index_block = level.buffer.index_block,
-                    .tables = .{ .table_info = table_info },
-                    .direction = scan.direction,
-                },
-            );
+            level.iterator.start(.{
+                .grid = scan.tree.grid,
+                .level = level.level_index,
+                .snapshot = scan.snapshot,
+                .index_block = level.buffer.index_block,
+                .tables = .{ .scan = table_info },
+                .direction = scan.direction,
+            });
         }
 
         pub fn fetch(level: *ScanTreeLevel) void {

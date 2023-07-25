@@ -63,16 +63,16 @@ pub fn ScanBufferType(comptime Storage: type) type {
 /// ScanBufferPool holds enough memory to perform up to a max number of
 /// scans operations in parallel.
 /// This buffer is shared across different trees.
-pub fn ScanBufferPoolType(comptime Storage: type, comptime scan_max: comptime_int) type {
+pub fn ScanBufferPoolType(comptime Storage: type, comptime scans_max: comptime_int) type {
     return struct {
         const ScanBufferPool = @This();
         const ScanBuffer = ScanBufferType(Storage);
 
-        scan_buffers: [scan_max]ScanBuffer,
+        scan_buffers: [scans_max]ScanBuffer,
         scan_buffer_used: u8,
 
         pub fn init(allocator: Allocator) !ScanBufferPool {
-            var scan_buffers: [scan_max]ScanBuffer = undefined;
+            var scan_buffers: [scans_max]ScanBuffer = undefined;
             for (scan_buffers) |*scan_buffer, i| {
                 errdefer for (scan_buffers[0..i]) |*buffer| buffer.deinit(allocator);
                 scan_buffer.* = try ScanBuffer.init(allocator);
@@ -92,7 +92,7 @@ pub fn ScanBufferPoolType(comptime Storage: type, comptime scan_max: comptime_in
         }
 
         pub inline fn buffer_acquire(self: *ScanBufferPool) *const ScanBuffer {
-            assert(self.scan_buffer_used < scan_max);
+            assert(self.scan_buffer_used < scans_max);
             defer self.scan_buffer_used += 1;
             return &self.scan_buffers[self.scan_buffer_used];
         }

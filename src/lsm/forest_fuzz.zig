@@ -380,13 +380,9 @@ const Environment = struct {
             }
         };
 
-        // TODO: using `inline for(meta.fields(Index))` crashes the compiler for some reason.
-        // Use inline switch when it's available.
         var scanner = Scanner{};
         try switch (params_.index) {
-            .code => scanner.scan(.code, env_, params_),
-            .ledger => scanner.scan(.ledger, env_, params_),
-            .user_data => scanner.scan(.user_data, env_, params_),
+            inline else => |field| scanner.scan(field, env_, params_),
         };
 
         return scanner.result.?;
@@ -600,9 +596,7 @@ const Environment = struct {
                     } else {
                         // If not exact, it's expected to be sorted by prefix and then timestamp.
                         const prefix_current: u128 = switch (params.index) {
-                            .code => account_immutable.code,
-                            .ledger => account_immutable.ledger,
-                            .user_data => account_immutable.user_data,
+                            inline else => |field| @field(account_immutable, @tagName(field)),
                         };
 
                         if (prefix_last) |prefix| {
@@ -749,12 +743,12 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .scan_account_immutable => blk: {
                 const Index = std.meta.FieldEnum(AccountImmutableGroove.IndexTrees);
                 const index = random.enumValue(Index);
-                // TODO: using `inline for(meta.fields(Index))` crashes the compiler for some reason.
-                // Use inline switch when it's available.
                 break :blk switch (index) {
-                    .code => ScanParams.fuzz_op_action(random, Index.ledger, u16),
-                    .ledger => ScanParams.fuzz_op_action(random, Index.ledger, u32),
-                    .user_data => ScanParams.fuzz_op_action(random, Index.ledger, u64),
+                    inline else => |field| {
+                        const field_index = std.meta.fieldIndex(Account, @tagName(field)).?;
+                        const FieldType = std.meta.fields(Account)[field_index].field_type;
+                        break :blk ScanParams.fuzz_op_action(random, field, FieldType);
+                    },
                 };
             },
         };
