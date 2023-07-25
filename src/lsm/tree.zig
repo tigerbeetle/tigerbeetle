@@ -1325,7 +1325,7 @@ test "TreeType" {
     _ = Tree.put;
     _ = Tree.remove;
     _ = Tree.lookup_from_memory;
-    _ = Tree.lookup_from_levels;
+    _ = Tree.lookup_from_levels_storage;
     _ = Tree.open;
     _ = Tree.compact;
     _ = Tree.compact_end;
