@@ -615,6 +615,7 @@ fn go_client(
             lib.linkLibC();
             lib.pie = true;
             lib.bundle_compiler_rt = true;
+            lib.stack_protector = false;
 
             lib.setOutputDir("src/clients/go/pkg/native/" ++ name);
 
