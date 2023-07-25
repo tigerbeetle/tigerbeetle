@@ -684,23 +684,24 @@ pub fn GrooveType(
             // Since lookup contexts are used one at a time, it's safe to access
             // the union's fields and reuse the same memory for all context instances.
             // Can't use extern/packed union as the LookupContextes aren't ABI compliant.
-            const LookupContext = union {
+            const LookupContext = union(enum) {
                 id: if (has_id) IdTree.LookupContext else void,
                 object: ObjectTree.LookupContext,
 
                 // TODO(Zig): No need for this function once Zig is upgraded
                 // and @fieldParentPtr() can be used for unions.
                 // See: https://github.com/ziglang/zig/issues/6611.
-                pub inline fn parent(completion: anytype) *PrefetchWorker {
-                    const T = @TypeOf(completion);
-                    comptime assert((has_id and T == *IdTree.LookupContext) or
-                        T == *ObjectTree.LookupContext);
+                pub inline fn parent(
+                    comptime field: std.meta.Tag(LookupContext),
+                    completion: anytype,
+                ) *PrefetchWorker {
+                    var stub = @unionInit(LookupContext, @tagName(field), undefined);
+                    const stub_field_ptr = &@field(stub, @tagName(field));
+                    comptime assert(@TypeOf(stub_field_ptr) == @TypeOf(completion));
 
-                    return @fieldParentPtr(
-                        PrefetchWorker,
-                        "lookup",
-                        @ptrCast(*LookupContext, completion),
-                    );
+                    const offset = @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
+                    const lookup_ptr = @intToPtr(*LookupContext, @ptrToInt(completion) - offset);
+                    return @fieldParentPtr(PrefetchWorker, "lookup", lookup_ptr);
                 }
             };
 
@@ -752,7 +753,7 @@ pub fn GrooveType(
                 completion: *IdTree.LookupContext,
                 result: ?*const IdTreeValue,
             ) void {
-                const worker = LookupContext.parent(completion);
+                const worker = LookupContext.parent(.id, completion);
                 const key_verify = if (constants.verify) worker.lookup.id.key else {};
                 worker.lookup = undefined;
 
@@ -808,7 +809,7 @@ pub fn GrooveType(
                 completion: *ObjectTree.LookupContext,
                 result: ?*const Object,
             ) void {
-                const worker = LookupContext.parent(completion);
+                const worker = LookupContext.parent(.object, completion);
                 worker.lookup = undefined;
 
                 if (result) |object| {
