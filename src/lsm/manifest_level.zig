@@ -78,22 +78,14 @@ pub fn ManifestLevelType(
 
                 const snapshots = &[1]u64{lsm.snapshot_latest};
                 if (compare_keys(exclude_range.key_max, self.key_range.?.key_max) == .eq) {
-                    const table: ?*const TableInfo = level.iterator(
-                        .visible,
-                        snapshots,
-                        .descending,
-                        null,
-                    ).next();
+                    var itr = level.iterator(.visible, snapshots, .descending, null);
+                    const table: ?*const TableInfo = itr.next();
                     assert(table != null);
                     self.key_range.?.key_max = table.?.key_max;
                 }
                 if (compare_keys(exclude_range.key_min, self.key_range.?.key_min) == .eq) {
-                    const table: ?*const TableInfo = level.iterator(
-                        .visible,
-                        snapshots,
-                        .ascending,
-                        null,
-                    ).next();
+                    var itr = level.iterator(.visible, snapshots, .ascending, null);
+                    const table: ?*const TableInfo = itr.next();
                     assert(table != null);
                     self.key_range.?.key_min = table.?.key_min;
                 }
