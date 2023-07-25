@@ -9,7 +9,7 @@ const fuzz = @import("./testing/fuzz.zig");
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 pub fn main() !void {
-    const allocator = std.testing.allocator;
+    const allocator = fuzz.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {

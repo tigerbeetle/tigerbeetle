@@ -6,21 +6,21 @@ pub fn register_function(
     env: c.napi_env,
     exports: c.napi_value,
     comptime name: [:0]const u8,
-    function: fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value,
+    function: *const fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value,
 ) !void {
     var napi_function: c.napi_value = undefined;
     if (c.napi_create_function(env, null, 0, function, null, &napi_function) != c.napi_ok) {
         return throw(env, "Failed to create function " ++ name ++ "().");
     }
 
-    if (c.napi_set_named_property(env, exports, name, napi_function) != c.napi_ok) {
+    if (c.napi_set_named_property(env, exports, @ptrCast([*c]const u8, name), napi_function) != c.napi_ok) {
         return throw(env, "Failed to add " ++ name ++ "() to exports.");
     }
 }
 
 const TranslationError = error{ExceptionThrown};
 pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationError {
-    var result = c.napi_throw_error(env, null, message);
+    var result = c.napi_throw_error(env, null, @ptrCast([*c]const u8, message));
     switch (result) {
         c.napi_ok, c.napi_pending_exception => {},
         else => unreachable,
@@ -41,7 +41,7 @@ pub fn capture_undefined(env: c.napi_env) !c.napi_value {
 pub fn set_instance_data(
     env: c.napi_env,
     data: *anyopaque,
-    finalize_callback: fn (env: c.napi_env, data: ?*anyopaque, hint: ?*anyopaque) callconv(.C) void,
+    finalize_callback: *const fn (env: c.napi_env, data: ?*anyopaque, hint: ?*anyopaque) callconv(.C) void,
 ) !void {
     if (c.napi_set_instance_data(env, data, finalize_callback, null) != c.napi_ok) {
         return throw(env, "Failed to initialize environment.");
@@ -70,7 +70,7 @@ pub fn value_external(
     return result;
 }
 
-pub const UserData = packed struct {
+pub const UserData = extern struct {
     env: c.napi_env,
     callback_reference: c.napi_ref,
 };
@@ -110,7 +110,7 @@ pub fn slice_from_object(
     comptime key: [:0]const u8,
 ) ![]const u8 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, @ptrCast([*c]const u8, key), &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -143,7 +143,7 @@ pub fn bytes_from_object(
     comptime key: [:0]const u8,
 ) ![length]u8 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, @ptrCast([*c]const u8, key), &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -181,7 +181,7 @@ pub fn bytes_from_buffer(
 
 pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, @ptrCast([*c]const u8, key), &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -190,7 +190,7 @@ pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0
 
 pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u64 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, @ptrCast([*c]const u8, key), &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -199,7 +199,7 @@ pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 
 pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u32 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, @ptrCast([*c]const u8, key), &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -274,7 +274,7 @@ pub fn byte_slice_into_object(
         return throw(env, error_message ++ " Failed to allocate Buffer in V8.");
     }
 
-    if (c.napi_set_named_property(env, object, key, result) != c.napi_ok) {
+    if (c.napi_set_named_property(env, object, @ptrCast([*c]const u8, key), result) != c.napi_ok) {
         return throw(env, error_message);
     }
 }
@@ -301,7 +301,7 @@ pub fn u128_into_object(
         return throw(env, error_message);
     }
 
-    if (c.napi_set_named_property(env, object, key, bigint) != c.napi_ok) {
+    if (c.napi_set_named_property(env, object, @ptrCast([*c]const u8, key), bigint) != c.napi_ok) {
         return throw(env, error_message);
     }
 }
@@ -318,7 +318,7 @@ pub fn u64_into_object(
         return throw(env, error_message);
     }
 
-    if (c.napi_set_named_property(env, object, key, result) != c.napi_ok) {
+    if (c.napi_set_named_property(env, object, @ptrCast([*c]const u8, key), result) != c.napi_ok) {
         return throw(env, error_message);
     }
 }
@@ -335,7 +335,7 @@ pub fn u32_into_object(
         return throw(env, error_message);
     }
 
-    if (c.napi_set_named_property(env, object, key, result) != c.napi_ok) {
+    if (c.napi_set_named_property(env, object, @ptrCast([*c]const u8, key), result) != c.napi_ok) {
         return throw(env, error_message);
     }
 }

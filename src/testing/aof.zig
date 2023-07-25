@@ -25,7 +25,7 @@ const InMemoryAOF = struct {
     pub fn readAll(self: *Self, buf: []u8) !usize {
         // Limit the reads to the end of the buffer and return the count of
         // bytes read, to have the same behavior as fs's readAll.
-        const end = @minimum(self.index + buf.len, self.backing_store.len);
+        const end = @min(self.index + buf.len, self.backing_store.len);
 
         stdx.copy_disjoint(.inexact, u8, buf, self.backing_store[self.index..end]);
         return end - self.index;

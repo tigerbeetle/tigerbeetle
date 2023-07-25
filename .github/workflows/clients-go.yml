@@ -77,7 +77,7 @@ jobs:
         run: rm -rf /Users/macos/Library/Caches/go-build
 
       # Build integration tests
-      - run: ./scripts/build.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }} client_integration
+      - run: ./zig/zig build client_integration
 
       - if: matrix.os != 'windows-latest'
         run: ./zig-out/bin/client_integration --language go --sample ${{ matrix.sample }}
@@ -112,13 +112,13 @@ jobs:
           # Specifically for self-hosted M1 runners, OK if this fails on other envs.
           rm -rf /Users/macos/Library/Caches/go-build
 
-          ./scripts/build.sh client_docs -- --language go
+          ./zig/zig build client_docs -- --language go
 
       # Set CC='zig.exe cc' for Windows.
       - if: matrix.os == 'windows-latest'
         run: |
           $env:CC = "$(pwd)\zig\zig.exe cc"
-          .\scripts\build.bat client_docs
+          .\zig\zig build client_docs
           .\zig-out\bin\client_docs --language go
 
       - if: matrix.os == 'ubuntu-latest'

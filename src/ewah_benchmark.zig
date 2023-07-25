@@ -48,7 +48,7 @@ pub fn main() !void {
         }
 
         // Benchmark encoding.
-        const encode_timer = try std.time.Timer.start();
+        var encode_timer = try std.time.Timer.start();
         i = 0;
         while (i < samples) : (i += 1) {
             var j: usize = 0;
@@ -60,7 +60,7 @@ pub fn main() !void {
         }
         const encode_time = encode_timer.read() / samples / repeats;
 
-        const decode_timer = try std.time.Timer.start();
+        var decode_timer = try std.time.Timer.start();
         // Benchmark decoding.
         i = 0;
         while (i < samples) : (i += 1) {

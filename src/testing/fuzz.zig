@@ -6,6 +6,11 @@ const mem = std.mem;
 
 const log = std.log.scoped(.fuzz);
 
+// Use our own allocator in the global scope instead of testing.allocator
+// as the latter now @compileError()'s if referenced outside a `test` block.
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub const allocator = gpa.allocator();
+
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
 pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T) T {
@@ -73,24 +78,20 @@ pub const FuzzArgs = struct {
 ///        Sets the seed used for the random number generator.
 ///    [--events-max usize]
 ///        Override the fuzzer's default maximum number of generated events.
-pub fn parse_fuzz_args(allocator: mem.Allocator) !FuzzArgs {
+pub fn parse_fuzz_args(args_allocator: mem.Allocator) !FuzzArgs {
     var seed: ?u64 = null;
     var events_max: ?usize = null;
 
-    var args = std.process.args();
+    var args = try std.process.argsWithAllocator(args_allocator);
+    defer args.deinit();
 
     // Discard executable name.
-    allocator.free(try args.next(allocator).?);
+    _ = args.next().?;
 
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = try arg_or_err;
-        defer allocator.free(arg);
-
+    while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--seed")) {
-            const seed_string_or_err = args.next(allocator) orelse
+            const seed_string = args.next() orelse
                 std.debug.panic("Expected an argument to --seed", .{});
-            const seed_string = try seed_string_or_err;
-            defer allocator.free(seed_string);
 
             if (seed != null) {
                 std.debug.panic("Received more than one \"--seed\"", .{});
@@ -101,10 +102,8 @@ pub fn parse_fuzz_args(allocator: mem.Allocator) !FuzzArgs {
                 .{ std.zig.fmtEscapes(seed_string), err },
             );
         } else if (std.mem.eql(u8, arg, "--events-max")) {
-            const events_string_or_err = args.next(allocator) orelse
+            const events_string = args.next() orelse
                 std.debug.panic("Expected an argument to --events-max", .{});
-            const events_string = try events_string_or_err;
-            defer allocator.free(events_string);
 
             if (events_max != null) {
                 std.debug.panic("Received more than one \"--events-max\"", .{});

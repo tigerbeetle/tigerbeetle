@@ -113,11 +113,11 @@ test "Aegis test vectors" {
     for (&[_]TestVector{
         .{
             .source = &[_]u8{0x00} ** 16,
-            .hash = @byteSwap(u128, 0xf4d997cc9b94227ada4fe4165422b1c8),
+            .hash = @byteSwap(@as(u128, 0xf4d997cc9b94227ada4fe4165422b1c8)),
         },
         .{
             .source = &[_]u8{},
-            .hash = @byteSwap(u128, 0x83cc600dc4e3e7e62d4055826174f149),
+            .hash = @byteSwap(@as(u128, 0x83cc600dc4e3e7e62d4055826174f149)),
         },
     }) |test_vector| {
         const cipher = cipher_buf[0..test_vector.source.len];

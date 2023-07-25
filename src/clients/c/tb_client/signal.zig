@@ -8,9 +8,9 @@ const Atomic = std.atomic.Atomic;
 
 const log = std.log.scoped(.tb_client_signal);
 
-/// A Signal is a way to trigger a registered callback on a tigerbeetle IO instance 
+/// A Signal is a way to trigger a registered callback on a tigerbeetle IO instance
 /// when notification occurs from another thread.
-/// It does this by using OS sockets (which are thread safe) 
+/// It does this by using OS sockets (which are thread safe)
 /// to resolve IO.Completions on the tigerbeetle thread.
 pub const Signal = struct {
     io: *IO,
@@ -22,14 +22,14 @@ pub const Signal = struct {
     recv_buffer: [1]u8,
     send_buffer: [1]u8,
 
-    on_signal_fn: fn (*Signal) void,
+    on_signal_fn: *const fn (*Signal) void,
     state: Atomic(enum(u8) {
         running,
         waiting,
         notified,
     }),
 
-    pub fn init(self: *Signal, io: *IO, on_signal_fn: fn (*Signal) void) !void {
+    pub fn init(self: *Signal, io: *IO, on_signal_fn: *const fn (*Signal) void) !void {
         self.io = io;
         self.server_socket = os.socket(
             os.AF.INET,
@@ -53,6 +53,7 @@ pub const Signal = struct {
                 return switch (err) {
                     error.AccessDenied => unreachable,
                     error.AlreadyBound => unreachable,
+                    error.AddressFamilyNotSupported => unreachable,
                     error.AddressInUse, error.AddressNotAvailable => unreachable,
                     error.SymLinkLoop => unreachable,
                     error.NameTooLong => unreachable,

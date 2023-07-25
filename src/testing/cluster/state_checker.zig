@@ -4,7 +4,6 @@ const mem = std.mem;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const RingBuffer = @import("../../ring_buffer.zig").RingBuffer;
 
 const message_pool = @import("../../message_pool.zig");
 const MessagePool = message_pool.MessagePool;

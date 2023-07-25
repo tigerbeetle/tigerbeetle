@@ -24,7 +24,7 @@ pub const Config = struct {
 /// If `values` contains duplicated matches, then returns
 /// the first index when `Config.mode == .lower_bound`,
 /// or the last index when `Config.mode == .upper_bound`.
-/// 
+///
 /// Doesn't perform the extra key comparison to determine if the match is exact.
 pub fn binary_search_values_upsert_index(
     comptime Key: type,
@@ -164,11 +164,11 @@ pub const BinarySearchRangeUpsertIndexes = struct {
 /// Same semantics of `binary_search_values_upsert_indexes`:
 /// Returns either the indexes of the values equal to `key_min` and `key_max`,
 /// or the indexes where they would be inserted.
-/// 
+///
 /// Expects `values` to be sorted by key.
 /// If `values` contains duplicated matches, then returns
 /// the first index for `key_min` and the last index for `key_max`.
-/// 
+///
 /// Doesn't perform the extra key comparison to determine if the match is exact.
 pub inline fn binary_search_values_range_upsert_indexes(
     comptime Key: type,
@@ -241,7 +241,7 @@ pub const BinarySearchRange = struct {
 
 /// Returns the index of the first value greater than or equal to `key_min` and
 /// the count of elements until the last value less than or equal to `key_max`.
-/// 
+///
 /// Expects `values` to be sorted by key.
 /// The result is always safe for slicing using the `values[start..][0..count]` idiom,
 /// even when no elements are matched.
@@ -387,7 +387,7 @@ const test_binary_search = struct {
     }
 
     fn random_sequence(allocator: std.mem.Allocator, random: std.rand.Random, iter: usize) ![]const u32 {
-        const keys_count = @minimum(
+        const keys_count = @min(
             @as(usize, 1E6),
             fuzz.random_int_exponential(random, usize, iter),
         );

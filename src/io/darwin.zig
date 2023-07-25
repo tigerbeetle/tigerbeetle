@@ -190,7 +190,7 @@ pub const IO = struct {
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*anyopaque,
-        callback: fn (*IO, *Completion) void,
+        callback: *const fn (*IO, *Completion) void,
         operation: Operation,
     };
 

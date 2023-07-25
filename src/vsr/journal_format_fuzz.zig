@@ -8,13 +8,13 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
 const fuzz = @import("../testing/fuzz.zig");
+const allocator = fuzz.allocator;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
 const cluster = 0;
 
 pub fn main() !void {
-    const allocator = std.testing.allocator;
     const args = try fuzz.parse_fuzz_args(allocator);
     var prng = std.rand.DefaultPrng.init(args.seed);
 
@@ -34,8 +34,8 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
     assert(write_size_max % @sizeOf(vsr.Header) == 0);
     assert(write_size_max % constants.sector_size == 0);
 
-    const write = try std.testing.allocator.alloc(u8, write_size_max);
-    defer std.testing.allocator.free(write);
+    const write = try allocator.alloc(u8, write_size_max);
+    defer allocator.free(write);
 
     var offset: usize = 0;
     while (offset < constants.journal_size_headers) {
@@ -56,8 +56,8 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
     assert(write_size_max % @sizeOf(vsr.Header) == 0);
     assert(write_size_max % constants.sector_size == 0);
 
-    const write = try std.testing.allocator.alloc(u8, write_size_max);
-    defer std.testing.allocator.free(write);
+    const write = try allocator.alloc(u8, write_size_max);
+    defer allocator.free(write);
 
     var offset: usize = 0;
     while (offset < constants.journal_size_prepares) {

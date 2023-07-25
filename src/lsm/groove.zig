@@ -158,7 +158,7 @@ pub fn GrooveType(
     /// - ignored: [][]const u8:
     ///     An array of fields on the Object type that should not be given index trees
     ///
-    /// - derived: { .field = fn (*const Object) ?DerivedType }:
+    /// - derived: { .field = *const fn (*const Object) ?DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
     comptime groove_options: anytype,
@@ -171,7 +171,7 @@ pub fn GrooveType(
     assert(@hasField(Object, "timestamp"));
     assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
 
-    comptime var index_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -192,7 +192,7 @@ pub fn GrooveType(
                 field.field_type,
                 @field(groove_options.value_count_max, field.name),
             );
-            index_fields = index_fields ++ [_]std.builtin.TypeInfo.StructField{
+            index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
                     .name = field.name,
                     .field_type = IndexTree,
@@ -244,10 +244,10 @@ pub fn GrooveType(
         };
     }
 
-    comptime var index_options_fields: []const std.builtin.TypeInfo.StructField = &.{};
+    comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
     for (index_fields) |index_field| {
         const IndexTree = index_field.field_type;
-        index_options_fields = index_options_fields ++ [_]std.builtin.TypeInfo.StructField{
+        index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = index_field.name,
                 .field_type = IndexTree.Options,
@@ -378,7 +378,7 @@ pub fn GrooveType(
 
         const Grid = GridType(Storage);
 
-        const Callback = fn (*Groove) void;
+        const Callback = *const fn (*Groove) void;
         const JoinOp = enum {
             compacting,
             checkpoint,
@@ -615,7 +615,7 @@ pub fn GrooveType(
         /// available in `prefetch_objects`.
         pub fn prefetch(
             groove: *Groove,
-            callback: fn (*PrefetchContext) void,
+            callback: *const fn (*PrefetchContext) void,
             context: *PrefetchContext,
         ) void {
             context.* = .{
@@ -630,7 +630,7 @@ pub fn GrooveType(
 
         pub const PrefetchContext = struct {
             groove: *Groove,
-            callback: fn (*PrefetchContext) void,
+            callback: *const fn (*PrefetchContext) void,
             snapshot: u64,
 
             id_iterator: PrefetchIDs.KeyIterator,
@@ -683,23 +683,25 @@ pub fn GrooveType(
 
             // Since lookup contexts are used one at a time, it's safe to access
             // the union's fields and reuse the same memory for all context instances.
-            const LookupContext = extern union {
+            // Can't use extern/packed union as the LookupContextes aren't ABI compliant.
+            const LookupContext = union(enum) {
                 id: if (has_id) IdTree.LookupContext else void,
                 object: ObjectTree.LookupContext,
 
                 // TODO(Zig): No need for this function once Zig is upgraded
                 // and @fieldParentPtr() can be used for unions.
                 // See: https://github.com/ziglang/zig/issues/6611.
-                pub inline fn parent(completion: anytype) *PrefetchWorker {
-                    const T = @TypeOf(completion);
-                    comptime assert((has_id and T == *IdTree.LookupContext) or
-                        T == *ObjectTree.LookupContext);
+                pub inline fn parent(
+                    comptime field: std.meta.Tag(LookupContext),
+                    completion: anytype,
+                ) *PrefetchWorker {
+                    var stub = @unionInit(LookupContext, @tagName(field), undefined);
+                    const stub_field_ptr = &@field(stub, @tagName(field));
+                    comptime assert(@TypeOf(stub_field_ptr) == @TypeOf(completion));
 
-                    return @fieldParentPtr(
-                        PrefetchWorker,
-                        "lookup",
-                        @ptrCast(*LookupContext, completion),
-                    );
+                    const offset = @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
+                    const lookup_ptr = @intToPtr(*LookupContext, @ptrToInt(completion) - offset);
+                    return @fieldParentPtr(PrefetchWorker, "lookup", lookup_ptr);
                 }
             };
 
@@ -716,6 +718,9 @@ pub fn GrooveType(
                     worker.lookup_with_timestamp(id.*);
                     return;
                 }
+
+                // Set the union tag so access via &worker.lookup.id doesn't trap.
+                worker.lookup = .{ .id = undefined };
 
                 if (worker.context.groove.ids.lookup_from_memory(
                     worker.context.snapshot,
@@ -748,7 +753,7 @@ pub fn GrooveType(
                 completion: *IdTree.LookupContext,
                 result: ?*const IdTreeValue,
             ) void {
-                const worker = LookupContext.parent(completion);
+                const worker = LookupContext.parent(.id, completion);
                 const key_verify = if (constants.verify) worker.lookup.id.key else {};
                 worker.lookup = undefined;
 
@@ -789,6 +794,9 @@ pub fn GrooveType(
                     return;
                 }
 
+                // Set the union tag so access via &worker.lookup.object doesn't trap.
+                worker.lookup = .{ .object = undefined };
+
                 worker.context.groove.objects.lookup_from_levels(
                     lookup_object_callback,
                     &worker.lookup.object,
@@ -801,7 +809,7 @@ pub fn GrooveType(
                 completion: *ObjectTree.LookupContext,
                 result: ?*const Object,
             ) void {
-                const worker = LookupContext.parent(completion);
+                const worker = LookupContext.parent(.object, completion);
                 worker.lookup = undefined;
 
                 if (result) |object| {
@@ -906,12 +914,7 @@ pub fn GrooveType(
                 }
             }
 
-            // TODO(zig) Replace this with a call to removeByPtr() after upgrading to 0.10.
-            // removeByPtr() replaces an unnecessary lookup here with some pointer arithmetic.
-            assert(groove.prefetch_objects.removeAdapted(
-                @field(object, primary_field),
-                PrefetchObjectsAdapter{},
-            ));
+            groove.prefetch_objects.removeByPtr(object);
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
@@ -948,7 +951,7 @@ pub fn GrooveType(
 
                 pub fn tree_callback(
                     comptime join_field: JoinField,
-                ) fn (*TreeFor(join_field)) void {
+                ) *const fn (*TreeFor(join_field)) void {
                     return struct {
                         fn tree_cb(tree: *TreeFor(join_field)) void {
                             // Derive the groove pointer from the tree using the join_field.
@@ -980,7 +983,7 @@ pub fn GrooveType(
             };
         }
 
-        pub fn open(groove: *Groove, callback: fn (*Groove) void) void {
+        pub fn open(groove: *Groove, callback: Callback) void {
             const Join = JoinType(.open);
             Join.start(groove, callback);
 
@@ -1020,7 +1023,7 @@ pub fn GrooveType(
             }
         }
 
-        pub fn checkpoint(groove: *Groove, callback: fn (*Groove) void) void {
+        pub fn checkpoint(groove: *Groove, callback: Callback) void {
             // Start a checkpoint join operation.
             const Join = JoinType(.checkpoint);
             Join.start(groove, callback);

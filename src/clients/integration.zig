@@ -5,7 +5,7 @@
 // bash script except for that it works on Windows as well.
 //
 // Example: (run from the repo root)
-//   ./scripts/build.sh client_integration -- --language java --sample basic
+//   ./zig/zig build client_integration -- --language java --sample basic
 //
 
 const std = @import("std");
@@ -33,19 +33,18 @@ fn error_main() !void {
     std.debug.print("Moved to git root: {s}\n", .{root});
     try std.os.chdir(root);
 
-    var args = std.process.args();
-    _ = args.next(allocator);
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
+
+    // Skip the first argument of the exe.
+    std.debug.assert(args.skip());
+
     var language: ?Docs = null;
     var sample: []const u8 = "";
     var keep_tmp = false;
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = arg_or_err catch {
-            std.debug.print("Could not parse all arguments.\n", .{});
-            return error.CouldNotParseArguments;
-        };
-
+    while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--language")) {
-            const next = try args.next(allocator) orelse "";
+            const next = args.next() orelse "";
 
             if (std.mem.eql(u8, next, "java")) {
                 language = java_docs;
@@ -66,7 +65,7 @@ fn error_main() !void {
         }
 
         if (std.mem.eql(u8, arg, "--sample")) {
-            const next = try args.next(allocator) orelse "";
+            const next = args.next() orelse "";
 
             sample = next;
         }
