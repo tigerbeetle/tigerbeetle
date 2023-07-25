@@ -279,19 +279,19 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.lookup_value = null;
             switch (env.tree.lookup_from_memory(snapshot_latest, key)) {
-                .exists => |value| {
-                    get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
-                },
-                .does_not_exist => {
+                .negative => {
                     get_callback(&env.lookup_context, null);
                 },
-                .may_exist => |level| {
+                .positive => |value| {
+                    get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
+                },
+                .possible => |level_min| {
                     env.tree.lookup_from_levels_storage(.{
                         .callback = get_callback,
                         .context = &env.lookup_context,
                         .snapshot = env.tree.lookup_snapshot_max.?,
                         .key = key,
-                        .start_level = level,
+                        .level_min = level_min,
                     });
                 },
             }

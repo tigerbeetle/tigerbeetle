@@ -78,14 +78,22 @@ pub fn ManifestLevelType(
 
                 const snapshots = &[1]u64{lsm.snapshot_latest};
                 if (compare_keys(exclude_range.key_max, self.key_range.?.key_max) == .eq) {
-                    const table = level.iterator(.visible, snapshots, .descending, null).next();
-                    // Since level.table_count_visible is non-zero, we're guaranteed to find a table
-                    // visible to snapshot_latest.
+                    const table: ?*const TableInfo = level.iterator(
+                        .visible,
+                        snapshots,
+                        .descending,
+                        null,
+                    ).next();
                     assert(table != null);
                     self.key_range.?.key_max = table.?.key_max;
                 }
                 if (compare_keys(exclude_range.key_min, self.key_range.?.key_min) == .eq) {
-                    const table = level.iterator(.visible, snapshots, .ascending, null).next();
+                    const table: ?*const TableInfo = level.iterator(
+                        .visible,
+                        snapshots,
+                        .ascending,
+                        null,
+                    ).next();
                     assert(table != null);
                     self.key_range.?.key_min = table.?.key_min;
                 }
@@ -430,6 +438,8 @@ pub fn ManifestLevelType(
         ) ?Keys.Cursor {
             assert(compare_keys(key_min, key_max) != .gt);
             assert(level.keys.len() == level.tables.len());
+
+            if (level.keys.len() == 0) return null;
 
             // Ascending:  Find the first table where table.key_max ≤ iterator.key_min.
             // Descending: Find the first table where table.key_max ≤ iterator.key_max.

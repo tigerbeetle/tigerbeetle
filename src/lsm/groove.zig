@@ -387,10 +387,10 @@ pub fn GrooveType(
 
         const primary_field = if (has_id) "id" else "timestamp";
         const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
-        const PrefetchKey = struct { level: u8, kind: union(enum) {
+        const PrefetchKey = struct { key: union(enum) {
             id: PrimaryKey,
             timestamp: u64,
-        } };
+        }, level: u8 };
 
         const PrefetchKeys = std.AutoHashMapUnmanaged(PrefetchKey, void);
 
@@ -585,9 +585,9 @@ pub fn GrooveType(
         pub fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
             if (has_id) {
                 if (!groove.ids.key_range_contains(groove.prefetch_snapshot.?, key)) return;
-                groove.prefetch_from_memory_with_id(key);
+                groove.prefetch_from_memory_by_id(key);
             } else {
-                groove.prefetch_from_memory_with_timestamp(key);
+                groove.prefetch_from_memory_by_timestamp(key);
             }
         }
 
@@ -596,17 +596,17 @@ pub fn GrooveType(
         /// If found in the IdTree, we attempt to prefetch a value for the timestamp.
         /// TODO: We may have to remove this function once Fed's prefetching changes are merged,
         /// since those changes remove lookup_from_memory.
-        fn prefetch_from_memory_with_id(groove: *Groove, id: PrimaryKey) void {
+        fn prefetch_from_memory_by_id(groove: *Groove, id: PrimaryKey) void {
             switch (groove.ids.lookup_from_memory(groove.prefetch_snapshot.?, id)) {
-                .does_not_exist => {},
-                .exists => |id_tree_value| {
+                .negative => {},
+                .positive => |id_tree_value| {
                     if (IdTreeValue.tombstone(id_tree_value)) return;
-                    groove.prefetch_from_memory_with_timestamp(id_tree_value.timestamp);
+                    groove.prefetch_from_memory_by_timestamp(id_tree_value.timestamp);
                 },
-                .may_exist => |level| {
+                .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(.{
+                        .key = .{ .id = id },
                         .level = level,
-                        .kind = .{ .id = id },
                     }, {});
                 },
             }
@@ -616,18 +616,18 @@ pub fn GrooveType(
         /// mutable table, immutable table, and the table blocks in the grid cache.
         /// TODO: We may have to remove this function once Fed's prefetching changes are merged,
         /// since those changes remove lookup_from_memory.
-        fn prefetch_from_memory_with_timestamp(groove: *Groove, timestamp: u64) void {
+        fn prefetch_from_memory_by_timestamp(groove: *Groove, timestamp: u64) void {
             switch (groove.objects.lookup_from_memory(groove.prefetch_snapshot.?, timestamp)) {
-                .does_not_exist => {},
-                .may_exist => |level| {
-                    groove.prefetch_keys.putAssumeCapacity(.{
-                        .level = level,
-                        .kind = .{ .timestamp = timestamp },
-                    }, {});
-                },
-                .exists => |object| {
+                .negative => {},
+                .positive => |object| {
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
                     groove.prefetch_objects.putAssumeCapacity(object.*, {});
+                },
+                .possible => |level| {
+                    groove.prefetch_keys.putAssumeCapacity(.{
+                        .key = .{ .timestamp = timestamp },
+                        .level = level,
+                    }, {});
                 },
             }
         }
@@ -738,7 +738,7 @@ pub fn GrooveType(
                 // prefetch_enqueue() ensures that the tree's cache is checked before queueing the
                 // object for prefetching. If not in the LSM tree's cache, the object must be read
                 // from disk and added to the auxiliary prefetch_objects hash map.
-                switch (prefetch_key.kind) {
+                switch (prefetch_key.key) {
                     .id => |id| {
                         // Set the union tag so access via &worker.lookup.id doesn't trap.
                         worker.lookup = .{ .id = undefined };
@@ -748,7 +748,7 @@ pub fn GrooveType(
                                 .context = &worker.lookup.id,
                                 .snapshot = worker.context.snapshot,
                                 .key = id,
-                                .start_level = prefetch_key.level,
+                                .level_min = prefetch_key.level,
                             });
                         } else unreachable;
                     },
@@ -760,7 +760,7 @@ pub fn GrooveType(
                             .context = &worker.lookup.object,
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .start_level = prefetch_key.level,
+                            .level_min = prefetch_key.level,
                         });
                     },
                 }
@@ -775,7 +775,7 @@ pub fn GrooveType(
 
                 if (result) |id_tree_value| {
                     if (!id_tree_value.tombstone()) {
-                        worker.lookup_with_timestamp(id_tree_value.timestamp);
+                        worker.lookup_by_timestamp(id_tree_value.timestamp);
                         return;
                     }
                 }
@@ -783,26 +783,26 @@ pub fn GrooveType(
                 worker.lookup_start_next();
             }
 
-            fn lookup_with_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
+            fn lookup_by_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
                 // Set the union tag so access via &worker.lookup.object doesn't trap.
                 worker.lookup = .{ .object = undefined };
                 switch (worker.context.groove.objects.lookup_from_memory(
                     worker.context.snapshot,
                     timestamp,
                 )) {
-                    .exists => |value| {
-                        lookup_object_callback(&worker.lookup.object, value);
-                    },
-                    .does_not_exist => {
+                    .negative => {
                         lookup_object_callback(&worker.lookup.object, null);
                     },
-                    .may_exist => |start_level| {
+                    .positive => |value| {
+                        lookup_object_callback(&worker.lookup.object, value);
+                    },
+                    .possible => |level_min| {
                         worker.context.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_object_callback,
                             .context = &worker.lookup.object,
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .start_level = start_level,
+                            .level_min = level_min,
                         });
                     },
                 }

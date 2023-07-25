@@ -95,9 +95,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         const CompactionType = @import("compaction.zig").CompactionType;
         const Compaction = CompactionType(Table, Tree, Storage);
         pub const LookupMemoryResult = union(enum) {
-            exists: *const Value,
-            does_not_exist,
-            may_exist: u8,
+            negative,
+            positive: *const Value,
+            possible: u8,
         };
 
         grid: *Grid,
@@ -320,7 +320,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// if one is available for the specified snapshot.
         pub fn lookup_from_memory(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
             if (snapshot >= tree.lookup_snapshot_max.?) {
-                if (tree.table_mutable.get(key)) |value| return .{ .exists = value };
+                if (tree.table_mutable.get(key)) |value| return .{ .positive = value };
             } else {
                 // The mutable table is converted to an immutable table when a snapshot is created.
                 // This means that a past snapshot will never be able to see the mutable table.
@@ -328,7 +328,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             if (!tree.table_immutable.free and tree.table_immutable.snapshot_min <= snapshot) {
-                if (tree.table_immutable.get(key)) |value| return .{ .exists = value };
+                if (tree.table_immutable.get(key)) |value| return .{ .positive = value };
             } else {
                 // If the immutable table is invisible, then the mutable table is also invisible.
                 assert(tree.table_immutable.free or snapshot != tree.lookup_snapshot_max.?);
@@ -338,9 +338,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         }
 
         /// Returns:
-        /// - .does_not_exist if the key does not exist in the Manifest.
-        /// - .exists if the key exists in the Manifest, along with the associated value.
-        /// - .may_exist if the key may exist in the Manifest but its existence cannot be
+        /// - .negative if the key does not exist in the Manifest.
+        /// - .positive if the key exists in the Manifest, along with the associated value.
+        /// - .possible if the key may exist in the Manifest but its existence cannot be
         ///  ascertained without IO, along with the level number at which IO must be performed.
         ///
         /// This function attempts to fetch the index, filter & data blocks for the tables that
@@ -357,7 +357,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 ) orelse {
                     // Index block not in cache. We cannot rule out existence without I/O,
                     // and therefore bail out.
-                    return .{ .may_exist = iterator.level - 1 };
+                    return .{ .possible = iterator.level - 1 };
                 };
 
                 const key_blocks = Table.index_blocks_for_key(index_block, key);
@@ -366,19 +366,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     key_blocks.filter_block_checksum,
                     fingerprint,
                 )) {
-                    .does_not_exist => {
+                    .negative => {
                         if (constants.verify) {
                             assert(tree.cached_data_block_search(
                                 key_blocks.data_block_address,
                                 key_blocks.data_block_checksum,
                                 key,
-                            ) != .exists);
+                            ) != .positive);
                         }
                         // Filter block indicates that the key is not present in the data block,
                         // move on to the next table that could contain the key.
                         continue;
                     },
-                    .may_exist, .block_not_in_cache => {
+                    .possible, .block_not_in_cache => {
                         // Give yourself another fighting chance to rule out the existence of
                         // the key; search for the data block in the grid cache.
                     },
@@ -389,16 +389,16 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     key_blocks.data_block_checksum,
                     key,
                 )) {
-                    .does_not_exist => {},
+                    .negative => {},
                     // Key present in the data block.
-                    .exists => |value| return .{ .exists = value },
+                    .positive => |value| return .{ .positive = value },
                     // Data block was not found in the grid cache. We cannot rule out
                     // the existence of the key without I/O, and therefore bail out.
-                    .block_not_in_cache => return .{ .may_exist = iterator.level - 1 },
+                    .block_not_in_cache => return .{ .possible = iterator.level - 1 },
                 }
             }
             // Key not present in the Manifest.
-            return .does_not_exist;
+            return .negative;
         }
 
         fn cached_filter_block_search(
@@ -406,14 +406,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             address: u64,
             checksum: u128,
             fingerprint: bloom_filter.Fingerprint,
-        ) enum { does_not_exist, may_exist, block_not_in_cache } {
+        ) enum { negative, possible, block_not_in_cache } {
             if (tree.grid.read_block_from_cache(address, checksum)) |filter_block| {
                 const filter_schema = schema.TableFilter.from(filter_block);
                 const filter_bytes = filter_schema.block_filter_const(filter_block);
                 if (!bloom_filter.may_contain(fingerprint, filter_bytes)) {
-                    return .does_not_exist;
+                    return .negative;
                 } else {
-                    return .may_exist;
+                    return .possible;
                 }
             } else {
                 return .block_not_in_cache;
@@ -426,15 +426,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             checksum: u128,
             key: Key,
         ) union(enum) {
-            exists: *const Value,
-            does_not_exist,
+            positive: *const Value,
+            negative,
             block_not_in_cache,
         } {
             if (tree.grid.read_block_from_cache(address, checksum)) |data_block| {
                 if (Table.data_block_search(data_block, key)) |value| {
-                    return .{ .exists = value };
+                    return .{ .positive = value };
                 } else {
-                    return .does_not_exist;
+                    return .negative;
                 }
             } else {
                 return .block_not_in_cache;
@@ -447,7 +447,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             context: *LookupContext,
             snapshot: u64,
             key: Key,
-            start_level: u8,
+            level_min: u8,
         }) void {
             var index_block_count: u8 = 0;
             var index_block_addresses: [constants.lsm_levels]u64 = undefined;
@@ -456,7 +456,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 var it = tree.manifest.lookup(
                     parameters.snapshot,
                     parameters.key,
-                    parameters.start_level,
+                    parameters.level_min,
                 );
                 while (it.next()) |table| : (index_block_count += 1) {
                     assert(table.visible(parameters.snapshot));
