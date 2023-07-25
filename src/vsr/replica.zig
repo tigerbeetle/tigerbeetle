@@ -422,7 +422,7 @@ pub fn ReplicaType(
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque = null,
         /// Simulator hooks.
-        event_callback: ?fn (replica: *const Self, event: ReplicaEvent) void = null,
+        event_callback: ?*const fn (replica: *const Self, event: ReplicaEvent) void = null,
 
         /// The prepare message being committed.
         commit_prepare: ?*Message = null,
@@ -944,10 +944,8 @@ pub fn ReplicaType(
             self.grid.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
-            // TODO(Zig) 0.10: inline-switch.
             switch (self.pipeline) {
-                .queue => |*pipeline| pipeline.deinit(self.message_bus.pool),
-                .cache => |*pipeline| pipeline.deinit(self.message_bus.pool),
+                inline else => |*pipeline| pipeline.deinit(self.message_bus.pool),
             }
 
             if (self.loopback_queue) |loopback_message| {
@@ -1647,14 +1645,16 @@ pub fn ReplicaType(
                 self.op_checkpoint());
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
-            const op_head = switch (DVCQuorum.quorum_headers(
+            // Store in a var so that `.complete_valid` can capture a mutable pointer in switch.
+            var headers = DVCQuorum.quorum_headers(
                 self.do_view_change_from_all_replicas,
                 .{
                     .quorum_nack_prepare = self.quorum_nack_prepare,
                     .quorum_view_change = self.quorum_view_change,
                     .replica_count = self.replica_count,
                 },
-            )) {
+            );
+            const op_head = switch (headers) {
                 .awaiting_quorum => {
                     log.debug("{}: on_do_view_change: view={} waiting for quorum", .{
                         self.replica,
@@ -3317,7 +3317,7 @@ pub fn ReplicaType(
                 @src(),
             );
 
-            if (prepare.header.operation.reserved()) {
+            if (prepare.header.operation.vsr_reserved()) {
                 // NOTE: this inline callback is fine because the next stage of committing,
                 // `.setup_client_replies`, is always async.
                 commit_op_prefetch_callback(&self.state_machine);
@@ -3599,7 +3599,7 @@ pub fn ReplicaType(
                 }) catch @panic("aof failure");
             }
 
-            const reply_body_size = if (prepare.header.operation.reserved())
+            const reply_body_size = if (prepare.header.operation.vsr_reserved())
                 0
             else
                 @intCast(u32, self.state_machine.commit(
@@ -4202,7 +4202,7 @@ pub fn ReplicaType(
             }
 
             if (self.status != .normal) {
-                log.debug("{}: on_request: ignoring ({s})", .{ self.replica, self.status });
+                log.debug("{}: on_request: ignoring ({})", .{ self.replica, self.status });
                 return true;
             }
 
@@ -5073,7 +5073,7 @@ pub fn ReplicaType(
             );
             assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
 
-            if (!message.header.operation.reserved()) {
+            if (!message.header.operation.vsr_reserved()) {
                 self.state_machine.prepare(
                     message.header.operation.cast(StateMachine),
                     message.body(),
@@ -5987,7 +5987,7 @@ pub fn ReplicaType(
                 received.* = null;
             }
             assert(count <= self.replica_count);
-            log.debug("{}: reset {} {s} message(s) from view={}", .{
+            log.debug("{}: reset {} {s} message(s) from view={?}", .{
                 self.replica,
                 count,
                 @tagName(command),
@@ -7470,7 +7470,7 @@ pub fn ReplicaType(
         /// sync_dispatch() is called between every sync-state transition.
         fn sync_dispatch(self: *Self, state_new: SyncStage) void {
             assert(!self.solo());
-            assert(self.syncing.valid_transition(state_new));
+            assert(SyncStage.valid_transition(self.syncing, state_new));
             if (self.op < self.commit_min) assert(self.status == .recovering_head);
 
             const state_old = self.syncing;
@@ -8215,7 +8215,7 @@ pub fn ReplicaType(
             assert(trailer_size > parameters.offset or
                 (trailer_size == 0 and parameters.offset == 0));
 
-            const body_size = @intCast(u32, @minimum(
+            const body_size = @intCast(u32, @min(
                 trailer_size - parameters.offset,
                 constants.sync_trailer_message_body_size_max,
             ));
@@ -8415,13 +8415,13 @@ const DVCQuorum = struct {
 
         const nacks = message.header.context;
         comptime assert(@TypeOf(nacks) == u128);
-        assert(@popCount(u128, nacks) <= headers.slice.len);
-        assert(@clz(u128, nacks) + headers.slice.len >= @bitSizeOf(u128));
+        assert(@popCount(nacks) <= headers.slice.len);
+        assert(@clz(nacks) + headers.slice.len >= @bitSizeOf(u128));
 
         const present = message.header.client;
         comptime assert(@TypeOf(present) == u128);
-        assert(@popCount(u128, present) <= headers.slice.len);
-        assert(@clz(u128, present) + headers.slice.len >= @bitSizeOf(u128));
+        assert(@popCount(present) <= headers.slice.len);
+        assert(@clz(present) + headers.slice.len >= @bitSizeOf(u128));
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
@@ -8805,11 +8805,11 @@ const PipelineQueue = struct {
 
     /// Messages that are preparing (uncommitted, being written to the WAL (may already be written
     /// to the WAL) and replicated (may just be waiting for acks)).
-    prepare_queue: PrepareQueue = .{},
+    prepare_queue: PrepareQueue = PrepareQueue.init(),
     /// Messages that are accepted from the client, but not yet preparing.
     /// When `pipeline_prepare_queue_max + pipeline_request_queue_max = clients_max`, the request
     /// queue guards against clients starving one another.
-    request_queue: RequestQueue = .{},
+    request_queue: RequestQueue = RequestQueue.init(),
 
     fn deinit(pipeline: *PipelineQueue, message_pool: *MessagePool) void {
         while (pipeline.request_queue.pop()) |r| message_pool.unref(r.message);

@@ -1,6 +1,5 @@
 const std = @import("std");
 const testing = std.testing;
-const allocator = testing.allocator;
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
@@ -8,6 +7,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
+const allocator = fuzz.allocator;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 const tracer = @import("../tracer.zig");
@@ -30,8 +30,8 @@ pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 // TODO Test grid corruption
 
-const Key = packed struct {
-    id: u64 align(@alignOf(u64)),
+const Key = extern struct {
+    id: u64,
 
     const Value = packed struct {
         id: u64,
@@ -314,9 +314,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 // Apply fuzz_op to the tree and the model.
                 switch (fuzz_op) {
-                    .compact => |compact| {
-                        env.compact(compact.op);
-                        if (compact.checkpoint) env.checkpoint(compact.op);
+                    .compact => |c| {
+                        env.compact(c.op);
+                        if (c.checkpoint) env.checkpoint(c.op);
                     },
                     .put => |value| {
                         if (table_usage == .secondary_index) {
@@ -443,7 +443,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // Maybe do some gets.
         .get = if (random.boolean()) 0 else constants.lsm_batch_multiple,
     };
-    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
     log.info("puts_since_compact_max = {}", .{puts_since_compact_max});
     log.info("compacts_per_checkpoint = {}", .{compacts_per_checkpoint});
@@ -529,7 +529,7 @@ pub fn main() !void {
         .fault_atlas = &storage_fault_atlas,
     };
 
-    const fuzz_op_count = @minimum(
+    const fuzz_op_count = @min(
         fuzz_args.events_max orelse @as(usize, 1E7),
         fuzz.random_int_exponential(random, usize, 1E6),
     );
@@ -543,11 +543,8 @@ pub fn main() !void {
 
     // TODO Use inline switch after upgrading to zig 0.10
     switch (table_usage) {
-        .general => {
-            try EnvironmentType(.general).run(&storage, fuzz_ops);
-        },
-        .secondary_index => {
-            try EnvironmentType(.secondary_index).run(&storage, fuzz_ops);
+        inline else => |usage| {
+            try EnvironmentType(usage).run(&storage, fuzz_ops);
         },
     }
 

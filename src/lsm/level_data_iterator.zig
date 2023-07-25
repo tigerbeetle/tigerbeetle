@@ -45,8 +45,8 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             direction: Direction,
         };
 
-        pub const IndexCallback = fn (it: *LevelTableValueBlockIterator) void;
-        pub const DataCallback = fn (it: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void;
+        pub const IndexCallback = *const fn (it: *LevelTableValueBlockIterator) void;
+        pub const DataCallback = *const fn (it: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void;
         pub const Callback = struct {
             on_index: IndexCallback,
             on_data: DataCallback,

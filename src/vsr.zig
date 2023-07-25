@@ -174,7 +174,7 @@ pub const Operation = enum(u8) {
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
         assert(self.valid(StateMachine));
-        assert(!self.reserved());
+        assert(!self.vsr_reserved());
         return @intToEnum(StateMachine.Operation, @enumToInt(self));
     }
 
@@ -193,7 +193,7 @@ pub const Operation = enum(u8) {
         return false;
     }
 
-    pub fn reserved(self: Operation) bool {
+    pub fn vsr_reserved(self: Operation) bool {
         return @enumToInt(self) < constants.vsr_operations_reserved;
     }
 
@@ -1330,16 +1330,19 @@ test "quorums" {
 /// needlessly compromising the experience until reconfiguration is fully implemented, derive
 /// replica ids for the initial cluster deterministically.
 pub fn root_members(cluster: u32) [constants.nodes_max]u128 {
-    const IdSeed = packed struct {
-        cluster_config_checksum: u128 = constants.config.cluster.checksum(),
-        cluster: u32,
-        replica: u8,
+    const IdSeed = extern struct {
+        cluster_config_checksum: u128 align(1) = constants.config.cluster.checksum(),
+        cluster: u32 align(1),
+        replica: u8 align(1),
     };
+
+    comptime assert(@sizeOf(IdSeed) == 21);
 
     var result = [_]u128{0} ** constants.nodes_max;
     var replica: u8 = 0;
     while (replica < constants.nodes_max) : (replica += 1) {
-        result[replica] = checksum(std.mem.asBytes(&IdSeed{ .cluster = cluster, .replica = replica }));
+        const seed = IdSeed{ .cluster = cluster, .replica = replica };
+        result[replica] = checksum(std.mem.asBytes(&seed));
     }
 
     assert_valid_members(&result);
@@ -1420,7 +1423,7 @@ const ViewChangeHeadersSlice = struct {
         assert(Headers.dvc_header_type(head) == .valid);
 
         if (headers.command == .start_view) {
-            assert(headers.slice.len >= @minimum(
+            assert(headers.slice.len >= @min(
                 constants.view_change_headers_suffix_max,
                 head.op + 1, // +1 to include the head itself.
             ));

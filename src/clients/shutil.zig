@@ -39,7 +39,7 @@ pub fn run_with_env(
     }
     std.debug.print("\n", .{});
 
-    var cp = try std.ChildProcess.init(cmd, arena.allocator());
+    var cp = std.ChildProcess.init(cmd, arena.allocator());
 
     var env_map = try std.process.getEnvMap(arena.allocator());
     i = 0;

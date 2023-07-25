@@ -28,7 +28,7 @@
     "test": "node dist/test",
     "build": "npm run build_tsc && npm run build_lib",
     "build_tsc": "./node_modules/typescript/bin/tsc",
-    "build_lib": "node scripts/windows_generate_node_lib.js && cd ../../.. && ./scripts/build.sh node_client -Drelease-safe",
+    "build_lib": "node scripts/windows_generate_node_lib.js && cd ../../.. && ./zig/zig build node_client -Drelease-safe",
     "prepack": "npm run build && find dist/bin -name '*.o' -delete && for path in dist/bin/*; do mv ${path}/libtb_nodeclient.* ${path}/client.node; done",
     "clean": "rm -rf build dist node_modules src/zig-cache zig"
   },

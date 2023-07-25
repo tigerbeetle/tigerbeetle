@@ -34,7 +34,7 @@ pub const vsr_options = .{
 pub fn request(
     operation: StateMachine.Operation,
     batch: anytype,
-    on_reply: fn (
+    on_reply: *const fn (
         user_data: u128,
         operation: StateMachine.Operation,
         results: []const u8,

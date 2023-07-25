@@ -70,7 +70,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const NextTick = Storage.NextTick;
 
         pub const Write = struct {
-            callback: fn (*Grid.Write) void,
+            callback: *const fn (*Grid.Write) void,
             address: u64,
             repair: bool,
             block: *BlockPtr,
@@ -89,7 +89,7 @@ pub fn GridType(comptime Storage: type) type {
         };
 
         pub const Read = struct {
-            callback: fn (*Grid.Read, BlockPtrConst) void,
+            callback: *const fn (*Grid.Read, BlockPtrConst) void,
             address: u64,
             checksum: u128,
             block_type: BlockType,
@@ -109,7 +109,7 @@ pub fn GridType(comptime Storage: type) type {
         };
 
         pub const ReadRepair = struct {
-            callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
+            callback: *const fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
             address: u64,
             checksum: u128,
             block: BlockPtr,
@@ -185,15 +185,15 @@ pub fn GridType(comptime Storage: type) type {
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
-        canceling: ?struct { callback: fn (*Grid) void } = null,
+        canceling: ?struct { callback: *const fn (*Grid) void } = null,
         canceling_tick_context: NextTick = undefined,
 
-        on_read_fault: ?fn (*Grid, *Grid.Read) void,
+        on_read_fault: ?*const fn (*Grid, *Grid.Read) void,
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
-            on_read_fault: ?fn (*Grid, *Grid.Read) void = null,
+            on_read_fault: ?*const fn (*Grid, *Grid.Read) void = null,
         }) !Grid {
             const cache_blocks = try allocator.alloc(BlockPtr, options.cache_blocks_count);
             errdefer allocator.free(cache_blocks);
@@ -244,7 +244,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.* = undefined;
         }
 
-        pub fn cancel(grid: *Grid, callback: fn (*Grid) void) void {
+        pub fn cancel(grid: *Grid, callback: *const fn (*Grid) void) void {
             assert(grid.canceling == null);
 
             grid.canceling = .{ .callback = callback };
@@ -297,7 +297,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn on_next_tick(
             grid: *Grid,
-            callback: fn (*Grid.NextTick) void,
+            callback: *const fn (*Grid.NextTick) void,
             next_tick: *Grid.NextTick,
         ) void {
             assert(grid.canceling == null);
@@ -416,7 +416,7 @@ pub fn GridType(comptime Storage: type) type {
         /// NOTE: This will consume `block` and replace it with a fresh block.
         pub fn write_block(
             grid: *Grid,
-            callback: fn (*Grid.Write) void,
+            callback: *const fn (*Grid.Write) void,
             write: *Grid.Write,
             block: *BlockPtr,
             address: u64,
@@ -454,7 +454,7 @@ pub fn GridType(comptime Storage: type) type {
         /// NOTE: This will consume `block` and replace it with a fresh block.
         pub fn write_block_repair(
             grid: *Grid,
-            callback: fn (*Grid.Write) void,
+            callback: *const fn (*Grid.Write) void,
             write: *Grid.Write,
             block: *BlockPtr,
             address: u64,
@@ -606,7 +606,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn read_block_from_cache_or_storage(
             grid: *Grid,
-            callback: fn (*Grid.Read, BlockPtrConst) void,
+            callback: *const fn (*Grid.Read, BlockPtrConst) void,
             read: *Grid.Read,
             address: u64,
             checksum: u128,
@@ -834,7 +834,7 @@ pub fn GridType(comptime Storage: type) type {
 
             if (header.checksum != checksum) {
                 log.err(
-                    "expected address={} checksum={} block_type={}, " ++
+                    "expected address={} checksum={} block_type={?}, " ++
                         "found address={} checksum={} block_type={}",
                     .{
                         address,
@@ -901,7 +901,7 @@ pub fn GridType(comptime Storage: type) type {
         /// - it would force an extra memcpy.
         pub fn read_block_repair(
             grid: *Grid,
-            callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
+            callback: *const fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
             read: *Grid.ReadRepair,
             block: BlockPtr,
             address: u64,

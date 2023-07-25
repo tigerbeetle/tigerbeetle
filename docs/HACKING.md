@@ -121,7 +121,7 @@ The `client_integration` target in build.zig helps with running the
 sample programs for each client as an integration test.
 
 ```bash
-./scripts/build.sh client_integration -- --language go --sample basic
+./zig/zig build client_integration -- --language go --sample basic
 ```
 
 See [the src/clients/README.md

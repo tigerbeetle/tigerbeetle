@@ -5,7 +5,7 @@ const math = std.math;
 pub fn CompositeKey(comptime Field: type) type {
     assert(Field == u128 or Field == u64);
 
-    return packed struct {
+    return extern struct {
         const Self = @This();
 
         pub const sentinel_key: Self = .{
@@ -15,45 +15,37 @@ pub fn CompositeKey(comptime Field: type) type {
 
         const tombstone_bit = 1 << 63;
 
-        // If zeroed padding is needed after the timestamp field.
-        const pad = Field == u128;
-
-        pub const Value = packed struct {
-            field: Field align(@alignOf(Field)),
-            /// The most significant bit indicates if the value is a tombstone.
-            timestamp: u64 align(@alignOf(u64)),
-            padding: (if (pad) u64 else u0) = 0,
-
-            comptime {
-                assert(@sizeOf(Value) == @sizeOf(Field) * 2);
-                assert(@alignOf(Value) == @alignOf(Field));
-                assert(@sizeOf(Value) * 8 == @bitSizeOf(Value));
-            }
+        // The type if zeroed padding is needed after the timestamp field.
+        const pad = switch (Field) {
+            u128 => @as(u64, 0),
+            u64 => [0]u8{},
+            else => @compileError("invalid Field for CompositeKey: " ++ @typeName(Field)),
         };
 
-        field: Field align(@alignOf(Field)),
+        // u128 may be aligned to 8 instead of the expected 16.
+        const field_bitsize_alignment = @divExact(@bitSizeOf(Field), 8);
+
+        pub const Value = Self;
+
+        field: Field align(field_bitsize_alignment),
         /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64 align(@alignOf(u64)),
-        padding: (if (pad) u64 else u0) = 0,
+        timestamp: u64,
+        /// [0]u8 as zero-sized-type workaround for https://github.com/ziglang/zig/issues/16394.
+        padding: @TypeOf(pad) = pad,
 
         comptime {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
-            assert(@alignOf(Self) == @alignOf(Field));
+            assert(@alignOf(Self) >= @alignOf(Field));
+            assert(@alignOf(Self) == field_bitsize_alignment);
             assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
         }
 
         pub inline fn compare_keys(a: Self, b: Self) math.Order {
-            if (a.field < b.field) {
-                return .lt;
-            } else if (a.field > b.field) {
-                return .gt;
-            } else if (a.timestamp < b.timestamp) {
-                return .lt;
-            } else if (a.timestamp > b.timestamp) {
-                return .gt;
-            } else {
-                return .eq;
+            var order = std.math.order(a.field, b.field);
+            if (order == .eq) {
+                order = std.math.order(a.timestamp, b.timestamp);
             }
+            return order;
         }
 
         pub inline fn key_from_value(value: *const Value) Self {

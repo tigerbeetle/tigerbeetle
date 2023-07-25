@@ -3236,7 +3236,10 @@ fn JniInterface(comptime T: type) type {
                 *VTable,
                 @alignCast(@alignOf(VTable), self),
             );
-            const fn_ptr = @ptrCast(Fn, vtable.functions[@enumToInt(function)]);
+            const fn_ptr = @ptrCast(*const Fn, @alignCast(
+                @alignOf(Fn),
+                vtable.functions[@enumToInt(function)],
+            ));
             return @call(.{}, fn_ptr, .{self} ++ args);
         }
     };

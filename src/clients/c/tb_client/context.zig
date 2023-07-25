@@ -27,10 +27,10 @@ const tb_client_t = api.tb_client_t;
 const tb_completion_t = api.tb_completion_t;
 
 pub const ContextImplementation = struct {
-    acquire_packet_fn: fn (*ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus,
-    release_packet_fn: fn (*ContextImplementation, *Packet) void,
-    submit_fn: fn (*ContextImplementation, *Packet) void,
-    deinit_fn: fn (*ContextImplementation) void,
+    acquire_packet_fn: *const fn (*ContextImplementation, out: *?*Packet) PacketAcquireStatus,
+    release_packet_fn: *const fn (*ContextImplementation, *Packet) void,
+    submit_fn: *const fn (*ContextImplementation, *Packet) void,
+    deinit_fn: *const fn (*ContextImplementation) void,
 };
 
 pub const Error = std.mem.Allocator.Error || error{

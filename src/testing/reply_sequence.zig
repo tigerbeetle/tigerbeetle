@@ -12,8 +12,7 @@ const Message = MessagePool.Message;
 const Client = @import("cluster.zig").Client;
 const StateMachine = @import("cluster.zig").StateMachine;
 
-// TODO(zig) This won't be necessary in Zig 0.10.
-const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
+const PriorityQueue = std.PriorityQueue;
 
 /// Both messages belong to the ReplySequence's `MessagePool`.
 const PendingReply = struct {

@@ -7,7 +7,7 @@
 // Windows as well.
 //
 // Example: (run from the repo root)
-//   ./scripts/build.sh run_with_tb -- node myscript.js
+//   ./zig/zig build run_with_tb -- node myscript.js
 //
 
 const std = @import("std");
@@ -76,7 +76,7 @@ pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8
         data_file,
     });
 
-    const port = free_port();
+    const port = try free_port();
 
     const start_args = &[_][]const u8{
         tb_binary,
@@ -86,14 +86,11 @@ pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8
         data_file,
     };
     std.debug.print("Starting TigerBeetle server: {s}\n", .{start_args});
-    const cp = try std.ChildProcess.init(
+    var cp = std.ChildProcess.init(
         start_args,
         arena.allocator(),
     );
-    defer {
-        _ = cp.kill() catch {};
-        cp.deinit();
-    }
+    defer _ = cp.kill() catch {};
     try cp.spawn();
 
     std.debug.print("Running commands: {s}\n", .{commands});
@@ -115,15 +112,12 @@ fn error_main() !void {
     const cwd = std.process.getEnvVarOwned(allocator, "R_CWD") catch ".";
 
     var collected_args = std.ArrayList([]const u8).init(allocator);
-    var args = std.process.args();
-    // Skip first arg, this process's name
-    _ = args.next(allocator);
-    while (args.next(allocator)) |arg_or_err| {
-        const arg = arg_or_err catch {
-            std.debug.print("Could not parse all arguments.\n", .{});
-            return error.CouldNotParseArguments;
-        };
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
+    // Skip first arg, this process's name
+    std.debug.assert(args.skip());
+    while (args.next()) |arg| {
         try collected_args.append(arg);
     }
 

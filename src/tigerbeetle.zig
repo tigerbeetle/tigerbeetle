@@ -35,7 +35,7 @@ pub const Account = extern struct {
     }
 };
 
-pub const AccountFlags = packed struct {
+pub const AccountFlags = packed struct(u16) {
     /// When the .linked flag is specified, it links an event with the next event in the batch, to
     /// create a chain of events, of arbitrary length, which all succeed or fail together. The tail
     /// of a chain is denoted by the first event without this flag. The last event in a batch may
@@ -81,7 +81,7 @@ pub const Transfer = extern struct {
     }
 };
 
-pub const TransferFlags = packed struct {
+pub const TransferFlags = packed struct(u16) {
     linked: bool = false,
     pending: bool = false,
     post_pending_transfer: bool = false,

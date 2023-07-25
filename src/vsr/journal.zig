@@ -132,14 +132,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         const Status = union(enum) {
             init: void,
-            recovering: fn (journal: *Journal) void,
+            recovering: *const fn (journal: *Journal) void,
             recovered: void,
         };
 
         pub const Read = struct {
             journal: *Journal,
             completion: Storage.Read,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
 
             message: *Message,
             op: u64,
@@ -151,7 +151,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             pub const Trigger = enum { append, fix, repair, pipeline };
 
             journal: *Journal,
-            callback: fn (replica: *Replica, wrote: ?*Message, trigger: Trigger) void,
+            callback: *const fn (replica: *Replica, wrote: ?*Message, trigger: Trigger) void,
 
             message: *Message,
             trigger: Trigger,
@@ -171,7 +171,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// concurrent write to complete. This is a range on the physical disk.
         const Range = struct {
             completion: Storage.Write,
-            callback: fn (write: *Journal.Write) void,
+            callback: *const fn (write: *Journal.Write) void,
             buffer: []const u8,
             ring: Ring,
             /// Offset within the ring.
@@ -696,7 +696,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             journal: *Journal,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -733,7 +733,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There may or may not be an in-memory header.
         pub fn read_prepare_with_op_and_checksum(
             journal: *Journal,
-            callback: fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -920,12 +920,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         fn read_prepare_log(journal: *Journal, op: u64, checksum: ?u128, notice: []const u8) void {
             log.info(
-                "{}: read_prepare: op={} checksum={}: {s}",
+                "{}: read_prepare: op={} checksum={?}: {s}",
                 .{ journal.replica, op, checksum, notice },
             );
         }
 
-        pub fn recover(journal: *Journal, callback: fn (journal: *Journal) void) void {
+        pub fn recover(journal: *Journal, callback: *const fn (journal: *Journal) void) void {
             assert(journal.status == .init);
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
@@ -1673,7 +1673,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         // sectors. (This is mostly a risk for single-replica clusters with small WALs).
         pub fn write_prepare(
             journal: *Journal,
-            callback: fn (journal: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
+            callback: *const fn (journal: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
             message: *Message,
             trigger: Journal.Write.Trigger,
         ) void {
@@ -1905,7 +1905,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         fn write_sectors(
             journal: *Journal,
-            callback: fn (write: *Journal.Write) void,
+            callback: *const fn (write: *Journal.Write) void,
             write: *Journal.Write,
             buffer: []const u8,
             ring: Ring,

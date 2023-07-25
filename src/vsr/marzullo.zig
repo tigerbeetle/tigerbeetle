@@ -6,7 +6,6 @@ const assert = std.debug.assert;
 /// time sources. NTP uses a modified form of this called the Intersection algorithm, which returns
 /// a larger interval for further statistical sampling. However, here we want the smallest interval.
 pub const Marzullo = struct {
-
     /// The smallest interval consistent with the largest number of sources.
     pub const Interval = struct {
         /// The lower bound on the minimum clock offset.

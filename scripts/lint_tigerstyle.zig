@@ -2,6 +2,7 @@ const std = @import("std");
 const fs = std.fs;
 const math = std.math;
 const mem = std.mem;
+const assert = std.debug.assert;
 
 const whitelist = std.ComptimeStringMap([]const u32, .{
     .{ "src/cli.zig", &.{ 35, 39 } },
@@ -26,8 +27,11 @@ var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
 const gpa = general_purpose_allocator.allocator();
 
 pub fn main() !void {
-    const argv = std.os.argv;
-    for (argv[1..]) |raw_path| {
+    var args = try std.process.argsWithAllocator(gpa);
+    defer args.deinit();
+
+    assert(args.skip());
+    while (args.next()) |raw_path| {
         const path = mem.span(raw_path);
         lint_file(path, fs.cwd(), path) catch |err| switch (err) {
             error.IsDir, error.AccessDenied => try lint_dir(path, fs.cwd(), path),
@@ -83,13 +87,13 @@ const LintError = error{
 } || fs.File.OpenError || fs.File.ReadError || fs.File.WriteError;
 
 fn lint_dir(file_path: []const u8, parent_dir: fs.Dir, parent_sub_path: []const u8) LintError!void {
-    var dir = try parent_dir.openDir(parent_sub_path, .{ .iterate = true });
-    defer dir.close();
+    var dir_iterable = try parent_dir.openIterableDir(parent_sub_path, .{});
+    defer dir_iterable.close();
 
-    const stat = try dir.stat();
+    const stat = try dir_iterable.dir.stat();
     if (try seen.fetchPut(gpa, stat.inode, {})) |_| return;
 
-    var dir_it = dir.iterate();
+    var dir_it = dir_iterable.iterate();
     while (try dir_it.next()) |entry| {
         const is_dir = entry.kind == .Directory;
 
@@ -100,9 +104,9 @@ fn lint_dir(file_path: []const u8, parent_dir: fs.Dir, parent_sub_path: []const 
             defer gpa.free(full_path);
 
             if (is_dir) {
-                try lint_dir(full_path, dir, entry.name);
+                try lint_dir(full_path, dir_iterable.dir, entry.name);
             } else {
-                try lint_file(full_path, dir, entry.name);
+                try lint_file(full_path, dir_iterable.dir, entry.name);
             }
         }
     }

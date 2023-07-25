@@ -144,15 +144,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             none,
             /// We're at the end of a half-bar.
             /// Call this callback when all current compactions finish.
-            awaiting: fn (*Tree) void,
+            awaiting: *const fn (*Tree) void,
             /// We're at the end of some other beat.
             /// Call this on the next tick.
-            next_tick: fn (*Tree) void,
+            next_tick: *const fn (*Tree) void,
         } = .none,
         compaction_next_tick: Grid.NextTick = undefined,
 
-        checkpoint_callback: ?fn (*Tree) void = null,
-        open_callback: ?fn (*Tree) void = null,
+        checkpoint_callback: ?*const fn (*Tree) void = null,
+        open_callback: ?*const fn (*Tree) void = null,
 
         tracer_slot: ?tracer.SpanStart = null,
         filter_block_hits: u64 = 0,
@@ -309,7 +309,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// Call this function only after checking `lookup_from_memory()`.
         pub fn lookup_from_levels(
             tree: *Tree,
-            callback: fn (*LookupContext, ?*const Value) void,
+            callback: *const fn (*LookupContext, ?*const Value) void,
             context: *LookupContext,
             snapshot: u64,
             key: Key,
@@ -381,7 +381,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 checksum: u128,
             } = null,
 
-            callback: fn (*Tree.LookupContext, ?*const Value) void,
+            callback: *const fn (*Tree.LookupContext, ?*const Value) void,
 
             fn read_index_block(context: *LookupContext) void {
                 assert(context.data_block == null);
@@ -496,7 +496,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             return if (value == null or tombstone(value.?)) null else value.?;
         }
 
-        pub fn open(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn open(tree: *Tree, callback: *const fn (*Tree) void) void {
             assert(tree.open_callback == null);
             tree.open_callback = callback;
 
@@ -560,7 +560,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         ///
         /// Compactions start on the down beat of a half bar, using 0-based beats.
         /// For example, if there are 4 beats in a bar, start on beat 0 or beat 2.
-        pub fn compact(tree: *Tree, callback: fn (*Tree) void, op: u64) void {
+        pub fn compact(tree: *Tree, callback: *const fn (*Tree) void, op: u64) void {
             assert(tree.compaction_phase == .idle);
             assert(tree.compaction_callback == .none);
             assert(op != 0);
@@ -960,7 +960,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(!tree.table_immutable.free);
         }
 
-        pub fn checkpoint(tree: *Tree, callback: fn (*Tree) void) void {
+        pub fn checkpoint(tree: *Tree, callback: *const fn (*Tree) void) void {
             // Assert no outstanding compact_tick() work.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == .none);
@@ -1022,7 +1022,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             snapshot: u64,
             query: RangeQuery,
 
-            pub fn next(callback: fn (result: ?Value) void) void {
+            pub fn next(callback: *const fn (result: ?Value) void) void {
                 _ = callback;
             }
         };
@@ -1162,4 +1162,34 @@ test "table_count_max_for_level/tree" {
     try expectEqual(@as(u32, 4680 + 32768), table_count_max_for_tree(8, 5));
     try expectEqual(@as(u32, 37448 + 262144), table_count_max_for_tree(8, 6));
     try expectEqual(@as(u32, 299592 + 2097152), table_count_max_for_tree(8, 7));
+}
+
+test "TreeType" {
+    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const Table = @import("table.zig").TableType(
+        Key,
+        Key.Value,
+        Key.compare_keys,
+        Key.key_from_value,
+        Key.sentinel_key,
+        Key.tombstone,
+        Key.tombstone_from_key,
+        constants.state_machine_config.lsm_batch_multiple * 1024,
+        .secondary_index,
+    );
+
+    const Storage = @import("../storage.zig").Storage;
+    const Tree = TreeType(Table, Storage);
+
+    _ = Tree.init;
+    _ = Tree.deinit;
+    _ = Tree.reset;
+    _ = Tree.put;
+    _ = Tree.remove;
+    _ = Tree.lookup_from_memory;
+    _ = Tree.lookup_from_levels;
+    _ = Tree.open;
+    _ = Tree.compact;
+    _ = Tree.compact_end;
+    _ = Tree.checkpoint;
 }

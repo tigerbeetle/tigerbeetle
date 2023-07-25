@@ -54,14 +54,15 @@ pub fn main() !void {
     // TODO Use std.testing.allocator when all deinit() leaks are fixed.
     const allocator = std.heap.page_allocator;
 
-    var args = std.process.args();
+    var args = try std.process.argsWithAllocator(allocator);
+    defer args.deinit();
 
     // Skip argv[0] which is the name of this executable:
-    _ = args_next(&args, allocator);
+    assert(args.skip());
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
-        const arg_two = args_next(&args, allocator) orelse break :seed_from_arg seed_random;
+        const arg_two = args.next() orelse break :seed_from_arg seed_random;
         defer allocator.free(arg_two);
         break :seed_from_arg parse_seed(arg_two);
     };
@@ -594,7 +595,7 @@ pub const Simulator = struct {
                 commit.request.header.request,
             });
 
-            if (!commit.request.header.operation.reserved()) {
+            if (!commit.request.header.operation.vsr_reserved()) {
                 simulator.requests_replied += 1;
                 simulator.workload.on_reply(
                     commit.client_index,
@@ -775,12 +776,6 @@ fn chance(random: std.rand.Random, p: u8) bool {
 fn chance_f64(random: std.rand.Random, p: f64) bool {
     assert(p <= 100.0);
     return random.float(f64) * 100.0 < p;
-}
-
-/// Returns the next argument for the simulator or null (if none available)
-fn args_next(args: *std.process.ArgIterator, allocator: std.mem.Allocator) ?[:0]const u8 {
-    const err_or_bytes = args.next(allocator) orelse return null;
-    return err_or_bytes catch @panic("Unable to extract next value from args");
 }
 
 /// Returns a random partitioning mode.

@@ -51,7 +51,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         const Read = struct {
             client_replies: *ClientReplies,
             completion: Storage.Read,
-            callback: fn (
+            callback: *const fn (
                 client_replies: *ClientReplies,
                 reply_header: *const vsr.Header,
                 reply: ?*Message,
@@ -71,6 +71,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             message: *Message,
         };
 
+        const WriteQueue = RingBuffer(*Write, constants.client_replies_iops_write_max, .array);
+
         storage: *Storage,
         message_pool: *MessagePool,
         replica: u8,
@@ -88,16 +90,16 @@ pub fn ClientRepliesType(comptime Storage: type) type {
 
         /// Guard against multiple concurrent writes to the same slot.
         /// Pointers are into `writes`.
-        write_queue: RingBuffer(*Write, constants.client_replies_iops_write_max, .array) = .{},
+        write_queue: WriteQueue = WriteQueue.init(),
 
         ready_next_tick: Storage.NextTick = undefined,
         ready_callback: ?union(enum) {
-            next_tick: fn (*ClientReplies) void,
-            write: fn (*ClientReplies) void,
+            next_tick: *const fn (*ClientReplies) void,
+            write: *const fn (*ClientReplies) void,
         } = null,
 
         checkpoint_next_tick: Storage.NextTick = undefined,
-        checkpoint_callback: ?fn (*ClientReplies) void = null,
+        checkpoint_callback: ?*const fn (*ClientReplies) void = null,
 
         pub fn init(options: struct {
             storage: *Storage,
@@ -156,7 +158,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-            callback: fn (*ClientReplies, *const vsr.Header, ?*Message, ?u8) void,
+            callback: *const fn (*ClientReplies, *const vsr.Header, ?*Message, ?u8) void,
             destination_replica: ?u8,
         ) error{Busy}!void {
             assert(client_replies.read_reply_sync(slot, session) == null);
@@ -258,7 +260,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Call `callback` when ClientReplies is able to start another write_reply().
         pub fn ready(
             client_replies: *ClientReplies,
-            callback: fn (client_replies: *ClientReplies) void,
+            callback: *const fn (client_replies: *ClientReplies) void,
         ) void {
             assert(client_replies.ready_callback == null);
 
@@ -387,7 +389,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             }
         }
 
-        pub fn checkpoint(client_replies: *ClientReplies, callback: fn (*ClientReplies) void) void {
+        pub fn checkpoint(client_replies: *ClientReplies, callback: *const fn (*ClientReplies) void) void {
             assert(client_replies.checkpoint_callback == null);
             client_replies.checkpoint_callback = callback;
 

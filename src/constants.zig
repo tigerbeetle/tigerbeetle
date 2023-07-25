@@ -202,14 +202,7 @@ pub const pipeline_prepare_queue_max = config.cluster.pipeline_prepare_queue_max
 
 /// The maximum number of Viewstamped Replication request messages that can be queued at a primary,
 /// waiting to prepare.
-// TODO(Zig): After 0.10, change this to simply "clients_max -| pipeline_prepare_queue_max".
-// In Zig 0.9 compilation fails with "operation caused overflow" despite the saturating subtraction.
-// See: https://github.com/ziglang/zig/issues/10870
-pub const pipeline_request_queue_max =
-    if (clients_max < pipeline_prepare_queue_max)
-    0
-else
-    clients_max - pipeline_prepare_queue_max;
+pub const pipeline_request_queue_max = clients_max -| pipeline_prepare_queue_max;
 
 comptime {
     // A prepare-queue capacity larger than clients_max is wasted.

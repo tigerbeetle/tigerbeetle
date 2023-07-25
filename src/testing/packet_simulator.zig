@@ -4,7 +4,7 @@ const math = std.math;
 
 const log = std.log.scoped(.packet_simulator);
 const vsr = @import("../vsr.zig");
-const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
+const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
 
 pub const PacketSimulatorOptions = struct {
@@ -82,12 +82,12 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         const LinkPacket = struct {
             expiry: u64,
-            callback: fn (packet: Packet, path: Path) void,
+            callback: *const fn (packet: Packet, path: Path) void,
             packet: Packet,
         };
 
         const Link = struct {
-            queue: PriorityQueue(LinkPacket, void, Self.order_packets),
+            queue: PriorityQueue(LinkPacket, void, order_packets),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
@@ -98,7 +98,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         };
 
         const RecordedPacket = struct {
-            callback: fn (packet: Packet, path: Path) void,
+            callback: *const fn (packet: Packet, path: Path) void,
             packet: Packet,
             path: Path,
         };
@@ -133,8 +133,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             for (links) |*link, i| {
                 errdefer for (links[0..i]) |l| l.queue.deinit();
 
-                const queue = PriorityQueue(LinkPacket, void, Self.order_packets).init(allocator, {});
-                try link.queue.ensureTotalCapacity(options.path_maximum_capacity);
+                var queue = PriorityQueue(LinkPacket, void, order_packets).init(allocator, {});
+                try queue.ensureTotalCapacity(options.path_maximum_capacity);
                 link.* = .{ .queue = queue };
             }
             errdefer for (links) |link| link.queue.deinit();
@@ -335,12 +335,12 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         self.auto_partition_stability = self.options.unpartition_stability;
                         std.mem.set(bool, self.auto_partition, false);
                         for (self.links) |*link| link.filter = LinkFilter.initFull();
-                        log.warn("unpartitioned network: partition={d}", .{self.auto_partition});
+                        log.warn("unpartitioned network: partition={any}", .{self.auto_partition});
                     }
                 } else {
                     if (self.options.node_count > 1 and self.should_partition()) {
                         self.auto_partition_network();
-                        log.warn("partitioned network: partition={d}", .{self.auto_partition});
+                        log.warn("partitioned network: partition={any}", .{self.auto_partition});
                     }
                 }
             }
@@ -395,7 +395,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         pub fn submit_packet(
             self: *Self,
             packet: Packet, // Callee owned.
-            callback: fn (packet: Packet, path: Path) void,
+            callback: *const fn (packet: Packet, path: Path) void,
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
