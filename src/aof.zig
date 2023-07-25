@@ -26,7 +26,8 @@ const magic_number: u128 = 312960301372567410560647846651901451202;
 pub const AOFEntryMetadata = extern struct {
     primary: u64,
     replica: u64,
-    reserved: [64]u8 = std.mem.zeroes([64]u8),
+    // Use large padding here to align the message itself to the sector boundary.
+    reserved: [4064]u8 = std.mem.zeroes([4064]u8),
 
     comptime {
         assert(stdx.no_padding(AOFEntryMetadata));
