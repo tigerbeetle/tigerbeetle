@@ -6,6 +6,7 @@ if [ ! -d "zig" ]; then
     ./scripts/install_zig.sh
 fi
 
+# TODO: remove -Drelease-safe once we no longer use a lot of stack in Groove.zig
 ./zig/zig build -Drelease-safe -Dconfig-aof-record=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof
 
