@@ -3,7 +3,7 @@ const std = @import("std");
 const Docs = @import("../docs_types.zig").Docs;
 const run = @import("../shutil.zig").run;
 const file_or_directory_exists = @import("../shutil.zig").file_or_directory_exists;
-const script_filename = @import("../shutil.zig").script_filename;
+const binary_filename = @import("../shutil.zig").binary_filename;
 
 fn go_current_commit_pre_install_hook(
     arena: *std.heap.ArenaAllocator,
@@ -29,7 +29,8 @@ fn go_current_commit_post_install_hook(
     try std.os.chdir(root);
     if (!file_or_directory_exists("src/clients/go/pkg/native/x86_64-linux")) {
         try run(arena, &[_][]const u8{
-            try script_filename(arena, &[_][]const u8{ "scripts", "build" }),
+            try binary_filename(arena, &[_][]const u8{ "zig", "zig" }),
+            "build",
             "go_client",
         });
     }
