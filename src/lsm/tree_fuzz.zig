@@ -79,6 +79,7 @@ const FuzzOp = union(enum) {
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
 const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
 const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
+const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const cluster = 32;
 const replica = 4;
@@ -276,13 +277,24 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn get(env: *Environment, key: Key) ?*const Key.Value {
             env.change_state(.fuzzing, .tree_lookup);
 
-            if (env.tree.lookup_from_memory(env.tree.lookup_snapshot_max.?, key)) |value| {
-                env.change_state(.tree_lookup, .fuzzing);
-                return Tree.unwrap_tombstone(value);
-            }
-
             env.lookup_value = null;
-            env.tree.lookup_from_levels(get_callback, &env.lookup_context, env.tree.lookup_snapshot_max.?, key);
+            switch (env.tree.lookup_from_memory(snapshot_latest, key)) {
+                .negative => {
+                    get_callback(&env.lookup_context, null);
+                },
+                .positive => |value| {
+                    get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
+                },
+                .possible => |level_min| {
+                    env.tree.lookup_from_levels_storage(.{
+                        .callback = get_callback,
+                        .context = &env.lookup_context,
+                        .snapshot = env.tree.lookup_snapshot_max.?,
+                        .key = key,
+                        .level_min = level_min,
+                    });
+                },
+            }
             env.tick_until_state_change(.tree_lookup, .fuzzing);
             return env.lookup_value;
         }
