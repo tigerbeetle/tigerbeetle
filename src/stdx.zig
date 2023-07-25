@@ -286,6 +286,58 @@ fn has_pointers(comptime T: type) bool {
     }
 }
 
+/// Checks that a type does not have implicit padding.
+pub fn no_padding(comptime T: type) bool {
+    comptime switch (@typeInfo(T)) {
+        .Int => return @bitSizeOf(T) == 8 * @sizeOf(T),
+        .Array => |info| return no_padding(info.child),
+        .Struct => |info| {
+            switch (info.layout) {
+                .Auto => return false,
+                .Extern => {
+                    var offset = 0;
+                    for (info.fields) |field| {
+                        const field_offset = @offsetOf(T, field.name);
+                        if (offset != field_offset) return false;
+                        offset += @sizeOf(field.field_type);
+                    }
+                    return offset == @sizeOf(T);
+                },
+                .Packed => return @bitSizeOf(T) == 8 * @sizeOf(T),
+            }
+        },
+        .Enum => |info| {
+            maybe(info.is_exhaustive);
+            return no_padding(info.tag_type);
+        },
+        .Pointer => return false,
+        .Union => return false,
+        else => return false,
+    };
+}
+
+test no_padding {
+    comptime for (.{
+        u8,
+        extern struct { x: u8 },
+        packed struct { x: u7, y: u1 },
+        enum(u8) { x },
+    }) |T| {
+        assert(no_padding(T));
+    };
+
+    comptime for (.{
+        u7,
+        struct { x: u7 },
+        struct { x: u8 },
+        struct { x: u64, y: u32 },
+        packed struct { x: u7 },
+        enum(u7) { x },
+    }) |T| {
+        assert(!no_padding(T));
+    };
+}
+
 pub inline fn hash_inline(value: anytype) u64 {
     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
         .Struct, .Int => std.mem.asBytes(&value),

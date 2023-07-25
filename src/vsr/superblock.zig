@@ -149,7 +149,7 @@ pub const SuperBlockHeader = extern struct {
         comptime {
             assert(@sizeOf(VSRState) == 272);
             // Assert that there is no implicit padding in the struct.
-            assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
+            assert(stdx.no_padding(VSRState));
         }
 
         pub fn root(options: struct {
@@ -250,7 +250,7 @@ pub const SuperBlockHeader = extern struct {
         comptime {
             assert(@sizeOf(Snapshot) == 24);
             // Assert that there is no implicit padding in the struct.
-            assert(@bitSizeOf(Snapshot) == @sizeOf(Snapshot) * 8);
+            assert(stdx.no_padding(Snapshot));
         }
     };
 
@@ -259,7 +259,7 @@ pub const SuperBlockHeader = extern struct {
         assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
         assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
-        assert(@bitSizeOf(SuperBlockHeader) == @sizeOf(SuperBlockHeader) * 8);
+        assert(stdx.no_padding(SuperBlockHeader));
     }
 
     pub fn calculate_checksum(superblock: *const SuperBlockHeader) u128 {
