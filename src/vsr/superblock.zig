@@ -116,6 +116,14 @@ pub const SuperBlockHeader = extern struct {
     vsr_headers_reserved: [vsr_headers_reserved_size]u8 =
         [_]u8{0} ** vsr_headers_reserved_size,
 
+    comptime {
+        assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
+        assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
+        assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
+        // Assert that there is no implicit padding in the struct.
+        assert(stdx.no_padding(SuperBlockHeader));
+    }
+
     pub const VSRState = extern struct {
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
@@ -236,6 +244,12 @@ pub const SuperBlockHeader = extern struct {
         /// A timeout of 0 indicates that the snapshot must be explicitly released by the user.
         timeout: u64,
 
+        comptime {
+            assert(@sizeOf(Snapshot) == 24);
+            // Assert that there is no implicit padding in the struct.
+            assert(stdx.no_padding(Snapshot));
+        }
+
         pub fn exists(snapshot: Snapshot) bool {
             if (snapshot.created == 0) {
                 assert(snapshot.queried == 0);
@@ -246,21 +260,7 @@ pub const SuperBlockHeader = extern struct {
                 return true;
             }
         }
-
-        comptime {
-            assert(@sizeOf(Snapshot) == 24);
-            // Assert that there is no implicit padding in the struct.
-            assert(stdx.no_padding(Snapshot));
-        }
     };
-
-    comptime {
-        assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
-        assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
-        assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
-        // Assert that there is no implicit padding in the struct.
-        assert(stdx.no_padding(SuperBlockHeader));
-    }
 
     pub fn calculate_checksum(superblock: *const SuperBlockHeader) u128 {
         comptime assert(meta.fieldIndex(SuperBlockHeader, "checksum") == 0);

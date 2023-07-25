@@ -24,20 +24,16 @@ const magic_number: u128 = 312960301372567410560647846651901451202;
 
 /// On-disk format for AOF Metadata.
 pub const AOFEntryMetadata = extern struct {
-    comptime {
-        assert(stdx.no_padding(AOFEntryMetadata));
-    }
-
     primary: u64,
     replica: u64,
     reserved: [64]u8 = std.mem.zeroes([64]u8),
+
+    comptime {
+        assert(stdx.no_padding(AOFEntryMetadata));
+    }
 };
 
 pub const AOFEntry = extern struct {
-    comptime {
-        assert(stdx.no_padding(AOFEntry));
-    }
-
     /// In case of extreme corruption, start each entry with a fixed random integer,
     /// to allow skipping over corrupted entries.
     magic_number: u128 = magic_number,
@@ -48,6 +44,10 @@ pub const AOFEntry = extern struct {
     /// The main Message to log. The actual length of the entire payload will be sector
     /// aligned, so we might write past what the VSR header in here indicates.
     message: [constants.message_size_max]u8 align(constants.sector_size),
+
+    comptime {
+        assert(stdx.no_padding(AOFEntry));
+    }
 
     /// Calculate the actual length of the AOFEntry that needs to be written to disk,
     /// accounting for sector alignment.

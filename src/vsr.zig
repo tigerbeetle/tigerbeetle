@@ -237,10 +237,6 @@ pub const Header = extern struct {
         assert(checksum_body_empty == checksum(&.{}));
     }
 
-    comptime {
-        assert(@sizeOf(Header) == 128);
-        assert(stdx.no_padding(Header));
-    }
     /// A checksum covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
     /// This checksum is enough to uniquely identify a network message or journal entry.
@@ -397,6 +393,11 @@ pub const Header = extern struct {
 
     /// The version of the protocol implementation that originated this message.
     version: u8 = Version,
+
+    comptime {
+        assert(@sizeOf(Header) == 128);
+        assert(stdx.no_padding(Header));
+    }
 
     pub fn calculate_checksum(self: *const Header) u128 {
         const checksum_size = @sizeOf(@TypeOf(self.checksum));
