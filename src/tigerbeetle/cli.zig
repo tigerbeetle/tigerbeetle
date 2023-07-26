@@ -311,11 +311,11 @@ fn parse_cluster(raw_cluster: []const u8) u32 {
 
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []net.Address {
-    return vsr.parse_addresses(allocator, raw_addresses, constants.nodes_max) catch |err| switch (err) {
+    return vsr.parse_addresses(allocator, raw_addresses, constants.members_max) catch |err| switch (err) {
         error.AddressHasTrailingComma => fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {
             fatal("--addresses: too many addresses, at most {d} are allowed", .{
-                constants.nodes_max,
+                constants.members_max,
             });
         },
         error.AddressHasMoreThanOneColon => {
@@ -433,7 +433,7 @@ test "parse_size" {
 }
 
 fn parse_replica(replica_count: u8, raw_replica: []const u8) u8 {
-    comptime assert(constants.nodes_max <= std.math.maxInt(u8));
+    comptime assert(constants.members_max <= std.math.maxInt(u8));
     const replica = fmt.parseUnsigned(u8, raw_replica, 10) catch |err| switch (err) {
         error.Overflow => fatal("--replica: value exceeds an 8-bit unsigned integer", .{}),
         error.InvalidCharacter => fatal("--replica: value contains an invalid character", .{}),
