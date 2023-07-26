@@ -206,7 +206,7 @@ pub const SuperBlockHeader = extern struct {
             }
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
-            assert(stdx.equal_bytes([constants.nodes_max]u128, &old.members, &new.members));
+            assert(stdx.equal_bytes([constants.members_max]u128, &old.members, &new.members));
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;

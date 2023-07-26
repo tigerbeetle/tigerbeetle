@@ -19,8 +19,8 @@ pub fn SyncCheckerType(comptime Replica: type) type {
         /// Indexed by checkpoint_index(checkpoint_op).
         canonical: std.ArrayList(u128),
 
-        replicas_syncing: std.StaticBitSet(constants.nodes_max) =
-            std.StaticBitSet(constants.nodes_max).initEmpty(),
+        replicas_syncing: std.StaticBitSet(constants.members_max) =
+            std.StaticBitSet(constants.members_max).initEmpty(),
 
         pub fn init(allocator: std.mem.Allocator) SyncChecker {
             var canonical = std.ArrayList(u128).init(allocator);
