@@ -1076,6 +1076,12 @@ pub const ReconfigurationResult = enum(u32) {
     /// The request is valid, but there's no need to advance the epoch, because / configuration
     /// exactly matches the current one.
     configuration_is_no_op = 16,
+
+    comptime {
+        for (std.enums.values(ReconfigurationResult)) |result, index| {
+            assert(@enumToInt(result) == index);
+        }
+    }
 };
 
 test "ReconfigurationRequest" {
