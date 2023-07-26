@@ -397,7 +397,7 @@ pub fn aof_merge(
 ) !void {
     const stdout = std.io.getStdOut().writer();
 
-    var aofs: [constants.nodes_max]AOF.Iterator = undefined;
+    var aofs: [constants.members_max]AOF.Iterator = undefined;
     var aof_count: usize = 0;
     defer for (aofs[0..aof_count]) |*it| it.close();
 
@@ -693,7 +693,7 @@ pub fn main() !void {
 
     var action: ?[:0]const u8 = null;
     var addresses: ?[:0]const u8 = null;
-    var paths: [constants.nodes_max][:0]const u8 = undefined;
+    var paths: [constants.members_max][:0]const u8 = undefined;
     var count: usize = 0;
 
     while (args.next()) |arg| {

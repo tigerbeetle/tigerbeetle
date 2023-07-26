@@ -1112,7 +1112,7 @@ const TestContext = struct {
 
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
-        var replica_indexes = std.BoundedArray(u8, constants.nodes_max){ .buffer = undefined };
+        var replica_indexes = std.BoundedArray(u8, constants.members_max){ .buffer = undefined };
         // TODO Zig: This should iterate over values instead of pointers once the miscompilation
         // segfault is fixed.
         for (replica_processes.constSlice()) |*p| replica_indexes.appendAssumeCapacity(p.replica);
@@ -1156,7 +1156,7 @@ const TestContext = struct {
         t.client_replies[client] += 1;
     }
 
-    const ProcessList = std.BoundedArray(Process, constants.nodes_max + constants.clients_max);
+    const ProcessList = std.BoundedArray(Process, constants.members_max + constants.clients_max);
 
     fn processes(t: *const TestContext, selector: ProcessSelector) ProcessList {
         const replica_count = t.cluster.options.replica_count;
@@ -1210,7 +1210,7 @@ const TestContext = struct {
 const TestReplicas = struct {
     context: *TestContext,
     cluster: *Cluster,
-    replicas: std.BoundedArray(u8, constants.nodes_max),
+    replicas: std.BoundedArray(u8, constants.members_max),
 
     pub fn stop(t: *const TestReplicas) void {
         for (t.replicas.constSlice()) |r| {
@@ -1473,7 +1473,7 @@ const TestReplicas = struct {
     }
 
     // -1: no route to self.
-    const paths_max = constants.nodes_max * (constants.nodes_max - 1 + constants.clients_max);
+    const paths_max = constants.members_max * (constants.members_max - 1 + constants.clients_max);
 
     fn peer_paths(
         t: *const TestReplicas,
