@@ -15,6 +15,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
@@ -274,7 +275,7 @@ const TableInfo = extern struct {
     comptime {
         assert(@sizeOf(TableInfo) == 48 + 16 * 2);
         assert(@alignOf(TableInfo) == 16);
-        assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
+        assert(stdx.no_padding(TableInfo));
     }
 };
 

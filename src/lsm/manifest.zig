@@ -3,6 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const growth_factor = constants.lsm_growth_factor;
 
@@ -46,7 +47,7 @@ pub fn TableInfoType(comptime Table: type) type {
         comptime {
             assert(@sizeOf(TableInfo) == 48 + Table.key_size * 2);
             assert(@alignOf(TableInfo) == 16);
-            assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
+            assert(stdx.no_padding(TableInfo));
         }
 
         /// Every query targets a particular snapshot. The snapshot determines which tables are

@@ -527,7 +527,7 @@ pub const Storage = struct {
 
         comptime {
             assert(@sizeOf(MessageRaw) == constants.message_size_max);
-            assert(@sizeOf(MessageRaw) * 8 == @bitSizeOf(MessageRaw));
+            assert(stdx.no_padding(MessageRaw));
         }
     };
 

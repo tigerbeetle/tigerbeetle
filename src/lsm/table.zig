@@ -96,8 +96,8 @@ pub fn TableType(
             // TODO(ifreund) What are our alignment expectations for Value?
 
             // There must be no padding in the Key/Value types to avoid buffer bleeds.
-            assert(@bitSizeOf(Key) == @sizeOf(Key) * 8);
-            assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
+            assert(stdx.no_padding(Key));
+            assert(stdx.no_padding(Value));
 
             // These impact our calculation of:
             // * the superblock trailer size, and

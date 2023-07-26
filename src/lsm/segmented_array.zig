@@ -1280,7 +1280,7 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
     comptime {
         assert(@sizeOf(TableInfo) == 48 + @sizeOf(u128) * 2);
         assert(@alignOf(TableInfo) == 16);
-        assert(@bitSizeOf(TableInfo) == @sizeOf(TableInfo) * 8);
+        assert(stdx.no_padding(TableInfo));
     }
 
     const TestOptions = struct {
