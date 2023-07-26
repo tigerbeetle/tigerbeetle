@@ -9,7 +9,7 @@ const message_pool = @import("../../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
-const ReplicaSet = std.StaticBitSet(constants.nodes_max);
+const ReplicaSet = std.StaticBitSet(constants.members_max);
 const Commits = std.ArrayList(struct {
     header: vsr.Header,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
@@ -30,7 +30,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         replica_count: u8,
 
         commits: Commits,
-        commit_mins: [constants.nodes_max]u64 = [_]u64{0} ** constants.nodes_max,
+        commit_mins: [constants.members_max]u64 = [_]u64{0} ** constants.members_max,
 
         replicas: []const Replica,
         clients: []const Client,

@@ -1109,7 +1109,7 @@ test "ReconfigurationRequest" {
         }
 
         fn to_members(m: anytype) Members {
-            var result = [_]u128{0} ** constants.nodes_max;
+            var result = [_]u128{0} ** constants.members_max;
             inline for (m) |member, index| result[index] = member;
             return result;
         }
@@ -1582,7 +1582,7 @@ test "quorums" {
 /// First replica_count elements are active replicas,
 /// then standby_count standbys, the rest are zeros.
 /// Order determines ring topology for replication.
-pub const Members = [constants.nodes_max]u128;
+pub const Members = [constants.members_max]u128;
 
 /// Deterministically assigns replica_ids for the initial configuration.
 ///
@@ -1599,9 +1599,9 @@ pub fn root_members(cluster: u32) Members {
 
     comptime assert(@sizeOf(IdSeed) == 21);
 
-    var result = [_]u128{0} ** constants.nodes_max;
+    var result = [_]u128{0} ** constants.members_max;
     var replica: u8 = 0;
-    while (replica < constants.nodes_max) : (replica += 1) {
+    while (replica < constants.members_max) : (replica += 1) {
         const seed = IdSeed{ .cluster = cluster, .replica = replica };
         result[replica] = checksum(std.mem.asBytes(&seed));
     }
@@ -1627,7 +1627,7 @@ fn member_count(members: *const Members) u8 {
     for (members) |member, index| {
         if (member == 0) return @intCast(u8, index);
     }
-    return constants.nodes_max;
+    return constants.members_max;
 }
 
 pub fn assert_valid_member(members: *const Members, replica_id: u128) void {
