@@ -432,40 +432,25 @@ pub fn update(base: anytype, diff: anytype) @TypeOf(base) {
 // TODO(Zig): No need for this function once Zig is upgraded
 // and @fieldParentPtr() can be used for unions.
 // See: https://github.com/ziglang/zig/issues/6611.
-
-pub fn UnionFieldParentPtrType(
-    comptime Union: type,
-    comptime field: std.meta.FieldEnum(Union),
-    comptime Child: type,
-) type {
-    assert(@typeInfo(Union) == .Union);
-    const Field = std.meta.fieldInfo(Union, field).field_type;
-
-    assert(std.meta.trait.isSingleItemPtr(Child));
-    assert(std.meta.Child(Child) == Field);
-
-    return if (std.meta.trait.isConstPtr(Child))
-        *const Union
-    else
-        *Union;
-}
-
 pub inline fn union_field_parent_ptr(
     comptime Union: type,
     comptime field: std.meta.FieldEnum(Union),
     child: anytype,
-) UnionFieldParentPtrType(Union, field, @TypeOf(child)) {
-    const UnionFieldParentPtr = UnionFieldParentPtrType(Union, field, @TypeOf(child));
+) *Union {
     const offset: usize = comptime blk: {
-        const stub = @unionInit(Union, @tagName(field), undefined);
-        const stub_field_ptr = &@field(stub, @tagName(field));
+        assert(@typeInfo(Union) == .Union);
+
+        var stub = @unionInit(Union, @tagName(field), undefined);
+        var stub_field_ptr = &@field(stub, @tagName(field));
+        assert(@TypeOf(stub_field_ptr) == @TypeOf(child));
+
         break :blk @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
     };
 
     return if (comptime offset == 0)
-        @ptrCast(UnionFieldParentPtr, @alignCast(@alignOf(Union), child))
+        @ptrCast(*Union, @alignCast(@alignOf(Union), child))
     else
-        @intToPtr(UnionFieldParentPtr, @ptrToInt(child) - offset);
+        @intToPtr(*Union, @ptrToInt(child) - offset);
 }
 
 test "union_field_parent_ptr" {
@@ -476,7 +461,7 @@ test "union_field_parent_ptr" {
     };
 
     {
-        const value = U{ .a = 100 };
+        var value = U{ .a = 100 };
         try std.testing.expectEqual(&value, union_field_parent_ptr(U, .a, &value.a));
     }
 
@@ -486,7 +471,7 @@ test "union_field_parent_ptr" {
     }
 
     {
-        const value: U = .c;
+        var value: U = .c;
         try std.testing.expectEqual(&value, union_field_parent_ptr(U, .c, &value.c));
     }
 }
