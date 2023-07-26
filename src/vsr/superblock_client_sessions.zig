@@ -82,11 +82,13 @@ pub const ClientSessions = struct {
 
         // First goes the vsr headers for the entries.
         // This takes advantage of the buffer alignment to avoid adding padding for the headers.
-        size_max = std.mem.alignForward(size_max, @alignOf(vsr.Header));
+        assert(@alignOf(vsr.Header) == 16);
+        size_max = std.mem.alignForward(size_max, 16);
         size_max += @sizeOf(vsr.Header) * constants.clients_max;
 
         // Then follows the session values for the entries.
-        size_max = std.mem.alignForward(size_max, @alignOf(u64));
+        assert(@alignOf(u64) == 8);
+        size_max = std.mem.alignForward(size_max, 8);
         size_max += @sizeOf(u64) * constants.clients_max;
 
         break :blk size_max;
@@ -98,7 +100,8 @@ pub const ClientSessions = struct {
         var size: u64 = 0;
 
         // Write all headers:
-        var new_size = std.mem.alignForward(size, @alignOf(vsr.Header));
+        assert(@alignOf(vsr.Header) == 16);
+        var new_size = std.mem.alignForward(size, 16);
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
@@ -108,7 +111,8 @@ pub const ClientSessions = struct {
         }
 
         // Write all sessions:
-        new_size = std.mem.alignForward(size, @alignOf(u64));
+        assert(@alignOf(u64) == 8);
+        new_size = std.mem.alignForward(size, 8);
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
@@ -133,14 +137,16 @@ pub const ClientSessions = struct {
         assert(source.len > 0);
         assert(source.len <= encode_size_max);
 
-        size = std.mem.alignForward(size, @alignOf(vsr.Header));
+        assert(@alignOf(vsr.Header) == 16);
+        size = std.mem.alignForward(size, 16);
         const headers = @alignCast(@alignOf(vsr.Header), mem.bytesAsSlice(
             vsr.Header,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
         ));
         size += mem.sliceAsBytes(headers).len;
 
-        size = std.mem.alignForward(size, @alignOf(u64));
+        assert(@alignOf(u64) == 8);
+        size = std.mem.alignForward(size, 8);
         const sessions = mem.bytesAsSlice(
             u64,
             source[size..][0 .. constants.clients_max * @sizeOf(u64)],
