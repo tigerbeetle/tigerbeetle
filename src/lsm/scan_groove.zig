@@ -22,10 +22,8 @@ pub fn ScanGrooveType(
         pub const Scan = ScanType(Groove, Storage, scans_max);
         pub const Fetcher = FetcherType(Scan, Groove, Storage);
 
-        slots: [scans_max]Scan = undefined,
-        slots_used: u32 = 0,
-
-        fetcher: Fetcher = undefined,
+        slots: std.BoundedArray(Scan, scans_max) = .{},
+        fetcher: ?Fetcher = null,
 
         pub fn Tree(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
             return std.meta.fieldInfo(Groove.IndexTrees, field).field_type;
@@ -178,8 +176,9 @@ pub fn ScanGrooveType(
 
         /// Initializes a `Fetcher` for loading objects from a scan.
         pub inline fn fetch(self: *Self, scan: *Scan, snapshot: u64) *Fetcher {
+            assert(self.fetcher == null);
             self.fetcher = Fetcher.init(self.groove(), scan, snapshot);
-            return &self.fetcher;
+            return &self.fetcher.?;
         }
 
         inline fn scan_add(
@@ -187,15 +186,16 @@ pub fn ScanGrooveType(
             comptime field: std.meta.FieldEnum(Scan.Dispatcher),
             init_expression: ScanImplType(field),
         ) *Scan {
-            assert(self.slots_used < scans_max);
-            self.slots[self.slots_used].dispatcher = @unionInit(
+            // TODO: instead of panic, we need to expose `error{Overflow}` when
+            // exceeding `scans_max`
+            var scan = self.slots.addOneAssumeCapacity();
+            scan.dispatcher = @unionInit(
                 Scan.Dispatcher,
                 @tagName(field),
                 init_expression,
             );
-            defer self.slots_used += 1;
 
-            return &self.slots[self.slots_used];
+            return scan;
         }
 
         inline fn groove(self: *Self) *Groove {

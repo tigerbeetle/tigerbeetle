@@ -53,27 +53,12 @@ const FuzzOp = struct {
 };
 
 const AccountImmutableGroove = std.meta.fieldInfo(Forest.Grooves, .accounts_immutable).field_type;
+
 const ScanParams = struct {
     index: std.meta.FieldEnum(AccountImmutableGroove.IndexTrees),
     min: u128, // Type-erased field min.
-    max: u128, // Type-erased field min.
+    max: u128, // Type-erased field max.
     direction: Direction,
-
-    fn fuzz_op_action(random: std.rand.Random, index: anytype, comptime Prefix: type) FuzzOpAction {
-        var min = random_id(random, Prefix);
-        var max = if (random.boolean()) min else random_id(random, Prefix);
-        if (min > max) std.mem.swap(Prefix, &min, &max);
-        assert(min <= max);
-
-        return FuzzOpAction{
-            .scan_account_immutable = .{
-                .index = index,
-                .min = min,
-                .max = max,
-                .direction = random.enumValue(Direction),
-            },
-        };
-    }
 };
 
 const Environment = struct {
@@ -745,9 +730,26 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 const index = random.enumValue(Index);
                 break :blk switch (index) {
                     inline else => |field| {
-                        const field_index = std.meta.fieldIndex(Account, @tagName(field)).?;
-                        const FieldType = std.meta.fields(Account)[field_index].field_type;
-                        break :blk ScanParams.fuzz_op_action(random, field, FieldType);
+                        const FieldType = std.meta.fieldInfo(
+                            StateMachine.AccountImmutable,
+                            comptime std.meta.stringToEnum(
+                                std.meta.FieldEnum(StateMachine.AccountImmutable),
+                                @tagName(field),
+                            ).?,
+                        ).field_type;
+                        var min = random_id(random, FieldType);
+                        var max = if (random.boolean()) min else random_id(random, FieldType);
+                        if (min > max) std.mem.swap(FieldType, &min, &max);
+                        assert(min <= max);
+
+                        break :blk FuzzOpAction{
+                            .scan_account_immutable = .{
+                                .index = index,
+                                .min = min,
+                                .max = max,
+                                .direction = random.enumValue(Direction),
+                            },
+                        };
                     },
                 };
             },
