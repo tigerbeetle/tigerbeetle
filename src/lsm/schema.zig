@@ -84,7 +84,7 @@ pub const TableIndex = struct {
 
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
+            assert(stdx.no_padding(Context));
         }
     };
 
@@ -279,7 +279,7 @@ pub const TableFilter = struct {
 
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
+            assert(stdx.no_padding(Context));
         }
     };
 
@@ -346,7 +346,7 @@ pub const TableData = struct {
 
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
+            assert(stdx.no_padding(Context));
         }
     };
 

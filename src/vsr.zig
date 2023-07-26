@@ -213,13 +213,14 @@ pub const Operation = enum(u8) {
     }
 
     fn check_state_machine_operations(comptime Op: type) void {
-        comptime assert(@typeInfo(Op).Enum.is_exhaustive);
-        comptime assert(@sizeOf(Op) == @sizeOf(Operation));
-        comptime assert(@bitSizeOf(Op) == @bitSizeOf(Operation));
-        inline for (@typeInfo(Op).Enum.fields) |field| {
-            const op = @field(Op, field.name);
-            if (@enumToInt(op) < constants.vsr_operations_reserved) {
-                @compileError("StateMachine.Operation is reserved");
+        comptime {
+            assert(@typeInfo(Op).Enum.is_exhaustive);
+            assert(@typeInfo(Op).Enum.tag_type == @typeInfo(Operation).Enum.tag_type);
+            for (@typeInfo(Op).Enum.fields) |field| {
+                const op = @field(Op, field.name);
+                if (@enumToInt(op) < constants.vsr_operations_reserved) {
+                    @compileError("StateMachine.Operation is reserved");
+                }
             }
         }
     }
@@ -236,11 +237,6 @@ pub const Header = extern struct {
         assert(checksum_body_empty == checksum(&.{}));
     }
 
-    comptime {
-        assert(@sizeOf(Header) == 128);
-        // Assert that there is no implicit padding in the struct.
-        assert(@bitSizeOf(Header) == @sizeOf(Header) * 8);
-    }
     /// A checksum covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
     /// This checksum is enough to uniquely identify a network message or journal entry.
@@ -397,6 +393,11 @@ pub const Header = extern struct {
 
     /// The version of the protocol implementation that originated this message.
     version: u8 = Version,
+
+    comptime {
+        assert(@sizeOf(Header) == 128);
+        assert(stdx.no_padding(Header));
+    }
 
     pub fn calculate_checksum(self: *const Header) u128 {
         const checksum_size = @sizeOf(@TypeOf(self.checksum));
@@ -939,7 +940,7 @@ pub const BlockRequest = extern struct {
 
     comptime {
         assert(@sizeOf(BlockRequest) == 32);
-        assert(@bitSizeOf(BlockRequest) == @sizeOf(BlockRequest) * 8);
+        assert(stdx.no_padding(BlockRequest));
     }
 };
 
@@ -966,10 +967,15 @@ pub const ReconfigurationRequest = extern struct {
     ///
     /// At the moment, we require this to be equal to the old count.
     standby_count: u8,
-    reserved: [52]u8 = [_]u8{0} ** 52,
+    reserved: [54]u8 = [_]u8{0} ** 54,
     /// The result of this request. Set to zero by the client and filled-in by the primary when it
     /// accepts a reconfiguration request.
     result: ReconfigurationResult,
+
+    comptime {
+        assert(@sizeOf(ReconfigurationRequest) == 256);
+        assert(stdx.no_padding(ReconfigurationRequest));
+    }
 
     pub fn validate(
         request: *const ReconfigurationRequest,
@@ -1025,11 +1031,6 @@ pub const ReconfigurationRequest = extern struct {
         }
 
         return .ok;
-    }
-
-    comptime {
-        assert(@sizeOf(ReconfigurationRequest) == 256);
-        assert(@bitSizeOf(ReconfigurationRequest) == @sizeOf(ReconfigurationRequest) * 8);
     }
 };
 
@@ -1142,7 +1143,7 @@ test "ReconfigurationRequest" {
         .members_invalid,
     );
     try t.check(stdx.update(r, .{ .replica_count = 4 }), .members_count_invalid);
-    try t.check(stdx.update(r, .{ .reserved = [_]u8{1} ** 52 }), .reserved_field);
+    try t.check(stdx.update(r, .{ .reserved = [_]u8{1} ** 54 }), .reserved_field);
     try t.check(stdx.update(r, .{ .result = .ok }), .result_must_be_reserved);
     try t.check(stdx.update(r, .{ .epoch = 0 }), .epoch_in_the_past);
     try t.check(stdx.update(r, .{ .epoch = 3 }), .epoch_in_the_future);

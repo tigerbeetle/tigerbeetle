@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const stdx = @import("./stdx.zig");
+
 pub const Account = extern struct {
     id: u128,
     /// Opaque third-party identifier to link this account (many-to-one) to an external entity.
@@ -20,7 +22,7 @@ pub const Account = extern struct {
 
     comptime {
         assert(@sizeOf(Account) == 128);
-        assert(@bitSizeOf(Account) == @sizeOf(Account) * 8);
+        assert(stdx.no_padding(Account));
         assert(@alignOf(Account) == 16);
     }
 
@@ -53,6 +55,7 @@ pub const AccountFlags = packed struct(u16) {
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u16));
+        assert(@bitSizeOf(AccountFlags) == @sizeOf(AccountFlags) * 8);
     }
 };
 
@@ -76,7 +79,7 @@ pub const Transfer = extern struct {
 
     comptime {
         assert(@sizeOf(Transfer) == 128);
-        assert(@bitSizeOf(Transfer) == @sizeOf(Transfer) * 8);
+        assert(stdx.no_padding(Transfer));
         assert(@alignOf(Transfer) == 16);
     }
 };
@@ -92,6 +95,7 @@ pub const TransferFlags = packed struct(u16) {
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
+        assert(@bitSizeOf(TransferFlags) == @sizeOf(TransferFlags) * 8);
     }
 };
 
@@ -221,7 +225,7 @@ pub const CreateAccountsResult = extern struct {
 
     comptime {
         assert(@sizeOf(CreateAccountsResult) == 8);
-        assert(@bitSizeOf(CreateAccountsResult) == @sizeOf(CreateAccountsResult) * 8);
+        assert(stdx.no_padding(CreateAccountsResult));
     }
 };
 
@@ -231,7 +235,7 @@ pub const CreateTransfersResult = extern struct {
 
     comptime {
         assert(@sizeOf(CreateTransfersResult) == 8);
-        assert(@bitSizeOf(CreateTransfersResult) == @sizeOf(CreateTransfersResult) * 8);
+        assert(stdx.no_padding(CreateTransfersResult));
     }
 };
 
