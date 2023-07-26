@@ -6,6 +6,7 @@ const mem = std.mem;
 const log = std.log.scoped(.state_machine);
 const tracer = @import("tracer.zig");
 
+const stdx = @import("./stdx.zig");
 const global_constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
@@ -112,7 +113,7 @@ pub fn StateMachineType(
 
             comptime {
                 assert(@sizeOf(AccountImmutable) == 64);
-                assert(@bitSizeOf(AccountImmutable) == @sizeOf(AccountImmutable) * 8);
+                assert(stdx.no_padding(AccountImmutable));
             }
 
             pub fn from_account(a: *const Account) AccountImmutable {
@@ -138,7 +139,7 @@ pub fn StateMachineType(
 
             comptime {
                 assert(@sizeOf(AccountMutable) == 64);
-                assert(@bitSizeOf(AccountMutable) == @sizeOf(AccountMutable) * 8);
+                assert(stdx.no_padding(AccountMutable));
             }
 
             pub fn from_account(a: *const Account) AccountMutable {
@@ -277,7 +278,7 @@ pub fn StateMachineType(
             comptime {
                 // Assert that there is no implicit padding.
                 assert(@sizeOf(PostedGrooveValue) == 16);
-                assert(@bitSizeOf(PostedGrooveValue) == 16 * 8);
+                assert(stdx.no_padding(PostedGrooveValue));
             }
         };
 

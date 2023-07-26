@@ -4,6 +4,7 @@ const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const lsm = @import("tree.zig");
 const binary_search = @import("binary_search.zig");
@@ -713,9 +714,15 @@ pub fn TestContext(
 
         const log = false;
 
-        const Value = struct {
+        const Value = packed struct {
             key: Key,
             tombstone: bool,
+            padding: u63 = 0,
+
+            comptime {
+                assert(stdx.no_padding(Value));
+                assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
+            }
         };
 
         inline fn compare_keys(a: Key, b: Key) math.Order {

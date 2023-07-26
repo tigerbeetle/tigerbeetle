@@ -24,21 +24,17 @@ const magic_number: u128 = 312960301372567410560647846651901451202;
 
 /// On-disk format for AOF Metadata.
 pub const AOFEntryMetadata = extern struct {
-    comptime {
-        assert(@bitSizeOf(AOFEntryMetadata) == @sizeOf(AOFEntryMetadata) * 8);
-    }
-
     primary: u64,
     replica: u64,
-    reserved: [64]u8 = std.mem.zeroes([64]u8),
+    // Use large padding here to align the message itself to the sector boundary.
+    reserved: [4064]u8 = std.mem.zeroes([4064]u8),
+
+    comptime {
+        assert(stdx.no_padding(AOFEntryMetadata));
+    }
 };
 
-/// On-disk format for full AOF Entry.
 pub const AOFEntry = extern struct {
-    comptime {
-        assert(@bitSizeOf(AOFEntry) == @sizeOf(AOFEntry) * 8);
-    }
-
     /// In case of extreme corruption, start each entry with a fixed random integer,
     /// to allow skipping over corrupted entries.
     magic_number: u128 = magic_number,
@@ -49,6 +45,10 @@ pub const AOFEntry = extern struct {
     /// The main Message to log. The actual length of the entire payload will be sector
     /// aligned, so we might write past what the VSR header in here indicates.
     message: [constants.message_size_max]u8 align(constants.sector_size),
+
+    comptime {
+        assert(stdx.no_padding(AOFEntry));
+    }
 
     /// Calculate the actual length of the AOFEntry that needs to be written to disk,
     /// accounting for sector alignment.
@@ -397,7 +397,7 @@ pub fn aof_merge(
 ) !void {
     const stdout = std.io.getStdOut().writer();
 
-    var aofs: [constants.nodes_max]AOF.Iterator = undefined;
+    var aofs: [constants.members_max]AOF.Iterator = undefined;
     var aof_count: usize = 0;
     defer for (aofs[0..aof_count]) |*it| it.close();
 
@@ -693,7 +693,7 @@ pub fn main() !void {
 
     var action: ?[:0]const u8 = null;
     var addresses: ?[:0]const u8 = null;
-    var paths: [constants.nodes_max][:0]const u8 = undefined;
+    var paths: [constants.members_max][:0]const u8 = undefined;
     var count: usize = 0;
 
     while (args.next()) |arg| {

@@ -178,11 +178,12 @@ fn parse_arg_addresses(
 ) !bool {
     if (!std.mem.eql(u8, arg, arg_name)) return false;
 
-    allocator.free(arg_value.*);
-
     const address_string = args.next() orelse
         panic("Expected an argument to {s}", .{arg_name});
-    arg_value.* = try vsr.parse_addresses(allocator, address_string, constants.nodes_max);
+
+    const addresses = try vsr.parse_addresses(allocator, address_string, constants.members_max);
+    allocator.free(arg_value.*);
+    arg_value.* = addresses;
     return true;
 }
 

@@ -116,6 +116,14 @@ pub const SuperBlockHeader = extern struct {
     vsr_headers_reserved: [vsr_headers_reserved_size]u8 =
         [_]u8{0} ** vsr_headers_reserved_size,
 
+    comptime {
+        assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
+        assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
+        assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
+        // Assert that there is no implicit padding in the struct.
+        assert(stdx.no_padding(SuperBlockHeader));
+    }
+
     pub const VSRState = extern struct {
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
@@ -127,12 +135,7 @@ pub const SuperBlockHeader = extern struct {
         /// Globally unique identifier of the replica, must be non-zero.
         replica_id: u128,
 
-        /// Set of replica_ids of cluster members, where order of ids determines replica indexes.
-        ///
-        /// First replica_count elements are active replicas,
-        /// then standby_count standbys, the rest are zeros.
-        /// Order determines ring topology for replication.
-        members: [constants.nodes_max]u128,
+        members: vsr.Members,
 
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
@@ -154,13 +157,13 @@ pub const SuperBlockHeader = extern struct {
         comptime {
             assert(@sizeOf(VSRState) == 272);
             // Assert that there is no implicit padding in the struct.
-            assert(@bitSizeOf(VSRState) == @sizeOf(VSRState) * 8);
+            assert(stdx.no_padding(VSRState));
         }
 
         pub fn root(options: struct {
             cluster: u32,
             replica_id: u128,
-            members: [constants.nodes_max]u128,
+            members: vsr.Members,
             replica_count: u8,
         }) VSRState {
             return .{
@@ -203,7 +206,7 @@ pub const SuperBlockHeader = extern struct {
             }
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
-            assert(stdx.equal_bytes([constants.nodes_max]u128, &old.members, &new.members));
+            assert(stdx.equal_bytes([constants.members_max]u128, &old.members, &new.members));
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
@@ -241,6 +244,12 @@ pub const SuperBlockHeader = extern struct {
         /// A timeout of 0 indicates that the snapshot must be explicitly released by the user.
         timeout: u64,
 
+        comptime {
+            assert(@sizeOf(Snapshot) == 24);
+            // Assert that there is no implicit padding in the struct.
+            assert(stdx.no_padding(Snapshot));
+        }
+
         pub fn exists(snapshot: Snapshot) bool {
             if (snapshot.created == 0) {
                 assert(snapshot.queried == 0);
@@ -251,21 +260,7 @@ pub const SuperBlockHeader = extern struct {
                 return true;
             }
         }
-
-        comptime {
-            assert(@sizeOf(Snapshot) == 24);
-            // Assert that there is no implicit padding in the struct.
-            assert(@bitSizeOf(Snapshot) == @sizeOf(Snapshot) * 8);
-        }
     };
-
-    comptime {
-        assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
-        assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
-        assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
-        // Assert that there is no implicit padding in the struct.
-        assert(@bitSizeOf(SuperBlockHeader) == @sizeOf(SuperBlockHeader) * 8);
-    }
 
     pub fn calculate_checksum(superblock: *const SuperBlockHeader) u128 {
         comptime assert(meta.fieldIndex(SuperBlockHeader, "checksum") == 0);

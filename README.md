@@ -2,39 +2,8 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-**Take part in TigerBeetle's $20k consensus challenge: [Viewstamped Replication Made Famous](https://github.com/tigerbeetle/viewstamped-replication-made-famous)**
-
-Watch an introduction to TigerBeetle on [Zig SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design decisions regarding performance, safety, and financial accounting primitives:
-
-[![A million financial transactions per second in Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
-
-Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the problem of balance tracking at scale, and the solution of a purpose-built financial accounting database.
-
-## TigerBeetle (under active development)
-
 TigerBeetle is not yet production-ready. The production version of
-**TigerBeetle is now under active development**. Our [DESIGN
-doc](docs/DESIGN.md) provides an overview of TigerBeetle's data
-structures.
-
-Check out our
-[roadmap](https://github.com/tigerbeetle/tigerbeetle/issues/259)
-below for where we're heading! And [join one of our communities](#Community) to stay
-in the loop about fixes and features!
-
-## Documentation
-
-Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
-Here are a few key pages you might be interested in:
-
-- Deployment
-  - [Hardware](https://docs.tigerbeetle.com/deploy/hardware)
-- Usage
-  - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
-- Reference
-  - [Accounts](https://docs.tigerbeetle.com/reference/accounts)
-  - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
-  - [Operations](https://docs.tigerbeetle.com/reference/operations)
+**TigerBeetle is now under active development**.
 
 ## Quickstart
 
@@ -188,12 +157,47 @@ For further reading:
 * [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/quick-start/with-docker)
 * [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary)
 
+## Next Steps
+
+Watch an introduction to TigerBeetle on [Zig
+SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design
+decisions regarding performance, safety, and financial accounting
+primitives:
+
+[![A million financial transactions per second in
+Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
+
+Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the
+problem of balance tracking at scale, and the solution of a
+purpose-built financial accounting database.
+
+Check out our [DESIGN doc](./docs/DESIGN.md) to see an overview of
+TigerBeetle's data structures, take a look at our
+[roadmap](https://github.com/tigerbeetle/tigerbeetle/issues/259), and
+[join one of our communities](#Community) to stay in the loop about
+fixes and features!
+
+## Documentation
+
+Check out [docs.tigerbeetle.com](https://docs.tigerbeetle.com/).
+
+Here are a few key pages you might be interested in:
+
+- Deployment
+  - [Hardware](https://docs.tigerbeetle.com/deploy/hardware)
+- Usage
+  - [Integration](https://docs.tigerbeetle.com/#designing-for-tigerbeetle)
+- Reference
+  - [Accounts](https://docs.tigerbeetle.com/reference/accounts)
+  - [Transfers](https://docs.tigerbeetle.com/reference/transfers)
+  - [Operations](https://docs.tigerbeetle.com/reference/operations)
+
 ## Clients
 
-* For Node.js: [tigerbeetle-node](./src/clients/node)
-* For Golang: [tigerbeetle-go](./src/clients/go)
-* For Java: [tigerbeetle-java](./src/clients/java)
-* For C# and Dotnet: [tigerbeetle-dotnet](./src/clients/dotnet)
+* [.NET](https://docs.tigerbeetle.com/clients/dotnet)
+* [Golang](https://docs.tigerbeetle.com/clients/go)
+* [Java](https://docs.tigerbeetle.com/clients/java)
+* [Node.js](https://docs.tigerbeetle.com/clients/node)
 
 ## Community
 

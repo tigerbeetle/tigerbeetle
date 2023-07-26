@@ -36,10 +36,14 @@ pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 const Key = extern struct {
     id: u64,
 
-    const Value = packed struct {
+    const Value = packed struct(u128) {
         id: u64,
         value: u63,
         tombstone: u1 = 0,
+
+        comptime {
+            assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
+        }
     };
 
     inline fn compare_keys(a: Key, b: Key) std.math.Order {

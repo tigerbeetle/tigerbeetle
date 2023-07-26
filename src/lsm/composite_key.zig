@@ -2,6 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
+const stdx = @import("../stdx.zig");
+
 pub fn CompositeKey(comptime Field: type) type {
     assert(Field == u128 or Field == u64);
 
@@ -37,7 +39,7 @@ pub fn CompositeKey(comptime Field: type) type {
             assert(@sizeOf(Self) == @sizeOf(Field) * 2);
             assert(@alignOf(Self) >= @alignOf(Field));
             assert(@alignOf(Self) == field_bitsize_alignment);
-            assert(@sizeOf(Self) * 8 == @bitSizeOf(Self));
+            assert(stdx.no_padding(Self));
         }
 
         pub inline fn compare_keys(a: Self, b: Self) math.Order {

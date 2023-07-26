@@ -407,17 +407,10 @@ fn parse_args(allocator: mem.Allocator) !Flags {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // Keep track of the args from the ArgIterator above that were allocated.
-    // `args` will free them all at the end of the scope.
-    var args_allocated = std.ArrayList([:0]const u8).init(allocator);
-    defer args_allocated.deinit();
-
     // Skip argv[0] which is the name of this executable
     assert(args.skip());
 
     while (args.next()) |arg| {
-        try args_allocated.append(arg);
-
         if (mem.startsWith(u8, arg, "--seed")) {
             const seed_string = parse_flag("--seed", arg);
             seed = simulator.parse_seed(seed_string);

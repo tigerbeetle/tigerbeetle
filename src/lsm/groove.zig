@@ -52,7 +52,7 @@ const IdTreeValue = extern struct {
     comptime {
         // Assert that there is no implicit padding.
         assert(@sizeOf(IdTreeValue) == 32);
-        assert(@bitSizeOf(IdTreeValue) == 32 * 8);
+        assert(stdx.no_padding(IdTreeValue));
     }
 
     inline fn compare_keys(a: u128, b: u128) std.math.Order {

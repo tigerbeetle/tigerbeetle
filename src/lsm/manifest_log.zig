@@ -784,9 +784,13 @@ fn ManifestLogBlockType(comptime Storage: type, comptime TableInfo: type) type {
             assert((entry_count_max * @sizeOf(TableInfo)) % @alignOf(TableInfo) == 0);
         }
 
-        pub const Label = packed struct {
+        pub const Label = packed struct(u8) {
             level: u7,
             event: enum(u1) { insert, remove },
+
+            comptime {
+                assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);
+            }
         };
 
         pub fn address(block: BlockPtrConst) u64 {

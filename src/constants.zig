@@ -30,8 +30,8 @@ pub const hash_log_mode = config.process.hash_log_mode;
 pub const replicas_max = 6;
 /// The maximum number of standbys allowed in a cluster.
 pub const standbys_max = 6;
-/// The maximum number of nodes (either standbys or active replicas) allowed in a cluster.
-pub const nodes_max = replicas_max + standbys_max;
+/// The maximum number of cluster members (either standbys or active replicas).
+pub const members_max = replicas_max + standbys_max;
 
 /// All operations <vsr_operations_reserved are reserved for the control protocol.
 /// All operations ≥vsr_operations_reserved are available for the state machine.
@@ -154,7 +154,7 @@ comptime {
 }
 
 /// The maximum number of connections that can be held open by the server at any time:
-pub const connections_max = nodes_max + clients_max;
+pub const connections_max = members_max + clients_max;
 
 /// The maximum size of a message in bytes:
 /// This is also the limit of all inflight data across multiple pipelined requests per connection.
@@ -176,6 +176,9 @@ comptime {
 
     // Ensure that DVC/SV messages can fit all necessary headers.
     assert(message_body_size_max >= view_change_headers_max * @sizeOf(vsr.Header));
+
+    assert(message_body_size_max >= @sizeOf(vsr.ReconfigurationRequest));
+    assert(message_body_size_max >= @sizeOf(vsr.BlockRequest));
 }
 
 /// The maximum body size of:
