@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const ScanBufferType = @import("scan_buffer.zig").ScanBufferType;
 const GridType = @import("grid.zig").GridType;
@@ -309,24 +311,12 @@ fn ScanType(
             }
         }
 
-        // TODO(batiati): Move this function to stdx, so we can share the same
-        // logic with PrefetchContext unions.
-        //
-        // TODO(Zig): No need for this cast once Zig is upgraded
-        // and @fieldParentPtr() can be used for unions.
-        // See: https://github.com/ziglang/zig/issues/6611.
         inline fn parent(
             comptime field: std.meta.Tag(Dispatcher),
             impl: anytype,
         ) *Scan {
-            var stub = @unionInit(Dispatcher, @tagName(field), undefined);
-            const stub_field_ptr = &@field(stub, @tagName(field));
-            comptime assert(@TypeOf(stub_field_ptr) == @TypeOf(impl));
-
-            const offset = @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
-            const dispatcher_ptr = @intToPtr(*Dispatcher, @ptrToInt(impl) - offset);
-
-            return @fieldParentPtr(Scan, "dispatcher", dispatcher_ptr);
+            const dispatcher = stdx.union_field_parent_ptr(Dispatcher, field, impl);
+            return @fieldParentPtr(Scan, "dispatcher", dispatcher);
         }
 
         inline fn timestamp(value: anytype) u64 {
