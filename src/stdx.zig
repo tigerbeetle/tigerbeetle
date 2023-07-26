@@ -339,6 +339,10 @@ test no_padding {
 }
 
 pub inline fn hash_inline(value: anytype) u64 {
+    comptime {
+        assert(no_padding(@TypeOf(value)));
+        assert(std.meta.trait.hasUniqueRepresentation(@TypeOf(value)));
+    }
     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
         .Struct, .Int => std.mem.asBytes(&value),
         else => @compileError("unsupported hashing for " ++ @typeName(@TypeOf(value))),
