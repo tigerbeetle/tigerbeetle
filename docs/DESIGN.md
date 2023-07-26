@@ -270,7 +270,7 @@ The header is a multiple of 128 bytes because we want to keep the subsequent dat
 
 We order the header struct as we do to keep any C protocol implementations padding-free.
 
-We use BLAKE3 as our checksum, truncating the checksum to 128 bits.
+We use AEGIS-128L as our checksum, designed to fully exploit the parallelism and built-in AES support of recent Intel and ARM CPUs.
 
 The reason we use two checksums instead of only a single checksum across header and data is that we
 need a reliable way to know the size of the data to expect before we start receiving the data.
