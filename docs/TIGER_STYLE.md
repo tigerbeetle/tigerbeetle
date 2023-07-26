@@ -217,10 +217,11 @@ Beyond these rules:
   don't use Zig's `CamelCase.zig` style for "struct" files to keep the convention simple and
   consistent.
 
-* For the rest, follow the Zig style guide.
-
 * Do not abbreviate variable names, unless the variable is a primitive integer type used as an
-  argument to a sort function or matrix calculation.
+  argument to a sort function or matrix calculation. Use proper capitalization for acronyms
+  (`VSRState`, not `VsrState`).
+
+* For the rest, follow the Zig style guide.
 
 * Add units or qualifiers to variable names, and put the units or qualifiers last, sorted by
   descending significance, so that the variable starts with the most significant word, and ends with
