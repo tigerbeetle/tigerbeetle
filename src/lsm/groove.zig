@@ -711,7 +711,6 @@ pub fn GrooveType(
         };
 
         pub const PrefetchWorker = struct {
-
             // Since lookup contexts are used one at a time, it's safe to access
             // the union's fields and reuse the same memory for all context instances.
             // Can't use extern/packed union as the LookupContextes aren't ABI compliant.
@@ -719,20 +718,22 @@ pub fn GrooveType(
                 id: if (has_id) IdTree.LookupContext else void,
                 object: ObjectTree.LookupContext,
 
-                // TODO(Zig): No need for this function once Zig is upgraded
-                // and @fieldParentPtr() can be used for unions.
-                // See: https://github.com/ziglang/zig/issues/6611.
-                pub inline fn parent(
-                    comptime field: std.meta.Tag(LookupContext),
-                    completion: anytype,
-                ) *PrefetchWorker {
-                    var stub = @unionInit(LookupContext, @tagName(field), undefined);
-                    const stub_field_ptr = &@field(stub, @tagName(field));
-                    comptime assert(@TypeOf(stub_field_ptr) == @TypeOf(completion));
+                pub const Field = std.meta.FieldEnum(LookupContext);
+                pub fn FieldType(comptime field: Field) type {
+                    return std.meta.fieldInfo(LookupContext, field).field_type;
+                }
 
-                    const offset = @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
-                    const lookup_ptr = @intToPtr(*LookupContext, @ptrToInt(completion) - offset);
-                    return @fieldParentPtr(PrefetchWorker, "lookup", lookup_ptr);
+                pub inline fn parent(
+                    comptime field: Field,
+                    completion: *FieldType(field),
+                ) *PrefetchWorker {
+                    const lookup = stdx.union_field_parent_ptr(LookupContext, field, completion);
+                    return @fieldParentPtr(PrefetchWorker, "lookup", lookup);
+                }
+
+                pub inline fn get(self: *LookupContext, comptime field: Field) *FieldType(field) {
+                    self.* = @unionInit(LookupContext, @tagName(field), undefined);
+                    return &@field(self, @tagName(field));
                 }
             };
 
@@ -750,12 +751,10 @@ pub fn GrooveType(
                 // from disk and added to the auxiliary prefetch_objects hash map.
                 switch (prefetch_key.key) {
                     .id => |id| {
-                        // Set the union tag so access via &worker.lookup.id doesn't trap.
-                        worker.lookup = .{ .id = undefined };
                         if (has_id) {
                             worker.context.groove.ids.lookup_from_levels_storage(.{
                                 .callback = lookup_id_callback,
-                                .context = &worker.lookup.id,
+                                .context = worker.lookup.get(.id),
                                 .snapshot = worker.context.snapshot,
                                 .key = id,
                                 .level_min = prefetch_key.level,
@@ -763,11 +762,9 @@ pub fn GrooveType(
                         } else unreachable;
                     },
                     .timestamp => |timestamp| {
-                        // Set the union tag so access via &worker.lookup.id doesn't trap.
-                        worker.lookup = .{ .object = undefined };
                         worker.context.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_object_callback,
-                            .context = &worker.lookup.object,
+                            .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
                             .level_min = prefetch_key.level,
@@ -794,8 +791,6 @@ pub fn GrooveType(
             }
 
             fn lookup_by_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
-                // Set the union tag so access via &worker.lookup.object doesn't trap.
-                worker.lookup = .{ .object = undefined };
                 switch (worker.context.groove.objects.lookup_from_memory(
                     worker.context.snapshot,
                     timestamp,
@@ -809,7 +804,7 @@ pub fn GrooveType(
                     .possible => |level_min| {
                         worker.context.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_object_callback,
-                            .context = &worker.lookup.object,
+                            .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
                             .level_min = level_min,
