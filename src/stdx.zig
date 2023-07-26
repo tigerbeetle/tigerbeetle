@@ -428,3 +428,50 @@ pub fn update(base: anytype, diff: anytype) @TypeOf(base) {
     }
     return updated;
 }
+
+// TODO(Zig): No need for this function once Zig is upgraded
+// and @fieldParentPtr() can be used for unions.
+// See: https://github.com/ziglang/zig/issues/6611.
+pub inline fn union_field_parent_ptr(
+    comptime Union: type,
+    comptime field: std.meta.FieldEnum(Union),
+    child: anytype,
+) *Union {
+    const offset: usize = comptime blk: {
+        assert(@typeInfo(Union) == .Union);
+
+        var stub = @unionInit(Union, @tagName(field), undefined);
+        var stub_field_ptr = &@field(stub, @tagName(field));
+        assert(@TypeOf(stub_field_ptr) == @TypeOf(child));
+
+        break :blk @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
+    };
+
+    return if (comptime offset == 0)
+        @ptrCast(*Union, @alignCast(@alignOf(Union), child))
+    else
+        @intToPtr(*Union, @ptrToInt(child) - offset);
+}
+
+test "union_field_parent_ptr" {
+    const U = union(enum) {
+        a: u32,
+        b: u128,
+        c: void,
+    };
+
+    {
+        var value = U{ .a = 100 };
+        try std.testing.expectEqual(&value, union_field_parent_ptr(U, .a, &value.a));
+    }
+
+    {
+        var value = U{ .b = 100_000 };
+        try std.testing.expectEqual(&value, union_field_parent_ptr(U, .b, &value.b));
+    }
+
+    {
+        var value: U = .c;
+        try std.testing.expectEqual(&value, union_field_parent_ptr(U, .c, &value.c));
+    }
+}
