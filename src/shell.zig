@@ -59,25 +59,22 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
     comptime var pos: usize = 0;
     comptime var pos_start: usize = 0;
 
-    next_pos: inline while (pos < fmt.len) {
+    comptime next_pos: while (pos < fmt.len) {
         if (fmt[pos] == '{') {
-            inline for (comptime std.meta.fieldNames(@TypeOf(ansi))) |field_name| {
-                const tag = comptime "{ansi-" ++ field_name ++ "}";
-                if (comptime std.mem.startsWith(u8, fmt[pos..], tag)) {
+            for (std.meta.fieldNames(@TypeOf(ansi))) |field_name| {
+                const tag = "{ansi-" ++ field_name ++ "}";
+                if (std.mem.startsWith(u8, fmt[pos..], tag)) {
                     fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ @field(ansi, field_name);
                     pos += tag.len;
                     pos_start = pos;
                     continue :next_pos;
                 }
-            } else {
-                pos += 1;
             }
-        } else {
-            pos += 1;
         }
-    }
-    // Note: We duplicate `pos += 1` above, otherwise this hits a compiler bug.
+        pos += 1;
+    };
     comptime assert(pos == fmt.len);
+
     fmt_ansi = fmt_ansi ++ fmt[pos_start..pos] ++ "\n";
 
     std.debug.print(fmt_ansi, fmt_args);
