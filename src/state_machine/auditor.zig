@@ -207,7 +207,7 @@ pub const AccountingAuditor = struct {
         return result.value_ptr.*.create_transfers[0..];
     }
 
-    /// Expire pending tranfers that have not been posted or voided.
+    /// Expire pending transfers that have not been posted or voided.
     fn tick_to_timestamp(self: *Self, timestamp: u64) void {
         assert(self.timestamp < timestamp);
 
