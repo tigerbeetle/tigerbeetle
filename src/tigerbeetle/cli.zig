@@ -278,8 +278,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     }
 }
 
-/// Format and print an error message followed by the usage string to stderr,
-/// then exit with an exit code of 1.
+/// Format and print an error message to stderr, then exit with an exit code of 1.
 pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
