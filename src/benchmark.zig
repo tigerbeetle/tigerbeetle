@@ -32,13 +32,14 @@ pub const log_level: std.log.Level = .info;
 
 const constants = @import("constants.zig");
 const stdx = @import("stdx.zig");
+const flags = @import("./flags.zig");
 const random_int_exponential = @import("testing/fuzz.zig").random_int_exponential;
-const IO = @import("io.zig").IO;
-const Storage = @import("storage.zig").Storage;
-const MessagePool = @import("message_pool.zig").MessagePool;
-const MessageBus = @import("message_bus.zig").MessageBusClient;
-const StateMachine = @import("state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
 const vsr = @import("vsr.zig");
+const IO = vsr.io.IO;
+const Storage = vsr.storage.Storage;
+const MessagePool = vsr.message_pool.MessagePool;
+const MessageBus = vsr.message_bus.MessageBusClient;
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Client = vsr.Client(StateMachine, MessageBus);
 const tb = @import("tigerbeetle.zig");
 const StatsD = @import("statsd.zig").StatsD;
@@ -52,6 +53,15 @@ const transfer_count_per_batch = @divExact(
     @sizeOf(tb.Transfer),
 );
 
+const CliArgs = struct {
+    account_count: usize = account_count_default,
+    transfer_count: usize = transfer_count_default,
+    transfer_count_per_second: usize = transfer_count_per_second_default,
+    print_batch_timings: bool = false,
+    enable_statsd: bool = false,
+    addresses: []const u8 = "127.0.0.1:" ++ std.fmt.comptimePrint("{}", .{constants.port}),
+};
+
 pub fn main() !void {
     const stderr = std.io.getStdErr().writer();
 
@@ -63,18 +73,6 @@ pub fn main() !void {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    var account_count = account_count_default;
-    var transfer_count = transfer_count_default;
-    var transfer_count_per_second = transfer_count_per_second_default;
-    var print_batch_timings = false;
-    var enable_statsd = false;
-
-    var addresses = try allocator.alloc(std.net.Address, 1);
-    addresses[0] = try std.net.Address.parseIp4("127.0.0.1", constants.port);
-
-    // This will either free the above address alloc, or parse_arg_addresses will
-    // free and re-alloc internally and this will free that.
-    defer allocator.free(addresses);
 
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
@@ -82,22 +80,19 @@ pub fn main() !void {
     // Discard executable name.
     _ = args.next().?;
 
-    // Parse arguments.
-    while (args.next()) |arg| {
-        _ = (try parse_arg_usize(&args, arg, "--account-count", &account_count)) or
-            (try parse_arg_usize(&args, arg, "--transfer-count", &transfer_count)) or
-            (try parse_arg_usize(&args, arg, "--transfer-count-per-second", &transfer_count_per_second)) or
-            (try parse_arg_addresses(allocator, &args, arg, "--addresses", &addresses)) or
-            (try parse_arg_bool(&args, arg, "--print-batch-timings", &print_batch_timings)) or
-            (try parse_arg_bool(&args, arg, "--statsd", &enable_statsd)) or
-            panic("Unrecognized argument: \"{}\"", .{std.zig.fmtEscapes(arg)});
-    }
+    const cli_args = flags.parse_flags(&args, CliArgs);
 
-    if (account_count < 2) panic("Need at least two accounts, got {}", .{account_count});
+    const addresses = try vsr.parse_addresses(allocator, cli_args.addresses, constants.members_max);
+    defer allocator.free(addresses);
+
+    if (cli_args.account_count < 2) flags.fatal(
+        "--account-count: need at least two accounts, got {}",
+        .{cli_args.account_count},
+    );
 
     const transfer_arrival_rate_ns = @divTrunc(
         std.time.ns_per_s,
-        transfer_count_per_second,
+        cli_args.transfer_count_per_second,
     );
 
     const client_id = std.crypto.random.int(u128);
@@ -121,26 +116,46 @@ pub fn main() !void {
         },
     );
 
-    var statsd: StatsD = undefined;
+    const batch_accounts =
+        try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
+    const batch_latency_ns =
+        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
+    const transfer_latency_ns =
+        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
+    const batch_transfers =
+        try std.ArrayListUnmanaged(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
+    const transfer_start_ns =
+        try std.ArrayListUnmanaged(u64).initCapacity(allocator, transfer_count_per_batch);
+
+    var statsd_opt: ?StatsD = null;
+    defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
+
+    if (cli_args.enable_statsd) {
+        statsd_opt = try StatsD.init(
+            allocator,
+            &io,
+            std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
+        );
+    }
 
     var benchmark = Benchmark{
         .io = &io,
         .message_pool = &message_pool,
         .client = &client,
-        .batch_accounts = try std.ArrayList(tb.Account).initCapacity(allocator, account_count_per_batch),
-        .account_count = account_count,
+        .batch_accounts = batch_accounts,
+        .account_count = cli_args.account_count,
         .account_index = 0,
         .rng = std.rand.DefaultPrng.init(42),
         .timer = try std.time.Timer.start(),
-        .batch_latency_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count),
-        .transfer_latency_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count),
-        .batch_transfers = try std.ArrayList(tb.Transfer).initCapacity(allocator, transfer_count_per_batch),
+        .batch_latency_ns = batch_latency_ns,
+        .transfer_latency_ns = transfer_latency_ns,
+        .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .tranfer_index = 0,
-        .transfer_count = transfer_count,
-        .transfer_count_per_second = transfer_count_per_second,
+        .transfer_count = cli_args.transfer_count,
+        .transfer_count_per_second = cli_args.transfer_count_per_second,
         .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
-        .transfer_start_ns = try std.ArrayList(u64).initCapacity(allocator, transfer_count_per_batch),
+        .transfer_start_ns = transfer_start_ns,
         .batch_index = 0,
         .transfers_sent = 0,
         .transfer_index = 0,
@@ -148,18 +163,9 @@ pub fn main() !void {
         .message = null,
         .callback = null,
         .done = false,
-        .statsd = if (enable_statsd) blk: {
-            statsd = try StatsD.init(
-                allocator,
-                &io,
-                std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
-            );
-            break :blk &statsd;
-        } else null,
-        .print_batch_timings = print_batch_timings,
+        .statsd = if (statsd_opt) |*statsd| statsd else null,
+        .print_batch_timings = cli_args.print_batch_timings,
     };
-
-    defer if (enable_statsd) benchmark.statsd.?.deinit(allocator);
 
     benchmark.create_accounts();
 
@@ -224,21 +230,21 @@ const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
     client: *Client,
-    batch_accounts: std.ArrayList(tb.Account),
+    batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_index: usize,
     rng: std.rand.DefaultPrng,
     timer: std.time.Timer,
-    batch_latency_ns: std.ArrayList(u64),
-    transfer_latency_ns: std.ArrayList(u64),
-    batch_transfers: std.ArrayList(tb.Transfer),
+    batch_latency_ns: std.ArrayListUnmanaged(u64),
+    transfer_latency_ns: std.ArrayListUnmanaged(u64),
+    batch_transfers: std.ArrayListUnmanaged(tb.Transfer),
     batch_start_ns: usize,
     transfers_sent: usize,
     tranfer_index: usize,
     transfer_count: usize,
     transfer_count_per_second: usize,
     transfer_arrival_rate_ns: usize,
-    transfer_start_ns: std.ArrayList(u64),
+    transfer_start_ns: std.ArrayListUnmanaged(u64),
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
@@ -255,7 +261,7 @@ const Benchmark = struct {
         }
 
         // Reset batch.
-        b.batch_accounts.resize(0) catch unreachable;
+        b.batch_accounts.clearRetainingCapacity();
 
         // Fill batch.
         while (b.account_index < b.account_count and
@@ -298,8 +304,8 @@ const Benchmark = struct {
 
         const random = b.rng.random();
 
-        b.batch_transfers.resize(0) catch unreachable;
-        b.transfer_start_ns.resize(0) catch unreachable;
+        b.batch_transfers.clearRetainingCapacity();
+        b.transfer_start_ns.clearRetainingCapacity();
 
         // Busy-wait for at least one transfer to be available.
         while (b.transfer_next_arrival_ns >= b.timer.read()) {}
@@ -335,7 +341,8 @@ const Benchmark = struct {
             b.transfer_start_ns.appendAssumeCapacity(b.transfer_next_arrival_ns);
 
             b.transfer_index += 1;
-            b.transfer_next_arrival_ns += random_int_exponential(random, u64, b.transfer_arrival_rate_ns);
+            b.transfer_next_arrival_ns +=
+                random_int_exponential(random, u64, b.transfer_arrival_rate_ns);
         }
 
         assert(b.batch_transfers.items.len > 0);
