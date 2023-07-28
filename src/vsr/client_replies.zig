@@ -85,6 +85,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             std.StaticBitSet(constants.clients_max).initEmpty(),
         /// Track which slots hold a corrupt reply, or are otherwise missing the reply
         /// that ClientSessions believes they should hold.
+        ///
+        /// Invariants:
+        /// - Set bits must correspond to occupied slots in ClientSessions.
+        /// - Set bits must correspond to entries in ClientSessions with
+        ///   `header.size > @sizeOf(vsr.Header)`.
         faulty: std.StaticBitSet(constants.clients_max) =
             std.StaticBitSet(constants.clients_max).initEmpty(),
 

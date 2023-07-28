@@ -24,6 +24,7 @@ const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExte
 const Storage = @import("../testing/storage.zig").Storage;
 const Grid = @import("grid.zig").GridType(Storage);
 const BlockType = @import("grid.zig").BlockType;
+const schema = @import("schema.zig");
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
 const fuzz = @import("../testing/fuzz.zig");
 
@@ -644,8 +645,8 @@ fn verify_manifest_compaction_set(
     var blocks = superblock.free_set.blocks.iterator(.{ .kind = .set });
     while (blocks.next()) |block_index| {
         const block_address = block_index + 1;
-        const block = superblock.storage.grid_block(block_address);
-        const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+        const block = superblock.storage.grid_block(block_address).?;
+        const block_header = schema.header_from_block(block);
         try std.testing.expectEqual(BlockType.manifest.operation(), block_header.operation);
 
         const entry_count = ManifestLog.Block.entry_count(block);

@@ -899,7 +899,7 @@ fn snapshot_max_for_table_input(op_min: u64) u64 {
     return op_min + @divExact(constants.lsm_batch_multiple, 2) - 1;
 }
 
-fn snapshot_min_for_table_output(op_min: u64) u64 {
+pub fn snapshot_min_for_table_output(op_min: u64) u64 {
     assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
     return op_min + @divExact(constants.lsm_batch_multiple, 2);
 }

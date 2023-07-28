@@ -31,7 +31,7 @@ pub const BlockType = enum(u8) {
     data = 4,
 
     pub fn valid(vsr_operation: vsr.Operation) bool {
-        _ = std.meta.intToEnum(BlockType, vsr_operation) catch return false;
+        _ = std.meta.intToEnum(BlockType, @enumToInt(vsr_operation)) catch return false;
 
         return true;
     }
@@ -116,7 +116,7 @@ pub fn GridType(comptime Storage: type) type {
         };
 
         pub const ReadRepair = struct {
-            callback: fn (*Grid.ReadRepair, error{BlockNotFound}!void) void,
+            callback: fn (*Grid.ReadRepair, ReadBlockResult) void,
             address: u64,
             checksum: u128,
             block: BlockPtr,
@@ -838,7 +838,7 @@ pub fn GridType(comptime Storage: type) type {
                     @enumToInt(read.block_type),
                     header.op,
                     header.checksum,
-                    @as(std.meta.Tag(BlockType), header.operation),
+                    @enumToInt(header.operation), // TODO is this safe for invalid variants?
                 },
             );
 
@@ -866,7 +866,7 @@ pub fn GridType(comptime Storage: type) type {
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
 
             if (!header.valid_checksum()) return .invalid_checksum;
-            if (header.command != .block) return .unexpect_command;
+            if (header.command != .block) return .unexpected_command;
 
             assert(header.size >= @sizeOf(vsr.Header));
             assert(header.size <= constants.block_size);
@@ -1004,9 +1004,9 @@ pub fn GridType(comptime Storage: type) type {
             const header = mem.bytesAsValue(vsr.Header, read.block[0..@sizeOf(vsr.Header)]);
 
             if (header.op > 0) {
-                read.callback(read, {});
+                read.callback(read, .valid);
             } else {
-                read.callback(read, error.BlockNotFound);
+                read.callback(read, .unexpected_checksum);
             }
         }
 
@@ -1068,7 +1068,7 @@ pub fn GridType(comptime Storage: type) type {
                 // Too complicated to do async verification
                 return;
 
-            const actual_block = grid.superblock.storage.grid_block(address);
+            const actual_block = grid.superblock.storage.grid_block(address).?;
             assert(std.mem.eql(u8, cached_block, actual_block));
         }
     };

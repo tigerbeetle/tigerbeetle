@@ -50,7 +50,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
-        pub const StorageChecker = StorageCheckerType(Replica);
+        pub const StorageChecker = StorageCheckerType(Storage);
         pub const SyncChecker = SyncCheckerType(Replica);
 
         pub const Options = struct {
@@ -216,8 +216,8 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             });
             errdefer state_checker.deinit();
 
-            var storage_checker = StorageChecker.init(allocator);
-            errdefer storage_checker.deinit();
+            var storage_checker = try StorageChecker.init(allocator);
+            errdefer storage_checker.deinit(allocator);
 
             var sync_checker = SyncChecker.init(allocator);
             errdefer sync_checker.deinit();
@@ -294,7 +294,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
         pub fn deinit(cluster: *Self) void {
             cluster.sync_checker.deinit();
-            cluster.storage_checker.deinit();
+            cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
             cluster.network.deinit();
             for (cluster.clients) |*client| client.deinit(cluster.allocator);
@@ -496,10 +496,6 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                         log.debug("{}: on_compact: skipping StorageChecker; diverged", .{
                             replica.replica,
                         });
-                    } else {
-                        cluster.storage_checker.replica_compact(replica) catch |err| {
-                            fatal(.correctness, "storage checker error: {}", .{err});
-                        };
                     }
                 },
                 .checkpoint_commenced => {
@@ -512,7 +508,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                             replica.replica,
                         });
                     } else {
-                        cluster.storage_checker.replica_checkpoint(replica) catch |err| {
+                        cluster.storage_checker.replica_checkpoint(&replica.superblock) catch |err| {
                             fatal(.correctness, "storage checker error: {}", .{err});
                         };
                     }
@@ -553,6 +549,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             }
         }
 
+        // TODO log scrubber mode, repair queue
         fn log_replica(
             cluster: *const Self,
             event: enum(u8) {
@@ -612,6 +609,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     }
                 }
 
+                // TODO GridRepairQueue
                 info = std.fmt.bufPrint(&info_buffer, "" ++
                     "{[view]:>4}V " ++
                     "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
@@ -619,7 +617,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
                     "{[grid_blocks_free]:>7}Gf " ++
-                    "{[grid_blocks_faulty]:>2}G!", .{
+                    "{[grid_blocks_remote]:>2}G!", .{
                     .view = replica.view,
                     .commit_min = replica.commit_min,
                     .commit_max = replica.commit_max,
@@ -630,7 +628,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     .wal_op_min = wal_op_min,
                     .wal_op_max = wal_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
-                    .grid_blocks_faulty = replica.grid.read_faulty_queue.count,
+                    .grid_blocks_remote = replica.grid.read_remote_queue.count,
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {

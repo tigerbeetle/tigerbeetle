@@ -42,6 +42,8 @@ Checkpoints:
 
 ## Algorithm
 
+(TODO update)
+
 0. [Sync is needed](#0-scenarios).
 1. [Trigger sync](#1-triggers).
 2. Wait for non-grid commit operation to finish.

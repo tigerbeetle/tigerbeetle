@@ -18,7 +18,7 @@ const div_ceil = @import("../stdx.zig").div_ceil;
 pub const Reservation = struct {
     block_base: usize,
     block_count: usize,
-    /// An identifer for each reservation cycle, to verify that old reservations are not reused.
+    /// An identifier for each reservation cycle, to verify that old reservations are not reused.
     session: usize,
 };
 
@@ -64,7 +64,7 @@ pub const FreeSet = struct {
         forfeiting,
     } = .reserving,
 
-    /// Verifies that reservations are not allocated from or forefeited when they should not be.
+    /// Verifies that reservations are not allocated from or forfeited when they should not be.
     reservation_session: usize = 1,
 
     // Each shard is 8 cache lines because the CPU line fill buffer can fetch 10 lines in parallel.

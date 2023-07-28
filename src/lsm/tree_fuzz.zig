@@ -398,7 +398,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(repair.address > 0);
             assert(!env.grid.superblock.free_set.is_free(repair.address));
 
-            const actual_block = env.grid.superblock.storage.grid_block(repair.address);
+            const actual_block = env.grid.superblock.storage.grid_block(repair.address).?;
             stdx.copy_disjoint(.exact, u8, block.*, actual_block);
 
             const header = schema.header_from_block(block.*);

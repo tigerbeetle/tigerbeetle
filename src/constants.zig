@@ -312,7 +312,7 @@ comptime {
     assert(grid_repair_tables_max > 0);
 }
 
-pub const grid_scrubber_reads_max = config.process_scrubber_reads_max;
+pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
 pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
 pub const grid_scrubber_interval_ticks_min = config.process.grid_scrubber_interval_min_ms / tick_ms;
 pub const grid_scrubber_interval_ticks_max = config.process.grid_scrubber_interval_max_ms / tick_ms;

@@ -85,7 +85,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub const Table = TreeTable;
 
         const Grid = @import("grid.zig").GridType(Storage);
-        const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
+        pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
         pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 

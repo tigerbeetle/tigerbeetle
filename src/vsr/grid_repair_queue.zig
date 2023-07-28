@@ -17,10 +17,6 @@ const IOPS = @import("../iops.zig").IOPS;
 /// table blocks.
 const grid_repair_writes_max = constants.grid_iops_write_max;
 
-comptime {
-    assert(grid_repair_writes_max <= constants.grid_repair_blocks_max);
-}
-
 /// The maximum number of blocks that can possibly be referenced by any table index block.
 ///
 /// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
@@ -169,27 +165,33 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             return requests_count;
         }
 
+        pub fn empty(queue: *const GridRepairQueue) bool {
+            if (queue.faulty_blocks.count() == 0) {
+                assert(queue.faulty_tables.executing() == 0);
+                return true;
+            } else {
+                return false;
+            }
+        }
+
         pub fn full(queue: *const GridRepairQueue) bool {
             const faulty_blocks_free =
+                queue.faulty_blocks.capacity() -
                 queue.faulty_blocks.count() -
                 constants.grid_repair_tables_max * lsm_table_blocks_max;
-            const tables_free = constants.grid_repair_tables_max - queue.faulty_tables.availabe();
+            const tables_free = queue.faulty_tables.available();
 
             return faulty_blocks_free == 0 or tables_free == 0;
         }
 
         /// Queue a faulty block for repair.
+        /// error.Faulty: The block is already marked as faulty.
         pub fn queue_fault(
             queue: *GridRepairQueue,
             address: u64,
             checksum: u128,
             repair_strategy: enum { block, table },
-        ) error{
-            /// The block is already marked as faulty.
-            Faulty
-            // The queue has insufficient capacity to queue the fault.
-            //Full,
-        }!void {
+        ) error{Faulty}!void {
             assert(queue.checkpoint_progress == null);
             assert(!queue.grid.superblock.free_set.is_free(address));
             assert(!queue.full());
@@ -200,14 +202,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             }
 
             const progress: FaultProgress = switch (repair_strategy) {
-                .block => progress: {
-                    //const faulty_blocks_free =
-                    //    queue.faulty_blocks.count() -
-                    //    constants.grid_repair_tables_max * lsm_table_blocks_max;
-                    //if (faulty_blocks_free == 0) return error.Full;
-
-                    break :progress .block;
-                },
+                .block => .block,
                 .table => progress: {
                     const table = queue.faulty_tables.acquire().?;// orelse return error.Full;
                     table.* = .{ .index_address = address, .index_checksum = checksum };
@@ -259,7 +254,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                     assert(block_header.checksum == table.index_checksum);
                     assert(BlockType.from(block_header.operation) == .index);
 
-                    queue.queue_table_content(block_data, table);
+                    //queue.queue_table_content(block_data, table);
 
                     stdx.copy_disjoint(
                         .inexact,
@@ -277,10 +272,13 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                     {
                         const content_block_id =
                             index_schema.content_block(block_data, content_block_index);
-                        queue.faulty_blocks.putAssumeCapacityNoClobber(content_block_id.address, .{
-                            .checksum = content_block_id.checksum,
-                            .progress = .{ .table_content = table },
-                        });
+                        queue.faulty_blocks.putAssumeCapacityNoClobber(
+                            content_block_id.block_address,
+                            .{
+                                .checksum = content_block_id.block_checksum,
+                                .progress = .{ .table_content = table },
+                            },
+                        );
                     }
 
                     return;
@@ -445,209 +443,3 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         }
     };
 }
-
-//fn table_blocks_max(comptime Forest: type) usize {
-//    var blocks_max: usize = 0;
-//    inline for (std.meta.fields(Forest.Grooves)) |groove_field| {
-//        const Groove = groove_field.field_type;
-//
-//        blocks_max = @maximum(blocks_max, tree_blocks_max(Groove.ObjectTree));
-//        blocks_max = @maximum(blocks_max, tree_blocks_max(Groove.IdTree));
-//        inline for (std.meta.fields(Groove.IndexTrees)) |tree_field| {
-//            blocks_max = @maximum(blocks_max, tree_blocks_max(tree_field.field_type));
-//        }
-//    }
-//    assert(blocks_max >= 2);
-//    return blocks_max;
-//}
-
-// TODO Implement this in table.zig. TableSchema{ ... }.etc()
-//const AnyTable = struct {
-//    fn index_schema(index_block: []align(16) const u8) struct {
-//        filter_blocks: usize,
-//        filter_blocks_max: usize,
-//        data_blocks: usize,
-//        data_blocks_max: usize,
-//    } {
-//        const block_header = std.mem.bytesAsValue(vsr.Header, block_data[0..@sizeOf(vsr.Header)]);
-//        const filter_blocks = block_header.commit;
-//        const filter_blocks_max = block_header.TODO;
-//        const data_blocks = block_header.request;
-//        const data_blocks_max = block_header.TODO;
-//        assert(filter_blocks <= filter_blocks_max);
-//        assert(data_blocks <= data_blocks_max);
-//        assert(data_blocks >= filter_blocks);
-//
-//        return .{
-//            .filter_blocks = filter_blocks,
-//            .filter_blocks_max = filter_blocks_max,
-//            .data_blocks = data_blocks,
-//            .data_blocks_max = data_blocks_max,
-//        };
-//    }
-//
-//    fn index_content(index_block: []align(16) const u8, i: usize) struct {
-//        address: u64,
-//        checksum: u128,
-//    } {
-//        const schema = index_schema(index_block);
-//        assert(i < schema.filter_blocks + schema.data_blocks);
-//
-//        if (i < schema.filter_blocks) {
-//            // Filter block.
-//            const filter_block_checksums_bytes =
-//                index_block[@sizeOf(vsr.Header)..][0..schema.filter_blocks_max * @sizeOf(u128)];
-//            const filter_block_checksums = std.mem.bytesAsSlice(u128, filter_block_checksums_bytes);
-//            const filter_block_addresses_bytes =
-//                index_block[@sizeOf(vsr.Header)..][0..schema.filter_blocks_max * @sizeOf(u128)];
-//        } else {
-//            // Data block.
-//        }
-//    }
-//};
-
-            //if (fault.table_progress != null and
-            //    fault.table_progress.?.* == .await_index)
-            //{
-            //    assert(block_header.operation.case(BlockType) == .index);
-            //    assert(fault.table_progress.?.await_index.table_address == block_header.op);
-            //    assert(fault.table_progress.?.await_index.table_checksum == block_header.checksum);
-            //
-            //    const removed = queue.faulty_blocks.remove(block_header.op);
-            //    assert(removed);
-            //
-            //    const table_progress_index =
-            //        queue.faulty_tables.index(fault.table_progress_index.?);
-            //
-            //    const table_schema = TableSchema.from_index(block_data);
-            //    fault.table_progress.* = .{ .await_content = .{
-            //        .table_address = block_header.op,
-            //        .table_checksum = block_header.checksum,
-            //        .blocks_total = table_schema.filter_block_count + table_schema.data_block_count,
-            //    } };
-            //
-            //    const table_progress_block = queue.faulty_table_blocks[table_progress_index];
-            //    stdx.copy_disjoint(.inexact, u8, table_progress_block, block_data);
-            //    return .repair;
-            //}
-            //
-            //if (fault.table_progress != null and
-            //    fault.table_progress.?.* == .await_content)
-            //{
-            //    fault.blocks_queued -= 1;
-            //}
-
-        //const TableProgress = union(enum) {
-        //    /// The entire table needs to be repaired/synced.
-        //    /// We are awaiting the index block.
-        //    await_index: struct {
-        //        table_address: u64,
-        //        table_checksum: u128,
-        //    },
-        //
-        //    /// Table index block is in the corresponding slot of `faulty_table_blocks`.
-        //    /// We are awaiting its filter/data blocks.
-        //    ///
-        //    /// Invariants:
-        //    /// - blocks_queued ≤ blocks_total
-        //    /// - blocks_written ≤ blocks_total
-        //    /// - blocks_written + blocks_queued ≤ blocks_total
-        //    /// When complete:
-        //    /// - blocks_queued = 0
-        //    /// - blocks_written = blocks_total
-        //    await_content: struct {
-        //        table_address: u64,
-        //        table_checksum: u128,
-        //
-        //        /// The table's `filter_block_count + data_block_count`.
-        //        blocks_total: usize,
-        //        /// The number of data/filter blocks from this table in `faulty_blocks`.
-        //        blocks_queued: usize = 0,
-        //        /// The number of data/filter blocks from this table that have been written.
-        //        blocks_written: usize = 0,
-        //    },
-        //};
-        //
-        //const Fault = union(enum) {
-        //    /// Waiting for a single block, which can be written immediately.
-        //    block: struct { address: u64, checksum: u128 },
-        //    /// The entire table needs to be repaired/synced.
-        //    /// We are awaiting the index block.
-        //    /// The index block will not be written until all of its content has been written.
-        //    table_index: struct { address: u64, checksum: u128 },
-        //    /// We are awaiting the table's filter/data blocks.
-        //    table_content: *TableProgress,
-        //};
-
-        //pub fn contains(queue: *const GridRepairQueue, block_id: struct {
-        //    block_address: u64,
-        //    block_checksum: u128,
-        //}) bool {
-        //    
-        //}
-        //
-        //fn find_fault(queue: *GridRepairQueue, fault_id: BlockId) ?union(enum) {
-        //    block: *Fault,
-        //    table_index: *Fault,
-        //    table_content: struct {
-        //        fault: *Fault,
-        //        index: usize,
-        //    },
-        //} {
-        //    var faults = queue.faults.iterate();
-        //    const fault = while (faults.next()) |fault| {
-        //        // TODO(Zig) inline-switch block+table_index
-        //        switch (fault) {
-        //            .block => |block_id| if (std.meta.eql(block_id, fault_id)) return fault;
-        //            .table_index => |block_id| if (std.meta.eql(block_id, fault_id)) return fault;
-        //            .table_content => |table_progress| {
-        //                if (parameters.block_address == table_progress.index_address) {
-        //                    assert(parameters.block_checksum == table_progress.index_checksum);
-        //                    return .already_faulty;
-        //                }
-        //                const schema = TableSchema.from_index_block(table_progress.index_block);
-        //                if (schema.find_content_block(table_progress.index_block, 
-        //            },
-        //        }
-        //    }
-        //    return null;
-        //}
-
-        //fn queue_table_content(
-        //    queue: *GridRepairQueue,
-        //    index_block_data: Grid.BlockPtrConst,
-        //    table: *FaultyTable,
-        //) void {
-        //    const index_schema = schema.TableIndex.from(index_block_data);
-        //    assert(index_schema.content_blocks_used(index_block_data) > 0);
-        //
-            //if (queue.faulty_blocks.capacity() <
-            //    queue.faulty_blocks.count() + index_schema.content_blocks_used(index_block_data))
-            //{
-            //    return error.Busy;
-            //}
-
-            //for ([_]struct {
-            //    checksums: []const u128,
-            //    addresses: []const u64,
-            //}{
-            //    .{
-            //        .checksums = index_schema.filter_checksums_used(index_block_data),
-            //        .addresses = index_schema.filter_addresses_used(index_block_data),
-            //    },
-            //    .{
-            //        .checksums = index_schema.data_checksums_used(index_block_data),
-            //        .addresses = index_schema.data_addresses_used(index_block_data),
-            //    },
-            //}) |content| {
-            //    assert(content.checksums.len > 0);
-            //    assert(content.checksums.len == content.addresses.len);
-            //
-            //    for (content.checksums) |content_checksum, i| {
-            //        queue.faulty_blocks.putAssumeCapacityNoClobber(content.addresses[i], .{
-            //            .checksum = content_checksum,
-            //            .progress = .{ .table_content = table },
-            //        });
-            //    }
-            //}
-        //}

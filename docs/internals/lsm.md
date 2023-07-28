@@ -195,6 +195,8 @@ Each query targets a particular snapshot, either:
 
 #### Current Snapshot
 
+TODO Update this section.
+
 Each tree tracks the highest snapshot safe to query from (`tree.lookup_snapshot_max`), to ensure that
 an ongoing compaction's incomplete output tables are not visible. Queries targeting
 `tree.lookup_snapshot_max` always read from the mutable and immutable tables — so each commit can

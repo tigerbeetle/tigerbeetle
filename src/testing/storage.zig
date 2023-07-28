@@ -34,6 +34,7 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const BlockType = @import("../lsm/grid.zig").BlockType;
+const schema = @import("../lsm/schema.zig");
 const stdx = @import("../stdx.zig");
 const PriorityQueue = @import("./priority_queue.zig").PriorityQueue;
 const fuzz = @import("./fuzz.zig");
@@ -318,10 +319,21 @@ pub const Storage = struct {
 
         verify_alignment(buffer);
 
-        if (zone != .grid) {
-            // Grid repairs can read blocks that have not ever been written.
-            var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
-            while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+        switch (zone) {
+            .superblock,
+            .wal_headers,
+            .wal_prepares,
+            => {
+                var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
+                while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+            },
+            .client_replies,
+            .grid,
+            => {
+                // ClientReplies/Grid repairs can read blocks that have not ever been written.
+                // (The former case is possible if we sync to a new superblock and someone requests
+                // a clientreply that we haven't repaired yet.)
+            },
         }
 
         read.* = .{
@@ -500,6 +512,17 @@ pub const Storage = struct {
         }
     }
 
+    /// Returns whether any sector in the area is corrupt.
+    pub fn area_faulty(storage: *const Storage, area: Area) bool {
+        const sectors = area.sectors();
+        var sector = sectors.min;
+        var faulty: bool = false;
+        while (sector < sectors.max) : (sector += 1) {
+            faulty = faulty or storage.faults.isSet(sector);
+        }
+        return faulty;
+    }
+
     pub fn superblock_header(
         storage: *const Storage,
         copy_: u8,
@@ -534,19 +557,19 @@ pub const Storage = struct {
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
-    ) *align(constants.sector_size) [constants.block_size]u8 {
+    ) ?*align(constants.sector_size) const [constants.block_size]u8 {
         assert(address > 0);
 
         const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
-        const block_header = mem.bytesToValue(
-            vsr.Header,
-            storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
-        );
-        assert(storage.memory_written.isSet(@divExact(block_offset, constants.sector_size)));
-        assert(block_header.valid_checksum());
-        assert(block_header.size <= constants.block_size);
+        if (storage.memory_written.isSet(@divExact(block_offset, constants.sector_size))) {
+            const block_buffer = storage.memory[block_offset..][0..constants.block_size];
+            const block_header = schema.header_from_block(block_buffer);
+            assert(block_header.op == address);
 
-        return storage.memory[block_offset..][0..constants.block_size];
+            return block_buffer;
+        } else {
+            return null;
+        }
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
@@ -610,7 +633,7 @@ pub const Area = union(enum) {
     grid: struct { address: u64 },
 
     fn sectors(area: Area) SectorRange {
-        switch (area) {
+        return switch (area) {
             .superblock => |data| SectorRange.from_zone(
                 .superblock,
                 data.zone.start_for_copy(data.copy),
@@ -636,7 +659,7 @@ pub const Area = union(enum) {
                 constants.block_size * (data.address - 1),
                 constants.block_size,
             ),
-        }
+        };
     }
 };
 
