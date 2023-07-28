@@ -284,13 +284,26 @@ fn ScanType(
         }
 
         pub inline fn next(scan: *Scan) error{ReadAgain}!?u64 {
-            return switch (scan.dispatcher) {
-                // Comptime generates an specialized callback function for each type.
-                inline else => |*scan_tree| if (try scan_tree.next()) |value|
-                    timestamp(value)
-                else
-                    null,
-            };
+            switch (scan.dispatcher) {
+                inline else => |*scan_tree| {
+                    while (try scan_tree.next()) |value| {
+                        // When iterating over `ScanMerge*Type` the result is already a timestamp.
+                        // When iterating over `ScanTreeType` the result is a `CompositeKey`,
+                        // check if it's not a tombstone and return only the `timestamp` part.
+                        if (comptime @TypeOf(value) == u64) {
+                            return value;
+                        } else {
+                            const ScanTree = @TypeOf(scan_tree.*);
+                            if (ScanTree.Tree.Table.tombstone(&value)) {
+                                continue;
+                            }
+
+                            return value.timestamp;
+                        }
+                    } 
+                    return null;
+                },
+            }
         }
 
         /// Returns the direction of the output timestamp values,
@@ -317,13 +330,6 @@ fn ScanType(
         ) *Scan {
             const dispatcher = stdx.union_field_parent_ptr(Dispatcher, field, impl);
             return @fieldParentPtr(Scan, "dispatcher", dispatcher);
-        }
-
-        inline fn timestamp(value: anytype) u64 {
-            return if (@TypeOf(value) == u64)
-                value
-            else
-                value.timestamp;
         }
 
         /// Generates a tagged union with an specialized ScanTree field for each
@@ -559,6 +565,7 @@ fn ScanMergeUnionType(
             assert(stream_index < self.scans.len);
 
             var item = &self.scans.slice()[stream_index];
+            assert(item.popped != null);
             defer item.popped = null;
 
             return item.popped.?;
@@ -688,10 +695,11 @@ fn FetcherType(comptime Scan: type, comptime Groove: type, comptime Storage: typ
                 completion: *Groove.ObjectTree.LookupContext,
                 result: ?*const Object,
             ) void {
+                // Since the scan produced a valid key, it's not expected to not be found here.
+                assert(result != null);
+
                 const lookup = @fieldParentPtr(Lookup, "lookup_context", completion);
                 lookup.lookup_context = undefined;
-
-                assert(result != null);
                 assert(lookup.index_produced != null);
 
                 lookup.parent.buffer[lookup.index_produced.?] = result.?.*;

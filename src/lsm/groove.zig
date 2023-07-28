@@ -229,11 +229,14 @@ pub fn GrooveType(
         };
 
         // Create an IndexTree for the DerivedType:
-        const tree_name = @typeName(Object) ++ "." ++ field.name;
         const DerivedType = @typeInfo(derive_return_type).Optional.child;
-        const IndexTree = IndexTreeType(Storage, DerivedType, tree_name);
+        const IndexTree = IndexTreeType(
+            Storage,
+            DerivedType,
+            @field(groove_options.value_count_max, field.name),
+        );
 
-        index_fields = index_fields ++ &.{
+        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
                 .field_type = IndexTree,
@@ -334,7 +337,7 @@ pub fn GrooveType(
             }
 
             const derived_fn = @TypeOf(@field(groove_options.derived, field_name));
-            return @typeInfo(derived_fn).Fn.return_type.?.Optional.child;
+            return @typeInfo(@typeInfo(derived_fn).Fn.return_type.?).Optional.child;
         }
 
         fn HelperType(comptime field_name: []const u8) type {
