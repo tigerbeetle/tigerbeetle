@@ -696,6 +696,112 @@ public class IntegrationTest {
     }
 
     @Test
+    public void testPendingTransfersAutoExpiration() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+
+                // Creating the accounts.
+                var errors = client.createAccounts(accounts);
+                assertTrue(errors.getLength() == 0);
+
+                // Creating a pending transfer.
+                var transfers = new TransferBatch(1);
+                transfers.add();
+
+                transfers.setId(transfer1Id);
+                transfers.setCreditAccountId(account1Id);
+                transfers.setDebitAccountId(account2Id);
+                transfers.setLedger(720);
+                transfers.setCode((short) 1);
+                transfers.setAmount(100);
+                transfers.setFlags(TransferFlags.PENDING);
+                transfers.setTimeout(TimeUnit.MILLISECONDS.toNanos(1_000));
+
+                var transferResults = client.createTransfers(transfers);
+                assertTrue(transferResults.getLength() == 0);
+
+                // Looking up the accounts.
+                var lookupAccounts = client.lookupAccounts(accountIds);
+                assertTrue(lookupAccounts.getLength() == 2);
+
+                accounts.beforeFirst();
+
+                // Asserting the first account for the pending credit.
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals(100L, lookupAccounts.getCreditsPending());
+                assertEquals(0L, lookupAccounts.getDebitsPending());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+
+                // Asserting the second account for the pending debit.
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals(100L, lookupAccounts.getDebitsPending());
+                assertEquals(0L, lookupAccounts.getCreditsPending());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+
+                // Looking up and asserting the pending transfer.
+                var ids = new IdBatch(1);
+                ids.add(transfer1Id);
+                var lookupTransfers = client.lookupTransfers(ids);
+                assertEquals(1, lookupTransfers.getLength());
+
+                transfers.beforeFirst();
+
+                assertTrue(transfers.next());
+                assertTrue(lookupTransfers.next());
+                assertTransfers(transfers, lookupTransfers);
+                assertNotEquals(0L, lookupTransfers.getTimestamp());
+                assertTrue(lookupTransfers.getTimeout() > 0);
+
+                // Waiting for the expiration
+                Thread.sleep(TimeUnit.NANOSECONDS.toMillis(lookupTransfers.getTimeout()));
+
+                // Looking up the accounts again for the updated balance.
+                lookupAccounts = client.lookupAccounts(accountIds);
+                assertTrue(lookupAccounts.getLength() == 2);
+
+                accounts.beforeFirst();
+
+                // Asserting the pending credit was voided.
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals(0L, lookupAccounts.getCreditsPending());
+                assertEquals(0L, lookupAccounts.getDebitsPending());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+
+
+                // Asserting the pending debit was voided.
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals(0L, lookupAccounts.getCreditsPending());
+                assertEquals(0L, lookupAccounts.getDebitsPending());
+                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(0L, lookupAccounts.getDebitsPosted());
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+
+    @Test
     public void testCreateLinkedTransfers() throws Throwable {
 
         try (var server = new Server()) {

@@ -316,6 +316,10 @@ const Benchmark = struct {
                 credit_account_index = (credit_account_index + 1) % b.account_count;
             }
             assert(debit_account_index != credit_account_index);
+
+            // 30% of pending transfers.
+            const pending = random.intRangeAtMost(u8, 0, 9) < 3;
+
             b.batch_transfers.appendAssumeCapacity(.{
                 // Reverse the bits to stress non-append-only index for `id`.
                 .id = @bitReverse(@as(u128, b.transfer_index + 1)),
@@ -325,10 +329,10 @@ const Benchmark = struct {
                 .reserved = 0,
                 // TODO Benchmark posting/voiding pending transfers.
                 .pending_id = 0,
-                .timeout = 0,
                 .ledger = 2,
                 .code = random.int(u16) +| 1,
-                .flags = .{},
+                .flags = .{ .pending = pending },
+                .timeout = if (pending) random.intRangeAtMost(u32, 1, 10_000) else 0,
                 .amount = random_int_exponential(random, u64, 10_000) +| 1,
                 .timestamp = 0,
             });

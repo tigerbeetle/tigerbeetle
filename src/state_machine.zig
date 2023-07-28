@@ -94,6 +94,7 @@ pub fn StateMachineType(
                     .ledger = 18,
                     .code = 19,
                     .amount = 20,
+                    .expires_at = 22,
                 };
 
                 pub const posted = .{
@@ -247,9 +248,19 @@ pub fn StateMachineType(
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{ "reserved", "flags" },
-                .derived = .{},
+                .derived = .{
+                    .expires_at = struct {
+                        fn expires_at(object: *const Transfer) ?u64 {
+                            return if (object.flags.pending and object.timeout > 0)
+                                object.timestamp + object.timeout
+                            else
+                                null;
+                        }
+                    }.expires_at,
+                },
             },
         );
 
@@ -334,10 +345,163 @@ pub fn StateMachineType(
             }
         };
 
+        const TransferPendingExpiry = struct {
+            context: TransfersGroove.ScanGroove.Fetcher.Context,
+            buffer: []Transfer,
+            result: ?[]const Transfer,
+
+            fn init(allocator: std.mem.Allocator) !@This() {
+                // TODO: We are limiting the max number of pending transfers
+                // that will be voided in each operation.
+                var buffer = try allocator.alloc(Transfer, constants.batch_max.create_transfers);
+                errdefer allocator.free(buffer);
+
+                return @This(){
+                    .context = .{ .callback = scan_fetch_callback },
+                    .buffer = buffer,
+                    .result = null,
+                };
+            }
+
+            fn deinit(self: *@This(), allocator: std.mem.Allocator) void {
+                allocator.free(self.buffer);
+            }
+
+            fn prefetch_enqueue_begin(self: *@This()) void {
+                const state_machine = self.parent();
+
+                const scan_buffer_pool = &state_machine.forest.scan_buffer_pool;
+                const scan_transfers: *TransfersGroove.ScanGroove = &state_machine.forest.grooves.transfers.scan;
+                var scan = scan_transfers.between(
+                    .expires_at,
+                    scan_buffer_pool.buffer_acquire(),
+                    state_machine.forest.grooves.transfers.prefetch_snapshot.?,
+                    TimestampRange.timestamp_min,
+                    state_machine.prepare_timestamp,
+                    TimestampRange.all(),
+                    .ascending,
+                );
+
+                var fetcher = scan_transfers.fetch(scan, snapshot_latest);
+                fetcher.read(&self.context, self.buffer);
+            }
+
+            fn scan_fetch_callback(context: *TransfersGroove.ScanGroove.Fetcher.Context, fetcher: *TransfersGroove.ScanGroove.Fetcher) void {
+                var self = @fieldParentPtr(@This(), "context", context);
+                const state_machine = self.parent();
+
+                assert(self.result == null);
+
+                const result = fetcher.slice();
+                state_machine.forest.scan_buffer_pool.reset();
+                state_machine.forest.grooves.transfers.scan.reset();
+
+                const grooves = &state_machine.forest.grooves;
+                self.result = result;
+                for (self.result.?) |expired| {
+                    assert(expired.flags.pending == true);
+                    assert(state_machine.prepare_timestamp >= expired.timestamp + expired.timeout);
+
+                    grooves.accounts_immutable.prefetch_enqueue(expired.debit_account_id);
+                    grooves.accounts_immutable.prefetch_enqueue(expired.credit_account_id);
+
+                    if (global_constants.verify) {
+                        // We prefetch `Posted` only to check that it's null.
+                        grooves.posted.prefetch_enqueue(expired.timestamp);
+                    }
+                }
+
+                state_machine.transfer_pending_expiry_prefetch_enqueue_complete();
+            }
+
+            pub fn prefetch_enqueue_accounts_mutable(self: *@This()) void {
+                const state_machine = self.parent();
+                const grooves = &state_machine.forest.grooves;
+
+                assert(self.result != null);
+                for (self.result.?) |expired| {
+                    const debit_account_immutable = grooves.accounts_immutable.get(
+                        expired.debit_account_id,
+                    ).?;
+                    grooves.accounts_mutable.prefetch_enqueue(debit_account_immutable.timestamp);
+
+                    const credit_account_immutable = grooves.accounts_immutable.get(
+                        expired.credit_account_id,
+                    ).?;
+                    grooves.accounts_mutable.prefetch_enqueue(credit_account_immutable.timestamp);
+                }
+            }
+
+            fn execute(self: *@This()) void {
+                // TODO: unit tests call `commit` without prefetching,
+                // we still need to unit test this code, but just returning for now.
+                if (self.result == null) return;
+
+                const state_machine = self.parent();
+                const grooves = &state_machine.forest.grooves;
+
+                assert(self.result != null);
+                for (self.result.?) |expired| {
+                    // Updating the debit side:
+                    var debit_account_mutable: AccountMutable = blk: {
+                        const debit_account_immutable = grooves.accounts_immutable.get(
+                            expired.debit_account_id,
+                        ).?;
+                        break :blk grooves.accounts_mutable.get(
+                            debit_account_immutable.timestamp,
+                        ).?.*;
+                    };
+                    assert(debit_account_mutable.debits_pending >= expired.amount);
+                    debit_account_mutable.debits_pending -= expired.amount;
+                    grooves.accounts_mutable.put(&debit_account_mutable);
+
+                    // Updating the credit side:
+                    var credit_account_mutable: AccountMutable = blk: {
+                        const credit_account_immutable = grooves.accounts_immutable.get(
+                            expired.credit_account_id,
+                        ).?;
+                        break :blk grooves.accounts_mutable.get(
+                            credit_account_immutable.timestamp,
+                        ).?.*;
+                    };
+                    assert(credit_account_mutable.credits_pending >= expired.amount);
+                    credit_account_mutable.credits_pending -= expired.amount;
+                    grooves.accounts_mutable.put(&credit_account_mutable);
+
+                    if (global_constants.verify) {
+                        // Asserting that it wasn't posted/voided before.
+                        assert(grooves.posted.get(expired.timestamp) == null);
+                    }
+
+                    // Voiding the transfer.
+                    grooves.posted.put_no_clobber(&.{
+                        .timestamp = expired.timestamp,
+                        .fulfillment = .voided,
+                        .padding = [_]u8{0} ** 7,
+                    });
+
+                    // Removing the `expires_at` index.
+                    grooves.transfers.indexes.expires_at.remove(
+                        &.{
+                            .field = expired.timestamp + expired.timeout,
+                            .timestamp = expired.timestamp,
+                        },
+                    );
+                }
+
+                self.result = null;
+            }
+
+            inline fn parent(self: *@This()) *StateMachine {
+                return @fieldParentPtr(StateMachine, "transfer_pending_expiry", self);
+            }
+        };
+
         prepare_timestamp: u64,
         commit_timestamp: u64,
         forest: Forest,
 
+        prefetch_operation: ?Operation = null,
         prefetch_input: ?[]align(16) const u8 = null,
         prefetch_callback: ?*const fn (*StateMachine) void = null,
         prefetch_context: PrefetchContext = undefined,
@@ -346,13 +510,7 @@ pub fn StateMachineType(
         compact_callback: ?*const fn (*StateMachine) void = null,
         checkpoint_callback: ?*const fn (*StateMachine) void = null,
 
-        // EXPERIMENTAL, not for real-world usage:
-        scan_context: TransfersGroove.ScanGroove.Scan.Context = .{ .callback = &on_scan_read },
-        scan_direction: Direction = .descending,
-        scan_count: u32 = 0,
-        scan_timestamp_last: ?u64 = null,
-        scan_fetcher_context: TransfersGroove.ScanGroove.Fetcher.Context = .{ .callback = &on_scan_fetcher_read },
-        scan_fetcher_buffer: [64]Transfer = undefined,
+        transfer_pending_expiry: TransferPendingExpiry,
 
         tracer_slot: ?tracer.SpanStart = null,
 
@@ -365,10 +523,14 @@ pub fn StateMachineType(
             );
             errdefer forest.deinit(allocator);
 
+            var transfer_pending_expiry = try TransferPendingExpiry.init(allocator);
+            errdefer transfer_pending_expiry.deinit(allocator);
+
             return StateMachine{
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = forest,
+                .transfer_pending_expiry = transfer_pending_expiry,
             };
         }
 
@@ -376,6 +538,7 @@ pub fn StateMachineType(
             assert(self.tracer_slot == null);
 
             self.forest.deinit(allocator);
+            self.transfer_pending_expiry.deinit(allocator);
         }
 
         // TODO Reset here and in LSM should clean up (i.e. end) tracer spans.
@@ -390,6 +553,7 @@ pub fn StateMachineType(
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = self.forest,
+                .transfer_pending_expiry = self.transfer_pending_expiry,
             };
         }
 
@@ -445,6 +609,7 @@ pub fn StateMachineType(
             input: []align(16) const u8,
         ) void {
             _ = op;
+            assert(self.prefetch_operation == null);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
 
@@ -454,6 +619,7 @@ pub fn StateMachineType(
                 @src(),
             );
 
+            self.prefetch_operation = operation;
             self.prefetch_input = input;
             self.prefetch_callback = callback;
 
@@ -463,18 +629,28 @@ pub fn StateMachineType(
             self.forest.grooves.transfers.prefetch_setup(null);
             self.forest.grooves.posted.prefetch_setup(null);
 
-            return switch (operation) {
+            // Scans for expired transfers and prefetches the needed objects for voiding them.
+            self.transfer_pending_expiry.prefetch_enqueue_begin();
+        }
+
+        fn transfer_pending_expiry_prefetch_enqueue_complete(self: *StateMachine) void {
+            assert(self.transfer_pending_expiry.result != null);
+            assert(self.prefetch_operation != null);
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_callback != null);
+
+            return switch (self.prefetch_operation.?) {
                 .create_accounts => {
-                    self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
+                    self.prefetch_create_accounts(mem.bytesAsSlice(Account, self.prefetch_input.?));
                 },
                 .create_transfers => {
-                    self.prefetch_create_transfers(mem.bytesAsSlice(Transfer, input));
+                    self.prefetch_create_transfers(mem.bytesAsSlice(Transfer, self.prefetch_input.?));
                 },
                 .lookup_accounts => {
-                    self.prefetch_lookup_accounts(mem.bytesAsSlice(u128, input));
+                    self.prefetch_lookup_accounts(mem.bytesAsSlice(u128, self.prefetch_input.?));
                 },
                 .lookup_transfers => {
-                    self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, input));
+                    self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, self.prefetch_input.?));
                 },
             };
         }
@@ -482,6 +658,7 @@ pub fn StateMachineType(
         fn prefetch_finish(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             const callback = self.prefetch_callback.?;
+            self.prefetch_operation = null;
             self.prefetch_input = null;
             self.prefetch_callback = null;
             self.prefetch_context = undefined;
@@ -536,132 +713,10 @@ pub fn StateMachineType(
                 }
             }
 
-            // EXPERIMENTAL, not for real-world usage:
-
-            // Shared buffer for the entire forest.
-            const scan_buffer_pool = &self.forest.scan_buffer_pool;
-
-            // Scan abstraction over any index of the groove.
-            const scan_transfers: *TransfersGroove.ScanGroove = &self.forest.grooves.transfers.scan;
-
-            // Arbitrary id.
-            const id = transfers[0].debit_account_id;
-
-            // Timestamp range min..max, inclusive.
-            const timestamp_range = TimestampRange.all();
-
-            // Initializes a Scan with the criteria equivalent to
-            // `WHERE credit_account_id = $id OR debit_account_id = $id`.
-            const scan = scan_transfers.set_union(
-                &[_]*TransfersGroove.ScanGroove.Scan{
-                    // credit_account_id = $id
-                    scan_transfers.equal(
-                        .credit_account_id,
-                        scan_buffer_pool.buffer_acquire(),
-                        snapshot_latest,
-                        id,
-                        timestamp_range,
-                        self.scan_direction,
-                    ),
-                    // debit_account_id = $id
-                    scan_transfers.equal(
-                        .debit_account_id,
-                        scan_buffer_pool.buffer_acquire(),
-                        snapshot_latest,
-                        id,
-                        timestamp_range,
-                        self.scan_direction,
-                    ),
-                },
-                self.scan_direction,
+            self.forest.grooves.transfers.prefetch(
+                prefetch_create_transfers_callback_transfers,
+                self.prefetch_context.get(.transfers),
             );
-
-            // Using the scan directly...
-            //scan.read(&self.scan_context);
-
-            // Fetching transfers from it...
-            var fetcher = scan_transfers.fetch(scan, snapshot_latest);
-            fetcher.read(&self.scan_fetcher_context, &self.scan_fetcher_buffer);
-        }
-
-        fn on_scan_fetcher_read(context: *TransfersGroove.ScanGroove.Fetcher.Context, fetcher: *TransfersGroove.ScanGroove.Fetcher) void {
-            var self = @fieldParentPtr(StateMachine, "scan_fetcher_context", context);
-            const transfers = fetcher.slice();
-
-            for (transfers) |transfer| {
-                // Asserting if we are iterating in the expected direction.
-                if (self.scan_timestamp_last) |timestamp_last| {
-                    switch (self.scan_direction) {
-                        .ascending => assert(transfer.timestamp > timestamp_last),
-                        .descending => assert(transfer.timestamp < timestamp_last),
-                    }
-                }
-                self.scan_timestamp_last = transfer.timestamp;
-                self.scan_count += 1;
-
-                std.log.err(
-                    "transfer={}, code={}, amount={}",
-                    .{ transfer.id, transfer.code, transfer.amount },
-                );
-            }
-
-            if (fetcher.has_more()) {
-                // The provided buffer was exhausted, we need to read again.
-                fetcher.read(&self.scan_fetcher_context, &self.scan_fetcher_buffer);
-            } else {
-                std.log.err("Found {} transfer(s)\n\n", .{self.scan_count});
-                // Reset my buffers to be reused.
-                self.forest.scan_buffer_pool.reset();
-                self.forest.grooves.transfers.scan.reset();
-                self.scan_count = 0;
-                self.scan_timestamp_last = null;
-
-                // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
-                self.prefetch_context = .{ .transfers = undefined };
-
-                // Resume prefetching transfers.
-                self.forest.grooves.transfers.prefetch(
-                    prefetch_create_transfers_callback_transfers,
-                    self.prefetch_context.get(.transfers),
-                );
-            }
-        }
-
-        fn on_scan_read(context: *TransfersGroove.ScanGroove.Scan.Context, scan: *TransfersGroove.ScanGroove.Scan) void {
-            var self = @fieldParentPtr(StateMachine, "scan_context", context);
-
-            while (scan.next() catch |err| switch (err) {
-                error.ReadAgain => return scan.read(&self.scan_context),
-            }) |value| {
-                // Asserting if we are iterating in the expected direction.
-                if (self.scan_timestamp_last) |timestamp_last| {
-                    switch (self.scan_direction) {
-                        .ascending => assert(value > timestamp_last),
-                        .descending => assert(value < timestamp_last),
-                    }
-                }
-
-                self.scan_count += 1;
-                self.scan_timestamp_last = value;
-            } else {
-                self.forest.scan_buffer_pool.reset();
-                self.forest.grooves.transfers.scan.reset();
-
-                if (self.scan_count > 0) {
-                    std.log.err("Found {} transfers", .{self.scan_count});
-                    self.scan_count = 0;
-                    self.scan_timestamp_last = null;
-                }
-
-                // Set the active union tag so access via &self.prefetch_context.* doesn't trap.
-                self.prefetch_context = .{ .transfers = undefined };
-
-                // Resume prefetching transfers.
-                self.forest.grooves.transfers.prefetch(
-                    prefetch_create_transfers_callback_transfers,
-                    self.prefetch_context.get(.transfers),
-                );
-            }
         }
 
         fn prefetch_create_transfers_callback_transfers(completion: *TransfersGroove.PrefetchContext) void {
@@ -714,6 +769,8 @@ pub fn StateMachineType(
                 }
             }
 
+            self.transfer_pending_expiry.prefetch_enqueue_accounts_mutable();
+
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_create_transfers_callback_accounts_mutable,
                 self.prefetch_context.get(.accounts_mutable),
@@ -755,6 +812,8 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts_mutable.prefetch_enqueue(immut.timestamp);
                 }
             }
+
+            self.transfer_pending_expiry.prefetch_enqueue_accounts_mutable();
 
             self.forest.grooves.accounts_mutable.prefetch(
                 prefetch_lookup_accounts_mutable_callback,
@@ -802,6 +861,9 @@ pub fn StateMachineType(
                 .state_machine_commit,
                 @src(),
             );
+
+            // Expires pending transfer before executing the state machine logic.
+            self.transfer_pending_expiry.execute();
 
             const result = switch (operation) {
                 .create_accounts => self.execute(.create_accounts, timestamp, input, output),
@@ -1313,6 +1375,16 @@ pub fn StateMachineType(
                 .padding = [_]u8{0} ** 7,
             });
 
+            // Removing the `expires_at` index.
+            if (p.timeout > 0) {
+                self.forest.grooves.transfers.indexes.expires_at.remove(
+                    &.{
+                        .field = p.timestamp + p.timeout,
+                        .timestamp = p.timestamp,
+                    },
+                );
+            }
+
             var dr_mut_new = self.forest.grooves.accounts_mutable.get(dr_immut.timestamp).?.*;
             var cr_mut_new = self.forest.grooves.accounts_mutable.get(cr_immut.timestamp).?.*;
             assert(dr_mut_new.timestamp == dr_immut.timestamp);
@@ -1501,6 +1573,7 @@ pub fn StateMachineType(
                         .ledger = .{},
                         .code = .{},
                         .amount = .{},
+                        .expires_at = .{},
                     },
                 },
                 .posted = .{

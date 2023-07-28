@@ -67,6 +67,7 @@ pub fn ScanTreeType(
         table_mutable_cursor: RangeCursor,
 
         table_immutable_cursor: RangeCursor,
+        table_immutable_values: []const Table.Value,
 
         state: union(enum) {
             idle: void,
@@ -107,17 +108,19 @@ pub fn ScanTreeType(
                 direction,
             );
 
+            const table_immutable_values = if (!tree.table_immutable.free and
+                tree.table_immutable.snapshot_min <= snapshot)
+                tree.table_immutable.values
+            else
+                &[_]Value{};
+
             const table_immutable_cursor = RangeCursor.init(
                 binary_search.binary_search_values_range(
                     Key,
                     Value,
                     key_from_value,
                     compare_keys,
-                    if (!tree.table_immutable.free and
-                        tree.table_immutable.snapshot_min <= snapshot)
-                        tree.table_immutable.values
-                    else
-                        &[_]Value{},
+                    table_immutable_values,
                     key_min,
                     key_max,
                 ),
@@ -136,6 +139,7 @@ pub fn ScanTreeType(
 
                 .table_mutable_values = table_mutable_values,
                 .table_mutable_cursor = table_mutable_cursor,
+                .table_immutable_values = table_immutable_values,
                 .table_immutable_cursor = table_immutable_cursor,
                 .levels = undefined,
                 .merge_iterator = null,
@@ -243,7 +247,7 @@ pub fn ScanTreeType(
             assert(scan.state == .seeking);
 
             const value: *const Value = scan.table_immutable_cursor.get(
-                scan.tree.table_immutable.values,
+                scan.table_immutable_values,
             ) orelse return error.Empty;
 
             const key = key_from_value(value);
@@ -288,7 +292,7 @@ pub fn ScanTreeType(
             assert(scan.state == .seeking);
 
             const value = scan.table_immutable_cursor.get(
-                scan.tree.table_immutable.values,
+                scan.table_immutable_values,
             ) orelse unreachable;
 
             _ = scan.table_immutable_cursor.move(scan.direction);
