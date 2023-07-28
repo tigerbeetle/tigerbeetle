@@ -43,13 +43,12 @@ pub fn ScanTreeType(
 
         const ScanBuffer = ScanBufferType(Storage);
 
-        const Tree = Tree_;
+        pub const Tree = Tree_;
         const Table = Tree.Table;
         const Key = Table.Key;
         const Value = Table.Value;
         const compare_keys = Table.compare_keys;
         const key_from_value = Table.key_from_value;
-        const tombstone = Table.tombstone;
 
         const KWayMergeIterator = KWayMergeIteratorType(ScanTree);
         const ScanTreeLevel = ScanTreeLevelType(ScanTree, Storage);
@@ -329,17 +328,16 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         const BlockPtr = ScanTree.Grid.BlockPtr;
         const BlockPtrConst = ScanTree.Grid.BlockPtrConst;
 
-        const Table = ScanTree.Table;
         const TableInfo = ScanTree.TableInfo;
         const Manifest = ScanTree.Manifest;
 
         const LevelBuffer = ScanTree.ScanBuffer.LevelBuffer;
 
+        const Table = ScanTree.Table;
         const Key = Table.Key;
         const Value = Table.Value;
         const compare_keys = Table.compare_keys;
         const key_from_value = Table.key_from_value;
-        const tombstone = Table.tombstone;
 
         scan: *ScanTree,
         level_index: u8,

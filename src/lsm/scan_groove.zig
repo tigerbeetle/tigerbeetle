@@ -300,7 +300,7 @@ fn ScanType(
 
                             return value.timestamp;
                         }
-                    } 
+                    }
                     return null;
                 },
             }
