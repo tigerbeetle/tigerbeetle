@@ -709,27 +709,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             tree.compaction_op = op;
 
-            if (op < constants.lsm_batch_multiple) {
-                // There is nothing to compact for the first measure.
-                // We skip the main compaction code path first compaction bar entirely because it
-                // is a special case — its first beat is 1, not 0.
-                tree.compaction_phase = .skipped;
-
-                if (op + 1 == constants.lsm_batch_multiple) {
-                    tree.compact_mutable_table_into_immutable();
-                }
-
-                tree.compaction_callback = .{ .next_tick = callback };
-                tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
-                return;
-            }
-
-            if (tree.grid.superblock.working.vsr_state.op_compacted(op)) {
-                // We recovered from a checkpoint, and must avoid replaying one bar of
-                // compactions that were applied before the checkpoint. Repeating these ops'
-                // compactions would actually perform different compactions than before,
-                // causing the storage state of the replica to diverge from the cluster.
-                // See also: compaction_op_min().
+            if (op < constants.lsm_batch_multiple or
+                tree.grid.superblock.working.vsr_state.op_compacted(op))
+            {
+                // Either:
+                // - There is nothing to compact for the first measure.
+                //   We skip the main compaction code path first compaction bar entirely because it
+                //   is a special case — its first beat is 1, not 0.
+                // - We recovered from a checkpoint, and must avoid replaying one bar of
+                //   compactions that were applied before the checkpoint. Repeating these ops'
+                //   compactions would actually perform different compactions than before,
+                //   causing the storage state of the replica to diverge from the cluster.
+                //   See also: compaction_op_min().
                 tree.compaction_phase = .skipped;
 
                 if ((op + 1) % constants.lsm_batch_multiple == 0) {
