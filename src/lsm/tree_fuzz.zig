@@ -295,7 +295,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     env.tree.lookup_from_levels_storage(.{
                         .callback = get_callback,
                         .context = &env.lookup_context,
-                        .snapshot = env.tree.lookup_snapshot_max.?,
+                        .snapshot = snapshot_latest,
                         .key = key,
                         .fingerprint = fingerprint,
                         .level_min = level_min,

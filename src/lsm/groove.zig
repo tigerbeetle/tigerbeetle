@@ -15,7 +15,6 @@ const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_s
 const Fingerprint = @import("bloom_filter.zig").Fingerprint;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
-const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_op;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
@@ -141,9 +140,6 @@ fn IndexTreeType(
 
 /// A Groove is a collection of LSM trees auto generated for fields on a struct type
 /// as well as custom derived fields from said struct type.
-///
-/// Invariants:
-/// - Between beats, all of a groove's trees share the same lookup_snapshot_max.
 pub fn GrooveType(
     comptime Storage: type,
     comptime Object: type,

@@ -162,9 +162,6 @@ queries against past states of the tree (unimplemented; future work).
 Consider the half-bar compaction beginning at op=`X` (`12`), with `lsm_batch_multiple=M` (`8`).
 Each half-bar contains `N=M/2` (`4`) beats. The next half-bar begins at `Y=X+N` (`16`).
 
-During the half-bar compaction `X` (op=`X…Y-1`; `12…15`), each commit prefetches from the snapshot
-[equal to its own op](#current-snapshot). As shown, they continue to query the old (input) tables.
-
 During the half-bar compaction `X`:
 - `snapshot_max` of each input table is truncated to `Y-1` (`15`).
 - `snapshot_min` of each output table is initialized to `Y` (`16`).
@@ -190,38 +187,8 @@ At this point the input tables can be removed if they are invisible to all persi
 ### Snapshot Queries
 
 Each query targets a particular snapshot, either:
-- the [current snapshot](#current-snapshot), or
+- the current snapshot (`snapshot_latest`), or
 - a [persisted snapshot](#persistent-snapshots).
-
-#### Current Snapshot
-
-Each tree tracks the highest snapshot safe to query from (`tree.lookup_snapshot_max`), to ensure that
-an ongoing compaction's incomplete output tables are not visible. Queries targeting
-`tree.lookup_snapshot_max` always read from the mutable and immutable tables — so each commit can
-see all previous commits' updates.)
-
-During typical operation, the `lookup_snapshot_max` when prefetching op `S` is snapshot `S`.
-The following chart depicts:
-- `lookup_snapshot_max` (`$`)
-- for each commit op (the left column)
-- and a compaction that began at op `12` and completed at the end of op `15`.
-
-```
-op  0   4   8  12  16  20  24  (op, snapshot)
-    ┼───┬───┼───┬───┼───┬───┼
-12  ····────────$───
-13  ····─────────$──
-14  ····──────────$─
-15  ····───────────$
-16                  $────····
-17                  ─$───····
-18                  ──$──····
-19                  ───$─····
-```
-
-However, commits in the first measure following recovery from a checkpoint prefetch from a higher
-snapshot to avoid querying tables that were deleted at the checkpoint.
-See [`lookup_snapshot_max_for_checkpoint()`](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/lsm/tree.zig) for more detail.
 
 #### Persistent Snapshots
 
