@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const os = std.os;
 
 const run = @import("./shutil.zig").run;
 const run_with_env = @import("./shutil.zig").run_with_env;
@@ -23,20 +24,18 @@ const binary_filename = @import("./shutil.zig").binary_filename;
 const file_or_directory_exists = @import("./shutil.zig").file_or_directory_exists;
 
 fn free_port() !u16 {
-    var port: u16 = 1025;
-    while (true) {
-        // Address.resolveIp doesn't end up working on Windows. It's
-        // ok because this is always going to be an IPv4 address anyway.
-        const self_addr = try std.net.Address.parseIp4("127.0.0.1", port);
-        var listener = std.net.StreamServer.init(.{});
-        defer listener.close();
-        listener.listen(self_addr) catch {
-            port += 1;
-            continue;
-        };
+    const address = try std.net.Address.parseIp4("127.0.0.1", 0);
 
-        return port;
-    }
+    const server = try os.socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+    defer os.closeSocket(server);
+
+    try os.bind(server, &address.any, address.getOsSockLen());
+
+    var client_address = std.net.Address.initIp4(undefined, undefined);
+    var client_address_len = client_address.getOsSockLen();
+    try os.getsockname(server, &client_address.any, &client_address_len);
+
+    return client_address.getPort();
 }
 
 pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8, cwd: []const u8) !void {
