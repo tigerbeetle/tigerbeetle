@@ -7,8 +7,6 @@ on:
     secrets:
       TIGERBEETLE_NODE_PUBLISH_KEY:
         required: true
-      TIGERBEETLE_DOCS_PUBLISH_KEY:
-        required: true
       NUGET_KEY:
         required: true
       MAVEN_GPG_SECRET_KEY:
@@ -18,6 +16,8 @@ on:
       MAVEN_CENTRAL_TOKEN:
         required: true
       MAVEN_GPG_SECRET_KEY_PASSWORD:
+        required: true
+      TIGERBEETLE_DOCS_DEPLOY_KEY:
         required: true
       TIGERBEETLE_GO_DEPLOY_KEY:
         required: true
