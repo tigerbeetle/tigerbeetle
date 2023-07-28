@@ -22,6 +22,7 @@ const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const Fingerprint = bloom_filter.Fingerprint;
+const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -132,20 +133,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// While no compaction is running, this is the op of the last compact() to complete.
         /// (When recovering from a checkpoint, compaction_op starts at op_checkpoint).
         compaction_op: ?u64 = null,
-
-        /// The minimum snapshot which can see the mutable table.
-        ///
-        /// This field ensures that the tree never queries the output tables of a running
-        /// compaction; they are incomplete.
-        ///
-        /// See lookup_snapshot_max_for_checkpoint().
-        ///
-        /// Invariants:
-        /// * `lookup_snapshot_max = compaction_op` while any compaction beat is in progress.
-        /// * `lookup_snapshot_max = compaction_op + 1` after a compaction beat finishes.
-        /// * `lookup_snapshot_max ≥ op_checkpoint + 1 + lsm_batch_multiple`
-        ///    when `op_checkpoint ≠ 0`.
-        lookup_snapshot_max: ?u64 = null,
 
         compaction_io_pending: usize = 0,
         compaction_callback: union(enum) {
@@ -325,19 +312,24 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             key: Key,
             fingerprint: Fingerprint,
         ) LookupMemoryResult {
-            if (snapshot >= tree.lookup_snapshot_max.?) {
+            assert(snapshot <= snapshot_latest);
+
+            if (snapshot == snapshot_latest) {
                 if (tree.table_mutable.get(key)) |value| return .{ .positive = value };
             } else {
+                // TODO(Snapshots) The following is speculative...:
                 // The mutable table is converted to an immutable table when a snapshot is created.
                 // This means that a past snapshot will never be able to see the mutable table.
                 // This simplifies the mutable table and eliminates compaction for duplicate puts.
             }
 
-            if (!tree.table_immutable.free and tree.table_immutable.snapshot_min <= snapshot) {
-                if (tree.table_immutable.get(key)) |value| return .{ .positive = value };
+            if (tree.table_immutable.snapshot_min <= snapshot) {
+                if (!tree.table_immutable.free) {
+                    if (tree.table_immutable.get(key)) |value| return .{ .positive = value };
+                }
             } else {
                 // If the immutable table is invisible, then the mutable table is also invisible.
-                assert(tree.table_immutable.free or snapshot != tree.lookup_snapshot_max.?);
+                assert(snapshot != snapshot_latest);
             }
 
             return tree.lookup_from_levels_cache(snapshot, key, fingerprint);
@@ -640,11 +632,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn open(tree: *Tree, callback: *const fn (*Tree) void) void {
             assert(tree.open_callback == null);
             tree.open_callback = callback;
-
-            // Compaction is one bar ahead of superblock's commit_min.
-            const op_checkpoint = tree.grid.superblock.working.vsr_state.commit_min;
-            tree.lookup_snapshot_max = lookup_snapshot_max_for_checkpoint(op_checkpoint);
-            tree.compaction_op = op_checkpoint;
+            tree.compaction_op = tree.grid.superblock.working.vsr_state.commit_min;
 
             tree.manifest.open(manifest_open_callback);
         }
@@ -727,7 +715,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 // is a special case — its first beat is 1, not 0.
                 tree.compaction_phase = .skipped;
 
-                tree.lookup_snapshot_max = op + 1;
                 if (op + 1 == constants.lsm_batch_multiple) {
                     tree.compact_mutable_table_into_immutable();
                 }
@@ -742,10 +729,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 // compactions that were applied before the checkpoint. Repeating these ops'
                 // compactions would actually perform different compactions than before,
                 // causing the storage state of the replica to diverge from the cluster.
-                // See also: lookup_snapshot_max_for_checkpoint().
+                // See also: compaction_op_min().
                 tree.compaction_phase = .skipped;
 
-                if (op + 1 == tree.lookup_snapshot_max.?) {
+                if ((op + 1) % constants.lsm_batch_multiple == 0) {
                     // This is the last op of the skipped compaction bar.
                     // Prepare the immutable table for the next bar — since this state is
                     // in-memory, it cannot be skipped.
@@ -756,7 +743,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 return;
             }
-            assert(op == tree.lookup_snapshot_max.?);
 
             tree.compaction_phase = .running;
 
@@ -809,20 +795,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         tree.compact_start_table(op_min, context);
                     }
 
-                    tree.lookup_snapshot_max = tree.compaction_op.? + 1;
-
                     tree.compaction_callback = .{ .next_tick = callback };
                     tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 },
                 .half_bar_middle => {
-                    tree.lookup_snapshot_max = tree.compaction_op.? + 1;
-
                     tree.compaction_callback = .{ .next_tick = callback };
                     tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
                 },
                 .half_bar_end => {
                     // At the end of a half-bar, we have to wait for all compactions to finish.
-                    // (We'll update `tree.lookup_snapshot_max` in `compact_finish_join`.)
                     tree.compaction_callback = .{ .awaiting = callback };
                     tree.compact_finish_join();
                 },
@@ -980,7 +961,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.compaction_phase = .running_done;
 
             if (constants.verify) {
-                tree.manifest.verify(tree.lookup_snapshot_max.?);
+                tree.manifest.verify(snapshot_latest);
             }
 
             tracer.end(
@@ -1009,8 +990,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             const compacted_levels_even = compaction_beat == half_bar_beat_count - 1;
             if (!compacted_levels_odd and !compacted_levels_even) return;
 
-            tree.lookup_snapshot_max = tree.compaction_op.? + 1;
-
             // All compactions have finished for the current half-bar.
             // We couldn't remove the (invisible) input tables until now because prefetch()
             // needs a complete set of tables for lookups to avoid missing data.
@@ -1026,7 +1005,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         tree.compaction_table_immutable.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.context.level_b,
-                            tree.lookup_snapshot_max.?,
+                            snapshot_latest,
                             tree.compaction_table_immutable.context.range_b.key_min,
                             tree.compaction_table_immutable.context.range_b.key_max,
                         );
@@ -1047,14 +1026,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         context.compaction.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.context.level_b,
-                            tree.lookup_snapshot_max.?,
+                            snapshot_latest,
                             context.compaction.context.range_b.key_min,
                             context.compaction.context.range_b.key_max,
                         );
                         if (context.compaction.context.level_b > 0) {
                             tree.manifest.remove_invisible_tables(
                                 context.compaction.context.level_b - 1,
-                                tree.lookup_snapshot_max.?,
+                                snapshot_latest,
                                 context.compaction.context.range_b.key_min,
                                 context.compaction.context.range_b.key_max,
                             );
@@ -1085,7 +1064,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         fn compact_mutable_table_into_immutable(tree: *Tree) void {
             assert(tree.table_immutable.free);
             assert((tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
-            assert(tree.compaction_op.? + 1 == tree.lookup_snapshot_max.?);
 
             if (tree.table_mutable.count() == 0) return;
 
@@ -1094,13 +1072,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             const values = tree.table_mutable.sort_into_values_and_clear(values_max);
             assert(values.ptr == values_max.ptr);
 
-            // The immutable table must be visible to the next bar — setting its snapshot_min to
-            // lookup_snapshot_max guarantees.
-            //
+            // The immutable table must be visible to the next bar.
             // In addition, the immutable table is conceptually an output table of this compaction
             // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
             // tables.
-            tree.table_immutable.reset_with_sorted_values(tree.lookup_snapshot_max.?, values);
+            tree.table_immutable.reset_with_sorted_values(
+                snapshot_min_for_table_output(compaction_op_min(tree.compaction_op.?)),
+                values,
+            );
 
             assert(tree.table_mutable.count() == 0);
             assert(!tree.table_immutable.free);
@@ -1111,7 +1090,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == .none);
             assert(tree.compaction_op.? > 0);
-            assert(tree.compaction_op.? + 1 == tree.lookup_snapshot_max.?);
             // Don't re-run the checkpoint we recovered from.
             assert(!tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op.?));
 
@@ -1195,18 +1173,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 /// Each half-bar has a separate op_min (for deriving the output snapshot_min) instead of each full
 /// bar because this allows the output tables of the first half-bar's compaction to be prefetched
 /// against earlier — hopefully while they are still warm in the cache from being written.
-pub fn compaction_op_min(op: u64) u64 {
-    return op - op % half_bar_beat_count;
-}
-
-/// These charts depict the commit/compact ops and `lookup_snapshot_max` over a series of
+///
+///
+/// These charts depict the commit/compact ops over a series of
 /// commits and compactions (with lsm_batch_multiple=8).
 ///
 /// Legend:
 ///
 ///   ┼   full bar (first half-bar start)
 ///   ┬   half bar (second half-bar start)
-///   $   lookup_snapshot_max (prefetch reads from the current snapshot)
 ///       This is incremented at the end of each compact().
 ///   .   op is in mutable table (in memory)
 ///   ,   op is in immutable table (in memory)
@@ -1215,56 +1190,47 @@ pub fn compaction_op_min(op: u64) u64 {
 ///
 ///   0 2 4 6 8 0 2 4 6
 ///   ┼───┬───┼───┬───┼
-///   .$      ╷       ╷     init(superblock.commit_min=0)⎤ Compaction is effectively a noop for the
-///   .$      ╷       ╷     commit;compact( 1) start/end ⎥ first bar because there are no tables on
-///   ..$     ╷       ╷     commit;compact( 2) start/end ⎥ disk yet, and no immutable table to
-///   ...$    ╷       ╷     commit;compact( 3) start/end ⎥ flush.
-///   ....$   ╷       ╷     commit;compact( 4) start/end ⎥
-///   .....$  ╷       ╷     commit;compact( 5) start/end ⎥ This applies:
-///   ......$ ╷       ╷     commit;compact( 6) start/end ⎥ - when the LSM is starting on a freshly
-///   .......$╷       ╷     commit;compact( 7) start    ⎤⎥   formatted data file, and also
-///   ,,,,,,,,$       ╷  ✓         compact( 7)       end⎦⎦ - when the LSM is recovering from a crash
-///   ,,,,,,,,$       ╷     commit;compact( 8) start/end     (see below).
-///   ,,,,,,,,.$      ╷     commit;compact( 9) start/end
-///   ,,,,,,,,..$     ╷     commit;compact(10) start/end
-///   ,,,,,,,,...$    ╷     commit;compact(11) start/end
-///   ,,,,,,,,....$   ╷     commit;compact(12) start/end
-///   ,,,,,,,,.....$  ╷     commit;compact(13) start/end
-///   ,,,,,,,,......$ ╷     commit;compact(14) start/end
-///   ,,,,,,,,.......$╷     commit;compact(15) start    ⎤
-///   ########,,,,,,,,$  ✓         compact(15)       end⎦
-///   ########,,,,,,,,$     commit;compact(16) start/end
+///   .       ╷       ╷     init(superblock.commit_min=0)⎤ Compaction is effectively a noop for the
+///   ..      ╷       ╷     commit;compact( 1) start/end ⎥ first bar because there are no tables on
+///   ...     ╷       ╷     commit;compact( 2) start/end ⎥ disk yet, and no immutable table to
+///   ....    ╷       ╷     commit;compact( 3) start/end ⎥ flush.
+///   .....   ╷       ╷     commit;compact( 4) start/end ⎥
+///   ......  ╷       ╷     commit;compact( 5) start/end ⎥ This applies:
+///   ....... ╷       ╷     commit;compact( 6) start/end ⎥ - when the LSM is starting on a freshly
+///   ........╷       ╷     commit;compact( 7) start    ⎤⎥   formatted data file, and also
+///   ,,,,,,,,.       ╷  ✓         compact( 7)       end⎦⎦ - when the LSM is recovering from a crash
+///   ,,,,,,,,.       ╷     commit;compact( 8) start/end     (see below).
+///   ,,,,,,,,..      ╷     commit;compact( 9) start/end
+///   ,,,,,,,,...     ╷     commit;compact(10) start/end
+///   ,,,,,,,,....    ╷     commit;compact(11) start/end
+///   ,,,,,,,,.....   ╷     commit;compact(12) start/end
+///   ,,,,,,,,......  ╷     commit;compact(13) start/end
+///   ,,,,,,,,....... ╷     commit;compact(14) start/end
+///   ,,,,,,,,........╷     commit;compact(15) start    ⎤
+///   ########,,,,,,,,╷  ✓         compact(15)       end⎦
+///   ########,,,,,,,,.     commit;compact(16) start/end
 ///   ┼───┬───┼───┬───┼
 ///   0 2 4 6 8 0 2 4 6
 ///   ┼───┬───┼───┬───┼                                    Recover with a checkpoint taken at op 15.
-///   ########        $     init(superblock.commit_min=7)  At op 15, ops 8…15 are in memory, so they
-///   ########.       $     commit        ( 8) start/end ⎤ were dropped by the crash.
-///   ########..      $     commit        ( 9) start/end ⎥
-///   ########...     $     commit        (10) start/end ⎥ But compaction is not run for ops 8…15
-///   ########....    $     commit        (11) start/end ⎥ because it was already performed
-///   ########.....   $     commit        (12) start/end ⎥ before the checkpoint.
-///   ########......  $     commit        (13) start/end ⎥
-///   ########....... $     commit        (14) start/end ⎥ We can begin to compact again at op 16,
-///   ########........$     commit        (15) start    ⎤⎥ because those compactions (if previously
-///   ########,,,,,,,,$  ✓                (15)       end⎦⎦ performed) are not included in the
-///   ########,,,,,,,,$     commit;compact(16) start/end   checkpoint.
+///   ########        ╷     init(superblock.commit_min=7)  At op 15, ops 8…15 are in memory, so they
+///   ########.       ╷     commit        ( 8) start/end ⎤ were dropped by the crash.
+///   ########..      ╷     commit        ( 9) start/end ⎥
+///   ########...     ╷     commit        (10) start/end ⎥ But compaction is not run for ops 8…15
+///   ########....    ╷     commit        (11) start/end ⎥ because it was already performed
+///   ########.....   ╷     commit        (12) start/end ⎥ before the checkpoint.
+///   ########......  ╷     commit        (13) start/end ⎥
+///   ########....... ╷     commit        (14) start/end ⎥ We can begin to compact again at op 16,
+///   ########........╷     commit        (15) start    ⎤⎥ because those compactions (if previously
+///   ########,,,,,,,,╷  ✓                (15)       end⎦⎦ performed) are not included in the
+///   ########,,,,,,,,.     commit;compact(16) start/end   checkpoint.
 ///   ┼───┬───┼───┬───┼
 ///   0 2 4 6 8 0 2 4 6
 ///
 /// Notice how in the checkpoint recovery example above, we are careful not to `compact(op)` twice
 /// for any op (even if we crash/recover), since that could lead to differences between replicas'
 /// storage. The last bar of `commit()`s is always only in memory, so it is safe to repeat.
-///
-/// Additionally, while skipping compactions during recovery, we use a `lookup_snapshot_max`
-/// different than the original compactions — the old tables may have been removed during the
-/// checkpoint.
-fn lookup_snapshot_max_for_checkpoint(op_checkpoint: u64) u64 {
-    if (op_checkpoint == 0) {
-        // Start from 1 because we never commit op 0.
-        return 1;
-    } else {
-        return op_checkpoint + constants.lsm_batch_multiple + 1;
-    }
+pub fn compaction_op_min(op: u64) u64 {
+    return op - op % half_bar_beat_count;
 }
 
 /// The total number of tables that can be supported by the tree across so many levels.
