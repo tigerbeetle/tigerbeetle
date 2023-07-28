@@ -42,7 +42,7 @@ rm -f aof-test.tigerbeetle.aof
 sleep 1
 
 echo "Running 'zig build benchmark' to populate AOF..."
-./zig/zig build benchmark -- --transfer-count 400000 >> aof.log 2>&1
+./zig/zig build benchmark -- --transfer-count=400000 >> aof.log 2>&1
 
 echo ""
 echo "Running 'zig build aof -- debug aof-test.tigerbeetle.aof' to check AOF..."
