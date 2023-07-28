@@ -70,7 +70,8 @@ jobs:
           (sleep 120 && mvn -U dependency:copy-dependencies) || \
           (sleep 180 && mvn -U dependency:copy-dependencies) || \
           (sleep 300 && mvn -U dependency:copy-dependencies) || \
-          (sleep 600 && mvn -U dependency:copy-dependencies)
+          (sleep 600 && mvn -U dependency:copy-dependencies) || \
+          (sleep 1200 && mvn -U dependency:copy-dependencies)
 
       - name: Check Client Node
         run: |
@@ -82,7 +83,8 @@ jobs:
           (sleep 120 && npm install tigerbeetle-node@${{ inputs.version }}) || \
           (sleep 180 && npm install tigerbeetle-node@${{ inputs.version }}) || \
           (sleep 300 && npm install tigerbeetle-node@${{ inputs.version }}) || \
-          (sleep 600 && npm install tigerbeetle-node@${{ inputs.version }})
+          (sleep 600 && npm install tigerbeetle-node@${{ inputs.version }}) || \
+          (sleep 1200 && npm install tigerbeetle-node@${{ inputs.version }})
 
       - name: Check Client Dotnet
         run: |
@@ -95,4 +97,5 @@ jobs:
           (sleep 120 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
           (sleep 180 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
           (sleep 300 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
-          (sleep 600 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }})
+          (sleep 600 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }}) || \
+          (sleep 1200 && dotnet nuget locals all --clear && dotnet add package tigerbeetle --version ${{ inputs.version }})
