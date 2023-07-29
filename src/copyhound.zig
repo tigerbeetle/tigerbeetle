@@ -31,63 +31,15 @@
 
 const std = @import("std");
 const stdx = @import("./stdx.zig");
+const flags = @import("./flags.zig");
 const assert = std.debug.assert;
 
 const log = std.log;
 pub const log_level: std.log.Level = .info;
 
-const size_thershold = 1024;
-
 const CliArgs = union(enum) {
     memcpy: struct { bytes: u32 },
     funcsize,
-
-    fn parse(arena: std.mem.Allocator) !CliArgs {
-        var args = try std.process.argsWithAllocator(arena);
-        assert(args.skip());
-
-        var subcommand: ?std.meta.Tag(CliArgs) = null;
-        var memcpy_bytes: ?u32 = null;
-
-        while (args.next(arena)) |arg_or_err| {
-            const arg = try arg_or_err;
-
-            if (subcommand == null) {
-                inline for (comptime std.enums.values(std.meta.Tag(CliArgs))) |tag| {
-                    if (std.mem.eql(u8, arg, @tagName(tag))) {
-                        subcommand = tag;
-                        break;
-                    }
-                } else fatal("unknown subcommand: '{s}'", .{arg});
-
-                continue;
-            }
-
-            if (subcommand != null and subcommand.? == .memcpy and
-                std.mem.eql(u8, arg, "--bytes"))
-            {
-                if (memcpy_bytes != null) fatal("duplicate argument: --bytes", .{});
-
-                const arg_value = try (args.next(arena) orelse
-                    fatal("expected a value for an argument: --bytes", .{}));
-
-                memcpy_bytes = std.fmt.parseInt(u32, arg_value, 10) catch
-                    fatal("expected an integer argument: --bytes {s}", .{arg_value});
-
-                continue;
-            }
-
-            fatal("unexpected argument: {s}", .{arg});
-        }
-
-        if (subcommand == null) fatal("subcommand required", .{});
-        return switch (subcommand.?) {
-            .memcpy => .{ .memcpy = .{
-                .bytes = memcpy_bytes orelse fatal("argument required: --bytes", .{}),
-            } },
-            .funcsize => .funcsize,
-        };
-    }
 };
 
 pub fn main() !void {
@@ -97,7 +49,11 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    const cli_args = try CliArgs.parse(allocator);
+    var args = try std.process.argsWithAllocator(allocator);
+    assert(args.skip());
+
+    const cli_args = flags.parse_commands(&args, CliArgs);
+
     var line_buffer = try allocator.alloc(u8, 1024 * 1024);
     var func_buf = try allocator.alloc(u8, 4096);
 
