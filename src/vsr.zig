@@ -17,6 +17,7 @@ pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const tracer = @import("tracer.zig");
 pub const stdx = @import("stdx.zig");
+pub const flags = @import("flags.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const lsm = .{
