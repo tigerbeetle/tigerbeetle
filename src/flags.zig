@@ -171,7 +171,13 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             counts.positional += 1;
             inline for (positional_fields) |positional_field, positional_index| {
                 const flag = comptime flag_name_positional(positional_field);
+                
                 if (arg.len == 0) fatal("{s}: empty argument", .{flag});
+                // Prevent ambiguity between a flag and positional argument value. We could add
+                // support for bare ` -- ` as a disambiguation mechanism once we have a real
+                // use-case.
+                if (arg[0] == '-') fatal("unexpected argument: '{s}'", .{arg});
+
                 @field(result.positional, positional_field.name) =
                     parse_value(positional_field.field_type, flag, arg);
                 if (positional_index + 1 == counts.positional) {
