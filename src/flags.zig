@@ -171,7 +171,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             counts.positional += 1;
             inline for (positional_fields) |positional_field, positional_index| {
                 const flag = comptime flag_name_positional(positional_field);
-                
+
                 if (arg.len == 0) fatal("{s}: empty argument", .{flag});
                 // Prevent ambiguity between a flag and positional argument value. We could add
                 // support for bare ` -- ` as a disambiguation mechanism once we have a real
@@ -244,7 +244,7 @@ fn parse_flag_split_value(comptime flag: []const u8, arg: [:0]const u8) [:0]cons
 
     const value = arg[flag.len..];
     if (value.len == 0) {
-        fatal("{s}: expected value separator '='", .{ flag, value[0], arg });
+        fatal("{s}: expected value separator '='", .{flag});
     }
     if (value[0] != '=') {
         fatal(
@@ -394,4 +394,178 @@ fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type
         ).*
     else
         null;
+}
+
+test "flags" {
+    const Snap = @import("./testing/snaptest.zig").Snap;
+    const snap = Snap.snap;
+
+    const T = struct {
+        const T = @This();
+
+        gpa: std.mem.Allocator,
+        buf: std.ArrayList(u8),
+        zig: []const u8,
+
+        fn init(gpa: std.mem.Allocator) !T {
+            return .{
+                .gpa = gpa,
+                .buf = std.ArrayList(u8).init(gpa),
+                .zig = std.os.getenv("ZIG_EXE") orelse return error.SkipZigTest,
+            };
+        }
+
+        fn deinit(t: *T) void {
+            t.buf.deinit();
+            t.* = undefined;
+        }
+
+        fn check(t: *T, cli: []const []const u8, want: Snap) !void {
+            const argv = try t.gpa.alloc([]const u8, cli.len + 4);
+            defer t.gpa.free(argv);
+
+            argv[0] = t.zig;
+            argv[1] = "run";
+            argv[2] = comptime std.fs.path.dirname(@src().file).? ++ "/flags_test_program.zig";
+            argv[3] = "--";
+            for (cli) |cli_arg, i| {
+                argv[i + 4] = cli_arg;
+            }
+            if (cli.len > 0) {
+                assert(argv[argv.len - 1].ptr == cli[cli.len - 1].ptr);
+            }
+
+            const exec_result = try std.ChildProcess.exec(.{
+                .allocator = t.gpa,
+                .argv = argv,
+            });
+            defer t.gpa.free(exec_result.stdout);
+            defer t.gpa.free(exec_result.stderr);
+
+            t.buf.clearRetainingCapacity();
+
+            if (exec_result.term.Exited != 0) {
+                try t.buf.writer().print("status: {}\n", .{exec_result.term.Exited});
+            }
+            if (exec_result.stdout.len > 0) {
+                try t.buf.writer().print("stdout:\n{s}", .{exec_result.stdout});
+            }
+            if (exec_result.stderr.len > 0) {
+                try t.buf.writer().print("stderr:\n{s}", .{exec_result.stderr});
+            }
+
+            try want.diff(t.buf.items);
+        }
+    };
+
+    var t = try T.init(std.testing.allocator);
+    defer t.deinit();
+
+    try t.check(&.{"empty"}, snap(@src(),
+        \\stdout:
+        \\empty
+        \\
+    ));
+
+    try t.check(&.{}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: subcommand required
+        \\
+    ));
+
+    try t.check(&.{"bogus"}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unknown subcommand: 'bogus'
+        \\
+    ));
+
+    try t.check(&.{"values"}, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 0
+        \\boolean: false
+        \\path: not-set
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=92", "--size=1GiB", "--boolean", "--path=/home" }, snap(@src(),
+        \\stdout:
+        \\int: 92
+        \\size: 1073741824
+        \\boolean: true
+        \\path: /home
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected value separator '='
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: argument requires a value
+        \\
+    ));
+
+    try t.check(&.{ "values", "--integer" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected value separator '=', but found 'e' in '--integer'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int", "92" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected value separator '='
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=XCII" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected an integer value, but found 'XCII' (invalid digit)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int=44444444444444444444" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected an integer value, but found '44444444444444444444' (value too large)
+        \\
+    ));
+
+    try t.check(&.{"--int=92"}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unknown subcommand: '--int=92'
+        \\
+    ));
+
+    try t.check(&.{"required"}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --foo: argument is required
+        \\
+    ));
+
+    try t.check(&.{ "required", "--foo=1" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --bar: argument is required
+        \\
+    ));
+
+    try t.check(&.{ "required", "--bar=1", "--foo=1" }, snap(@src(),
+        \\stdout:
+        \\foo: 1
+        \\bar: 1
+        \\
+    ));
 }
