@@ -75,7 +75,7 @@ done
 echo ""
 echo "Benchmarking..."
 # shellcheck disable=SC2086
-zig/zig build benchmark -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET -- --addresses "${PORT}" "$@"
+zig/zig build benchmark -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET -- --addresses="${PORT}" "$@"
 echo ""
 
 for I in $REPLICAS
