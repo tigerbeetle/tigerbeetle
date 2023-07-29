@@ -54,22 +54,43 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///
 /// ```
 /// const cli_args = parse_commands(&args, union(enum) {
-///    help,
 ///    start: struct { addresses: []const u8, replica: u32 },
-///    format: struct { verbose: bool = false },
+///    format: struct {
+///        verbose: bool = false,
+///        positional: struct {
+///            path: []const u8,
+///        }
+///    },
+///
+///    pub const help =
+///        \\ tigerbeetle start --addresses=<addresses> --replica=<replica>
+///        \\ tigerbeetle format [--verbose]
 /// })
 /// ```
+///
+/// `positional` field is treated specially, it designates positional arguments.
+///
+/// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
     assert(@typeInfo(Commands) == .Union);
 
-    const subcommand = args.next() orelse fatal("subcommand required", .{});
+    const first_arg = args.next() orelse fatal("subcommand required", .{});
+
+    // NB: help must be declared as *pub* const to be visible here.
+    if (@hasDecl(Commands, "help")) {
+        if (std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "--help")) {
+            std.io.getStdOut().writeAll(Commands.help) catch std.os.exit(1);
+            std.os.exit(0);
+        }
+    }
+
     inline for (comptime std.meta.fields(Commands)) |field| {
         comptime assert(std.mem.indexOf(u8, field.name, "_") == null);
-        if (std.mem.eql(u8, subcommand, field.name)) {
+        if (std.mem.eql(u8, first_arg, field.name)) {
             return @unionInit(Commands, field.name, parse_flags(args, field.field_type));
         }
     }
-    fatal("unknown subcommand: '{s}'", .{subcommand});
+    fatal("unknown subcommand: '{s}'", .{first_arg});
 }
 
 /// Parse CLI arguments for a single command specified as Zig `struct`:
@@ -78,7 +99,7 @@ pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) C
 /// const cli_args = parse_commands(&args, struct {
 ///    verbose: bool = false,
 ///    replica: u32,
-///    path: []const u8 = "0_0.tigerbeetle"
+///    positional: struct { path: []const u8 = "0_0.tigerbeetle" },
 /// })
 /// ```
 pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
@@ -91,16 +112,27 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     assert(@typeInfo(Flags) == .Struct);
 
-    const fields = comptime std.meta.fields(Flags);
-    comptime assert(fields.len >= 1);
+    comptime var fields: [16]std.builtin.Type.StructField = undefined;
+    comptime var field_count = 0;
 
-    comptime for (fields) |field| {
-        const T = field.field_type;
-        if (T == bool) {
-            assert(default_value(field) == false); // boolean flags should have explicit default
+    comptime var positional_fields: []const std.builtin.Type.StructField = &.{};
+
+    comptime for (std.meta.fields(Flags)) |field| {
+        if (std.mem.eql(u8, field.name, "positional")) {
+            assert(@typeInfo(field.field_type) == .Struct);
+            positional_fields = std.meta.fields(field.field_type);
+            for (positional_fields) |positional_field| {
+                assert(default_value(positional_field) == null);
+                assert_valid_value_type(positional_field.field_type);
+            }
         } else {
-            assert(T == []const u8 or T == ByteSize or // unsupported CLI argument type
-                @typeInfo(T) == .Int);
+            fields[field_count] = field;
+            field_count += 1;
+            if (field.field_type == bool) {
+                assert(default_value(field) == false); // boolean flags should have explicit default
+            } else {
+                assert_valid_value_type(field.field_type);
+            }
         }
     };
 
@@ -109,15 +141,12 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     // When parsing arguments, we must consider longer arguments first, such that `--foo-bar=92` is
     // not confused for a misspelled `--foo=92`. Using `std.sort` for comptime-only values does not
-    // work, so open-code insertion sort by indexes, and comptime assert order during the actual
-    // parsing.
-    comptime var fields_longer_first: [fields.len]usize = undefined;
+    // work, so open-code insertion sort, and comptime assert order during the actual parsing.
     comptime {
-        for (fields_longer_first) |*index, i| index.* = i;
-        for (fields_longer_first) |*index_right, i| {
-            for (fields_longer_first[0..i]) |*index_left| {
-                if (fields[index_left.*].name.len < fields[index_right.*].name.len) {
-                    std.mem.swap(usize, index_left, index_right);
+        for (fields[0..field_count]) |*field_right, i| {
+            for (fields[0..i]) |*field_left| {
+                if (field_left.name.len < field_right.name.len) {
+                    std.mem.swap(std.builtin.Type.StructField, field_left, field_right);
                 }
             }
         }
@@ -125,9 +154,8 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     next_arg: while (args.next()) |arg| {
         comptime var field_len_prev = std.math.maxInt(usize);
-        inline for (fields_longer_first) |field_index| {
-            const field = comptime fields[field_index];
-            const flag = comptime field_to_flag(field.name);
+        inline for (fields[0..field_count]) |field| {
+            const flag = comptime flag_name(field);
 
             comptime assert(field_len_prev >= field.name.len);
             field_len_prev = field.name.len;
@@ -139,11 +167,24 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             }
         }
 
+        if (@hasField(Flags, "positional")) {
+            counts.positional += 1;
+            inline for (positional_fields) |positional_field, positional_index| {
+                const flag = comptime flag_name_positional(positional_field);
+                if (arg.len == 0) fatal("{s}: empty argument", .{flag});
+                @field(result.positional, positional_field.name) =
+                    parse_value(positional_field.field_type, flag, arg);
+                if (positional_index + 1 == counts.positional) {
+                    continue :next_arg;
+                }
+            }
+        }
+
         fatal("unexpected argument: '{s}'", .{arg});
     }
 
-    inline for (fields) |field| {
-        const flag = comptime field_to_flag(field.name);
+    inline for (fields[0..field_count]) |field| {
+        const flag = flag_name(field);
         switch (@field(counts, field.name)) {
             0 => if (default_value(field)) |default| {
                 @field(result, field.name) = default;
@@ -155,7 +196,23 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
     }
 
+    if (@hasField(Flags, "positional")) {
+        assert(counts.positional <= positional_fields.len);
+        inline for (positional_fields) |positional_field, positional_index| {
+            if (counts.positional == positional_index) {
+                const flag = comptime flag_name_positional(positional_field);
+                fatal("{s}: argument is required", .{flag});
+            }
+        }
+    }
+
     return result;
+}
+
+fn assert_valid_value_type(comptime T: type) void {
+    if (T == []const u8 or T == [:0]const u8 or T == ByteSize or @typeInfo(T) == .Int) return;
+    @compileLog("unsupported type", T);
+    comptime unreachable;
 }
 
 /// Parse, e.g., `--cluster=123` into `123` integer
@@ -169,17 +226,13 @@ fn parse_flag(comptime T: type, comptime flag: []const u8, arg: [:0]const u8) T 
         return true;
     }
 
-    const value = parse_flag_value(flag, arg);
+    const value = parse_flag_split_value(flag, arg);
     assert(value.len > 0);
-
-    if (T == []const u8) return value;
-    if (T == ByteSize) return parse_flag_value_size(flag, value);
-    if (@typeInfo(T) == .Int) return parse_flag_value_int(T, flag, value);
-    comptime unreachable;
+    return parse_value(T, flag, value);
 }
 
 /// Splits the value part from a `--arg=value` syntax.
-fn parse_flag_value(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
+fn parse_flag_split_value(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
     comptime assert(flag[0] == '-' and flag[1] == '-');
     assert(std.mem.startsWith(u8, arg, flag));
 
@@ -196,9 +249,20 @@ fn parse_flag_value(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
     return value[1..];
 }
 
+fn parse_value(comptime T: type, comptime flag: []const u8, value: [:0]const u8) T {
+    comptime assert(T != bool);
+    comptime assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
+    assert(value.len > 0);
+
+    if (T == []const u8 or T == [:0]const u8) return value;
+    if (T == ByteSize) return parse_value_size(flag, value);
+    if (@typeInfo(T) == .Int) return parse_value_int(T, flag, value);
+    comptime unreachable;
+}
+
 /// Parse string value into an integer, providing a nice error message for the user.
-fn parse_flag_value_int(comptime T: type, comptime flag: []const u8, value: [:0]const u8) T {
-    comptime assert(flag[0] == '-' and flag[1] == '-');
+fn parse_value_int(comptime T: type, comptime flag: []const u8, value: [:0]const u8) T {
+    comptime assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     return std.fmt.parseInt(T, value, 10) catch |err| {
         fatal("{s}: expected an integer value, but found '{s}' ({s})", .{
@@ -211,8 +275,8 @@ fn parse_flag_value_int(comptime T: type, comptime flag: []const u8, value: [:0]
 }
 
 pub const ByteSize = struct { bytes: u64 };
-fn parse_flag_value_size(comptime flag: []const u8, value: []const u8) ByteSize {
-    comptime assert(flag[0] == '-' and flag[1] == '-');
+fn parse_value_size(comptime flag: []const u8, value: []const u8) ByteSize {
+    comptime assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     const units = .{
         .{ &[_][]const u8{ "TiB", "tib", "TB", "tb" }, 1024 * 1024 * 1024 * 1024 },
@@ -252,21 +316,66 @@ fn parse_flag_value_size(comptime flag: []const u8, value: []const u8) ByteSize 
     return ByteSize{ .bytes = bytes };
 }
 
-fn field_to_flag(comptime field: []const u8) []const u8 {
+test parse_value_size {
+    const kib = 1024;
+    const mib = kib * 1024;
+    const gib = mib * 1024;
+    const tib = gib * 1024;
+
+    const cases = .{
+        .{ 0, "0" },
+        .{ 1, "1" },
+        .{ 140737488355328, "140737488355328" },
+        .{ 140737488355328, "128TiB" },
+        .{ 1 * tib, "1TiB" },
+        .{ 10 * tib, "10tib" },
+        .{ 100 * tib, "100TB" },
+        .{ 1000 * tib, "1000tb" },
+        .{ 1 * gib, "1GiB" },
+        .{ 10 * gib, "10gib" },
+        .{ 100 * gib, "100GB" },
+        .{ 1000 * gib, "1000gb" },
+        .{ 1 * mib, "1MiB" },
+        .{ 10 * mib, "10mib" },
+        .{ 100 * mib, "100MB" },
+        .{ 1000 * mib, "1000mb" },
+        .{ 1 * kib, "1KiB" },
+        .{ 10 * kib, "10kib" },
+        .{ 100 * kib, "100KB" },
+        .{ 1000 * kib, "1000kb" },
+    };
+
+    inline for (cases) |case| {
+        const want = case[0];
+        const input = case[1];
+        const got = parse_value_size("--size", input);
+        try std.testing.expectEqual(want, got);
+    }
+}
+
+fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+    comptime assert(!std.mem.eql(u8, field.name, "positional"));
+
     comptime var result: []const u8 = "--";
     comptime {
         var index = 0;
-        while (std.mem.indexOf(u8, field[index..], "_")) |i| {
-            result = result ++ field[index..][0..i] ++ "-";
+        while (std.mem.indexOf(u8, field.name[index..], "_")) |i| {
+            result = result ++ field.name[index..][0..i] ++ "-";
             index = index + i + 1;
         }
-        result = result ++ field[index..];
+        result = result ++ field.name[index..];
     }
     return result;
 }
 
-test field_to_flag {
-    try std.testing.expectEqualStrings(field_to_flag("enable_statsd"), "--enable-statsd");
+test flag_name {
+    const field = @typeInfo(struct { enable_statsd: bool }).fields[0];
+    try std.testing.expectEqualStrings(flag_name(field), "--enable-statsd");
+}
+
+fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {
+    comptime assert(std.mem.indexOf(u8, field.name, "_") == null);
+    return "<" ++ field.name ++ ">";
 }
 
 /// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
