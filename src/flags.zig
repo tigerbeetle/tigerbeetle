@@ -99,7 +99,8 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         if (T == bool) {
             assert(default_value(field) == false); // boolean flags should have explicit default
         } else {
-            assert(T == []const u8 or @typeInfo(T) == .Int); // unsupported CLI argument type
+            assert(T == []const u8 or T == ByteSize or // unsupported CLI argument type
+                @typeInfo(T) == .Int);
         }
     };
 
@@ -171,16 +172,17 @@ fn parse_flag(comptime T: type, comptime flag: []const u8, arg: [:0]const u8) T 
     const value = parse_flag_value(flag, arg);
     assert(value.len > 0);
 
-    if (T == []const u8) {
-        return value;
-    }
-    assert(@typeInfo(T) == .Int);
-    return parse_flag_value_int(T, flag, value);
+    if (T == []const u8) return value;
+    if (T == ByteSize) return parse_flag_value_size(flag, value);
+    if (@typeInfo(T) == .Int) return parse_flag_value_int(T, flag, value);
+    comptime unreachable;
 }
 
 /// Splits the value part from a `--arg=value` syntax.
 fn parse_flag_value(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
+    comptime assert(flag[0] == '-' and flag[1] == '-');
     assert(std.mem.startsWith(u8, arg, flag));
+
     const value = arg[flag.len..];
     if (value.len < 2) {
         fatal("{s}: argument requires a value", .{flag});
@@ -196,6 +198,8 @@ fn parse_flag_value(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
 
 /// Parse string value into an integer, providing a nice error message for the user.
 fn parse_flag_value_int(comptime T: type, comptime flag: []const u8, value: [:0]const u8) T {
+    comptime assert(flag[0] == '-' and flag[1] == '-');
+
     return std.fmt.parseInt(T, value, 10) catch |err| {
         fatal("{s}: expected an integer value, but found '{s}' ({s})", .{
             flag, value, switch (err) {
@@ -204,6 +208,48 @@ fn parse_flag_value_int(comptime T: type, comptime flag: []const u8, value: [:0]
             },
         });
     };
+}
+
+pub const ByteSize = struct { bytes: u64 };
+fn parse_flag_value_size(comptime flag: []const u8, value: []const u8) ByteSize {
+    comptime assert(flag[0] == '-' and flag[1] == '-');
+
+    const units = .{
+        .{ &[_][]const u8{ "TiB", "tib", "TB", "tb" }, 1024 * 1024 * 1024 * 1024 },
+        .{ &[_][]const u8{ "GiB", "gib", "GB", "gb" }, 1024 * 1024 * 1024 },
+        .{ &[_][]const u8{ "MiB", "mib", "MB", "mb" }, 1024 * 1024 },
+        .{ &[_][]const u8{ "KiB", "kib", "KB", "kb" }, 1024 },
+    };
+
+    const unit: struct { suffix: []const u8, scale: u64 } = unit: inline for (units) |unit| {
+        const suffixes = unit[0];
+        const scale = unit[1];
+        for (suffixes) |suffix| {
+            if (std.mem.endsWith(u8, value, suffix)) {
+                break :unit .{ .suffix = suffix, .scale = scale };
+            }
+        }
+    } else break :unit .{ .suffix = "", .scale = 1 };
+
+    assert(std.mem.endsWith(u8, value, unit.suffix));
+    const value_numeric = value[0 .. value.len - unit.suffix.len];
+
+    const amount = std.fmt.parseUnsigned(u64, value_numeric, 10) catch |err| {
+        fatal("{s}: expected a size, but found '{s}' ({s})", .{
+            flag, value, switch (err) {
+                error.Overflow => "value too large",
+                error.InvalidCharacter => "invalid digit",
+            },
+        });
+    };
+
+    var bytes: u64 = undefined;
+    if (@mulWithOverflow(u64, amount, unit.scale, &bytes)) {
+        fatal("{s}: expected a size, but found '{s}' (value too large)", .{
+            flag, value,
+        });
+    }
+    return ByteSize{ .bytes = bytes };
 }
 
 fn field_to_flag(comptime field: []const u8) []const u8 {
