@@ -237,8 +237,8 @@ fn parse_flag_split_value(comptime flag: []const u8, arg: [:0]const u8) [:0]cons
     assert(std.mem.startsWith(u8, arg, flag));
 
     const value = arg[flag.len..];
-    if (value.len < 2) {
-        fatal("{s}: argument requires a value", .{flag});
+    if (value.len == 0) {
+        fatal("{s}: expected value separator '='", .{ flag, value[0], arg });
     }
     if (value[0] != '=') {
         fatal(
@@ -246,6 +246,7 @@ fn parse_flag_split_value(comptime flag: []const u8, arg: [:0]const u8) [:0]cons
             .{ flag, value[0], arg },
         );
     }
+    if (value.len == 1) fatal("{s}: argument requires a value", .{flag});
     return value[1..];
 }
 
