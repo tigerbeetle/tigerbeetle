@@ -402,11 +402,84 @@ fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type
         null;
 }
 
-// CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible.
-//
-// Rather than making the code more complicated by abstracting over termination logic, test it out
-// of process, by building `flags_test_program.zig` test executable, shelling out to it, and
-// inspecting its status and error streams.
+// CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
+// test it our of process by:
+//   - using Zig compiler to build this vey file as an executable in a temporary directory,
+//   - running the following main with various args and capturing stdout, stderr, and the exit code.
+//   - asserting that the captured values are correct.
+pub usingnamespace if (@import("root") != @This()) struct {
+    // For production builds, don't include the main function.
+    // This is `if __name__ == "__main__":` at comptime!
+} else struct {
+    const CliArgs = union(enum) {
+        empty,
+        prefix: struct {
+            foo: u8 = 0,
+            foo_bar: u8 = 0,
+            opt: bool = false,
+            option: bool = false,
+        },
+        pos: struct { flag: bool = false, positional: struct {
+            p1: []const u8,
+            p2: []const u8,
+        } },
+        required: struct {
+            foo: u8,
+            bar: u8,
+        },
+        values: struct {
+            int: u32 = 0,
+            size: ByteSize = .{ .bytes = 0 },
+            boolean: bool = false,
+            path: []const u8 = "not-set",
+        },
+
+        pub const help =
+            \\ flags-test-program [flags]
+            \\
+        ;
+    };
+
+    pub fn main() !void {
+        var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+        const gpa = gpa_allocator.allocator();
+
+        var args = try std.process.argsWithAllocator(gpa);
+        defer args.deinit();
+
+        assert(args.skip());
+
+        const cli_args = parse_commands(&args, CliArgs);
+
+        const stdout = std.io.getStdOut();
+        const out_stream = stdout.writer();
+        switch (cli_args) {
+            .empty => try out_stream.print("empty\n", .{}),
+            .prefix => |values| {
+                try out_stream.print("foo: {}\n", .{values.foo});
+                try out_stream.print("foo-bar: {}\n", .{values.foo_bar});
+                try out_stream.print("opt: {}\n", .{values.opt});
+                try out_stream.print("option: {}\n", .{values.option});
+            },
+            .pos => |values| {
+                try out_stream.print("p1: {s}\n", .{values.positional.p1});
+                try out_stream.print("p2: {s}\n", .{values.positional.p2});
+                try out_stream.print("flag: {}\n", .{values.flag});
+            },
+            .required => |required| {
+                try out_stream.print("foo: {}\n", .{required.foo});
+                try out_stream.print("bar: {}\n", .{required.bar});
+            },
+            .values => |values| {
+                try out_stream.print("int: {}\n", .{values.int});
+                try out_stream.print("size: {}\n", .{values.size.bytes});
+                try out_stream.print("boolean: {}\n", .{values.boolean});
+                try out_stream.print("path: {s}\n", .{values.path});
+            },
+        }
+    }
+};
+
 test "flags" {
     const Snap = @import("./testing/snaptest.zig").Snap;
     const snap = Snap.snap;
@@ -432,14 +505,7 @@ test "flags" {
             const flags_exe_buf = try gpa.create([std.fs.MAX_PATH_BYTES]u8);
             errdefer gpa.destroy(flags_exe_buf);
 
-            const src_dir = comptime std.fs.path.dirname(@src().file).?;
-            const argv = [_][]const u8{
-                zig_exe,
-                "build-exe",
-                "--main-pkg-path",
-                src_dir,
-                src_dir ++ "/testing/flags_test_program.zig",
-            };
+            const argv = [_][]const u8{ zig_exe, "build-exe", @src().file };
             const exec_result = try std.ChildProcess.exec(.{
                 .allocator = gpa,
                 .argv = &argv,
@@ -454,7 +520,7 @@ test "flags" {
             }
 
             const flags_exe = try tmp_dir.dir.realpath(
-                "flags_test_program" ++ if (builtin.os.tag == .windows) ".exe" else "",
+                "flags" ++ if (builtin.os.tag == .windows) ".exe" else "",
                 flags_exe_buf,
             );
 
