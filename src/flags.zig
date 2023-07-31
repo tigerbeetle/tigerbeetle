@@ -220,8 +220,8 @@ fn assert_valid_value_type(comptime T: type) void {
 }
 
 /// Parse, e.g., `--cluster=123` into `123` integer
-fn parse_flag(comptime T: type, comptime flag: []const u8, arg: [:0]const u8) T {
-    comptime assert(flag[0] == '-' and flag[1] == '-');
+fn parse_flag(comptime T: type, flag: []const u8, arg: [:0]const u8) T {
+    assert(flag[0] == '-' and flag[1] == '-');
 
     if (T == bool) {
         if (!std.mem.eql(u8, arg, flag)) {
@@ -236,8 +236,8 @@ fn parse_flag(comptime T: type, comptime flag: []const u8, arg: [:0]const u8) T 
 }
 
 /// Splits the value part from a `--arg=value` syntax.
-fn parse_flag_split_value(comptime flag: []const u8, arg: [:0]const u8) [:0]const u8 {
-    comptime assert(flag[0] == '-' and flag[1] == '-');
+fn parse_flag_split_value(flag: []const u8, arg: [:0]const u8) [:0]const u8 {
+    assert(flag[0] == '-' and flag[1] == '-');
     assert(std.mem.startsWith(u8, arg, flag));
 
     const value = arg[flag.len..];
@@ -254,9 +254,9 @@ fn parse_flag_split_value(comptime flag: []const u8, arg: [:0]const u8) [:0]cons
     return value[1..];
 }
 
-fn parse_value(comptime T: type, comptime flag: []const u8, value: [:0]const u8) T {
+fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     comptime assert(T != bool);
-    comptime assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
+    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
     assert(value.len > 0);
 
     if (T == []const u8 or T == [:0]const u8) return value;
@@ -266,8 +266,8 @@ fn parse_value(comptime T: type, comptime flag: []const u8, value: [:0]const u8)
 }
 
 /// Parse string value into an integer, providing a nice error message for the user.
-fn parse_value_int(comptime T: type, comptime flag: []const u8, value: [:0]const u8) T {
-    comptime assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
+fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
+    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     return std.fmt.parseInt(T, value, 10) catch |err| {
         fatal("{s}: expected an integer value, but found '{s}' ({s})", .{
@@ -280,8 +280,8 @@ fn parse_value_int(comptime T: type, comptime flag: []const u8, value: [:0]const
 }
 
 pub const ByteSize = struct { bytes: u64 };
-fn parse_value_size(comptime flag: []const u8, value: []const u8) ByteSize {
-    comptime assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
+fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
+    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     const units = .{
         .{ &[_][]const u8{ "TiB", "tib", "TB", "tb" }, 1024 * 1024 * 1024 * 1024 },
