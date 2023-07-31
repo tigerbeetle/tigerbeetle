@@ -920,7 +920,7 @@ pub fn HashMapUnmanaged(
 
         pub fn clearRetainingCapacity(self: *Self) void {
             if (self.metadata) |_| {
-                self.initMetadatas();
+                self.initMetadata();
                 self.size = 0;
                 self.available = @truncate(u32, (self.capacity() * max_load_percentage) / 100);
             }
@@ -1444,7 +1444,7 @@ pub fn HashMapUnmanaged(
             self.removeByIndex(idx);
         }
 
-        fn initMetadatas(self: *Self) void {
+        fn initMetadata(self: *Self) void {
             @memset(@ptrCast([*]u8, self.metadata.?), 0, @sizeOf(Metadata) * self.capacity());
         }
 
@@ -1474,7 +1474,7 @@ pub fn HashMapUnmanaged(
 
             const new_cap = capacityForSize(self.size);
             try other.allocate(allocator, new_cap);
-            other.initMetadatas();
+            other.initMetadata();
             other.available = @truncate(u32, (new_cap * max_load_percentage) / 100);
 
             var i: Size = 0;
@@ -1501,7 +1501,7 @@ pub fn HashMapUnmanaged(
             var map = Self{};
             defer map.deinit(allocator);
             try map.allocate(allocator, new_cap);
-            map.initMetadatas();
+            map.initMetadata();
             map.available = @truncate(u32, (new_cap * max_load_percentage) / 100);
 
             if (self.size != 0) {

@@ -390,7 +390,7 @@ test "Cluster: network: partition client-primary (symmetric)" {
     try c.request(40, 20);
 }
 
-test "Cluster: network: partititon client-primary (asymmetric, drop requests)" {
+test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
     // Primary cannot receive messages from the clients.
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
@@ -404,7 +404,7 @@ test "Cluster: network: partititon client-primary (asymmetric, drop requests)" {
     try c.request(40, 20);
 }
 
-test "Cluster: network: partititon client-primary (asymmetric, drop replies)" {
+test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     // Clients cannot receive replies from the primary, but they receive replies from a backup.
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
