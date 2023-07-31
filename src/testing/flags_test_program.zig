@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const flags = @import("./flags.zig");
+const flags = @import("../flags.zig");
 
 const CliArgs = union(enum) {
     empty,
