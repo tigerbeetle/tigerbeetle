@@ -1,17 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
-const math = std.math;
-const mem = std.mem;
-const meta = std.meta;
 const net = std.net;
-const os = std.os;
 
 const vsr = @import("vsr");
 const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
-const IO = vsr.io.IO;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 const Grid = vsr.lsm.grid.GridType(vsr.storage.Storage);
 const StateMachine = vsr.state_machine.StateMachineType(
@@ -277,7 +272,11 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []net.Address {
-    return vsr.parse_addresses(allocator, raw_addresses, constants.members_max) catch |err| switch (err) {
+    return vsr.parse_addresses(
+        allocator,
+        raw_addresses,
+        constants.members_max,
+    ) catch |err| switch (err) {
         error.AddressHasTrailingComma => flags.fatal("--addresses: invalid trailing comma", .{}),
         error.AddressLimitExceeded => {
             flags.fatal("--addresses: too many addresses, at most {d} are allowed", .{
