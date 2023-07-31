@@ -39,9 +39,6 @@ test {
     _ = @import("testing/storage.zig");
     _ = @import("testing/table.zig");
 
-    // This one is a bit sketchy: we rely on tests not actually using the `vsr` package.
-    _ = @import("tigerbeetle/cli.zig");
-
     _ = @import("vsr.zig");
     _ = @import("vsr/clock.zig");
     _ = @import("vsr/checksum.zig");

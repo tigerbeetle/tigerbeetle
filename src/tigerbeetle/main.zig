@@ -14,7 +14,7 @@ const config = constants.config;
 const tracer = vsr.tracer;
 
 const cli = @import("cli.zig");
-const fatal = cli.fatal;
+const fatal = vsr.flags.fatal;
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
