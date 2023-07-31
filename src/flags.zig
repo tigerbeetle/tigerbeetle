@@ -62,7 +62,7 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///
 ///    pub const help =
 ///        \\ tigerbeetle start --addresses=<addresses> --replica=<replica>
-///        \\ tigerbeetle format [--verbose]
+///        \\ tigerbeetle format [--verbose] <path>
 /// })
 /// ```
 ///
@@ -110,7 +110,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     assert(@typeInfo(Flags) == .Struct);
 
-    comptime var fields: [16]std.builtin.Type.StructField = undefined;
+    comptime var fields: [std.meta.fields(Flags).len]std.builtin.Type.StructField = undefined;
     comptime var field_count = 0;
 
     comptime var positional_fields: []const std.builtin.Type.StructField = &.{};
@@ -270,12 +270,16 @@ fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     return std.fmt.parseInt(T, value, 10) catch |err| {
-        fatal("{s}: expected an integer value, but found '{s}' ({s})", .{
-            flag, value, switch (err) {
-                error.Overflow => "value too large",
-                error.InvalidCharacter => "invalid digit",
-            },
-        });
+        switch (err) {
+            error.Overflow => fatal(
+                "{s}: value exceeds {d}-bit {s} integer: '{s}'",
+                .{ flag, @typeInfo(T).Int.bits, @tagName(@typeInfo(T).Int.signedness), value },
+            ),
+            error.InvalidCharacter => fatal(
+                "{s}: expected an integer value, but found '{s}' (invalid digit)",
+                .{ flag, value },
+            ),
+        }
     };
 }
 
@@ -304,17 +308,21 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
     const value_numeric = value[0 .. value.len - unit.suffix.len];
 
     const amount = std.fmt.parseUnsigned(u64, value_numeric, 10) catch |err| {
-        fatal("{s}: expected a size, but found '{s}' ({s})", .{
-            flag, value, switch (err) {
-                error.Overflow => "value too large",
-                error.InvalidCharacter => "invalid digit",
-            },
-        });
+        switch (err) {
+            error.Overflow => fatal(
+                "{s}: value exceeds 64-bit unsigned integer: '{s}'",
+                .{ flag, value },
+            ),
+            error.InvalidCharacter => fatal(
+                "{s}: expected a size, but found '{s}' (invalid digit or suffix)",
+                .{ flag, value },
+            ),
+        }
     };
 
     var bytes: u64 = undefined;
     if (@mulWithOverflow(u64, amount, unit.scale, &bytes)) {
-        fatal("{s}: expected a size, but found '{s}' (value too large)", .{
+        fatal("{s}: size in bytes exceeds 64-bit unsigned integer: '{s}'", .{
             flag, value,
         });
     }
@@ -396,7 +404,7 @@ fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type
 
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible.
 //
-// Rater than making the code more complicated by abstracting over termination logic, test it out
+// Rather than making the code more complicated by abstracting over termination logic, test it out
 // of process, by building `flags_test_program.zig` test executable, shelling out to it, and
 // inspecting its status and error streams.
 test "flags" {
@@ -756,7 +764,7 @@ test "flags" {
     try t.check(&.{ "values", "--int=44444444444444444444" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --int: expected an integer value, but found '44444444444444444444' (value too large)
+        \\error: --int: value exceeds 32-bit unsigned integer: '44444444444444444444'
         \\
     ));
 
@@ -772,7 +780,7 @@ test "flags" {
     try t.check(&.{ "values", "--size=44444444444444444444" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: expected a size, but found '44444444444444444444' (value too large)
+        \\error: --size: value exceeds 64-bit unsigned integer: '44444444444444444444'
         \\
     ));
 
@@ -788,14 +796,14 @@ test "flags" {
     try t.check(&.{ "values", "--size=100000000000000000kb" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: expected a size, but found '100000000000000000kb' (value too large)
+        \\error: --size: size in bytes exceeds 64-bit unsigned integer: '100000000000000000kb'
         \\
     ));
 
     try t.check(&.{ "values", "--size=3Mib" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: expected a size, but found '3Mib' (invalid digit)
+        \\error: --size: expected a size, but found '3Mib' (invalid digit or suffix)
         \\
     ));
 }
