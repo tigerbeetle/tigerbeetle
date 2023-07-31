@@ -30,9 +30,6 @@
 //!   caller the hassle of propagating errors. The `fatal` function is public, to allow the caller
 //!   to run additional validation or parsing using the same error reporting mechanism.
 //!
-//!   Fatal errors make testing awkward, we'll need to wait for this Zig issue to test this code:
-//!   <https://github.com/ziglang/zig/issues/1356>.
-//!
 //! - Concise DSL. Most cli parsing is done for ad-hoc tools like benchmarking, where the ability to
 //!   quickly add a new argument is valuable. As this is a 80% solution, production code may use
 //!   more verbose approach if it gives better UX.
@@ -357,7 +354,7 @@ test parse_value_size {
         const want = case[0];
         const input = case[1];
         const got = parse_value_size("--size", input);
-        try std.testing.expectEqual(want, got);
+        assert(want == got.bytes);
     }
 }
 
@@ -377,7 +374,7 @@ fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
 }
 
 test flag_name {
-    const field = @typeInfo(struct { enable_statsd: bool }).fields[0];
+    const field = @typeInfo(struct { enable_statsd: bool }).Struct.fields[0];
     try std.testing.expectEqualStrings(flag_name(field), "--enable-statsd");
 }
 
@@ -510,6 +507,8 @@ test "flags" {
     var t = try T.init(std.testing.allocator);
     defer t.deinit();
 
+    // Test-cases are roughly in the source order of the corresponding features.
+
     try t.check(&.{"empty"}, snap(@src(),
         \\stdout:
         \\empty
@@ -523,6 +522,25 @@ test "flags" {
         \\
     ));
 
+    try t.check(&.{"-h"}, snap(@src(),
+        \\stdout:
+        \\ flags-test-program [flags]
+        \\
+    ));
+
+    try t.check(&.{"--help"}, snap(@src(),
+        \\stdout:
+        \\ flags-test-program [flags]
+        \\
+    ));
+
+    try t.check(&.{""}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unknown subcommand: ''
+        \\
+    ));
+
     try t.check(&.{"bogus"}, snap(@src(),
         \\status: 1
         \\stderr:
@@ -530,12 +548,146 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{"values"}, snap(@src(),
+    try t.check(&.{"--int=92"}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unknown subcommand: '--int=92'
+        \\
+    ));
+
+    try t.check(&.{ "empty", "--help" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: '--help'
+        \\
+    ));
+
+    try t.check(&.{ "prefix", "--foo=92" }, snap(@src(),
         \\stdout:
-        \\int: 0
-        \\size: 0
-        \\boolean: false
-        \\path: not-set
+        \\foo: 92
+        \\foo-bar: 0
+        \\opt: false
+        \\option: false
+        \\
+    ));
+
+    try t.check(&.{ "prefix", "--foo-bar=92" }, snap(@src(),
+        \\stdout:
+        \\foo: 0
+        \\foo-bar: 92
+        \\opt: false
+        \\option: false
+        \\
+    ));
+
+    try t.check(&.{ "prefix", "--foo-baz=92" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --foo: expected value separator '=', but found '-' in '--foo-baz=92'
+        \\
+    ));
+
+    try t.check(&.{ "prefix", "--opt" }, snap(@src(),
+        \\stdout:
+        \\foo: 0
+        \\foo-bar: 0
+        \\opt: true
+        \\option: false
+        \\
+    ));
+
+    try t.check(&.{ "prefix", "--option" }, snap(@src(),
+        \\stdout:
+        \\foo: 0
+        \\foo-bar: 0
+        \\opt: false
+        \\option: true
+        \\
+    ));
+
+    try t.check(&.{ "prefix", "--optx" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --opt: argument does not require a value in '--optx'
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "y" }, snap(@src(),
+        \\stdout:
+        \\p1: y
+        \\p2: y
+        \\flag: false
+        \\
+    ));
+
+    try t.check(&.{"pos"}, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: <p1>: argument is required
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: <p2>: argument is required
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "y", "z" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: 'z'
+        \\
+    ));
+
+    try t.check(&.{ "pos", "" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: <p1>: empty argument
+        \\
+    ));
+
+    try t.check(&.{ "pos", "--flag", "x", "y" }, snap(@src(),
+        \\stdout:
+        \\p1: y
+        \\p2: y
+        \\flag: true
+        \\
+    ));
+
+    try t.check(&.{ "pos", "--flak", "x", "y" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: '--flak'
+        \\
+    ));
+
+    try t.check(&.{ "required", "--foo=1", "--bar=2" }, snap(@src(),
+        \\stdout:
+        \\foo: 1
+        \\bar: 2
+        \\
+    ));
+
+    try t.check(&.{ "required", "--surprise" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected argument: '--surprise'
+        \\
+    ));
+
+    try t.check(&.{ "required", "--foo=1" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --bar: argument is required
+        \\
+    ));
+
+    try t.check(&.{ "required", "--foo=1", "--bar=2", "--foo=3" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --foo: duplicate argument
         \\
     ));
 
@@ -548,10 +700,33 @@ test "flags" {
         \\
     ));
 
+    try t.check(&.{"values"}, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 0
+        \\boolean: false
+        \\path: not-set
+        \\
+    ));
+
+    try t.check(&.{ "values", "--boolean=true" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --boolean: argument does not require a value in '--boolean=true'
+        \\
+    ));
+
     try t.check(&.{ "values", "--int" }, snap(@src(),
         \\status: 1
         \\stderr:
         \\error: --int: expected value separator '='
+        \\
+    ));
+
+    try t.check(&.{ "values", "--int:" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --int: expected value separator '=', but found ':' in '--int:'
         \\
     ));
 
@@ -562,17 +737,12 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--integer" }, snap(@src(),
-        \\status: 1
-        \\stderr:
-        \\error: --int: expected value separator '=', but found 'e' in '--integer'
-        \\
-    ));
-
-    try t.check(&.{ "values", "--int", "92" }, snap(@src(),
-        \\status: 1
-        \\stderr:
-        \\error: --int: expected value separator '='
+    try t.check(&.{ "values", "--int=92" }, snap(@src(),
+        \\stdout:
+        \\int: 92
+        \\size: 0
+        \\boolean: false
+        \\path: not-set
         \\
     ));
 
@@ -590,31 +760,42 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{"--int=92"}, snap(@src(),
-        \\status: 1
-        \\stderr:
-        \\error: unknown subcommand: '--int=92'
-        \\
-    ));
-
-    try t.check(&.{"required"}, snap(@src(),
-        \\status: 1
-        \\stderr:
-        \\error: --foo: argument is required
-        \\
-    ));
-
-    try t.check(&.{ "required", "--foo=1" }, snap(@src(),
-        \\status: 1
-        \\stderr:
-        \\error: --bar: argument is required
-        \\
-    ));
-
-    try t.check(&.{ "required", "--bar=1", "--foo=1" }, snap(@src(),
+    try t.check(&.{ "values", "--size=3MiB" }, snap(@src(),
         \\stdout:
-        \\foo: 1
-        \\bar: 1
+        \\int: 0
+        \\size: 3145728
+        \\boolean: false
+        \\path: not-set
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=44444444444444444444" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found '44444444444444444444' (value too large)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=100000000000000000" }, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 100000000000000000
+        \\boolean: false
+        \\path: not-set
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=100000000000000000kb" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found '100000000000000000kb' (value too large)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=3Mib" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found '3Mib' (invalid digit)
         \\
     ));
 }
