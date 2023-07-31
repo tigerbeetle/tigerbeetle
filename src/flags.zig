@@ -41,6 +41,7 @@
 //!   caller to manage the lifetime. The caller should be skipping program name.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 /// Format and print an error message to stderr, then exit with an exit code of 1.
@@ -396,6 +397,11 @@ fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type
         null;
 }
 
+// CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible.
+//
+// Rater than making the code more complicated by abstracting over termination logic, test it out
+// of process, by building `flags_test_program.zig` test executable, shelling out to it, and
+// inspecting its status and error streams.
 test "flags" {
     const Snap = @import("./testing/snaptest.zig").Snap;
     const snap = Snap.snap;
@@ -404,32 +410,75 @@ test "flags" {
         const T = @This();
 
         gpa: std.mem.Allocator,
-        buf: std.ArrayList(u8),
-        zig: []const u8,
+        tmp_dir: std.testing.TmpDir,
+        output_buf: std.ArrayList(u8),
+        flags_exe_buf: *[std.fs.MAX_PATH_BYTES]u8,
+        flags_exe: []const u8,
 
         fn init(gpa: std.mem.Allocator) !T {
+            const zig_exe = std.os.getenv("ZIG_EXE") orelse return error.SkipZigTest;
+
+            var tmp_dir = std.testing.tmpDir(.{});
+            errdefer tmp_dir.cleanup();
+
+            const output_buf = std.ArrayList(u8).init(gpa);
+            errdefer output_buf.deinit();
+
+            const flags_exe_buf = try gpa.create([std.fs.MAX_PATH_BYTES]u8);
+            errdefer gpa.destroy(flags_exe_buf);
+
+            const src_dir = comptime std.fs.path.dirname(@src().file).?;
+            const argv = [_][]const u8{
+                zig_exe,
+                "build-exe",
+                "--main-pkg-path",
+                src_dir,
+                src_dir ++ "/testing/flags_test_program.zig",
+            };
+            const exec_result = try std.ChildProcess.exec(.{
+                .allocator = gpa,
+                .argv = &argv,
+                .cwd_dir = tmp_dir.dir,
+            });
+            defer gpa.free(exec_result.stdout);
+            defer gpa.free(exec_result.stderr);
+
+            if (exec_result.term.Exited != 0) {
+                std.debug.print("{s}{s}", .{ exec_result.stdout, exec_result.stderr });
+                return error.FailedToCompile;
+            }
+
+            const flags_exe = try tmp_dir.dir.realpath(
+                "flags_test_program" ++ if (builtin.os.tag == .windows) ".exe" else "",
+                flags_exe_buf,
+            );
+
+            const sanity_check = try std.fs.openFileAbsolute(flags_exe, .{});
+            sanity_check.close();
+
             return .{
                 .gpa = gpa,
-                .buf = std.ArrayList(u8).init(gpa),
-                .zig = std.os.getenv("ZIG_EXE") orelse return error.SkipZigTest,
+                .tmp_dir = tmp_dir,
+                .output_buf = output_buf,
+                .flags_exe_buf = flags_exe_buf,
+                .flags_exe = flags_exe,
             };
         }
 
         fn deinit(t: *T) void {
-            t.buf.deinit();
+            t.gpa.destroy(t.flags_exe_buf);
+            t.output_buf.deinit();
+            t.tmp_dir.cleanup();
             t.* = undefined;
         }
 
         fn check(t: *T, cli: []const []const u8, want: Snap) !void {
-            const argv = try t.gpa.alloc([]const u8, cli.len + 4);
+            const argv = try t.gpa.alloc([]const u8, cli.len + 1);
             defer t.gpa.free(argv);
 
-            argv[0] = t.zig;
-            argv[1] = "run";
-            argv[2] = comptime std.fs.path.dirname(@src().file).? ++ "/flags_test_program.zig";
-            argv[3] = "--";
-            for (cli) |cli_arg, i| {
-                argv[i + 4] = cli_arg;
+            argv[0] = t.flags_exe;
+            for (argv[1..]) |*arg, i| {
+                arg.* = cli[i];
             }
             if (cli.len > 0) {
                 assert(argv[argv.len - 1].ptr == cli[cli.len - 1].ptr);
@@ -442,19 +491,19 @@ test "flags" {
             defer t.gpa.free(exec_result.stdout);
             defer t.gpa.free(exec_result.stderr);
 
-            t.buf.clearRetainingCapacity();
+            t.output_buf.clearRetainingCapacity();
 
             if (exec_result.term.Exited != 0) {
-                try t.buf.writer().print("status: {}\n", .{exec_result.term.Exited});
+                try t.output_buf.writer().print("status: {}\n", .{exec_result.term.Exited});
             }
             if (exec_result.stdout.len > 0) {
-                try t.buf.writer().print("stdout:\n{s}", .{exec_result.stdout});
+                try t.output_buf.writer().print("stdout:\n{s}", .{exec_result.stdout});
             }
             if (exec_result.stderr.len > 0) {
-                try t.buf.writer().print("stderr:\n{s}", .{exec_result.stderr});
+                try t.output_buf.writer().print("stderr:\n{s}", .{exec_result.stderr});
             }
 
-            try want.diff(t.buf.items);
+            try want.diff(t.output_buf.items);
         }
     };
 
