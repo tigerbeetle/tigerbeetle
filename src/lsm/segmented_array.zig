@@ -806,11 +806,30 @@ fn SegmentedArrayType(
                 assert(cursor.node == 0);
                 assert(cursor.relative_index == 0);
 
-                return Iterator{
+                return .{
                     .array = array,
                     .direction = direction,
                     .cursor = .{ .node = 0, .relative_index = 0 },
                     .done = true,
+                };
+            } else if (cursor.node == array.node_count - 1 and
+                cursor.relative_index == array.count(cursor.node))
+            {
+                return switch (direction) {
+                    .ascending => .{
+                        .array = array,
+                        .direction = direction,
+                        .cursor = .{ .node = 0, .relative_index = 0 },
+                        .done = true,
+                    },
+                    .descending => .{
+                        .array = array,
+                        .direction = direction,
+                        .cursor = .{
+                            .node = cursor.node,
+                            .relative_index = cursor.relative_index - 1,
+                        },
+                    },
                 };
             } else {
                 assert(cursor.node < array.node_count);

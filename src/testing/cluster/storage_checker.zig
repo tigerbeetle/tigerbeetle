@@ -92,6 +92,8 @@ pub fn StorageCheckerType(comptime Storage: type) type {
 
             assert(index_address > 0);
 
+            //std.debug.print("{}: STORAGE_CHECKER:CHECK index={} checksum={}\n", .{storage.options.replica_index, index_address, index_checksum});
+
             const index_block = storage.grid_block(index_address).?;
             const index_block_header = schema.header_from_block(index_block);
             assert(index_block_header.op == index_address);
@@ -135,16 +137,12 @@ pub fn StorageCheckerType(comptime Storage: type) type {
         }
 
         pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
-            const storage: *const Storage = superblock.storage;
-            const syncing = superblock.working.vsr_state.commit_unsynced_max > 0;
-
             //std.debug.print("{}: syncing={}, commit_unsynced={},{}\n",.{ replica.replica, syncing,
             //    replica.superblock.working.vsr_state.commit_unsynced_min,
             //    replica.superblock.working.vsr_state.commit_unsynced_max,
             //});
 
             // TODO iterate superblock manifest, check tables not in snapshot range
-            const replica_id = superblock.working.vsr_state.replica_id;
             const replica_checkpoint_op = superblock.working.vsr_state.commit_min;
 
             var checkpoint_actual = std.enums.EnumMap(CheckpointCheck, u128).init(.{
@@ -153,14 +151,15 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                 .superblock_client_sessions = checksum_trailer(superblock, .client_sessions),
             });
 
+            const syncing = superblock.working.vsr_state.commit_unsynced_max > 0;
             if (!syncing) {
-                checkpoint_actual.put(.client_replies, checksum_client_replies(storage));
+                checkpoint_actual.put(.client_replies, checksum_client_replies(superblock));
                 checkpoint_actual.put(.grid, checker.checksum_grid(superblock));
             }
 
             for (std.enums.values(CheckpointCheck)) |check| {
                 log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:0>32}", .{
-                    replica_id,
+                    superblock.replica(),
                     replica_checkpoint_op,
                     @tagName(check),
                     checkpoint_actual.get(check),
@@ -187,7 +186,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                 if (checksum_expect != checksum_actual) {
                     log.warn("{}: replica_checkpoint: mismatch " ++
                         "area={s} expect={x:0>32} actual={x:0>32}", .{
-                        replica_id,
+                        superblock.replica(),
                         @tagName(check),
                         checksum_expect,
                         checksum_actual,
@@ -222,10 +221,24 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             return trailer_checksum;
         }
 
-        fn checksum_client_replies(storage: *const TestStorage) u128 {
-            const offset = vsr.Zone.client_replies.offset(0);
-            const size = constants.clients_max * constants.message_size_max;
-            return vsr.checksum(storage.memory[offset..][0..size]);
+        fn checksum_client_replies(superblock: *const SuperBlock) u128 {
+            var checksum: u128 = 0;
+            for (superblock.client_sessions.entries) |client_session, slot| {
+                if (client_session.session == 0) {
+                    // Empty slot.
+                } else {
+                    assert(client_session.header.command == .reply);
+
+                    if (client_session.header.size == @sizeOf(vsr.Header)) {
+                        // ClientReplies won't store this entry.
+                    } else {
+                        checksum ^= vsr.checksum(superblock.storage.area_memory(
+                            .{ .client_replies = .{ .slot = slot } },
+                        )[0 .. vsr.sector_ceil(client_session.header.size)]);
+                    }
+                }
+            }
+            return checksum;
         }
 
         fn checksum_grid(checker: *Self, superblock: *const SuperBlock) u128 {

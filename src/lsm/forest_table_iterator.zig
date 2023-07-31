@@ -177,7 +177,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             // Sanity-check, since all of this code generation is tricky to follow.
             inline for (std.meta.fields(TreeTableIterators)) |field| {
                 const tree_iterator = @field(iterator.trees, field.name);
-                std.debug.print("CHECK {s} level={}/{}\n", .{field.name, tree_iterator.level, iterator.level});
                 assert(tree_iterator.done);
                 assert(tree_iterator.level == 0);
             }
@@ -192,12 +191,12 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         ) ?TableInfo {
             const tree_iterator = &@field(iterator.trees, iterator_field);
             if (tree_iterator.level < iterator.level.?) {
-                std.debug.print("{s}: A={}<{}\n", .{iterator_field, tree_iterator.level, iterator.level});
+                //std.debug.print("{s}: A={}<{}\n", .{iterator_field, tree_iterator.level, iterator.level});
                 return null;
             }
 
             if (tree_iterator.next(tree)) |table| {
-                std.debug.print("{s}: B={}<{}: {}\n", .{iterator_field, tree_iterator.level, iterator.level, table});
+                //std.debug.print("{s}: B={}<{}: {}\n", .{iterator_field, tree_iterator.level, iterator.level, table});
                 return TableInfo{
                     .checksum = table.checksum,
                     .address = table.address,
@@ -206,7 +205,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                     .snapshot_max = table.snapshot_max,
                 };
             } else {
-                std.debug.print("{s}: C={}<{}\n", .{iterator_field, tree_iterator.level, iterator.level});
                 assert(tree_iterator.done);
                 assert(tree_iterator.level == 0);
                 return null;

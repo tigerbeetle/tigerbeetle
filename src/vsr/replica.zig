@@ -681,6 +681,20 @@ pub fn ReplicaType(
             self.grid_scrubber.open();
             self.state_machine_opened = true;
 
+            // We have finished state sync, but the replies are (potentially) not yet repaired.
+            if (self.superblock.working.vsr_state.commit_unsynced_max != 0) {
+                var slot: usize = 0;
+                while (slot < constants.clients_max) : (slot += 1) {
+                    const entry_free = self.superblock.client_sessions.entries_free.isSet(slot);
+                    const entry_size = self.superblock.client_sessions.entries[slot].header.size;
+
+                    self.client_replies.faulty.setValue(
+                        slot,
+                        !entry_free and entry_size > @sizeOf(Header),
+                    );
+                }
+            }
+
             if (self.solo()) {
                 if (self.commit_min < self.op) {
                     self.commit_journal(self.op);
@@ -2209,16 +2223,16 @@ pub fn ReplicaType(
             request_loop: for (requests) |*request, i| {
                 assert(stdx.zeroed(&request.reserved));
 
-                if (self.grid.faulty(request.block_address, null)) {
-                    log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
-                        "(replica={} address={} checksum={})", .{
-                        self.replica,
-                        message.header.replica,
-                        request.block_address,
-                        request.block_checksum,
-                    });
-                    continue;
-                }
+                //if (self.grid.faulty(request.block_address, null)) {
+                //    log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
+                //        "(replica={} address={} checksum={})", .{
+                //        self.replica,
+                //        message.header.replica,
+                //        request.block_address,
+                //        request.block_checksum,
+                //    });
+                //    continue;
+                //}
 
                 // TODO check grid repair queue contains, too
 
@@ -2882,28 +2896,21 @@ pub fn ReplicaType(
                 ),
             };
 
-            std.debug.print("{}: CHECK: full={} timeout={}\n", .{self.replica,
-                self.grid_repair_queue.full(),
-                self.grid_scrub_timeout.after});
             while (!self.grid_repair_queue.full()) {
                 const fault = self.grid_scrubber.next_fault() orelse break;
 
-                //// TODO move log into scrubber
-                //log.debug("{}: on_grid_scrub_timeout: fault found: " ++
-                //    "block_address={} block_checksum={} block_type={s}", .{
-                //    self.replica,
-                //    fault.block_address,
-                //    fault.block_checksum,
-                //    @tagName(fault.block_type),
-                //});
-
-                self.grid_repair_queue.queue_fault(
+                log.debug("{}: on_grid_scrub_timeout: fault found: " ++
+                    "block_address={} block_checksum={} block_type={s}", .{
+                    self.replica,
                     fault.block_address,
                     fault.block_checksum,
-                    switch (fault.block_type) {
-                        .index => .table,
-                        else => .block,
-                    },
+                    @tagName(fault.block_type),
+                });
+
+                self.grid_repair_queue.queue_insert(
+                    fault.block_address,
+                    fault.block_checksum,
+                    if (fault.block_type == .index) .table else .block,
                 ) catch |err| assert(err == error.Faulty);
             }
 
@@ -3603,18 +3610,19 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
-            const vsr_state_commit_unsynced: struct {
-                min: u64,
-                max: u64,
-            } = unsynced: {
-                if (self.grid_scrubber.mode == .fast) {
-                    assert(self.superblock.staging.vsr_state.commit_unsynced_max > 0);
-
+            const vsr_state_commit_unsynced: struct { min: u64, max: u64 } = unsynced: {
+                if (self.superblock.staging.vsr_state.commit_unsynced_max > 0 and
+                    (self.grid_scrubber.mode == .fast or
+                     !self.grid_repair_queue.empty() or
+                     self.client_replies.faulty.count() > 0))
+                {
                     break :unsynced .{
                         .min = self.superblock.staging.vsr_state.commit_unsynced_min,
                         .max = self.superblock.staging.vsr_state.commit_unsynced_max,
                     };
                 } else {
+                    assert(self.grid_scrubber.mode == .slow);
+
                     break :unsynced .{
                         .min = 0,
                         .max = 0,
@@ -7807,7 +7815,7 @@ pub fn ReplicaType(
                     self.superblock.trailer_buffer(trailer)[0..trailer_size],
                 );
             }
-            self.sync_client_replies();
+            //self.sync_client_replies();
 
             self.sync_dispatch(.{ .updating_superblock = .{
                 .target = stage.target,
@@ -7834,18 +7842,35 @@ pub fn ReplicaType(
             // during the sync_start update uses the correct (new) commit_max.
             self.commit_max = std.math.max(stage.target.checkpoint_op, self.commit_max);
 
+            // TODO:
+            // op_checkpoint + batch_multiple = op_checkpoint_trigger
+            //
+
             // TODO can we avoid using a trigger here, use it when converting to snapshot?
-            const op_checkpoint_trigger_previous =
+            const commit_unsynced_max = // checkpoint trigger
                 stage.target.checkpoint_op + constants.lsm_batch_multiple;
             const commit_unsynced_min = commit_unsynced_min: {
                 const unsynced_old = self.superblock.staging.vsr_state.commit_unsynced_min;
+                const unsynced_new = @minimum(
+                    self.op_checkpoint() + constants.lsm_batch_multiple, // TODO self.commit_min?
+                    commit_unsynced_max -| (2 * constants.journal_slot_count), // TODO tighten, 2x nondeterminism
+                );
                 // TODO tighten this up. Explain 2x to guard against nondeterminism
-                const unsynced_new =
-                    op_checkpoint_trigger_previous -| (2 * constants.journal_slot_count);
+                //const unsynced_new =
+                //    self.superblock.staging.vsr_state.commit_min, // TODO tighten to self.commit_min?
+                //    commit_unsynced_max -| (2 * constants.journal_slot_count);
                 const unsynced_min =
                     if (unsynced_old == 0) unsynced_new else @minimum(unsynced_old, unsynced_new);
                 break :commit_unsynced_min unsynced_min;
             };
+
+            std.debug.print("{}: SYNC {}..{} ({}..{})\n", .{
+                self.replica,
+                self.superblock.staging.vsr_state.commit_min,
+                stage.target.checkpoint_op,
+                commit_unsynced_min,
+                commit_unsynced_max,
+            });
 
             self.sync_message_timeout.stop();
             self.superblock.sync(
@@ -7856,7 +7881,7 @@ pub fn ReplicaType(
                     .commit_min = stage.target.checkpoint_op,
                     .commit_min_checksum = stage.checkpoint_op_checksum,
                     .previous_checkpoint_id = stage.previous_checkpoint_id,
-                    .commit_unsynced_max = op_checkpoint_trigger_previous,
+                    .commit_unsynced_max = commit_unsynced_max,
                     .commit_unsynced_min = commit_unsynced_min,
                 },
             );
@@ -8314,7 +8339,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.grid_repair_queue.queue_fault(
+            self.grid_repair_queue.queue_insert(
                 read.address,
                 read.checksum,
                 if (read.block_type == .index) .table else .block,

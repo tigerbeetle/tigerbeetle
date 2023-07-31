@@ -417,12 +417,12 @@ pub const Simulator = struct {
         // Check whether the replica is still scrubbing after sync.
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
-                std.debug.print("REPLICA={}: {} {} {} empty={}\n", .{replica.replica,
-                    replica.journal.faulty.count,
-                    replica.client_replies.faulty.count(),
-                    replica.grid_scrubber.mode,
-                    replica.grid_repair_queue.empty(),
-                });
+                //std.debug.print("REPLICA={}: {} {} {} empty={}\n", .{replica.replica,
+                //    replica.journal.faulty.count,
+                //    replica.client_replies.faulty.count(),
+                //    replica.grid_scrubber.mode,
+                //    replica.grid_repair_queue.empty(),
+                //});
 
                 if (replica.journal.faulty.count > 0) return false;
                 if (replica.client_replies.faulty.count() > 0) return false;

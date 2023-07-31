@@ -512,6 +512,13 @@ pub const Storage = struct {
         }
     }
 
+    pub fn area_memory(storage: *const Storage, area: Area) []const u8 {
+        const sectors = area.sectors();
+        const area_min = sectors.min * constants.sector_size;
+        const area_max = sectors.max * constants.sector_size;
+        return storage.memory[area_min..area_max];
+    }
+
     /// Returns whether any sector in the area is corrupt.
     pub fn area_faulty(storage: *const Storage, area: Area) bool {
         const sectors = area.sectors();
@@ -527,9 +534,9 @@ pub const Storage = struct {
         storage: *const Storage,
         copy_: u8,
     ) *const superblock.SuperBlockHeader {
-        const offset = vsr.Zone.superblock.offset(superblock.SuperBlockZone.header.start_for_copy(copy_));
-        const bytes = storage.memory[offset..][0..comptime superblock.SuperBlockZone.header.size_max()];
-        return mem.bytesAsValue(superblock.SuperBlockHeader, bytes);
+        return mem.bytesAsValue(superblock.SuperBlockHeader, storage.area_memory(.{
+            .superblock = .{ .zone = .header, .copy = copy_ },
+        }));
     }
 
     pub fn wal_headers(storage: *const Storage) []const vsr.Header {

@@ -1659,6 +1659,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .client_sessions => superblock.client_sessions_buffer,
             };
         }
+
+        pub fn replica(superblock: *const SuperBlock) u8 {
+            for (superblock.working.vsr_state.members) |member, i| {
+                if (superblock.working.vsr_state.replica_id == member) return @intCast(u8, i);
+            } else unreachable;
+        }
     };
 }
 

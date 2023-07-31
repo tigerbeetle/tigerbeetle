@@ -580,7 +580,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             callback(manifest);
         }
 
-        pub fn verify(manifest: *Manifest, snapshot: u64) void {
+        pub fn verify(manifest: *const Manifest, snapshot: u64) void {
             for (manifest.levels) |*level| {
                 var key_max_previous: ?Key = null;
                 var table_info_iterator = level.iterator(.visible, &.{snapshot}, .ascending, null);
@@ -593,10 +593,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     key_max_previous = table_info.key_max;
 
                     const vsr_state = &manifest.manifest_log.grid.superblock.working.vsr_state;
-                    std.debug.print("TABLE_INFO={} vs {},{}\n", .{table_info.snapshot_min,
-                        (vsr_state.commit_unsynced_min),
-                        (vsr_state.commit_unsynced_max),
-                    });
                     if (table_info.snapshot_min < snapshot_from_op(vsr_state.commit_unsynced_min) or
                         table_info.snapshot_min > snapshot_from_op(vsr_state.commit_unsynced_max))
                     {
