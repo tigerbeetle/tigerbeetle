@@ -254,7 +254,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         start.cache_transfers,
                     ),
                     .cache_transfers_posted = parse_cache_size_to_count(
-                        u256, // TODO(#264): Use actual type here, once exposed.
+                        StateMachine.PostedGrooveValue,
                         PostedValuesCache,
                         start.cache_transfers_posted,
                     ),
