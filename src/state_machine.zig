@@ -264,7 +264,7 @@ pub fn StateMachineType(
             },
         );
 
-        const PostedGrooveValue = extern struct {
+        pub const PostedGrooveValue = extern struct {
             timestamp: u64,
             fulfillment: enum(u8) {
                 posted = 0,
