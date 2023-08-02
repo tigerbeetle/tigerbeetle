@@ -13,7 +13,6 @@ const div_ceil = stdx.div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-const BlockType = @import("grid.zig").BlockType;
 const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const schema = @import("schema.zig");
@@ -527,7 +526,7 @@ pub fn TableType(
                     .request = builder.value_count,
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
-                    .operation = BlockType.data.operation(),
+                    .operation = schema.BlockType.data.operation(),
                 };
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
@@ -587,7 +586,7 @@ pub fn TableType(
                     .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
-                    .operation = BlockType.filter.operation(),
+                    .operation = schema.BlockType.filter.operation(),
                 };
 
                 const body = builder.filter_block[@sizeOf(vsr.Header)..header.size];
@@ -645,7 +644,7 @@ pub fn TableType(
                     .timestamp = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
-                    .operation = BlockType.index.operation(),
+                    .operation = schema.BlockType.index.operation(),
                 };
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
