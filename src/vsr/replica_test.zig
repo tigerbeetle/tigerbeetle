@@ -1113,9 +1113,7 @@ const TestContext = struct {
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
         var replica_indexes = std.BoundedArray(u8, constants.members_max){ .buffer = undefined };
-        // TODO Zig: This should iterate over values instead of pointers once the miscompilation
-        // segfault is fixed.
-        for (replica_processes.constSlice()) |*p| replica_indexes.appendAssumeCapacity(p.replica);
+        for (replica_processes.constSlice()) |p| replica_indexes.appendAssumeCapacity(p.replica);
         return TestReplicas{
             .context = t,
             .cluster = t.cluster,
@@ -1484,14 +1482,12 @@ const TestReplicas = struct {
         const peers = t.context.processes(peer);
         for (t.replicas.constSlice()) |a| {
             const process_a = Process{ .replica = a };
-            // TODO Zig: This should iterate over values instead of pointers once the miscompilation
-            // segfault is fixed.
-            for (peers.constSlice()) |*process_b| {
+            for (peers.constSlice()) |process_b| {
                 if (direction == .bidirectional or direction == .outgoing) {
-                    paths.appendAssumeCapacity(.{ .source = process_a, .target = process_b.* });
+                    paths.appendAssumeCapacity(.{ .source = process_a, .target = process_b });
                 }
                 if (direction == .bidirectional or direction == .incoming) {
-                    paths.appendAssumeCapacity(.{ .source = process_b.*, .target = process_a });
+                    paths.appendAssumeCapacity(.{ .source = process_b, .target = process_a });
                 }
             }
         }

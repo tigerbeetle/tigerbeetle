@@ -3,10 +3,8 @@ const assert = std.debug.assert;
 
 /// Parse a "table" of data with the specified schema.
 /// See test cases for example usage.
-// TODO(Zig): Change this to a a purely comptime function returning a slice
-// once Zig's "runtime value cannot be passed to comptime arg" bugs are fixed.
-pub fn parse(comptime Row: type, comptime table_string: []const u8) std.BoundedArray(Row, 128) {
-    var rows = std.BoundedArray(Row, 128).init(0) catch unreachable;
+pub fn parse(comptime Row: type, table_string: []const u8) std.BoundedArray(Row, 128) {
+    var rows = std.BoundedArray(Row, 128){ .buffer = undefined };
     var row_strings = std.mem.tokenize(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.

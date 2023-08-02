@@ -1258,31 +1258,32 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 superblock.working.* = working.*;
                 superblock.staging.* = working.*;
-                // TODO(Zig): Use named format specifiers to avoid mixups.
+
                 log.debug(
-                    "{s}: installed working superblock: checksum={x:0>32} sequence={} cluster={} " ++
-                        "replica_id={} size={} checkpoint_id={x:0>32} " ++
-                        "manifest_checksum={x:0>32} " ++
-                        "free_set_checksum={x:0>32} " ++
-                        "client_sessions_checksum={x:0>32} " ++
-                        "commit_min_checksum={} commit_min={} commit_max={} " ++
-                        "log_view={} view={}",
+                    "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
+                        "sequence={[sequence]} cluster={[cluster]} replica_id={[replica_id]} " ++
+                        "size={[size]} checkpoint_id={[checkpoint_id]x:0>32} " ++
+                        "manifest_checksum={[manifest_checksum]x:0>32} " ++
+                        "free_set_checksum={[free_set_checksum]x:0>32} " ++
+                        "client_sessions_checksum={[client_sessions_checksum]x:0>32} " ++
+                        "commit_min_checksum={[commit_min_checksum]} commit_min={[commit_min]} " ++
+                        "commit_max={[commit_max]} log_view={[log_view]} view={[view]}",
                     .{
-                        @tagName(context.caller),
-                        superblock.working.checksum,
-                        superblock.working.sequence,
-                        superblock.working.cluster,
-                        superblock.working.vsr_state.replica_id,
-                        superblock.working.storage_size,
-                        superblock.working.checkpoint_id(),
-                        superblock.working.manifest_checksum,
-                        superblock.working.free_set_checksum,
-                        superblock.working.client_sessions_checksum,
-                        superblock.working.vsr_state.commit_min_checksum,
-                        superblock.working.vsr_state.commit_min,
-                        superblock.working.vsr_state.commit_max,
-                        superblock.working.vsr_state.log_view,
-                        superblock.working.vsr_state.view,
+                        .caller = @tagName(context.caller),
+                        .checksum = superblock.working.checksum,
+                        .sequence = superblock.working.sequence,
+                        .cluster = superblock.working.cluster,
+                        .replica_id = superblock.working.vsr_state.replica_id,
+                        .size = superblock.working.storage_size,
+                        .checkpoint_id = superblock.working.checkpoint_id(),
+                        .manifest_checksum = superblock.working.manifest_checksum,
+                        .free_set_checksum = superblock.working.free_set_checksum,
+                        .client_sessions_checksum = superblock.working.client_sessions_checksum,
+                        .commit_min_checksum = superblock.working.vsr_state.commit_min_checksum,
+                        .commit_min = superblock.working.vsr_state.commit_min,
+                        .commit_max = superblock.working.vsr_state.commit_max,
+                        .log_view = superblock.working.vsr_state.log_view,
+                        .view = superblock.working.vsr_state.view,
                     },
                 );
                 for (superblock.working.vsr_headers().slice) |*header| {
@@ -1584,34 +1585,32 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn log_context(superblock: *const SuperBlock, context: *const Context) void {
-            // TODO(Zig): Use named format specifiers when we upgrade past 0.9.
-            // In 0.9 the test runner's log implementation does not support the named arguments.
-            log.debug("{s}: " ++
-                "commit_min={}..{} " ++
-                "commit_max={}..{} " ++
-                "commit_min_checksum={}..{} " ++
-                "log_view={}..{} " ++
-                "view={}..{} " ++
-                "head={}..{?}", .{
-                @tagName(context.caller),
+            log.debug("{[caller]s}: " ++
+                "commit_min={[commit_min_old]}..{[commit_min_new]} " ++
+                "commit_max={[commit_max_old]}..{[commit_max_new]} " ++
+                "commit_min_checksum={[commit_min_checksum_old]}..{[commit_min_checksum_new]} " ++
+                "log_view={[log_view_old]}..{[log_view_new]} " ++
+                "view={[view_old]}..{[view_new]} " ++
+                "head={[head_old]}..{[head_new]?}", .{
+                .caller = @tagName(context.caller),
 
-                superblock.staging.vsr_state.commit_min,
-                context.vsr_state.?.commit_min,
+                .commit_min_old = superblock.staging.vsr_state.commit_min,
+                .commit_min_new = context.vsr_state.?.commit_min,
 
-                superblock.staging.vsr_state.commit_max,
-                context.vsr_state.?.commit_max,
+                .commit_max_old = superblock.staging.vsr_state.commit_max,
+                .commit_max_new = context.vsr_state.?.commit_max,
 
-                superblock.staging.vsr_state.commit_min_checksum,
-                context.vsr_state.?.commit_min_checksum,
+                .commit_min_checksum_old = superblock.staging.vsr_state.commit_min_checksum,
+                .commit_min_checksum_new = context.vsr_state.?.commit_min_checksum,
 
-                superblock.staging.vsr_state.log_view,
-                context.vsr_state.?.log_view,
+                .log_view_old = superblock.staging.vsr_state.log_view,
+                .log_view_new = context.vsr_state.?.log_view,
 
-                superblock.staging.vsr_state.view,
-                context.vsr_state.?.view,
+                .view_old = superblock.staging.vsr_state.view,
+                .view_new = context.vsr_state.?.view,
 
-                superblock.staging.vsr_headers().slice[0].checksum,
-                if (context.vsr_headers) |*headers|
+                .head_old = superblock.staging.vsr_headers().slice[0].checksum,
+                .head_new = if (context.vsr_headers) |*headers|
                     @as(?u128, headers.array.get(0).checksum)
                 else
                     null,
