@@ -1628,7 +1628,7 @@ const TestCreateTransfer = struct {
     }
 };
 
-fn check(comptime test_table: []const u8) !void {
+fn check(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 
