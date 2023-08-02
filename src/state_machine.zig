@@ -1629,10 +1629,6 @@ const TestCreateTransfer = struct {
 };
 
 fn check(comptime test_table: []const u8) !void {
-    // TODO(Zig): Disabled because of spurious failure (segfault) on MacOS at the
-    // `test_actions.constSlice()`. Most likely a comptime bug that will be resolved by 0.10.
-    if (@import("builtin").os.tag == .macos) return;
-
     const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 
