@@ -27,6 +27,7 @@
 //! Filter block schema:
 //! │ vsr.Header │ operation=BlockType.filter,
 //! │            │ context=schema.TableFilter.context
+//! │            │ timestamp=snapshot_min
 //! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 //! │            │   `filter_data_block_count_max` data blocks.
 //!
@@ -34,6 +35,7 @@
 //! │ vsr.Header               │ operation=BlockType.data,
 //! │                          │ context=schema.TableData.context,
 //! │                          │ request=values_count
+//! │                          │ timestamp=snapshot_min
 //! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
@@ -65,6 +67,7 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     assert(header.size >= @sizeOf(vsr.Header));
     assert(header.size <= block.len);
     assert(BlockType.valid(header.operation));
+    assert(BlockType.from(header.operation) != .reserved);
     return header;
 }
 

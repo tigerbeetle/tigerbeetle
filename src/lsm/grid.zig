@@ -474,6 +474,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .none);
 
+            //if (header.checksum == 76648540669318493793937402168690919905) {
+            //    std.debug.print("{}: WRITE: address={} (commit_min={}) \n", .{grid.superblock.replica(), header.op, grid.superblock.working.vsr_state.commit_min});
+            //}
+
             if (trigger == .acquire) {
                 grid.assert_not_reading(address, block.*);
             }

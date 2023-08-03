@@ -874,10 +874,7 @@ fn SegmentedArrayType(
         pub usingnamespace if (Key) |K| struct {
             /// Returns a cursor to the index of the key either exactly equal to the target key or,
             /// if there is no exact match, the next greatest key.
-            pub fn search(
-                array: *const Self,
-                key: K,
-            ) Cursor {
+            pub fn search(array: *const Self, key: K) Cursor {
                 if (array.node_count == 0) {
                     return .{
                         .node = 0,

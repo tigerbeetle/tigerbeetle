@@ -54,6 +54,8 @@ const CheckpointCheck = enum {
 
 const Checkpoint = std.enums.EnumArray(CheckpointCheck, u128);
 
+// TODO ReplicaStorageChecker vs ClusterStorageChecker?
+
 pub fn StorageCheckerType(comptime Storage: type) type {
     return struct {
         const Self = @This();
@@ -85,55 +87,6 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             checker.free_set.deinit(allocator);
             checker.checkpoints.deinit();
             checker.compactions.deinit();
-        }
-
-        pub fn check_table(storage: *const Storage, index_address: u64, index_checksum: u128) void {
-            if (Storage != TestStorage) return;
-
-            assert(index_address > 0);
-
-            //std.debug.print("{}: STORAGE_CHECKER:CHECK index={} checksum={}\n", .{storage.options.replica_index, index_address, index_checksum});
-
-            const index_block = storage.grid_block(index_address).?;
-            const index_block_header = schema.header_from_block(index_block);
-            assert(index_block_header.op == index_address);
-            assert(index_block_header.checksum == index_checksum);
-            assert(BlockType.from(index_block_header.operation) == .index);
-
-            const index_schema = schema.TableIndex.from(index_block);
-            const content_blocks_used = index_schema.content_blocks_used(index_block);
-            var content_block_index: usize = 0;
-            while (content_block_index < content_blocks_used) : (content_block_index += 1) {
-                const content_block_id =
-                    index_schema.content_block(index_block, content_block_index);
-                const content_block = storage.grid_block(content_block_id.block_address).?;
-                const content_block_header = schema.header_from_block(content_block);
-
-                assert(content_block_header.op == content_block_id.block_address);
-                assert(content_block_header.checksum == content_block_id.block_checksum);
-                assert(BlockType.from(content_block_header.operation) == .filter or
-                    BlockType.from(content_block_header.operation) == .data);
-            }
-        }
-
-        // TODO is this ever used?
-        pub fn check_block(storage: *const Storage, address: u64, checksum: u128) void {
-            if (Storage != TestStorage) return;
-
-            assert(address > 0);
-
-            const block = storage.grid_block(address).?;
-            const block_header = schema.header_from_block(block);
-            assert(block_header.op == address);
-            assert(block_header.checksum == checksum);
-
-            switch (BlockType.from(block_header.operation)) {
-                .reserved => unreachable,
-                .manifest => {},
-                .table => storage.check_table(address, checksum),
-                .data => {},
-                .filter => {},
-            }
         }
 
         pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
@@ -222,6 +175,8 @@ pub fn StorageCheckerType(comptime Storage: type) type {
         }
 
         fn checksum_client_replies(superblock: *const SuperBlock) u128 {
+            assert(superblock.working.vsr_state.commit_unsynced_max == 0);
+
             var checksum: u128 = 0;
             for (superblock.client_sessions.entries) |client_session, slot| {
                 if (client_session.session == 0) {
@@ -242,26 +197,47 @@ pub fn StorageCheckerType(comptime Storage: type) type {
         }
 
         fn checksum_grid(checker: *Self, superblock: *const SuperBlock) u128 {
+            assert(superblock.working.vsr_state.commit_unsynced_max == 0);
+
             const free_set_zone = vsr.SuperBlockTrailer.free_set.zone();
             const free_set_offset = vsr.Zone.superblock.offset(free_set_zone.start_for_copy(0));
             const free_set_size = superblock.working.free_set_size;
             const free_set_buffer = superblock.storage.memory[free_set_offset..][0..free_set_size];
-
-            // TODO assert checksum
+            assert(vsr.checksum(free_set_buffer) == superblock.working.free_set_checksum);
 
             checker.free_set.decode(free_set_buffer);
             defer checker.free_set.reset();
 
-            //const storage = replica.superblock.storage;
-            //var acquired = replica.superblock.free_set.blocks.iterator(.{});
             var checksum: u128 = 0;
-            var acquired = checker.free_set.blocks.iterator(.{});
-            while (acquired.next()) |address_index| {
-                const block = superblock.storage.grid_block(address_index + 1).?; // TODO "orelse ..."?
-                const block_header =
-                    std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            var blocks_missing: usize = 0;
+            var blocks_acquired = checker.free_set.blocks.iterator(.{});
+            while (blocks_acquired.next()) |block_address_index| {
+                const block_address: u64 = block_address_index + 1;
+                //if (superblock.storage.grid_block(block_address) == null) {
+                //    std.debug.print("ERROR: commit_min={} address={} (syncing={})\n", .{superblock.working.vsr_state.commit_min, block_address, superblock.working.vsr_state.commit_unsynced_max});
+                //}
+                const block = superblock.storage.grid_block(block_address) orelse {
+                    log.err("{}: checksum_grid: missing block_address={}", .{
+                        superblock.replica(),
+                        block_address,
+                    });
+
+                    blocks_missing += 1;
+                    continue;
+                };
+
+                const block_header = schema.header_from_block(block);
+                assert(block_header.op == block_address);
+
+                if (block_address == 70)
+                {
+                    std.debug.print("{}: GOT_HEADER={}\n", .{superblock.replica(), block_header.*});
+                }
+
                 checksum ^= vsr.checksum(block[0..block_header.size]);
             }
+            assert(blocks_missing == 0);
+
             return checksum;
         }
     };

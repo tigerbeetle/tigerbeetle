@@ -53,6 +53,8 @@ const log = std.log.scoped(.storage);
 // - likely that surrounding sectors also corrupt
 // - likely that stuff written at the same time is also corrupt even if written to a far away sector
 pub const Storage = struct {
+    pub const verify = @import("./storage_verify.zig");
+
     /// Options for fault injection during fuzz testing
     pub const Options = struct {
         /// Seed for the storage PRNG.
@@ -400,6 +402,22 @@ pub const Storage = struct {
                 other.offset + other.buffer.len <= offset_in_zone);
         }
 
+        // TODO update buffer immediately
+        //
+        //const offset_in_storage = zone.offset(offset_in_zone);
+        //stdx.copy_disjoint(
+        //    .exact,
+        //    u8,
+        //    storage.memory[offset_in_storage..][0..buffer.len],
+        //    buffer,
+        //);
+        //
+        //var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
+        //while (sectors.next()) |sector| {
+        //    storage.faults.set(sector);
+        //    storage.memory_written.set(sector);
+        //}
+
         write.* = .{
             .callback = callback,
             .buffer = buffer,
@@ -512,7 +530,10 @@ pub const Storage = struct {
         }
     }
 
-    pub fn area_memory(storage: *const Storage, area: Area) []const u8 {
+    pub fn area_memory(
+        storage: *const Storage,
+        area: Area,
+    ) []align(constants.sector_size) const u8 {
         const sectors = area.sectors();
         const area_min = sectors.min * constants.sector_size;
         const area_max = sectors.max * constants.sector_size;

@@ -427,7 +427,7 @@ pub const Simulator = struct {
                 if (replica.journal.faulty.count > 0) return false;
                 if (replica.client_replies.faulty.count() > 0) return false;
                 if (replica.grid_scrubber.mode == .fast) return false;
-                if (!replica.grid_repair_queue.empty()) return false;
+                if (replica.grid_repair_queue.syncing()) return false;
             }
         }
 

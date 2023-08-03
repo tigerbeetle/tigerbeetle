@@ -476,6 +476,11 @@ pub fn CompactionType(
             // table in Level B. Additionally, compaction.index_block_a holds
             // a copy of the index block for the Level A table being compacted.
 
+            //const h = schema.header_from_block(index_block);
+            //if (h.checksum == 25215638319991117136832403508585030204) {
+            //    std.debug.print("{}: FREE!", .{compaction.context.grid.superblock.replica()});
+            //}
+
             const grid = compaction.context.grid;
             const index_schema = schema.TableIndex.from(index_block);
             for (index_schema.data_addresses_used(index_block)) |address| grid.release(address);
@@ -713,6 +718,7 @@ pub fn CompactionType(
                 table_builder.data_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                 });
                 WriteBlock(.data).write_block(compaction);
             }
@@ -728,6 +734,7 @@ pub fn CompactionType(
                 table_builder.filter_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                 });
                 WriteBlock(.filter).write_block(compaction);
             }

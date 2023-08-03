@@ -209,6 +209,7 @@ pub fn TableType(
         pub const block_count_max =
             index_block_count + filter_block_count_max + data_block_count_max;
 
+        // TODO index_schema
         const index = schema.TableIndex.init(.{
             .key_size = key_size,
             .filter_block_count_max = filter_block_count_max,
@@ -452,6 +453,7 @@ pub fn TableType(
             const DataFinishOptions = struct {
                 cluster: u32,
                 address: u64,
+                snapshot_min: u64,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -524,6 +526,7 @@ pub fn TableType(
                         .value_size = value_size,
                     }),
                     .op = options.address,
+                    .timestamp = options.snapshot_min,
                     .request = builder.value_count,
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
@@ -571,6 +574,7 @@ pub fn TableType(
             const FilterFinishOptions = struct {
                 cluster: u32,
                 address: u64,
+                snapshot_min: u64,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -585,6 +589,7 @@ pub fn TableType(
                         .data_block_count_max = data_block_count_max,
                     }),
                     .op = options.address,
+                    .timestamp = options.snapshot_min,
                     .size = block_size - filter.padding_size,
                     .command = .block,
                     .operation = BlockType.filter.operation(),
@@ -649,6 +654,15 @@ pub fn TableType(
                 };
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
+
+            //const content_blocks_used = index.content_blocks_used(builder.index_block);
+            //var content_block_index: usize = 0;
+            //while (content_block_index < content_blocks_used) : (content_block_index += 1) {
+            //    const content_block_id = index.content_block(builder.index_block, content_block_index);
+            //    if (content_block_id.block_checksum == 76648540669318493793937402168690919905) {
+            //        std.debug.print("TABLE2: {},{}\n", .{options.address, header.checksum});
+            //    }
+            //}
 
                 const info: TableInfo = .{
                     .checksum = header.checksum,

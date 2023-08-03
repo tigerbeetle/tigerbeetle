@@ -585,7 +585,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 break :role '\\';
             };
 
-            var info_buffer: [64]u8 = undefined;
+            var info_buffer: [126]u8 = undefined;
             var info: []u8 = "";
             var pipeline_buffer: [16]u8 = undefined;
             var pipeline: []u8 = "";
@@ -609,15 +609,16 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     }
                 }
 
-                // TODO GridRepairQueue
                 info = std.fmt.bufPrint(&info_buffer, "" ++
                     "{[view]:>4}V " ++
                     "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
-                    "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
+                    "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
+                    "{[commit_unsynced_min]:>3}:{[commit_unsynced_max]:_>3}S? " ++
                     "{[grid_blocks_free]:>7}Gf " ++
-                    "{[grid_blocks_remote]:>2}G!", .{
+                    "{[grid_blocks_remote]:>2}G! " ++
+                    "{[grid_blocks_repair]:>3}G?", .{
                     .view = replica.view,
                     .commit_min = replica.commit_min,
                     .commit_max = replica.commit_max,
@@ -627,8 +628,11 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     .journal_faulty = replica.journal.faulty.count,
                     .wal_op_min = wal_op_min,
                     .wal_op_max = wal_op_max,
+                    .commit_unsynced_min = replica.superblock.working.vsr_state.commit_unsynced_min,
+                    .commit_unsynced_max = replica.superblock.working.vsr_state.commit_unsynced_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
                     .grid_blocks_remote = replica.grid.read_remote_queue.count,
+                    .grid_blocks_repair = replica.grid_repair_queue.faulty_blocks.count(),
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {

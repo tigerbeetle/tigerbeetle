@@ -11,6 +11,8 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.grid_repair);
 const maybe = stdx.maybe;
 
+// 18010338644879270703; [2144595159662352539]
+
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
@@ -161,8 +163,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             {
                 const fault_index =
                     (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
-                const fault = &fault_data[fault_index];
 
+                const fault = &fault_data[fault_index];
                 if (!fault.received) {
                     requests[requests_count] = .{
                         .block_address = fault_addresses[fault_index],
@@ -171,19 +173,14 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                     requests_count += 1;
                 }
             }
+
             queue.faulty_blocks_repair_index =
                 (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
-
             return requests_count;
         }
 
-        pub fn empty(queue: *const GridRepairQueue) bool {
-            if (queue.faulty_blocks.count() == 0) {
-                assert(queue.faulty_tables.executing() == 0);
-                return true;
-            } else {
-                return false;
-            }
+        pub fn syncing(queue: *const GridRepairQueue) bool {
+            return queue.faulty_tables.executing() > 0;
         }
 
         pub fn full(queue: *const GridRepairQueue) bool {
@@ -195,22 +192,32 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
             return faulty_blocks_free == 0 or tables_free == 0;
         }
+        //
+        //pub fn scrub_block(
+        //    queue: *GridRepairQueue,
+        //    callback: fn (*GridRepairQueue, enum { released, repaired, valid }) void,
+        //    address: u64,
+        //    checksum: u128,
+        //    repair_strategy: enum { block, table },
+        //) void {
+        //}
 
-        /// Queue a faulty block for repair.
-        /// error.Faulty: The block is already marked as faulty.
-        pub fn queue_insert(
+        /// Queue a faulty block to be requested from the cluster and repaired.
+        pub fn request_block(
             queue: *GridRepairQueue,
             address: u64,
             checksum: u128,
             repair_strategy: enum { block, table },
-        ) error{Faulty}!void {
+        ) void {
             assert(queue.checkpoint_progress == null);
             assert(!queue.grid.superblock.free_set.is_free(address));
             assert(!queue.full());
 
             if (queue.faulty_blocks.get(address)) |fault| {
+                // We are already trying to repair this exact block.
                 assert(fault.checksum == checksum);
-                return error.Faulty;
+                assert(fault.progress == .table_index or repair_strategy == .block);
+                return;
             }
 
             queue.faulty_blocks.putAssumeCapacityNoClobber(address, .{
@@ -224,9 +231,219 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                     },
                 },
             });
+
+            // TODO Check grid cache?
         }
 
-        fn queue_remove(queue: *GridRepairQueue, fault_index: usize) void {
+        /// error.Busy: The block is faulty and needs repair, but the queue is too busy right now.
+        /// error.Clean: The block is not faulty; no need to repair it.
+        pub fn receive_block(
+            queue: *GridRepairQueue,
+            block_data: Grid.BlockPtrConst,
+        ) error{Canceling, Busy, Clean}!void {
+            assert(queue.checkpoint_progress == null);
+
+            if (queue.grid.canceling) |_| return error.Canceling;
+
+            const block_header = schema.header_from_block(block_data);
+            const fault_index =
+                queue.faulty_blocks.getIndex(block_header.op) orelse return error.Clean;
+
+            const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
+            if (fault.checksum != block_header.checksum) return error.Clean;
+            if (fault.received) return error.Clean;
+
+            switch (fault.progress) {
+                .block => try queue.repair_block(block_data),
+                .table_index => |*progress| queue.receive_table_index(block_data, progress),
+                .table_content => |*progress| try queue.receive_table_content(block_data, progress),
+            }
+            fault.received = true;
+        }
+
+        fn receive_table_index(
+            queue: *GridRepairQueue,
+            index_block_data: Grid.BlockPtrConst,
+            progress: *FaultProgress.TableIndex,
+        ) void {
+            assert(queue.checkpoint_progress == null);
+            assert(queue.grid.canceling == null);
+            assert(progress.table.content_blocks_total == null);
+            assert(progress.table.content_blocks_received.count() == 0);
+
+            const index_schema = schema.TableIndex.from(index_block_data);
+            const index_block_header = schema.header_from_block(index_block_data);
+            assert(index_block_header.op == progress.table.index_address);
+            assert(index_block_header.checksum == progress.table.index_checksum);
+            assert(BlockType.from(index_block_header.operation) == .index);
+
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                queue.faulty_table_blocks[queue.faulty_tables.index(progress.table)],
+                index_block_data[0 .. index_block_header.size],
+            );
+
+            progress.table.content_blocks_total = index_schema.content_blocks_used(index_block_data);
+
+            var content_block_index: usize = 0;
+            while (content_block_index < progress.table.content_blocks_total.?)
+                : (content_block_index += 1)
+            {
+                const block_id = index_schema.content_block(index_block_data, content_block_index);
+                const block_fault =
+                    queue.faulty_blocks.getOrPutAssumeCapacity(block_id.block_address);
+
+                if (block_fault.found_existing) {
+                    // The content block may already have been queued by either the background
+                    // scrubber or a commit/compaction grid read.
+                    assert(block_fault.value_ptr.progress == .block);
+                    assert(block_fault.value_ptr.checksum == block_id.block_checksum);
+
+                    block_fault.value_ptr.progress = .{ .table_content = .{
+                        .table = progress.table,
+                        .index = content_block_index,
+                    } };
+
+                    if (block_fault.value_ptr.received) {
+                        progress.table.content_blocks_received.set(content_block_index);
+                    }
+                } else {
+                    block_fault.value_ptr.* = .{
+                        .checksum = block_id.block_checksum,
+                        .progress = .{ .table_content = .{
+                            .table = progress.table,
+                            .index = content_block_index,
+                        } },
+                    };
+                }
+            }
+        }
+
+        fn receive_table_content(
+            queue: *GridRepairQueue,
+            block_data: Grid.BlockPtrConst,
+            progress: *FaultProgress.TableContent,
+        ) error{Busy}!void {
+            assert(queue.checkpoint_progress == null);
+            assert(queue.grid.canceling == null);
+            assert(progress.table.content_blocks_written < progress.table.content_blocks_total.?);
+            assert(!progress.table.content_blocks_received.isSet(progress.index));
+
+            {
+                const table_index = queue.faulty_tables.index(progress.table);
+                const index_block = queue.faulty_table_blocks[table_index];
+                const index_schema = schema.TableIndex.from(index_block);
+                const content_block_header = schema.header_from_block(block_data);
+                const content_block_id = index_schema.content_block(index_block, progress.index);
+                assert(content_block_id.block_address == content_block_header.op);
+                assert(content_block_id.block_checksum == content_block_header.checksum);
+                assert(content_block_id.block_type ==
+                    BlockType.from(content_block_header.operation));
+            }
+
+            try queue.repair_block(block_data);
+
+            progress.table.content_blocks_received.set(progress.index);
+        }
+
+        fn repair_block(
+            queue: *GridRepairQueue,
+            block_data: Grid.BlockPtrConst,
+        ) error{Busy}!void {
+            assert(queue.checkpoint_progress == null);
+            assert(queue.grid.canceling == null);
+
+            const write = queue.writes.acquire() orelse return error.Busy;
+            const write_index = queue.writes.index(write);
+
+            const block_header = schema.header_from_block(block_data);
+            stdx.copy_disjoint(.inexact, u8, queue.write_blocks[write_index], block_data);
+            write.* = .{ .queue = queue, .checksum = block_header.checksum };
+
+            queue.grid.write_block(
+                repair_write_block_callback,
+                &write.write,
+                &queue.write_blocks[write_index],
+                .repair,
+            );
+        }
+
+        fn repair_write_block_callback(grid_write: *Grid.Write) void {
+            const write = @fieldParentPtr(Write, "write", grid_write);
+            const queue = write.queue;
+
+            if (queue.grid.canceling) |_| return;
+
+            const fault_index = queue.faulty_blocks.getIndex(grid_write.address).?;
+            const fault_address = queue.faulty_blocks.entries.items(.key)[fault_index];
+            const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
+            assert(fault.received);
+            assert(fault.checksum == write.checksum);
+            assert(!queue.grid.superblock.free_set.is_free(fault_address));
+
+            switch (fault.progress) {
+                .block => queue.repair_single_block_callback(write),
+                .table_index => |*progress| queue.repair_table_index_callback(write, progress),
+                .table_content => |*progress| queue.repair_table_content_callback(write, progress),
+            }
+            queue.release_fault(fault_index);
+        }
+
+        fn repair_single_block_callback(queue: *GridRepairQueue, write: *Write) void {
+            assert(queue.grid.canceling == null);
+            maybe(queue.checkpoint_progress == null);
+
+            queue.release_write(write);
+        }
+
+        fn repair_table_index_callback(
+            queue: *GridRepairQueue,
+            write: *Write,
+            progress: *FaultProgress.TableIndex,
+        ) void {
+            assert(queue.grid.canceling == null);
+            maybe(queue.checkpoint_progress == null);
+
+            const table: *FaultyTable = progress.table;
+            assert(table.content_blocks_total.? > 0);
+            assert(table.content_blocks_total.? == table.content_blocks_written);
+            assert(table.content_blocks_total.? == table.content_blocks_received.count());
+
+            queue.faulty_tables.release(table);
+            queue.release_write(write);
+        }
+
+        fn repair_table_content_callback(
+            queue: *GridRepairQueue,
+            write: *Write,
+            progress: *FaultProgress.TableContent,
+        ) void {
+            assert(queue.grid.canceling == null);
+            maybe(queue.checkpoint_progress == null);
+
+            const table: *FaultyTable = progress.table;
+            assert(table.content_blocks_written < table.content_blocks_total.?);
+            assert(table.content_blocks_received.isSet(progress.index));
+            assert(table.content_blocks_received.count() <= table.content_blocks_total.?);
+            assert(table.content_blocks_received.count() > table.content_blocks_written);
+
+            table.content_blocks_written += 1;
+            if (table.content_blocks_written == table.content_blocks_total.?) {
+                write.* = .{ .queue = queue, .checksum = table.index_checksum };
+
+                queue.grid.write_block(
+                    repair_write_block_callback,
+                    &write.write,
+                    &queue.faulty_table_blocks[queue.faulty_tables.index(table)],
+                    .repair,
+                );
+            } else {
+                queue.release_write(write);
+            }
+        }
+
+        fn release_fault(queue: *GridRepairQueue, fault_index: usize) void {
             assert(queue.checkpoint_progress == null);
             assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
 
@@ -244,175 +461,10 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             }
         }
 
-        /// error.Busy: The block is faulty and needs repair, but the queue is too busy right now.
-        /// error.Clean: The block is not faulty; no need to repair it.
-        pub fn repair(
-            queue: *GridRepairQueue,
-            block_data: Grid.BlockPtrConst,
-        ) error{Canceling, Busy, Clean}!void {
-            assert(queue.checkpoint_progress == null);
-
-            if (queue.grid.canceling) |_| return error.Canceling;
-
-            const block_header = schema.header_from_block(block_data);
-            const fault_index =
-                queue.faulty_blocks.getIndex(block_header.op) orelse return error.Clean;
-
-            const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
-            if (fault.checksum != block_header.checksum) return error.Clean;
-            if (fault.received) return error.Clean;
-
-            switch (fault.progress) {
-                .block => try queue.repair_write_block(block_data),
-                .table_index => |*progress| queue.repair_table_index(block_data, progress),
-                .table_content => |*progress| try queue.repair_table_content(block_data, progress),
-            }
-            fault.received = true;
-        }
-
-        fn repair_table_index(
-            queue: *GridRepairQueue,
-            block_data: Grid.BlockPtrConst,
-            progress: *FaultProgress.TableIndex,
-        ) void {
-            assert(queue.checkpoint_progress == null);
-            assert(queue.grid.canceling == null);
-            assert(progress.table.content_blocks_total == null);
-            assert(progress.table.content_blocks_received.count() == 0);
-
-            const block_header = schema.header_from_block(block_data);
-            assert(block_header.checksum == progress.table.index_checksum);
-            assert(BlockType.from(block_header.operation) == .index);
-
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                queue.faulty_table_blocks[queue.faulty_tables.index(progress.table)],
-                block_data[0..block_header.size],
-            );
-
-            const index_schema = schema.TableIndex.from(block_data);
-            progress.table.content_blocks_total = index_schema.content_blocks_used(block_data);
-
-            var content_block_index: usize = 0;
-            while (content_block_index < progress.table.content_blocks_total.?)
-                : (content_block_index += 1)
-            {
-                const content_block_id =
-                    index_schema.content_block(block_data, content_block_index);
-                const content_block_fault =
-                    queue.faulty_blocks.getOrPutAssumeCapacity(content_block_id.block_address);
-
-                if (content_block_fault.found_existing) {
-                    assert(content_block_fault.value_ptr.progress == .block);
-                    assert(content_block_fault.value_ptr.checksum ==
-                        content_block_id.block_checksum);
-
-                    content_block_fault.value_ptr.progress = .{ .table_content = progress.table };
-                } else {
-                    content_block_fault.value_ptr.* = .{
-                        .checksum = content_block_id.block_checksum,
-                        .progress = .{ .table_content = progress.table },
-                    };
-                }
-            }
-        }
-
-        fn repair_table_content(
-            queue: *GridRepairQueue,
-            block_data: Grid.BlockPtrConst,
-            progress: *FaultProgress.TableContent,
-        ) error{Busy}!void {
-            assert(queue.checkpoint_progress == null);
-            assert(queue.grid.canceling == null);
-            assert(progress.table.content_blocks_written < progress.table.content_blocks_total.?);
-            assert(!progress.table.content_blocks_received.isSet(progress.index));
-
-            {
-                const index_block = queue.faulty_table_blocks[queue.tables.index(progress.table)];
-                const index_schema = schema.TableIndex.from(index_block);
-                const content_block_header = schema.header_from_block(block_data);
-                const content_block_id = table_index_schema.content_block(progress.index);
-                assert(content_block_id.block_address == content_block_header.op);
-                assert(content_block_id.block_checksum == content_block_header.checksum);
-                assert(content_block_id.block_type ==
-                    BlockType.from(content_block_header.operation));
-            }
-
-            try queue.repair_write_block(block_data);
-
-            progress.table.content_blocks_received.set(progress.index);
-        }
-
-        fn repair_write_block(
-            queue: *GridRepairQueue,
-            block_data: Grid.BlockPtrConst,
-        ) error{Busy}!void {
-            assert(queue.checkpoint_progress == null);
+        fn release_write(queue: *GridRepairQueue, write: *Write) void {
             assert(queue.grid.canceling == null);
 
-            const write = queue.writes.acquire() orelse return error.Busy;
             const write_index = queue.writes.index(write);
-
-            stdx.copy_disjoint(.inexact, u8, queue.write_blocks[write_index], block_data);
-            write.* = .{ .queue = queue, .checksum = block_header.checksum };
-
-            queue.grid.write_block(
-                repair_write_block_callback,
-                &write.write,
-                &queue.write_blocks[write_index],
-                .repair,
-            );
-        }
-
-        fn repair_write_block_callback(grid_write: *Grid.Write) void {
-            const write = @fieldParentPtr(Write, "write", grid_write);
-            const write_index = write.queue.writes.index(write);
-            const queue = write.queue;
-
-            if (queue.grid.canceling) |_| return;
-
-            const fault_index = queue.faulty_blocks.getIndex(grid_write.address).?;
-            const fault_address = queue.faulty_blocks.entries.items(.key)[fault_index];
-            const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
-            assert(fault.received);
-            assert(fault.checksum == write.checksum);
-            assert(!queue.grid.superblock.free_set.is_free(fault_address));
-
-            queue.queue_remove(fault_index);
-
-            switch (fault.progress) {
-                .block => {},
-                .table_index => |progress| {
-                    const table: *FaultyTable = table_index_progress.table;
-                    assert(table.content_blocks_total.? > 0);
-                    assert(table.content_blocks_total.? == table.content_blocks_received.count());
-                    assert(table.content_blocks_total.? == table.content_blocks_written);
-
-                    queue.faulty_tables.release(table);
-                },
-                .table_content => |progress| {
-                    const table: *FaultyTable = table_index_progress.table;
-                    assert(table.content_blocks_written < table.content_blocks_total.?);
-                    assert(table.content_blocks_received.isSet(progress.index));
-                    assert(table.content_blocks_received.count() <= table.content_blocks_total.?);
-                    assert(table.content_blocks_received.count() > table.content_blocks_written);
-
-                    table.content_blocks_written += 1;
-                    if (table.content_blocks_written == table.content_blocks_total.?) {
-                        write.* = .{ .queue = queue, .checksum = table.index_checksum };
-
-                        queue.grid.write_block(
-                            repair_write_block_callback,
-                            &write.write,
-                            &queue.faulty_table_blocks[queue.faulty_tables.index(table)],
-                            .repair,
-                        );
-                        return;
-                    }
-                },
-            }
-
             queue.writes.release(write);
 
             if (queue.checkpoint_progress) |*checkpoint_progress| {
@@ -425,6 +477,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
         pub fn cancel(queue: *GridRepairQueue) void {
             assert(queue.checkpoint_progress == null);
+            assert(queue.grid.canceling == null);
 
             queue.faulty_blocks.clearRetainingCapacity();
             queue.faulty_blocks_repair_index = 0;
@@ -452,7 +505,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 if (queue.grid.superblock.free_set.is_released(fault_entry.key_ptr.*)) {
                     faulty_blocks.index -= 1;
                     faulty_blocks.len -= 1;
-                    queue.queue_remove(faulty_blocks.index);
+                    queue.release_fault(faulty_blocks.index);
                 }
             }
 

@@ -13,6 +13,9 @@ const StateMachineType = @import("../testing/state_machine.zig").StateMachineTyp
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
+const Storage = @import("../testing/storage.zig").Storage;
+const StorageArea = @import("../testing/storage.zig").Area;
+const schema = @import("../lsm/schema.zig");
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = checkpoint_1_trigger - constants.lsm_batch_multiple;
@@ -1010,8 +1013,62 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 }
 
-// TODO use corruption to verify that sync is proactive
-//test "Cluster: sync: partition, lag, sync (entire )" {
+test "Cluster: scrub: background scrubber, fully corrupt grid" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+
+    var a0 = t.replica(.A0);
+    var b2 = t.replica(.B2);
+
+    // Corrupt the entirety of B2's grid.
+    // Disable read/write faults so that we can use `storage.faults` to track repairs.
+    b2.stop();
+    b2.storage().options.read_fault_probability = 0;
+    b2.storage().options.write_fault_probability = 0;
+    {
+        var address: u64 = 1;
+        while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+            b2.corrupt(.{ .grid_block = address });
+        }
+    }
+    try b2.open();
+
+    // Loop until B2's grid repair stops making progress.
+    var faults_before = b2.storage().faults.count();
+    while (true) {
+        t.run();
+
+        var faults_after = b2.storage().faults.count();
+        assert(faults_after <= faults_before);
+        if (faults_after == faults_before) break;
+
+        faults_before = faults_after;
+    }
+
+    // Verify that B2 repaired all blocks.
+    var address: u64 = 1;
+    while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+        if (a0.free_set().is_free(address)) {
+            assert(b2.free_set().is_free(address));
+            assert(b2.storage().area_faulty(.{ .grid = .{ .address = address } }));
+        } else {
+            assert(!b2.free_set().is_free(address));
+            assert(!b2.storage().area_faulty(.{ .grid = .{ .address = address } }));
+
+            const block_scrubbed = b2.storage().area_memory(.{ .grid = .{ .address = address } });
+            const block_original = a0.storage().area_memory(.{ .grid = .{ .address = address } });
+
+            try expectEqual(
+                std.mem.bytesToValue(vsr.Header, block_original[0..@sizeOf(vsr.Header)]),
+                std.mem.bytesToValue(vsr.Header, block_scrubbed[0..@sizeOf(vsr.Header)]),
+            );
+        }
+    }
+}
 
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
@@ -1375,6 +1432,16 @@ const TestReplicas = struct {
     pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
         assert(t.replicas.len == 1);
         return t.cluster.replicas[t.replicas.get(0)].view_headers.array.constSlice();
+    }
+
+    pub fn free_set(t: *const TestReplicas) *const Cluster.Replica.SuperBlock.FreeSet {
+        assert(t.replicas.len == 1);
+        return &t.cluster.replicas[t.replicas.get(0)].superblock.free_set;
+    }
+
+    pub fn storage(t: *const TestReplicas) *Storage {
+        assert(t.replicas.len == 1);
+        return &t.cluster.storages[t.replicas.get(0)];
     }
 
     /// Simulate a storage determinism bug.
