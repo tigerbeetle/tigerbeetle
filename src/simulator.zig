@@ -298,7 +298,6 @@ pub fn main() !void {
             output.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (try simulator.core_missing_blocks()) |blocks| {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
-            unreachable;
         } else {
             output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
@@ -426,8 +425,8 @@ pub const Simulator = struct {
 
                 if (replica.journal.faulty.count > 0) return false;
                 if (replica.client_replies.faulty.count() > 0) return false;
-                if (replica.grid_scrubber.mode == .fast) return false;
-                if (replica.grid_repair_queue.syncing()) return false;
+                if (replica.grid_repair_tables.executing() > 0) return false;
+                if (replica.sync_tables) |_| return false;
             }
         }
 
@@ -557,19 +556,22 @@ pub const Simulator = struct {
         var blocks_missing = std.AutoHashMap(u128, u64).init(simulator.allocator);
         defer blocks_missing.deinit();
 
-        // Find all blocks that any replica in the core is missing:
+        // Find all blocks that any replica in the core is missing.
         for (simulator.cluster.replicas) |replica| {
             if (!simulator.core.isSet(replica.replica)) continue;
 
+            const storage = &simulator.cluster.storages[replica.replica];
             var fault_iterator = replica.grid.read_remote_queue.peek();
             while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
                 try blocks_missing.put(faulty_read.checksum, faulty_read.address);
 
+
                 log_simulator.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} (remote)", .{
+                    "missing address={} checksum={} corrupt={} (remote)", .{
                     replica.replica,
                     faulty_read.address,
                     faulty_read.checksum,
+                    storage.area_faulty(.{ .grid = .{ .address = faulty_read.address } }),
                 });
             }
 
@@ -579,10 +581,11 @@ pub const Simulator = struct {
                 try blocks_missing.put(fault.value_ptr.checksum, fault.key_ptr.*);
 
                 log_simulator.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} (repair)", .{
+                    "missing address={} checksum={} corrupt={} (repair)", .{
                     replica.replica,
                     fault.key_ptr.*,
                     fault.value_ptr.checksum,
+                    storage.area_faulty(.{ .grid = .{ .address = fault.key_ptr.* } }),
                 });
             }
         }
@@ -595,11 +598,11 @@ pub const Simulator = struct {
             const block_address = block_missing.value_ptr.*;
 
             for (simulator.cluster.replicas) |replica| {
-                const storage = simulator.cluster.storages[replica.replica];
+                const storage = &simulator.cluster.storages[replica.replica];
 
                 if (!simulator.core.isSet(replica.replica)) continue;
                 if (replica.standby()) continue;
-                if (storage.area_faulty(.{ .grid = .{ .address = block_address }, })) continue;
+                if (storage.area_faulty(.{ .grid = .{ .address = block_address } })) continue;
 
                 const block = storage.grid_block(block_address) orelse continue;
                 const block_header = schema.header_from_block(block);

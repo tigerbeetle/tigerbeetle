@@ -42,6 +42,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
             /// These fields are also on the Grid.ReadRepair, but we will need them even after the
             /// Grid's read is released. (See `reads_faulty`).
+            /// TODO unnecessary; remove
             id: BlockId,
 
             /// When true: If the read completes and is corrupt, the block will *not* be added to
@@ -67,42 +68,29 @@ pub fn GridScrubberType(comptime Forest: type) type {
         /// - must be repaired.
         reads_faulty: ReadSet = ReadSet.initEmpty(),
 
-        mode: union(enum) {
-            /// Scrubbing is disabled.
-            stop,
-
-            /// Scrub the entire forest slowly in the background.
-            /// TODO Start each replica scrubbing from a (different) random offset.
-            slow: union(enum) {
-                init,
-                done,
-                manifest_log: struct {
-                    index: usize = 0,
-                },
-                table_index: struct {
-                    tables: ForestTableIterator,
-                },
-                table_content: struct {
-                    tables: ForestTableIterator,
-                    index_checksum: u128,
-                    index_address: u64,
-                    /// Points to `tour_index_block` once the index block has been read.
-                    index_block: ?Grid.BlockPtr = null,
-                    content_index: usize = 0,
-                },
+        /// When null: Scrubbing is disabled.
+        /// When non-null: Scrub the entire forest slowly in the background.
+        /// TODO Start each replica scrubbing from a (different) random offset.
+        tour: ?union(enum) {
+            init,
+            done,
+            manifest_log: struct {
+                index: usize = 0,
             },
-
-            /// Scrub index blocks quickly to identify missing tables.
-            /// Only check tables created within the (inclusive) snapshot range.
-            /// (Table "creation" is according to the `TableInfo.snapshot_min`).
-            fast: struct {
-                snapshot_min: u64,
-                snapshot_max: u64,
+            table_index: struct {
                 tables: ForestTableIterator,
+            },
+            table_content: struct {
+                tables: ForestTableIterator,
+                index_checksum: u128,
+                index_address: u64,
+                /// Points to `tour_index_block` once the index block has been read.
+                index_block: ?Grid.BlockPtr = null,
+                content_index: usize = 0,
             },
         },
 
-        /// Contains a table index block when mode=slow.table_content.
+        /// Contains a table index block when tour=table_content.
         tour_index_block: Grid.BlockPtr,
 
         pub fn init(
@@ -125,7 +113,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 .forest = forest,
                 .options = options,
                 .read_blocks = read_blocks,
-                .mode = .stop,
+                .tour = null,
                 .tour_index_block = tour_index_block,
             };
         }
@@ -137,58 +125,44 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.* = undefined;
         }
 
-        pub fn open(scrubber: *GridScrubber) void {
-            assert(scrubber.mode == .stop);
+        pub fn start(scrubber: *GridScrubber) void {
+            assert(scrubber.tour == null);
             assert(scrubber.forest.grid.superblock.opened);
 
-            const superblock: *const SuperBlock = scrubber.forest.grid.superblock;
-            const commit_unsynced_min = superblock.working.vsr_state.commit_unsynced_min;
-            const commit_unsynced_max = superblock.working.vsr_state.commit_unsynced_max;
-            assert(commit_unsynced_max >= commit_unsynced_min);
+            scrubber.tour = .init;
 
-            if (commit_unsynced_max == 0) {
-                scrubber.mode = .{ .slow = .init };
-            } else {
-                // State sync ran, and we must repair all of the tables we missed.
-                scrubber.mode = .{ .fast = .{
-                    .snapshot_min = snapshot_from_op(commit_unsynced_min),
-                    .snapshot_max = snapshot_from_op(commit_unsynced_max),
-                    .tables = .{},
-                } };
-            }
-
-            log.debug("{}: open: {s}", .{scrubber.options.replica_index, @tagName(scrubber.mode)});
+            log.debug("{}: start", .{scrubber.options.replica_index});
         }
 
-        pub fn sync(scrubber: *GridScrubber) void {
-            assert(scrubber.forest.grid.superblock.opened);
+        pub fn stop(scrubber: *GridScrubber) void {
+            maybe(scrubber.tour == null);
 
-            const superblock: *const SuperBlock = scrubber.forest.grid.superblock;
-            const commit_unsynced_min = superblock.working.vsr_state.commit_unsynced_min;
-            const commit_unsynced_max = superblock.working.vsr_state.commit_unsynced_max;
-            assert(commit_unsynced_min > 0);
-            assert(commit_unsynced_max > 0);
+            var reads = scrubber.reads.iterate();
+            while (reads.next()) |read| scrubber.cancel_read(read);
 
-            scrubber.mode = .{ .fast = .{
-                .snapshot_min = snapshot_from_op(commit_unsynced_min),
-                .snapshot_max = snapshot_from_op(commit_unsynced_max),
-            } };
+            scrubber.tour = null;
         }
 
         pub fn checkpoint(scrubber: *GridScrubber) void {
             var reads = scrubber.reads.iterate();
             while (reads.next()) |read| {
+                assert(!scrubber.superblock.free_set.is_free(read.id.block_address));
+
                 if (scrubber.superblock.free_set.is_released(read.id.block_address)) {
                     scrubber.cancel_read(read);
                 }
             }
-        }
 
-        pub fn stop(scrubber: *GridScrubber) void {
-            var reads = scrubber.reads.iterate();
-            while (reads.next()) |read| scrubber.cancel_read(read);
+            if (scrubber.tour != null and
+                scrubber.tour.? == .table_content)
+            {
+                const index_address = scrubber.tour.?.table_content.index_address;
+                assert(!scrubber.superblock.free_set.is_free(index_address));
 
-            scrubber.mode = .stop;
+                if (scrubber.superblock.free_set.is_released(index_address)) {
+                    scrubber.tour_skip_content();
+                }
+            }
         }
 
         fn cancel_read(scrubber: *GridScrubber, read: *Read) void {
@@ -210,33 +184,19 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         pub fn read_next(scrubber: *GridScrubber) enum { read, busy, done } {
-            const reads_max = switch (scrubber.mode) {
-                .stop => return .done,
-                .slow => 1,
-                .fast => constants.grid_scrubber_reads_max,
-            };
+            assert(scrubber.tour != null);
 
-            if (scrubber.reads.executing() >= reads_max) {
-                return .busy;
-            }
+            if (scrubber.reads.available() == 0) return .busy;
 
             const block_id = scrubber.tour_next() orelse {
                 if (scrubber.reads.executing() > 0) return .busy;
 
                 assert(scrubber.reads_faulty.count() == 0);
+                assert(scrubber.tour.? == .done);
 
-                switch (scrubber.mode) {
-                    .stop => {},
-                    .slow => |*slow| assert(slow.* == .done),
-                    .fast => |*fast| assert(fast.tables.next(scrubber.forest) == null),
-                }
+                log.debug("{}: read_next: completed cycle", .{ scrubber.options.replica_index });
 
-                log.debug("{}: read_next: completed mode={s}", .{
-                    scrubber.options.replica_index,
-                    @tagName(scrubber.mode),
-                });
-
-                scrubber.mode = .{ .slow = .init };
+                scrubber.tour = .init;
                 return .done;
             };
 
@@ -299,17 +259,16 @@ pub fn GridScrubberType(comptime Forest: type) type {
                     scrubber.reads_faulty.set(read_index);
                 }
 
-                if (scrubber.mode == .slow and
-                    scrubber.mode.slow == .table_content and
-                    scrubber.mode.slow.table_content.index_block == null and
-                    scrubber.mode.slow.table_content.index_checksum == read_id.block_checksum and
-                    scrubber.mode.slow.table_content.index_address == read_id.block_address)
+                if (scrubber.tour.? == .table_content and
+                    scrubber.tour.?.table_content.index_block == null and
+                    scrubber.tour.?.table_content.index_checksum == read_id.block_checksum and
+                    scrubber.tour.?.table_content.index_address == read_id.block_address)
                 {
-                    assert(scrubber.mode.slow.table_content.content_index == 0);
+                    assert(scrubber.tour.?.table_content.content_index == 0);
 
                     if (result == .valid) {
                         stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, read_block);
-                        scrubber.mode.slow.table_content.index_block = scrubber.tour_index_block;
+                        scrubber.tour.?.table_content.index_block = scrubber.tour_index_block;
                     } else {
                         scrubber.tour_skip_content();
                     }
@@ -332,26 +291,19 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         fn tour_next(scrubber: *GridScrubber) ?BlockId {
-            switch (scrubber.mode) {
-                .stop => unreachable,
-                .slow => return scrubber.tour_next_slow(),
-                .fast => return scrubber.tour_next_fast(),
-            }
-        }
+            assert(scrubber.tour != null);
 
-        fn tour_next_slow(scrubber: *GridScrubber) ?BlockId {
-            const mode = &scrubber.mode.slow;
-
-            if (mode.* == .init) {
-                mode.* = .{ .table_index = .{ .tables = ForestTableIterator{} } };
+            const tour = &scrubber.tour.?;
+            if (tour.* == .init) {
+                tour.* = .{ .table_index = .{ .tables = ForestTableIterator{} } };
             }
 
-            if (mode.* == .table_content) {
-                const index_block = mode.table_content.index_block orelse return null;
+            if (tour.* == .table_content) {
+                const index_block = tour.table_content.index_block orelse return null;
                 const index_schema = schema.TableIndex.from(index_block);
-                const content_index = mode.table_content.content_index;
+                const content_index = tour.table_content.content_index;
                 if (content_index < index_schema.content_blocks_used(scrubber.tour_index_block)) {
-                    mode.table_content.content_index += 1;
+                    tour.table_content.content_index += 1;
 
                     const content_block =
                         index_schema.content_block(scrubber.tour_index_block, content_index);
@@ -361,13 +313,13 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = content_block.block_type,
                     };
                 } else {
-                    const tables = mode.table_content.tables;
-                    mode.* = .{ .table_index = .{ .tables = tables } };
+                    const tables = tour.table_content.tables;
+                    tour.* = .{ .table_index = .{ .tables = tables } };
                 }
             }
 
-            if (mode.* == .table_index) {
-                if (mode.table_index.tables.next(scrubber.forest)) |table_info| {
+            if (tour.* == .table_index) {
+                if (tour.table_index.tables.next(scrubber.forest)) |table_info| {
                     if (Forest.Storage == TestStorage) {
                         TestStorage.verify.check_table(
                             scrubber.forest.grid.superblock.storage,
@@ -376,8 +328,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         );
                     }
 
-                    const tables = mode.table_index.tables;
-                    mode.* = .{ .table_content = .{
+                    const tables = tour.table_index.tables;
+                    tour.* = .{ .table_content = .{
                         .index_checksum = table_info.checksum,
                         .index_address = table_info.address,
                         .tables = tables,
@@ -389,14 +341,14 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = .index,
                     };
                 } else {
-                    mode.* = .{ .manifest_log = .{} };
+                    tour.* = .{ .manifest_log = .{} };
                 }
             }
 
-            if (mode.* == .manifest_log) {
-                if (mode.manifest_log.index < scrubber.superblock.manifest.count) {
-                    const index = mode.manifest_log.index;
-                    mode.manifest_log.index += 1;
+            if (tour.* == .manifest_log) {
+                if (tour.manifest_log.index < scrubber.superblock.manifest.count_checkpointed) {
+                    const index = tour.manifest_log.index;
+                    tour.manifest_log.index += 1;
 
                     return BlockId{
                         .block_checksum = scrubber.superblock.manifest.checksums[index],
@@ -404,148 +356,22 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = .manifest,
                     };
                 } else {
-                    // The index may be beyond `manifest.count` due to a checkpoint which removed
-                    // blocks.
-                    mode.* = .done;
+                    // The index may be beyond `manifest.count_checkpointed` due to a checkpoint
+                    // which removed blocks.
+                    tour.* = .done;
                 }
             }
 
-            assert(mode.* == .done);
-            return null;
-        }
-
-        fn tour_next_fast(scrubber: *GridScrubber) ?BlockId {
-            while (scrubber.mode.fast.tables.next(scrubber.forest)) |table_info| {
-                if (scrubber.mode.fast.snapshot_min <= table_info.snapshot_min and
-                    scrubber.mode.fast.snapshot_max >= table_info.snapshot_min)
-                {
-                    return BlockId{
-                        .block_checksum = table_info.checksum,
-                        .block_address = table_info.address,
-                        .block_type = .index,
-                    };
-                } else {
-                    if (Forest.Storage == TestStorage) {
-                        TestStorage.verify.check_table(
-                            scrubber.forest.grid.superblock.storage,
-                            table_info.address,
-                            table_info.checksum,
-                        );
-                    }
-                }
-            }
+            assert(tour.* == .done);
             return null;
         }
 
         fn tour_skip_content(scrubber: *GridScrubber) void {
-            assert(scrubber.mode == .slow);
-            assert(scrubber.mode.slow == .table_content);
-            assert(scrubber.mode.slow.table_content.index_block == null);
-            assert(scrubber.mode.slow.table_content.content_index == 0);
+            assert(scrubber.tour != null);
+            assert(scrubber.tour.? == .table_content);
 
-            const tables = scrubber.mode.slow.table_content.tables;
-            scrubber.mode = .{ .slow = .{ .table_index = .{ .tables = tables } } };
+            const tables = scrubber.tour.?.table_content.tables;
+            scrubber.tour = .{ .table_index = .{ .tables = tables } };
         }
     };
 }
-
-        //fn tour_next(scrubber: *GridScrubber) ?BlockId {
-        //    assert(scrubber.mode != .stop);
-        //
-        //    if (scrubber.tour == .init) {
-        //        scrubber.tour = .{ .table_index = .{ .tables = ForestTableIterator{} } };
-        //    }
-        //
-        //    if (scrubber.tour == .table_content) {
-        //        assert(scrubber.mode.config().check_table_content);
-        //
-        //        const index_block = scrubber.tour.table_content.index_block orelse return null;
-        //        const index_schema = schema.TableIndex.from(index_block);
-        //        const content_index = scrubber.tour.table_content.content_index;
-        //        if (content_index < index_schema.content_blocks_used(scrubber.tour_index_block)) {
-        //            scrubber.tour.table_content.content_index += 1;
-        //
-        //            const content_block =
-        //                index_schema.content_block(scrubber.tour_index_block, content_index);
-        //            return BlockId{
-        //                .block_checksum = content_block.block_checksum,
-        //                .block_address = content_block.block_address,
-        //                .block_type = content_block.block_type,
-        //            };
-        //        } else {
-        //            const tables = scrubber.tour.table_content.tables;
-        //            scrubber.tour = .{ .table_index = .{ .tables = tables } };
-        //        }
-        //    }
-        //
-        //    if (scrubber.tour == .table_index) {
-        //        const table_info = while ( // TODO move loop into .fast
-        //            scrubber.tour.table_index.tables.next(scrubber.forest)
-        //        ) |table_info| {
-        //            switch (scrubber.mode) {
-        //                .stop => unreachable,
-        //                .slow => break table_info,
-        //                .fast => |sync| {
-        //                    if (sync.snapshot_min <= table_info.snapshot_min and
-        //                        sync.snapshot_max >= table_info.snapshot_min)
-        //                    {
-        //                        //std.debug.print("SYNC:RANGE: {} ... {} ({s})\n", .{sync.snapshot_min, sync.snapshot_max, @tagName(scrubber.mode)});
-        //                        //std.debug.print("SYNC:FOUND: {}\n", .{table_info});
-        //                        break table_info;
-        //                    } else {
-        //                        //std.debug.print("SKIP:RANGE: {} ... {} ({s})\n", .{sync.snapshot_min, sync.snapshot_max, @tagName(scrubber.mode)});
-        //                        //std.debug.print("SKIP:FOUND: {}\n", .{table_info});
-        //                        if (Forest.Storage == TestStorage) {
-        //                            TestStorage.verify.check_table(
-        //                                scrubber.forest.grid.superblock.storage,
-        //                                table_info.address,
-        //                                table_info.checksum,
-        //                            );
-        //                        }
-        //                    }
-        //                }
-        //            }
-        //        } else null;
-        //
-        //        if (scrubber.mode.config().check_table_index and table_info != null) {
-        //            if (scrubber.mode.config().check_table_content) {
-        //                const tables = scrubber.tour.table_index.tables;
-        //                scrubber.tour = .{ .table_content = .{
-        //                    .index_checksum = table_info.?.checksum,
-        //                    .index_address = table_info.?.address,
-        //                    .tables = tables,
-        //                } };
-        //            }
-        //
-        //            return BlockId{
-        //                .block_checksum = table_info.?.checksum,
-        //                .block_address = table_info.?.address,
-        //                .block_type = .index,
-        //            };
-        //        } else {
-        //            scrubber.tour = .{ .manifest_log = .{} };
-        //        }
-        //    }
-        //
-        //    if (scrubber.tour == .manifest_log) {
-        //        if (scrubber.mode.config().check_manifest_log and
-        //            scrubber.tour.manifest_log.index < scrubber.superblock.manifest.count)
-        //        {
-        //            const index = scrubber.tour.manifest_log.index;
-        //            scrubber.tour.manifest_log.index += 1;
-        //
-        //            return BlockId{
-        //                .block_checksum = scrubber.superblock.manifest.checksums[index],
-        //                .block_address = scrubber.superblock.manifest.addresses[index],
-        //                .block_type = .manifest,
-        //            };
-        //        } else {
-        //            // The index may be beyond `manifest.count` due to a checkpoint which removed
-        //            // blocks.
-        //            scrubber.tour = .done;
-        //        }
-        //    }
-        //
-        //    assert(scrubber.tour == .done);
-        //    return null;
-        //}

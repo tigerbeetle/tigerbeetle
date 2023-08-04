@@ -16,6 +16,10 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 const GridScrubberType = @import("./grid_scrubber.zig").GridScrubberType;
+const snapshot_from_op = @import("../lsm/manifest.zig").snapshot_from_op;
+const ForestTableIteratorType =
+    @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
+const TestStorage = @import("../testing/storage.zig").Storage;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -132,6 +136,7 @@ pub fn ReplicaType(
         const Journal = vsr.JournalType(Self, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
+        const ForestTableIterator = ForestTableIteratorType(StateMachine.Forest);
 
         const BlockRead = struct {
             read: Grid.ReadRepair,
@@ -140,9 +145,14 @@ pub fn ReplicaType(
             message: *Message,
         };
 
-        const BlockWrite = struct {
-            write: Grid.Write,
+        //const BlockWrite = struct {
+        //    write: Grid.Write,
+        //    replica: *Self,
+        //};
+
+        const RepairTable = struct {
             replica: *Self,
+            table: GridRepairQueue.RepairTable,
         };
 
         /// We use this allocator during open/init and then disable it.
@@ -218,6 +228,7 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_repair_queue: GridRepairQueue,
+        grid_repair_tables: IOPS(RepairTable, constants.grid_repair_tables_max) = .{},
         grid_scrubber: GridScrubber,
         grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
         grid_read_fault_next_tick: Grid.NextTick = undefined,
@@ -229,6 +240,7 @@ pub fn ReplicaType(
         /// Kept up-to-date during every status, while syncing or healthy.
         sync_target_max: ?SyncTarget = null,
         sync_target_quorum: SyncTargetQuorum = .{},
+        sync_tables: ?ForestTableIterator = null,
 
         /// The current view.
         /// Initialized from the superblock's VSRState.
@@ -674,25 +686,19 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
-            assert(self.grid_scrubber.mode == .stop);
+            assert(self.sync_tables == null);
+            assert(self.grid_scrubber.tour == null);
 
-            log.debug("{}: state_machine_open_callback", .{self.replica});
-
-            self.grid_scrubber.open();
             self.state_machine_opened = true;
 
-            // We have finished state sync, but the replies are (potentially) not yet repaired.
-            if (self.superblock.working.vsr_state.commit_unsynced_max != 0) {
-                var slot: usize = 0;
-                while (slot < constants.clients_max) : (slot += 1) {
-                    const entry_free = self.superblock.client_sessions.entries_free.isSet(slot);
-                    const entry_size = self.superblock.client_sessions.entries[slot].header.size;
+            if (self.superblock.working.vsr_state.commit_unsynced_max > 0) {
+                log.debug("{}: state_machine_open_callback: sync", .{self.replica});
 
-                    self.client_replies.faulty.setValue(
-                        slot,
-                        !entry_free and entry_size > @sizeOf(Header),
-                    );
-                }
+                self.sync_content();
+            } else {
+                log.debug("{}: state_machine_open_callback: scrub", .{self.replica});
+
+                self.grid_scrubber.start();
             }
 
             if (self.solo()) {
@@ -1445,6 +1451,14 @@ pub fn ReplicaType(
             assert(message.header.command == .reply);
             assert(message.header.replica < self.replica_count);
 
+            if (self.syncing != .idle) {
+                log.debug("{}: on_reply: ignoring, syncing (sync_status={s})", .{
+                    self.replica,
+                    @tagName(self.syncing),
+                });
+                return;
+            }
+
             const entry = self.client_sessions().get(message.header.client) orelse {
                 log.debug("{}: on_reply: ignoring, client not in table (client={} request={})", .{
                     self.replica,
@@ -2161,8 +2175,10 @@ pub fn ReplicaType(
                     reply_header.checksum,
                 });
 
-                if (self.client_sessions().get_slot_for_header(reply_header)) |slot| {
-                    self.client_replies.faulty.set(slot.index);
+                if (self.syncing == .idle) {
+                    if (self.client_sessions().get_slot_for_header(reply_header)) |slot| {
+                        self.client_replies.faulty.set(slot.index);
+                    }
                 }
                 return;
             };
@@ -2375,7 +2391,7 @@ pub fn ReplicaType(
 
             //const grid_fulfill = self.grid.faulty(block_address, message.header.checksum);
             const grid_fulfill = self.grid.fulfill_block(block);
-            const grid_repair = self.grid_repair_queue.receive_block(block);
+            const grid_repair = self.grid_repair_queue.repair_block(block);
                 //self.grid_repair_queue.contains(block_address, message.header.checksum);
             //    self.grid_repair_queue.repair(block) catch |err| {
             //        log.debug("{}: on_block: ignoring; grid repair queue {} " ++
@@ -2883,21 +2899,22 @@ pub fn ReplicaType(
             assert(self.grid_scrub_timeout.ticking);
 
             self.grid_scrub_timeout.reset();
-            self.grid_scrub_timeout.after = switch (self.grid_scrubber.mode) {
-                .stop => 100,
-                .fast => 100, // TODO constants?
-                .slow => std.math.clamp(
-                    @divFloor(
-                        constants.grid_scrubber_cycle_ticks,
-                        @maximum(1, self.superblock.free_set.count_acquired()),
-                    ),
-                    constants.grid_scrubber_interval_ticks_min,
-                    constants.grid_scrubber_interval_ticks_max,
+            self.grid_scrub_timeout.after = std.math.clamp(
+                @divFloor(
+                    constants.grid_scrubber_cycle_ticks,
+                    @maximum(1, self.superblock.free_set.count_acquired()),
                 ),
-            };
+                constants.grid_scrubber_interval_ticks_min,
+                constants.grid_scrubber_interval_ticks_max,
+            );
 
-            while (!self.grid_repair_queue.full()) {
+            if (self.grid_scrubber.tour == null) return;
+
+            assert(self.sync_tables == null);
+
+            while (self.grid_repair_queue.blocks_available() > 0) {
                 const fault = self.grid_scrubber.next_fault() orelse break;
+                assert(!self.superblock.free_set.is_free(fault.block_address));
 
                 log.debug("{}: on_grid_scrub_timeout: fault found: " ++
                     "block_address={} block_checksum={} block_type={s}", .{
@@ -2907,11 +2924,7 @@ pub fn ReplicaType(
                     @tagName(fault.block_type),
                 });
 
-                self.grid_repair_queue.request_block(
-                    fault.block_address,
-                    fault.block_checksum,
-                    if (fault.block_type == .index) .table else .block,
-                );
+                self.grid_repair_queue.request_block(fault.block_address, fault.block_checksum);
             }
 
             _ = self.grid_scrubber.read_next();
@@ -3590,6 +3603,7 @@ pub fn ReplicaType(
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
+            assert(self.state_machine_opened);
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
@@ -3612,8 +3626,8 @@ pub fn ReplicaType(
 
             const vsr_state_commit_unsynced: struct { min: u64, max: u64 } = unsynced: {
                 if (self.superblock.staging.vsr_state.commit_unsynced_max > 0 and
-                    (self.grid_scrubber.mode == .fast or
-                     self.grid_repair_queue.syncing() or
+                    (self.sync_tables != null or
+                     self.grid_repair_tables.executing() > 0 or
                      self.client_replies.faulty.count() > 0))
                 {
                     break :unsynced .{
@@ -3621,7 +3635,9 @@ pub fn ReplicaType(
                         .max = self.superblock.staging.vsr_state.commit_unsynced_max,
                     };
                 } else {
-                    assert(self.grid_scrubber.mode == .slow);
+                    assert(self.grid_scrubber.tour != null);
+                    assert(self.sync_tables == null);
+                    assert(self.grid_repair_tables.executing() == 0);
 
                     break :unsynced .{ .min = 0, .max = 0 };
                 }
@@ -3856,7 +3872,6 @@ pub fn ReplicaType(
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
                 const evictee = self.client_sessions().evictee();
-                //const slot = self.client_sessions().get_slot_for_client(evictee).?;
                 self.client_sessions().remove(evictee);
 
                 assert(self.client_sessions().count() == constants.clients_max - 1);
@@ -4435,6 +4450,7 @@ pub fn ReplicaType(
         fn ignore_request_message_duplicate(self: *Self, message: *const Message) bool {
             assert(self.status == .normal);
             assert(self.primary());
+            assert(self.syncing == .idle);
 
             assert(message.header.command == .request);
             assert(message.header.client > 0);
@@ -4568,6 +4584,7 @@ pub fn ReplicaType(
             destination_replica: ?u8,
         ) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(reply_header.size > @sizeOf(Header));
             assert(destination_replica == null);
 
             const reply = reply_ orelse {
@@ -4580,6 +4597,7 @@ pub fn ReplicaType(
                 return;
             };
             assert(reply.header.checksum == reply_header.checksum);
+            assert(reply.header.size > @sizeOf(Header));
 
             log.debug("{}: on_request: repeat reply (client={} request={})", .{
                 self.replica,
@@ -5411,9 +5429,9 @@ pub fn ReplicaType(
             } else if (self.client_replies.faulty.findFirstSet()) |slot| {
                 // After we have all prepares, repair replies.
                 const entry = &self.client_sessions().entries[slot];
+                assert(!self.client_sessions().entries_free.isSet(slot));
                 assert(entry.session != 0);
                 assert(entry.header.size > @sizeOf(Header));
-                assert(!self.client_sessions().entries_free.isSet(slot));
 
                 self.send_header_to_replica(self.choose_any_other_replica(), .{
                     .command = .request_reply,
@@ -7564,6 +7582,7 @@ pub fn ReplicaType(
             });
 
             self.grid_scrubber.stop();
+            self.sync_tables = null;
 
             // We learned that we are lagging behind the cluster, so we know we shouldn't actually
             // be the primary. But we can't join a new view until the view's headers are within our
@@ -7745,7 +7764,8 @@ pub fn ReplicaType(
         fn sync_cancel_grid_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(self.syncing == .canceling_grid);
-            assert(self.grid_scrubber.mode == .stop);
+            assert(self.sync_tables == null);
+            assert(self.grid_scrubber.tour == null);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -7786,11 +7806,13 @@ pub fn ReplicaType(
             assert(!self.superblock.updating(.checkpoint));
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
-            assert(self.grid_scrubber.mode == .stop);
+            assert(self.sync_tables == null);
+            assert(self.grid_scrubber.tour == null);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_pending_queue.empty());
             assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_queue.writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
@@ -7818,7 +7840,14 @@ pub fn ReplicaType(
                     self.superblock.trailer_buffer(trailer)[0..trailer_size],
                 );
             }
+            while (self.client_replies.faulty.findFirstSet()) |slot| {
+                self.client_replies.faulty.unset(slot);
+            }
             //self.sync_client_replies();
+
+            for (self.client_sessions().entries) |e, i| {
+                std.debug.print("{}: ENTRY: {}: {}\n", .{self.replica,i,e.header});
+            }
 
             self.sync_dispatch(.{ .updating_superblock = .{
                 .target = stage.target,
@@ -7831,11 +7860,13 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
             assert(self.sync_message_timeout.ticking);
-            assert(self.grid_scrubber.mode == .stop);
+            assert(self.sync_tables == null);
+            assert(self.grid_scrubber.tour == null);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_pending_queue.empty());
             assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_queue.writes.executing() == 0);
             maybe(self.state_machine_opened);
 
@@ -7896,11 +7927,13 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            assert(self.grid_scrubber.mode == .stop);
+            assert(self.sync_tables == null);
+            assert(self.grid_scrubber.tour == null);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_pending_queue.empty());
             assert(self.grid.read_remote_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_queue.writes.executing() == 0);
             assert(self.syncing == .updating_superblock);
             assert(!self.state_machine_opened);
@@ -7925,11 +7958,18 @@ pub fn ReplicaType(
             self.sync_dispatch(.idle);
         }
 
-        fn sync_client_replies(self: *Self) void {
-            if (self.syncing == .idle) {
-                assert(self.superblock.working.vsr_state.commit_unsynced_max != 0);
+        fn sync_content(self: *Self) void {
+            assert(self.syncing == .idle);
+            assert(self.state_machine_opened);
+            assert(self.superblock.working.vsr_state.commit_unsynced_max > 0);
+            assert(self.grid_scrubber.tour == null);
+
+            self.sync_tables = .{};
+            if (self.grid_repair_tables.available() > 0) {
+                self.sync_request_tables();
             }
 
+            // We have finished state sync: sync the missed replies and tables.
             var slot: usize = 0;
             while (slot < constants.clients_max) : (slot += 1) {
                 const entry_free = self.superblock.client_sessions.entries_free.isSet(slot);
@@ -7939,6 +7979,91 @@ pub fn ReplicaType(
                     slot,
                     !entry_free and entry_size > @sizeOf(Header),
                 );
+            }
+        }
+
+        /// State sync finished, and we must repair all of the tables we missed.
+        fn sync_request_tables(self: *Self) void {
+            assert(self.syncing == .idle);
+            assert(self.sync_tables != null);
+            assert(self.state_machine_opened);
+            assert(self.superblock.working.vsr_state.commit_unsynced_max > 0);
+            assert(self.grid_scrubber.tour == null);
+            assert(self.grid_repair_tables.available() > 0);
+
+            const commit_unsynced_min = self.superblock.working.vsr_state.commit_unsynced_min;
+            const commit_unsynced_max = self.superblock.working.vsr_state.commit_unsynced_max;
+            while (self.sync_tables.?.next(&self.state_machine.forest)) |table_info| {
+                if (snapshot_from_op(commit_unsynced_min) <= table_info.snapshot_min and
+                    snapshot_from_op(commit_unsynced_max) >= table_info.snapshot_min)
+                {
+                    const table = self.grid_repair_tables.acquire().?;
+                    table.* = .{ .replica = self, .table = undefined };
+
+                    log.debug("{}: sync_request_tables: " ++
+                        "request address={} checksum={} snapshot_min={} ({}..{})", .{
+                        self.replica,
+                        table_info.address,
+                        table_info.checksum,
+                        table_info.snapshot_min,
+                        snapshot_from_op(commit_unsynced_min),
+                        snapshot_from_op(commit_unsynced_max),
+                    });
+
+                    self.grid_repair_queue.request_table(
+                        sync_request_table_callback,
+                        &table.table,
+                        table_info.address,
+                        table_info.checksum,
+                    );
+
+                    if (self.grid_repair_tables.available() == 0) break;
+                } else {
+                    if (StateMachine.Forest.Storage == TestStorage) {
+                        TestStorage.verify.check_table(
+                            self.superblock.storage,
+                            table_info.address,
+                            table_info.checksum,
+                        );
+                    }
+                }
+            }
+
+            if (self.grid_repair_tables.executing() == 0) {
+                assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
+
+                log.debug("{}: sync_request_tables: all tables synced (commit={}..{})", .{
+                    self.replica,
+                    commit_unsynced_min,
+                    commit_unsynced_max,
+                });
+
+                self.sync_tables = null;
+                self.grid_scrubber.start();
+            }
+        }
+
+        fn sync_request_table_callback(
+            queue_table: *GridRepairQueue.RepairTable,
+            result: GridRepairQueue.RepairTableResult,
+        ) void {
+            const table = @fieldParentPtr(RepairTable, "table", queue_table);
+            const self = table.replica;
+
+            log.debug("{}: sync_request_table_callback: address={} checksum={} result={s}", .{
+                self.replica,
+                queue_table.index_address,
+                queue_table.index_checksum,
+                @tagName(result),
+            });
+
+            self.grid_repair_tables.release(table);
+
+            switch (result) {
+                .duplicate,
+                .repaired,
+                => if (self.sync_tables) |_| self.sync_request_tables(),
+                .canceled => {},
             }
         }
 
@@ -8346,19 +8471,32 @@ pub fn ReplicaType(
 
             if (self.solo()) @panic("grid is corrupt");
 
-            if (self.grid_repair_queue.full()) {
+            if (self.grid_repair_queue.blocks_available() > 0) {
                 log.debug("{}: on_grid_read_fault: not repairing; repair queue is full", .{
                     self.replica,
                 });
                 return;
             }
 
+            if (self.sync_tables) |_| return;
+
             self.grid_repair_queue.request_block(
+                //grid_repair_block_callback,
                 read.address,
                 read.checksum,
-                if (read.block_type == .index) .table else .block,
+                //.block,
             );
         }
+
+        //fn grid_repair_block_callback(
+        //    grid_repair_queue: *GridRepairQueue,
+        //    address: u64,
+        //    checksum: u128,
+        //) void {
+        //    assert(!grid_repair_queue.full(.block));
+        //    assert(address > 0);
+        //    _ = checksum;
+        //}
 
         fn send_request_blocks(self: *Self) void {
             assert(self.grid_repair_message_timeout.ticking);

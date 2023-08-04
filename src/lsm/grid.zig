@@ -560,6 +560,8 @@ pub fn GridType(comptime Storage: type) type {
             );
 
             if (grid.canceling) |_| {
+                assert(grid.write_queue.empty());
+
                 grid.write_iops.release(iop);
                 grid.cancel_join_callback();
                 return;

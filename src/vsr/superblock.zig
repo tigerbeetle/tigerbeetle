@@ -818,7 +818,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.previous_checkpoint_id = superblock.staging.checkpoint_id();
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
-            std.debug.print("SET2 {},{}\n", .{vsr_state.commit_unsynced_min, vsr_state.commit_unsynced_max});
+            //std.debug.print("SET2 {},{}\n", .{vsr_state.commit_unsynced_min, vsr_state.commit_unsynced_max});
 
             context.* = .{
                 .superblock = superblock,
@@ -908,7 +908,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_unsynced_min = update.commit_unsynced_min;
             vsr_state.commit_unsynced_max = update.commit_unsynced_max;
 
-            std.debug.print("SET min={}, max={}\n", .{vsr_state.commit_unsynced_min, vsr_state.commit_unsynced_max});
+            //std.debug.print("SET min={}, max={}\n", .{vsr_state.commit_unsynced_min, vsr_state.commit_unsynced_max});
 
             // VSRState is usually updated, but not if we are syncing to the same checkpoint op
             // (i.e. if we are a divergent replica trying).

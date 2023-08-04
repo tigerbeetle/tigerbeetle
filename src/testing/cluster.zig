@@ -615,7 +615,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
-                    "{[commit_unsynced_min]:>3}:{[commit_unsynced_max]:_>3}S? " ++
+                    "<{[commit_unsynced_min]:_>3}:{[commit_unsynced_max]:_>3}> " ++
                     "{[grid_blocks_free]:>7}Gf " ++
                     "{[grid_blocks_remote]:>2}G! " ++
                     "{[grid_blocks_repair]:>3}G?", .{
