@@ -1,16 +1,13 @@
 //! Track and repair corrupt/missing grid blocks.
 //!
-//! The GridRepairQueue is LSM-aware.
-//!
-//! The GridRepairQueue is "coherent" – that is, all of the blocks in the queue belong in the
-//! replica's current checkpoint.
-//! "sync blocks that are not free, even if they are released" TODO
+//! - The GridRepairQueue is LSM-aware: it can repair entire tables.
+//! - The GridRepairQueue is "coherent" – that is, all of the blocks in the queue belong in the
+//!   replica's current checkpoint. (The GridRepairQueue repairs blocks that are not-free. The
+//!   GridRepairQueue *may* repair released blocks, until they are freed at the checkpoint).
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.grid_repair_queue);
 const maybe = stdx.maybe;
-
-// 18010338644879270703; [2144595159662352539]
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
@@ -52,17 +49,13 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         const Write = struct {
             queue: *GridRepairQueue,
             write: Grid.Write = undefined,
-            // TODO move this into Grid.Write?
-            checksum: u128,
         };
 
         const FaultyBlocks = std.AutoArrayHashMapUnmanaged(u64, struct {
             checksum: u128,
-            // TODO "group"
             progress: FaultProgress,
-            /// Initially false.
-            /// Set to true when we start writing this block.
-            /// (After writing, the FaultyBlocks entry is removed from the hashmap).
+            /// Initially false. Set to true when we receive and begin writing this block.
+            /// (The FaultyBlocks entry is removed from the hashmap after the block is written).
             received: bool = false,
         });
 
@@ -82,11 +75,14 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         pub const RepairTable = struct {
             index_address: u64,
             index_checksum: u128,
+            /// TODO(Congestion control): This bitset is currently used only for extra validation.
+            /// Eventually we should request tables using this + EWAH encoding, instead of
+            /// block-by-block.
             content_blocks_received: TableContentBlocksSet = TableContentBlocksSet.initEmpty(),
             table_blocks_written: usize = 0,
-            // When null, the table is awaiting an index block.
-            // When non-null, the table is awaiting content blocks.
-            // The count is "1 + content_blocks_used" (+1 to include the index).
+            /// When null, the table is awaiting an index block.
+            /// When non-null, the table is awaiting content blocks.
+            /// The count is "1 + table.content_blocks_used" (+1 is the index block).
             table_blocks_total: ?usize = null,
 
             callback: fn (*RepairTable, RepairTableResult) void,
@@ -105,8 +101,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         faulty_blocks_repair_index: usize = 0,
 
         faulty_tables: FIFO(RepairTable) = .{ .name = "grid_repair_queue_tables" },
-
-        //faulty_tables: IOPS(RepairTable, constants.grid_repair_tables_max) = .{},
 
         writes: IOPS(Write, grid_repair_writes_max) = .{},
         write_blocks: [grid_repair_writes_max]Grid.BlockPtr,
@@ -184,10 +178,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             return requests_count;
         }
 
-        //pub fn syncing(queue: *const GridRepairQueue) bool {
-        //    return queue.faulty_tables.empty();
-        //}
-
         pub fn blocks_available(queue: *const GridRepairQueue) usize {
             const faulty_blocks_free =
                 queue.faulty_blocks.capacity() -
@@ -214,25 +204,9 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             assert(!queue.grid.superblock.free_set.is_free(address));
 
             if (queue.faulty_blocks.get(address)) |fault| {
-                // We are already trying to repair this exact block.
                 assert(fault.checksum == checksum);
-                //std.debug.print("GOT: {s} vs {} (addr={} check={})\n", .{@tagName(fault.progress), repair_strategy, address, checksum});
-                //assert(fault.progress == .table_index or repair_strategy == .block);
                 return;
             }
-
-            //if (repair_strategy == .table) {
-            //    assert(queue.grid.superblock.working.vsr_state.commit_unsynced_max > 0);
-            //
-            //    var tables = queue.faulty_tables.iterate();
-            //    while (tables.next()) |table| {
-            //        if (table.index_checksum == checksum) {
-            //            assert(table.index_address == address);
-            //            assert(table.content_blocks_total != null);
-            //            return;
-            //        }
-            //    }
-            //}
 
             log.debug("{}: request_block: address={} checksum={}", .{
                 queue.grid.superblock.replica(),
@@ -243,18 +217,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             queue.faulty_blocks.putAssumeCapacityNoClobber(address, .{
                 .checksum = checksum,
                 .progress = .block,
-                //    switch (repair_strategy) {
-                //    .block => .{ .block = .{ .callback = callback } },
-                //    .table => progress: {
-                //        const table = queue.faulty_tables.acquire().?;
-                //        table.* = .{
-                //            .callback = callback,
-                //            .index_address = address,
-                //            .index_checksum = checksum,
-                //        };
-                //        break :progress .{ .table_index = .{ .table = table } };
-                //    },
-                //},
             });
 
             // TODO Check grid cache?
@@ -287,7 +249,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
             var tables = queue.faulty_tables.peek();
             while (tables) |queue_table| : (tables = queue_table.next) {
-                //std.debug.print("TABLE: {} ; {}\n", .{queue_table.index_checksum, queue_table.index_address});
                 if (queue_table.index_checksum == checksum) {
                     assert(queue_table.index_address == address);
 
@@ -338,9 +299,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             const write_index = queue.writes.index(write);
 
             stdx.copy_disjoint(.inexact, u8, queue.write_blocks[write_index], block_data);
-            write.* = .{ .queue = queue, .checksum = block_header.checksum };
+            write.* = .{ .queue = queue };//, .checksum = block_header.checksum };
 
-            //std.debug.print("{}: WRITE: address={} checksum={}\n", .{queue.grid.superblock.replica(), block_header.op, block_header.checksum});
             queue.grid.write_block(
                 repair_write_block_callback,
                 &write.write,
@@ -396,6 +356,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
                     if (block_fault.value_ptr.received) {
                         progress.table.content_blocks_received.set(content_block_index);
+                        progress.table.table_blocks_written += 1;
                     }
                 } else {
                     block_fault.value_ptr.* = .{
@@ -429,8 +390,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
             defer queue.writes.release(write);
 
-            //if (queue.grid.canceling) |_| return;
-
             if (queue.checkpoint_progress) |*checkpoint_progress| {
                 const write_index = queue.writes.index(write);
                 if (checkpoint_progress.writes_pending.isSet(write_index)) {
@@ -440,12 +399,10 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 }
             }
 
-            //std.debug.print("{}: WRITE_CALLBACK: address={} checksum={}\n", .{queue.grid.superblock.replica(), grid_write.address, write.checksum});
             const fault_index = queue.faulty_blocks.getIndex(grid_write.address).?;
             const fault_address = queue.faulty_blocks.entries.items(.key)[fault_index];
             const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
             assert(fault.received);
-            assert(fault.checksum == write.checksum);
             assert(fault_address == write.write.address);
             assert(!queue.grid.superblock.free_set.is_free(fault_address));
 
@@ -456,22 +413,17 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
             queue.release_fault(fault_index);
 
-            //const table = ;
-
             if (switch (fault_progress) {
                 .block => null,
                 .table_index => |progress| progress.table,
                 .table_content => |progress| progress.table,
             }) |table| {
-                //const table: *RepairTable = fault_progress.table_content.table;
                 assert(table.table_blocks_total != null); // We already received the index block.
                 assert(table.table_blocks_written < table.table_blocks_total.?);
-                //assert(table.content_blocks_received.isSet(fault_progress.table_content.index));
-                //assert(table.content_blocks_received.count() <= table.content_blocks_total.?);
-                //assert(table.content_blocks_received.count() > table.content_blocks_written);
+                assert(table.content_blocks_received.count() <= table.table_blocks_total.? - 1);
 
                 table.table_blocks_written += 1;
-                if (table.table_blocks_total.? == table.table_blocks_written) {
+                if (table.table_blocks_written == table.table_blocks_total.?) {
                     queue.faulty_tables.remove(table);
                     (table.callback)(table, .repaired);
                 }
@@ -499,6 +451,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         pub fn cancel(queue: *GridRepairQueue) void {
             assert(queue.checkpoint_progress == null);
             assert(queue.grid.canceling == null);
+            assert(!queue.canceling);
 
             queue.faulty_blocks.clearRetainingCapacity();
             queue.faulty_blocks_repair_index = 0;
@@ -520,11 +473,12 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         /// finish. (All other writes can safely complete after the checkpoint.)
         pub fn checkpoint(queue: *GridRepairQueue, callback: fn(*GridRepairQueue) void) void {
             assert(queue.checkpoint_progress == null);
+            assert(queue.grid.canceling == null);
+            assert(!queue.canceling);
 
             var faulty_blocks = queue.faulty_blocks.iterator();
             while (faulty_blocks.next()) |fault_entry| {
                 if (queue.grid.superblock.free_set.is_released(fault_entry.key_ptr.*)) {
-                    std.debug.print("{}: CHECKPOINT free={} check={}\n", .{queue.grid.superblock.replica(), fault_entry.key_ptr.*, fault_entry.value_ptr.checksum});
                     faulty_blocks.index -= 1;
                     faulty_blocks.len -= 1;
                     queue.release_fault(faulty_blocks.index);
@@ -566,12 +520,14 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             const queue = @fieldParentPtr(GridRepairQueue, "checkpoint_tick_context", next_tick);
             assert(queue.checkpoint_progress != null);
             assert(queue.checkpoint_progress.?.writes_pending.count() == 0);
+            assert(!queue.canceling);
 
             queue.checkpoint_done();
         }
 
         fn checkpoint_join(queue: *GridRepairQueue) void {
             assert(queue.checkpoint_progress != null);
+            assert(!queue.canceling);
 
             if (queue.checkpoint_progress.?.writes_pending.count() == 0) {
                 queue.checkpoint_done();
@@ -580,6 +536,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
 
         fn checkpoint_done(queue: *GridRepairQueue) void {
             assert(queue.checkpoint_progress != null);
+            assert(!queue.canceling);
 
             const checkpoint_progress = queue.checkpoint_progress.?;
             assert(checkpoint_progress.writes_pending.count() == 0);

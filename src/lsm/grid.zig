@@ -82,7 +82,7 @@ pub fn GridType(comptime Storage: type) type {
             repair: bool,
             block: *BlockPtr,
             /// The current checkpoint when the write began.
-            /// Used to verify that the checkpoint does not advance while the write is in progress.
+            /// Verifies that the checkpoint does not advance during the (non-repair) write.
             checkpoint_id: u128,
 
             /// Link for the Grid.write_queue linked list.
@@ -128,12 +128,15 @@ pub fn GridType(comptime Storage: type) type {
 
         pub const ReadBlockResult = enum {
             valid,
+            /// Checksum of block header is invalid.
             invalid_checksum,
+            /// Checksum of block body is invalid.
             invalid_checksum_body,
-            /// The block appears to be valid, but it is not the block we expected.
-            unexpected_checksum,
-            /// Block header is valid, but its `command≠block`.
+            /// The block header is valid, but its `header.command` is not `block`.
+            /// (This is possible due to misdirected IO).
             unexpected_command,
+            /// The block is valid, but it is not the block we expected.
+            unexpected_checksum,
         };
 
         const ReadPending = struct {
@@ -474,10 +477,6 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .none);
 
-            //if (header.checksum == 76648540669318493793937402168690919905) {
-            //    std.debug.print("{}: WRITE: address={} (commit_min={}) \n", .{grid.superblock.replica(), header.op, grid.superblock.working.vsr_state.commit_min});
-            //}
-
             if (trigger == .acquire) {
                 grid.assert_not_reading(address, block.*);
             }
@@ -493,7 +492,7 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .repair = trigger == .repair,
                 .block = block,
-                .checkpoint_id = grid.superblock.working.checkpoint_id(), // TODO remove
+                .checkpoint_id = grid.superblock.working.checkpoint_id(),
             };
 
             const iop = grid.write_iops.acquire() orelse {
@@ -1029,9 +1028,6 @@ pub fn GridType(comptime Storage: type) type {
             // We try to read the block even when it is free — if we recently released it,
             // it might be found on disk anyway.
             maybe(grid.superblock.free_set.is_free(address));
-            // The caller will not attempt to help another replica repair a block that
-            // we are already trying to repair ourselves.
-            //assert(!grid.faulty(address, null));
             maybe(grid.writing(address, null) == .acquire);
 
             read.* = .{
@@ -1042,23 +1038,13 @@ pub fn GridType(comptime Storage: type) type {
                 .grid = grid,
             };
 
-            if (grid.faulty(address, null)) {
-                read.next_tick_result = .invalid_checksum;
-
-                grid.superblock.storage.on_next_tick(
-                    .vsr,
-                    read_block_repair_tick_callback,
-                    &read.next_tick,
-                );
-            } else {
-                grid.superblock.storage.read_sectors(
-                    read_block_repair_from_storage_callback,
-                    &read.completion,
-                    read.block,
-                    .grid,
-                    block_offset(read.address),
-                );
-            }
+            grid.superblock.storage.read_sectors(
+                read_block_repair_from_storage_callback,
+                &read.completion,
+                read.block,
+                .grid,
+                block_offset(read.address),
+            );
         }
 
         fn read_block_repair_from_storage_callback(completion: *Storage.Read) void {

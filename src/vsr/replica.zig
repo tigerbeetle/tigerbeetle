@@ -2236,21 +2236,8 @@ pub fn ReplicaType(
             const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body());
             assert(requests.len > 0);
 
-            request_loop: for (requests) |*request, i| {
+            next_request: for (requests) |*request, i| {
                 assert(stdx.zeroed(&request.reserved));
-
-                //if (self.grid.faulty(request.block_address, null)) {
-                //    log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
-                //        "(replica={} address={} checksum={})", .{
-                //        self.replica,
-                //        message.header.replica,
-                //        request.block_address,
-                //        request.block_checksum,
-                //    });
-                //    continue;
-                //}
-
-                // TODO check grid repair queue contains, too
 
                 var reads = self.grid_reads.iterate();
                 while (reads.next()) |read| {
@@ -2265,7 +2252,7 @@ pub fn ReplicaType(
                             request.block_address,
                             request.block_checksum,
                         });
-                        continue :request_loop;
+                        continue :next_request;
                     }
                 }
 
@@ -7842,11 +7829,6 @@ pub fn ReplicaType(
             }
             while (self.client_replies.faulty.findFirstSet()) |slot| {
                 self.client_replies.faulty.unset(slot);
-            }
-            //self.sync_client_replies();
-
-            for (self.client_sessions().entries) |e, i| {
-                std.debug.print("{}: ENTRY: {}: {}\n", .{self.replica,i,e.header});
             }
 
             self.sync_dispatch(.{ .updating_superblock = .{

@@ -90,11 +90,6 @@ pub fn StorageCheckerType(comptime Storage: type) type {
         }
 
         pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
-            //std.debug.print("{}: syncing={}, commit_unsynced={},{}\n",.{ replica.replica, syncing,
-            //    replica.superblock.working.vsr_state.commit_unsynced_min,
-            //    replica.superblock.working.vsr_state.commit_unsynced_max,
-            //});
-
             // TODO iterate superblock manifest, check tables not in snapshot range
             const replica_checkpoint_op = superblock.working.vsr_state.commit_min;
 
@@ -158,17 +153,9 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             var copy: u8 = 0;
             while (copy < constants.superblock_copies) : (copy += 1) {
                 const trailer_start = trailer.zone().start_for_copy(copy);
-                //const trailer_checksum_computed =
-                //    vsr.checksum(storage.memory[trailer_start..][0..trailer_size]);
 
                 assert(trailer_checksum ==
                     vsr.checksum(superblock.storage.memory[trailer_start..][0..trailer_size]));
-                //if (checkpoint_actual.get(check)) |checksum|
-                //if (@field(checkpoint_actual, field)) |checksum| {
-                //    assert(trailer_checksum == checksum);
-                //} else {
-                //    @field(checkpoint_actual, field) = trailer_checksum;
-                //}
             }
 
             return trailer_checksum;
@@ -213,9 +200,6 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             var blocks_acquired = checker.free_set.blocks.iterator(.{});
             while (blocks_acquired.next()) |block_address_index| {
                 const block_address: u64 = block_address_index + 1;
-                //if (superblock.storage.grid_block(block_address) == null) {
-                //    std.debug.print("ERROR: commit_min={} address={} (syncing={})\n", .{superblock.working.vsr_state.commit_min, block_address, superblock.working.vsr_state.commit_unsynced_max});
-                //}
                 const block = superblock.storage.grid_block(block_address) orelse {
                     log.err("{}: checksum_grid: missing block_address={}", .{
                         superblock.replica(),
@@ -228,11 +212,6 @@ pub fn StorageCheckerType(comptime Storage: type) type {
 
                 const block_header = schema.header_from_block(block);
                 assert(block_header.op == block_address);
-
-                if (block_address == 70)
-                {
-                    std.debug.print("{}: GOT_HEADER={}\n", .{superblock.replica(), block_header.*});
-                }
 
                 checksum ^= vsr.checksum(block[0..block_header.size]);
             }
