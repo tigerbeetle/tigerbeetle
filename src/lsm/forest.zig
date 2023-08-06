@@ -113,7 +113,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             var grooves: Grooves = undefined;
             var grooves_initialized: usize = 0;
 
-            errdefer inline for (std.meta.fields(Grooves)) |field, field_index| {
+            errdefer inline for (std.meta.fields(Grooves), 0..) |field, field_index| {
                 if (grooves_initialized >= field_index + 1) {
                     @field(grooves, field.name).deinit(allocator);
                 }

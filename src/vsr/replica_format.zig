@@ -199,7 +199,7 @@ test "format" {
 
     // Verify the WAL headers and prepares zones.
     assert(storage.wal_headers().len == storage.wal_headers().len);
-    for (storage.wal_headers()) |header, slot| {
+    for (storage.wal_headers(), 0..) |header, slot| {
         const message = storage.wal_prepares()[slot];
         try std.testing.expect(std.meta.eql(header, message.header));
 

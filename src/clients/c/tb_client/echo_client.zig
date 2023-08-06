@@ -74,7 +74,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .cluster = 0,
                 .command = .request,
                 .operation = vsr.Operation.from(Self.StateMachine, operation),
-                .size = @intCast(u32, @sizeOf(Header) + message_body_size),
+                .size = @as(u32, @intCast(@sizeOf(Header) + message_body_size)),
             };
 
             assert(!self.request_queue.full());

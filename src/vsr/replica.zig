@@ -473,8 +473,8 @@ pub fn ReplicaType(
             self.superblock.working.vsr_state.assert_internally_consistent();
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
-            const replica = for (self.superblock.working.vsr_state.members) |member, index| {
-                if (member == replica_id) break @intCast(u8, index);
+            const replica = for (self.superblock.working.vsr_state.members, 0..) |member, index| {
+                if (member == replica_id) break @as(u8, @intCast(index));
             } else unreachable;
             const replica_count = self.superblock.working.vsr_state.replica_count;
             if (replica >= options.node_count or replica_count > options.node_count) {
@@ -797,7 +797,7 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
-            for (self.grid_write_blocks) |*block, i| {
+            for (self.grid_write_blocks, 0..) |*block, i| {
                 errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }
@@ -1134,7 +1134,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 .commit = message.header.commit,
-                .timestamp = @bitCast(u64, self.clock.realtime()),
+                .timestamp = @as(u64, @bitCast(self.clock.realtime())),
             });
         }
 
@@ -1149,7 +1149,7 @@ pub fn ReplicaType(
             if (message.header.replica >= self.replica_count) return;
 
             const m0 = message.header.commit;
-            const t1 = @bitCast(i64, message.header.timestamp);
+            const t1 = @as(i64, @bitCast(message.header.timestamp));
             const m2 = self.clock.monotonic();
 
             self.clock.learn(message.header.replica, m0, t1, m2);
@@ -2051,7 +2051,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            response.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
+            response.header.size = @as(u32, @intCast(@sizeOf(Header) * (1 + count)));
             response.header.set_checksum_body(response.body());
             response.header.set_checksum();
 
@@ -2183,7 +2183,7 @@ pub fn ReplicaType(
             const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body());
             assert(requests.len > 0);
 
-            request_loop: for (requests) |*request, i| {
+            request_loop: for (requests, 0..) |*request, i| {
                 for (std.mem.bytesAsSlice(u64, &request.reserved)) |word| assert(word == 0);
 
                 if (self.grid.faulty(request.block_address, null)) {
@@ -2428,7 +2428,7 @@ pub fn ReplicaType(
             }
 
             const target_buffer = self.superblock.trailer_buffer(trailer);
-            const target_size = @intCast(u32, message.header.commit);
+            const target_size = @as(u32, @intCast(message.header.commit));
             const progress = stage.trailers.getPtr(trailer).write_chunk(.{
                 .buffer = target_buffer,
                 .size = target_size,
@@ -2509,7 +2509,7 @@ pub fn ReplicaType(
                 assert(replica < self.replica_count);
 
                 if (replica != self.replica) {
-                    waiting[waiting_len] = @intCast(u8, replica);
+                    waiting[waiting_len] = @as(u8, @intCast(replica));
                     waiting_len += 1;
                 }
             } else {
@@ -3634,7 +3634,7 @@ pub fn ReplicaType(
                 .op = prepare.header.op,
                 .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
-                .size = @sizeOf(Header) + @intCast(u32, reply_body_size),
+                .size = @sizeOf(Header) + @as(u32, @intCast(reply_body_size)),
             };
             assert(reply.header.epoch == 0);
 
@@ -3852,7 +3852,7 @@ pub fn ReplicaType(
             var nacks = BitSet.initEmpty();
             var present = BitSet.initEmpty();
             if (command == .do_view_change) {
-                for (self.view_headers.array.constSlice()) |*header, i| {
+                for (self.view_headers.array.constSlice(), 0..) |*header, i| {
                     const slot = self.journal.slot_for_op(header.op);
                     const journal_header = self.journal.header_for_op(header.op);
                     const dirty = self.journal.dirty.bit(slot);
@@ -3893,7 +3893,7 @@ pub fn ReplicaType(
             }
 
             message.header.* = .{
-                .size = @intCast(u32, @sizeOf(Header) * (1 + self.view_headers.array.len)),
+                .size = @as(u32, @intCast(@sizeOf(Header) * (1 + self.view_headers.array.len))),
                 .command = command,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -4247,7 +4247,7 @@ pub fn ReplicaType(
                 log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
                     self.replica,
                     message.header.client,
-                    @enumToInt(message.header.operation),
+                    @intFromEnum(message.header.operation),
                 });
                 return true;
             }
@@ -4284,11 +4284,11 @@ pub fn ReplicaType(
                 self.op_checkpoint() + constants.lsm_batch_multiple + 1 == self.op)
             {
                 var count: usize = 0;
-                for (self.sync_target_quorum.candidates) |target, replica_index| {
+                for (self.sync_target_quorum.candidates, 0..) |target, replica_index| {
                     if (replica_index == self.replica) {
                         count += 1; // Count ourselves.
                     } else {
-                        count += @boolToInt(
+                        count += @intFromBool(
                             target != null and
                                 target.?.checkpoint_op == self.op_checkpoint(),
                         );
@@ -4788,7 +4788,7 @@ pub fn ReplicaType(
 
         /// Returns the index into the configuration of the primary for a given view.
         pub fn primary_index(self: *const Self, view: u32) u8 {
-            return @intCast(u8, @mod(view, self.replica_count));
+            return @as(u8, @intCast(@mod(view, self.replica_count)));
         }
 
         /// Returns whether the replica is the primary for the current view.
@@ -5102,7 +5102,7 @@ pub fn ReplicaType(
                     self.state_machine.prepare_timestamp,
                     self.state_machine.commit_timestamp,
                 ) + 1,
-                @intCast(u64, request.realtime),
+                @as(u64, @intCast(request.realtime)),
             );
             assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
 
@@ -6007,7 +6007,7 @@ pub fn ReplicaType(
         /// We arrange standbys into a logical ring for replication.
         fn standby_index_to_replica(self: *const Self, index: u32) u8 {
             assert(self.standby_count > 0);
-            return self.replica_count + @intCast(u8, @mod(index, self.standby_count));
+            return self.replica_count + @as(u8, @intCast(@mod(index, self.standby_count)));
         }
 
         fn standby_replica_to_index(self: *const Self, replica: u8) u32 {
@@ -6021,7 +6021,7 @@ pub fn ReplicaType(
             assert(messages.len == constants.replicas_max);
             var view: ?u32 = null;
             var count: usize = 0;
-            for (messages) |*received, replica| {
+            for (messages, 0..) |*received, replica| {
                 if (received.*) |message| {
                     assert(replica < self.replica_count);
                     assert(message.header.command == command);
@@ -6950,7 +6950,7 @@ pub fn ReplicaType(
                 const dvc_headers = message_body_as_view_headers(dvc);
                 const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 const dvc_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
-                for (dvc_headers.slice) |*header, i| {
+                for (dvc_headers.slice, 0..) |*header, i| {
                     log.debug("{}: {s}: dvc: header: " ++
                         "replica={} op={} checksum={} nack={} present={} type={s}", .{
                         self.replica,
@@ -8004,7 +8004,7 @@ pub fn ReplicaType(
                     // - or if the lead-half is in view-change status (not sending commit messages)
                     // then the lagging-half replicas must use incoming ping to determine the
                     // canonical target.
-                    break :threshold self.quorum_majority - @boolToInt(self.replica_count % 2 == 0);
+                    break :threshold self.quorum_majority - @intFromBool(self.replica_count % 2 == 0);
                 };
 
                 if (candidates_matching >= candidates_threshold) {
@@ -8268,10 +8268,10 @@ pub fn ReplicaType(
             assert(trailer_size > parameters.offset or
                 (trailer_size == 0 and parameters.offset == 0));
 
-            const body_size = @intCast(u32, @min(
+            const body_size = @as(u32, @intCast(@min(
                 trailer_size - parameters.offset,
                 constants.sync_trailer_message_body_size_max,
-            ));
+            )));
             assert(body_size > 0 or parameters.offset == 0);
             assert(body_size <= constants.message_body_size_max);
 
@@ -8417,7 +8417,7 @@ const DVCQuorum = struct {
         for (dvcs.constSlice()) |message| verify_message(message);
 
         // Verify that DVCs with the same log_view do not conflict.
-        for (dvcs.constSlice()) |dvc_a, i| {
+        for (dvcs.constSlice(), 0..) |dvc_a, i| {
             for (dvcs.constSlice()[0..i]) |dvc_b| {
                 if (dvc_a.header.request != dvc_b.header.request) continue;
 
@@ -8479,7 +8479,7 @@ const DVCQuorum = struct {
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
         var array = DVCArray{ .buffer = undefined };
-        for (dvc_quorum) |received, replica| {
+        for (dvc_quorum, 0..) |received, replica| {
             if (received) |message| {
                 assert(message.header.command == .do_view_change);
                 assert(message.header.replica == replica);

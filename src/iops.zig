@@ -25,7 +25,7 @@ pub fn IOPS(comptime T: type, comptime size: u6) type {
         }
 
         pub fn index(self: *Self, item: *T) usize {
-            const i = (@ptrToInt(item) - @ptrToInt(&self.items)) / @sizeOf(T);
+            const i = (@intFromPtr(item) - @intFromPtr(&self.items)) / @sizeOf(T);
             assert(i < size);
             return i;
         }

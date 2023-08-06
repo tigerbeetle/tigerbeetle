@@ -43,7 +43,7 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
         defer offset += write_size;
 
         const write_headers = std.mem.bytesAsSlice(vsr.Header, write[0..write_size]);
-        for (write_headers) |header, i| {
+        for (write_headers, 0..) |header, i| {
             const slot = @divExact(offset, @sizeOf(vsr.Header)) + i;
             try verify_slot_header(slot, header);
         }

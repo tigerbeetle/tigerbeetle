@@ -142,7 +142,7 @@ fn extract_memcpy_size(memcpy_call: []const u8) ?u32 {
     var level: u32 = 0;
     var arg_count: u32 = 0;
 
-    const args_after_size = for (call_args) |c, i| {
+    const args_after_size = for (call_args, 0..) |c, i| {
         switch (c) {
             '(' => level += 1,
             ')' => level -= 1,

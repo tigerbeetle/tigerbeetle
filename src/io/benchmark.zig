@@ -36,11 +36,11 @@ pub fn main() !void {
     const started = timer.monotonic();
     defer {
         const elapsed_ns = timer.monotonic() - started;
-        const transferred_mb = @intToFloat(f64, self.transferred) / 1024 / 1024;
+        const transferred_mb = @as(f64, @floatFromInt(self.transferred)) / 1024 / 1024;
 
         log.info("took {}ms @ {d:.2} MB/s\n", .{
             elapsed_ns / std.time.ns_per_ms,
-            transferred_mb / (@intToFloat(f64, elapsed_ns) / std.time.ns_per_s),
+            transferred_mb / (@as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s),
         });
     }
 

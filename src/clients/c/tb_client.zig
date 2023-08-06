@@ -46,11 +46,11 @@ const TestingContext = blk: {
 };
 
 pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
-    return @ptrCast(tb_client_t, implementation);
+    return @as(tb_client_t, @ptrCast(implementation));
 }
 
 fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
-    return @ptrCast(*ContextImplementation, @alignCast(@alignOf(ContextImplementation), tb_client));
+    return @as(*ContextImplementation, @ptrCast(@alignCast(tb_client)));
 }
 
 pub fn init_error_to_status(err: InitError) tb_status_t {
@@ -87,7 +87,7 @@ const ffi = struct {
         else
             @compileError("tb_client must be built with libc");
 
-        const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
+        const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
         const client = init(
             allocator,
             cluster_id,
@@ -122,7 +122,7 @@ const ffi = struct {
         else
             @compileError("tb_client must be built with libc");
 
-        const addresses = @ptrCast([*]const u8, addresses_ptr)[0..addresses_len];
+        const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
         const client = init_echo(
             allocator,
             cluster_id,

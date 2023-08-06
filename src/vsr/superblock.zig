@@ -581,10 +581,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.storage_size_limit <= constants.storage_size_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
 
-            const shard_count_limit = @intCast(usize, @divFloor(
+            const shard_count_limit = @as(usize, @intCast(@divFloor(
                 options.storage_size_limit - data_file_size_min,
                 constants.block_size * FreeSet.shard_bits,
-            ));
+            )));
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
             assert(block_count_limit <= grid_blocks_max);
 
@@ -919,7 +919,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (context.vsr_headers) |*headers| {
                 assert(context.caller.updates_vsr_headers());
 
-                superblock.staging.vsr_headers_count = @intCast(u32, headers.array.len);
+                superblock.staging.vsr_headers_count = @as(u32, @intCast(headers.array.len));
                 stdx.copy_disjoint(
                     .exact,
                     vsr.Header,
@@ -954,7 +954,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.manifest_buffer;
 
-            staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
+            staging.manifest_size = @as(u32, @intCast(superblock.manifest.encode(target)));
             staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
         }
 
@@ -983,7 +983,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // of storage_size_limit.
                 staging.free_set_size = 0;
             } else {
-                staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
+                staging.free_set_size = @as(u32, @intCast(superblock.free_set.encode(target)));
             }
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
@@ -992,7 +992,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.client_sessions_buffer;
 
-            staging.client_sessions_size = @intCast(u32, superblock.client_sessions.encode(target));
+            staging.client_sessions_size = @as(u32, @intCast(superblock.client_sessions.encode(target)));
             staging.client_sessions_checksum = vsr.checksum(target[0..staging.client_sessions_size]);
 
             assert(staging.client_sessions_size == ClientSessions.encode_size_max);

@@ -107,7 +107,7 @@ fn emit_enum(
         try buffer.writer().print("\t{s} {s} = {d}\n", .{
             enum_name,
             name,
-            @enumToInt(@field(Type, field.name)),
+            @intFromEnum(@field(Type, field.name)),
         });
     }
 
@@ -161,7 +161,7 @@ fn emit_packed_struct(
         int_type,
     });
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
         try buffer.writer().print("\tif f.{s} {{\n" ++
@@ -230,7 +230,7 @@ fn emit_struct(
 
         switch (@typeInfo(flagType)) {
             .Struct => |info| switch (info.layout) {
-                .Packed => inline for (info.fields) |field, i| {
+                .Packed => inline for (info.fields, 0..) |field, i| {
                     if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
                     try buffer.writer().print("\tf.{s} = ((o.Flags >> {}) & 0x1) == 1\n", .{

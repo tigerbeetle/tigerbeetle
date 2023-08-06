@@ -248,7 +248,7 @@ pub const IO = struct {
 
                 // The completion is finally ready to invoke the callback
                 callback(
-                    @intToPtr(Context, @ptrToInt(ctx.completion.context)),
+                    @as(Context, @ptrFromInt(@intFromPtr(ctx.completion.context))),
                     ctx.completion,
                     result,
                 );
@@ -258,7 +258,7 @@ pub const IO = struct {
         // Setup the completion with the callback wrapper above
         completion.* = .{
             .next = null,
-            .context = @ptrCast(?*anyopaque, context),
+            .context = @as(?*anyopaque, @ptrCast(context)),
             .callback = Callback.onComplete,
             .operation = @unionInit(Completion.Operation, @tagName(op_tag), op_data),
         };
@@ -470,9 +470,9 @@ pub const IO = struct {
                         switch (os.windows.ws2_32.WSAIoctl(
                             op.socket,
                             os.windows.ws2_32.SIO_GET_EXTENSION_FUNCTION_POINTER,
-                            @ptrCast(*const anyopaque, &guid),
+                            @as(*const anyopaque, @ptrCast(&guid)),
                             @sizeOf(os.windows.GUID),
-                            @ptrCast(*anyopaque, &connect_ex),
+                            @as(*anyopaque, @ptrCast(&connect_ex)),
                             @sizeOf(LPFN_CONNECTEX),
                             &num_bytes,
                             null,
@@ -557,8 +557,8 @@ pub const IO = struct {
         const transfer = Completion.Transfer{
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
-                .len = @intCast(u32, buffer_limit(buffer.len)),
-                .buf = @intToPtr([*]u8, @ptrToInt(buffer.ptr)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .buf = @as([*]u8, @ptrFromInt(@intFromPtr(buffer.ptr))),
             },
             .overlapped = undefined,
             .pending = false,
@@ -596,7 +596,7 @@ pub const IO = struct {
                         // Start the send operation.
                         break :blk switch (os.windows.ws2_32.WSASend(
                             op.socket,
-                            @ptrCast([*]os.windows.ws2_32.WSABUF, &op.buf),
+                            @as([*]os.windows.ws2_32.WSABUF, @ptrCast(&op.buf)),
                             1, // one buffer
                             &transferred,
                             0, // no flags
@@ -657,7 +657,7 @@ pub const IO = struct {
         const transfer = Completion.Transfer{
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .buf = buffer.ptr,
             },
             .overlapped = undefined,
@@ -696,7 +696,7 @@ pub const IO = struct {
                         // Start the recv operation.
                         break :blk switch (os.windows.ws2_32.WSARecv(
                             op.socket,
-                            @ptrCast([*]os.windows.ws2_32.WSABUF, &op.buf),
+                            @as([*]os.windows.ws2_32.WSABUF, @ptrCast(&op.buf)),
                             1, // one buffer
                             &transferred,
                             &flags,
@@ -774,7 +774,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
@@ -817,7 +817,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
@@ -854,7 +854,7 @@ pub const IO = struct {
 
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
-                    const socket = @ptrCast(os.socket_t, op.fd);
+                    const socket = @as(os.socket_t, @ptrCast(op.fd));
                     getsockoptError(socket) catch |err| switch (err) {
                         error.FileDescriptorNotASocket => return os.windows.CloseHandle(op.fd),
                         else => {},
@@ -884,11 +884,11 @@ pub const IO = struct {
         if (nanoseconds == 0) {
             completion.* = .{
                 .next = null,
-                .context = @ptrCast(?*anyopaque, context),
+                .context = @as(?*anyopaque, @ptrCast(context)),
                 .operation = undefined,
                 .callback = struct {
                     fn on_complete(ctx: Completion.Context) void {
-                        const _context = @intToPtr(Context, @ptrToInt(ctx.completion.context));
+                        const _context = @as(Context, @ptrFromInt(@intFromPtr(ctx.completion.context)));
                         callback(_context, ctx.completion, {});
                     }
                 }.on_complete,
@@ -924,9 +924,9 @@ pub const IO = struct {
         flags |= os.windows.ws2_32.WSA_FLAG_NO_HANDLE_INHERIT;
 
         const socket = try os.windows.WSASocketW(
-            @bitCast(i32, family),
-            @bitCast(i32, sock_type),
-            @bitCast(i32, protocol),
+            @as(i32, @bitCast(family)),
+            @as(i32, @bitCast(sock_type)),
+            @as(i32, @bitCast(protocol)),
             null,
             0,
             flags,
@@ -942,7 +942,7 @@ pub const IO = struct {
         mode |= os.windows.FILE_SKIP_COMPLETION_PORT_ON_SUCCESS;
         mode |= os.windows.FILE_SKIP_SET_EVENT_ON_HANDLE;
 
-        const handle = @ptrCast(os.windows.HANDLE, socket);
+        const handle = @as(os.windows.HANDLE, @ptrCast(socket));
         try os.windows.SetFileCompletionNotificationModes(handle, mode);
 
         return socket;
@@ -1118,8 +1118,8 @@ pub const IO = struct {
             handle,
             lock_flags,
             0, // reserved param is always zero
-            @truncate(u32, size), // low bits of size
-            @truncate(u32, size >> 32), // high bits of size
+            @as(u32, @truncate(size)), // low bits of size
+            @as(u32, @truncate(size >> 32)), // high bits of size
             &lock_overlapped,
         );
 
@@ -1138,7 +1138,7 @@ pub const IO = struct {
         // Move the file pointer to the start + size
         const seeked = os.windows.kernel32.SetFilePointerEx(
             handle,
-            @intCast(i64, size),
+            @as(i64, @intCast(size)),
             null, // no reference to new file pointer
             os.windows.FILE_BEGIN,
         );
@@ -1188,7 +1188,7 @@ fn getsockoptError(socket: os.socket_t) IO.ConnectError!void {
     if (err_code == 0)
         return;
 
-    const ws_err = @intToEnum(os.windows.ws2_32.WinsockError, @intCast(u16, err_code));
+    const ws_err = @as(os.windows.ws2_32.WinsockError, @enumFromInt(@as(u16, @intCast(err_code))));
     return switch (ws_err) {
         .WSAEACCES => error.PermissionDenied,
         .WSAEADDRINUSE => error.AddressInUse,

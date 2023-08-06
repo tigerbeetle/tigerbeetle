@@ -174,7 +174,7 @@ fn emit_enum(
     });
 
     const type_info = @typeInfo(Type).Enum;
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         if (mapping.docs_link) |docs_link| {
@@ -196,7 +196,7 @@ fn emit_enum(
         , .{
             .enum_name = to_case(field.name, .pascal),
             .int_type = int_type,
-            .value = @enumToInt(@field(Type, field.name)),
+            .value = @intFromEnum(@field(Type, field.name)),
             .separator = if (i == type_info.fields.len - 1) ';' else ',',
         });
     }
@@ -246,7 +246,7 @@ fn emit_packed_enum(
         .int_type = int_type,
     });
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         if (mapping.docs_link) |docs_link| {

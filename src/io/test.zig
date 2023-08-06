@@ -245,7 +245,7 @@ test "timeout" {
 
             try testing.expectApproxEqAbs(
                 @as(f64, ms),
-                @intToFloat(f64, (self.stop_time - start_time) / std.time.ns_per_ms),
+                @as(f64, @floatFromInt((self.stop_time - start_time) / std.time.ns_per_ms)),
                 margin,
             );
         }
@@ -473,7 +473,7 @@ test "tick to wait" {
                     else => |err| return os.windows.unexpectedWSAError(err),
                 }
             } else {
-                return @intCast(usize, rc);
+                return @as(usize, @intCast(rc));
             }
         }
     }.run_test();
@@ -556,7 +556,7 @@ test "pipe data over socket" {
             while (self.rx.transferred != self.rx.buffer.len) : (tick +%= 1) {
                 if (tick % 61 == 0) {
                     const timeout_ns = tick % (10 * std.time.ns_per_ms);
-                    try self.io.run_for_ns(@intCast(u63, timeout_ns));
+                    try self.io.run_for_ns(@as(u63, @intCast(timeout_ns)));
                 } else {
                     try self.io.tick();
                 }

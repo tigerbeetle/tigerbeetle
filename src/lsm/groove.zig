@@ -310,7 +310,7 @@ pub fn GrooveType(
     const indexes_count_expect = std.meta.fields(Object).len -
         groove_options.ignored.len -
         // The id/timestamp fields are implicitly ignored since it's the primary key for ObjectTree:
-        (1 + @boolToInt(has_id)) +
+        (1 + @intFromBool(has_id)) +
         std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
@@ -359,7 +359,7 @@ pub fn GrooveType(
                         .timestamp = object.timestamp,
                         .field = switch (@typeInfo(Index)) {
                             .Int => index,
-                            .Enum => @enumToInt(index),
+                            .Enum => @intFromEnum(index),
                             else => @compileError("Unsupported index type for " ++ field_name),
                         },
                     };
@@ -480,7 +480,7 @@ pub fn GrooveType(
             var index_trees: IndexTrees = undefined;
 
             // Make sure to deinit initialized index LSM trees on error.
-            errdefer inline for (std.meta.fields(IndexTrees)) |field, field_index| {
+            errdefer inline for (std.meta.fields(IndexTrees), 0..) |field, field_index| {
                 if (index_trees_initialized >= field_index + 1) {
                     @field(index_trees, field.name).deinit(allocator);
                 }
@@ -919,7 +919,7 @@ pub fn GrooveType(
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
-        const join_pending_max = 1 + @boolToInt(has_id) + std.meta.fields(IndexTrees).len;
+        const join_pending_max = 1 + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
 
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {

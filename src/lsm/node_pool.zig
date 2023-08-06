@@ -68,7 +68,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             pool.free.unset(node_index);
 
             const node = pool.buffer[node_index * node_size ..][0..node_size];
-            return @alignCast(node_alignment, node);
+            return @alignCast(node);
         }
 
         pub fn release(pool: *Self, node: Node) void {
@@ -76,10 +76,10 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             comptime assert(meta.Elem(Node) == u8);
             comptime assert(meta.Elem(@TypeOf(pool.buffer)) == u8);
 
-            assert(@ptrToInt(node) >= @ptrToInt(pool.buffer.ptr));
-            assert(@ptrToInt(node) + node_size <= @ptrToInt(pool.buffer.ptr) + pool.buffer.len);
+            assert(@intFromPtr(node) >= @intFromPtr(pool.buffer.ptr));
+            assert(@intFromPtr(node) + node_size <= @intFromPtr(pool.buffer.ptr) + pool.buffer.len);
 
-            const node_index = @divExact(@ptrToInt(node) - @ptrToInt(pool.buffer.ptr), node_size);
+            const node_index = @divExact(@intFromPtr(node) - @intFromPtr(pool.buffer.ptr), node_size);
             assert(!pool.free.isSet(node_index));
             pool.free.set(node_index);
         }

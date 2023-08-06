@@ -122,7 +122,7 @@ pub const Manifest = struct {
         stdx.copy_disjoint(
             .exact,
             u128,
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, trees)),
+            @alignCast(trees),
             manifest.trees[0..manifest.count],
         );
         size += trees.len;
@@ -131,7 +131,7 @@ pub const Manifest = struct {
         stdx.copy_disjoint(
             .exact,
             u128,
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, checksums)),
+            @alignCast(mem.bytesAsSlice(u128, checksums)),
             manifest.checksums[0..manifest.count],
         );
         size += checksums.len;
@@ -140,7 +140,7 @@ pub const Manifest = struct {
         stdx.copy_disjoint(
             .exact,
             u64,
-            @alignCast(@alignOf(u64), mem.bytesAsSlice(u64, addresses)),
+            @alignCast(mem.bytesAsSlice(u64, addresses)),
             manifest.addresses[0..manifest.count],
         );
         size += addresses.len;
@@ -157,7 +157,7 @@ pub const Manifest = struct {
         assert(manifest.tables.count() == 0);
         assert(manifest.compaction_set.count() == 0);
 
-        manifest.count = @intCast(u32, @divExact(source.len, BlockReferenceSize));
+        manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReferenceSize)));
         assert(manifest.count <= manifest.count_max);
 
         var size: u64 = 0;
@@ -167,7 +167,7 @@ pub const Manifest = struct {
             .exact,
             u128,
             manifest.trees[0..manifest.count],
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, trees)),
+            @alignCast(trees),
         );
         size += trees.len;
 
@@ -176,7 +176,7 @@ pub const Manifest = struct {
             .exact,
             u128,
             manifest.checksums[0..manifest.count],
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, checksums)),
+            @alignCast(checksums),
         );
         size += checksums.len;
 
@@ -185,7 +185,7 @@ pub const Manifest = struct {
             .exact,
             u64,
             manifest.addresses[0..manifest.count],
-            @alignCast(@alignOf(u64), mem.bytesAsSlice(u64, addresses)),
+            @alignCast(addresses),
         );
         size += addresses.len;
 

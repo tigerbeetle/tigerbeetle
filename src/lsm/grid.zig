@@ -31,11 +31,11 @@ pub const BlockType = enum(u8) {
     data = 4,
 
     pub inline fn from(vsr_operation: vsr.Operation) BlockType {
-        return @intToEnum(BlockType, @enumToInt(vsr_operation));
+        return @as(BlockType, @enumFromInt(@intFromEnum(vsr_operation)));
     }
 
     pub inline fn operation(block_type: BlockType) vsr.Operation {
-        return @intToEnum(vsr.Operation, @enumToInt(block_type));
+        return @as(vsr.Operation, @enumFromInt(@intFromEnum(block_type)));
     }
 };
 
@@ -202,7 +202,7 @@ pub fn GridType(comptime Storage: type) type {
                 try std.DynamicBitSetUnmanaged.initEmpty(allocator, options.cache_blocks_count);
             errdefer cache_coherent.deinit(allocator);
 
-            for (cache_blocks) |*cache_block, i| {
+            for (cache_blocks, 0..) |*cache_block, i| {
                 errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
                 cache_block.* = try allocate_block(allocator);
             }
@@ -213,7 +213,7 @@ pub fn GridType(comptime Storage: type) type {
 
             var read_iop_blocks: [read_iops_max]BlockPtr = undefined;
 
-            for (&read_iop_blocks) |*read_iop_block, i| {
+            for (&read_iop_blocks, 0..) |*read_iop_block, i| {
                 errdefer for (read_iop_blocks[0..i]) |block| allocator.free(block);
                 read_iop_block.* = try allocate_block(allocator);
             }
@@ -842,7 +842,7 @@ pub fn GridType(comptime Storage: type) type {
                         block_type,
                         header.op,
                         header.checksum,
-                        @enumToInt(header.operation),
+                        @intFromEnum(header.operation),
                     },
                 );
                 return false;

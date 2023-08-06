@@ -104,7 +104,7 @@ pub const StringIndexContext = struct {
     }
 
     pub fn hash(self: @This(), x: u32) u64 {
-        const x_slice = mem.sliceTo(@ptrCast([*:0]const u8, self.bytes.items.ptr) + x, 0);
+        const x_slice = mem.sliceTo(@as([*:0]const u8, @ptrCast(self.bytes.items.ptr)) + x, 0);
         return hashString(x_slice);
     }
 };
@@ -113,7 +113,7 @@ pub const StringIndexAdapter = struct {
     bytes: *std.ArrayListUnmanaged(u8),
 
     pub fn eql(self: @This(), a_slice: []const u8, b: u32) bool {
-        const b_slice = mem.sliceTo(@ptrCast([*:0]const u8, self.bytes.items.ptr) + b, 0);
+        const b_slice = mem.sliceTo(@as([*:0]const u8, @ptrCast(self.bytes.items.ptr)) + b, 0);
         return mem.eql(u8, a_slice, b_slice);
     }
 
@@ -772,25 +772,25 @@ pub fn HashMapUnmanaged(
             fingerprint: FingerPrint = free,
             used: u1 = 0,
 
-            const slot_free = @bitCast(u8, Metadata{ .fingerprint = free });
-            const slot_tombstone = @bitCast(u8, Metadata{ .fingerprint = tombstone });
+            const slot_free = @as(u8, @bitCast(Metadata{ .fingerprint = free }));
+            const slot_tombstone = @as(u8, @bitCast(Metadata{ .fingerprint = tombstone }));
 
             pub fn isUsed(self: Metadata) bool {
                 return self.used == 1;
             }
 
             pub fn isTombstone(self: Metadata) bool {
-                return @bitCast(u8, self) == slot_tombstone;
+                return @as(u8, @bitCast(self)) == slot_tombstone;
             }
 
             pub fn isFree(self: Metadata) bool {
-                return @bitCast(u8, self) == slot_free;
+                return @as(u8, @bitCast(self)) == slot_free;
             }
 
             pub fn takeFingerprint(hash: Hash) FingerPrint {
                 const hash_bits = @typeInfo(Hash).Int.bits;
                 const fp_bits = @typeInfo(FingerPrint).Int.bits;
-                return @truncate(FingerPrint, hash >> (hash_bits - fp_bits));
+                return @as(FingerPrint, @truncate(hash >> (hash_bits - fp_bits)));
             }
 
             pub fn fill(self: *Metadata, fp: FingerPrint) void {
@@ -894,7 +894,7 @@ pub fn HashMapUnmanaged(
         }
 
         fn capacityForSize(size: Size) Size {
-            var new_cap = @truncate(u32, (@as(u64, size) * 100) / max_load_percentage + 1);
+            var new_cap = @as(u32, @truncate((@as(u64, size) * 100) / max_load_percentage + 1));
             new_cap = math.ceilPowerOfTwo(u32, new_cap) catch unreachable;
             return new_cap;
         }
@@ -922,7 +922,7 @@ pub fn HashMapUnmanaged(
             if (self.metadata) |_| {
                 self.initMetadata();
                 self.size = 0;
-                self.available = @truncate(u32, (self.capacity() * max_load_percentage) / 100);
+                self.available = @as(u32, @truncate((self.capacity() * max_load_percentage) / 100));
             }
         }
 
@@ -937,7 +937,7 @@ pub fn HashMapUnmanaged(
         }
 
         fn header(self: *const Self) *Header {
-            return @ptrCast(*Header, @ptrCast([*]Header, @alignCast(@alignOf(Header), self.metadata.?)) - 1);
+            return @as(*Header, @ptrCast(@as([*]Header, @ptrCast(@alignCast(self.metadata.?))) - 1));
         }
 
         fn keys(self: *const Self) [*]K {
@@ -1028,7 +1028,7 @@ pub fn HashMapUnmanaged(
 
             const hash = ctx.hash(key);
             const mask = self.capacity() - 1;
-            var idx = @truncate(usize, hash & mask);
+            var idx = @as(usize, @truncate(hash & mask));
 
             var metadata = self.metadata.? + idx;
             while (metadata[0].isUsed()) {
@@ -1142,7 +1142,7 @@ pub fn HashMapUnmanaged(
             const fingerprint = Metadata.takeFingerprint(hash);
             // Don't loop indefinitely when there are no empty slots.
             var limit = self.capacity();
-            var idx = @truncate(usize, hash & mask);
+            var idx = @as(usize, @truncate(hash & mask));
 
             var metadata = self.metadata.? + idx;
             while (!metadata[0].isFree() and limit != 0) {
@@ -1320,7 +1320,7 @@ pub fn HashMapUnmanaged(
             const mask = self.capacity() - 1;
             const fingerprint = Metadata.takeFingerprint(hash);
             var limit = self.capacity();
-            var idx = @truncate(usize, hash & mask);
+            var idx = @as(usize, @truncate(hash & mask));
 
             var first_tombstone_idx: usize = self.capacity(); // invalid index
             var metadata = self.metadata.? + idx;
@@ -1437,7 +1437,7 @@ pub fn HashMapUnmanaged(
             // map, which is assumed to exist as keyPtr must be valid.  This
             // item must be at index 0.
             const idx = if (@sizeOf(K) > 0)
-                (@ptrToInt(keyPtr) - @ptrToInt(self.keys())) / @sizeOf(K)
+                (@intFromPtr(keyPtr) - @intFromPtr(self.keys())) / @sizeOf(K)
             else
                 0;
 
@@ -1445,7 +1445,10 @@ pub fn HashMapUnmanaged(
         }
 
         fn initMetadata(self: *Self) void {
-            @memset(@ptrCast([*]u8, self.metadata.?), 0, @sizeOf(Metadata) * self.capacity());
+            @memset(
+                @as([*]u8, @ptrCast(self.metadata.?))[0 .. @sizeOf(Metadata) * self.capacity()],
+                0,
+            );
         }
 
         // This counts the number of occupied slots (not counting tombstones), which is
@@ -1453,7 +1456,7 @@ pub fn HashMapUnmanaged(
         fn load(self: *const Self) Size {
             const max_load = (self.capacity() * max_load_percentage) / 100;
             assert(max_load >= self.available);
-            return @truncate(Size, max_load - self.available);
+            return @as(Size, @truncate(max_load - self.available));
         }
 
         fn growIfNeeded(self: *Self, allocator: Allocator, new_count: Size, ctx: Context) Allocator.Error!void {
@@ -1475,7 +1478,7 @@ pub fn HashMapUnmanaged(
             const new_cap = capacityForSize(self.size);
             try other.allocate(allocator, new_cap);
             other.initMetadata();
-            other.available = @truncate(u32, (new_cap * max_load_percentage) / 100);
+            other.available = @as(u32, @truncate((new_cap * max_load_percentage) / 100));
 
             var i: Size = 0;
             var metadata = self.metadata.?;
@@ -1502,7 +1505,7 @@ pub fn HashMapUnmanaged(
             defer map.deinit(allocator);
             try map.allocate(allocator, new_cap);
             map.initMetadata();
-            map.available = @truncate(u32, (new_cap * max_load_percentage) / 100);
+            map.available = @as(u32, @truncate((new_cap * max_load_percentage) / 100));
 
             if (self.size != 0) {
                 const old_capacity = self.capacity();
@@ -1541,19 +1544,19 @@ pub fn HashMapUnmanaged(
             const total_size = std.mem.alignForward(vals_end, max_align);
 
             const slice = try allocator.alignedAlloc(u8, max_align, total_size);
-            const ptr = @ptrToInt(slice.ptr);
+            const ptr = @intFromPtr(slice.ptr);
 
             const metadata = ptr + @sizeOf(Header);
 
-            const hdr = @intToPtr(*Header, ptr);
+            const hdr = @as(*Header, @ptrFromInt(ptr));
             if (@sizeOf([*]V) != 0) {
-                hdr.values = @intToPtr([*]V, ptr + vals_start);
+                hdr.values = @as([*]V, @ptrFromInt(ptr + vals_start));
             }
             if (@sizeOf([*]K) != 0) {
-                hdr.keys = @intToPtr([*]K, ptr + keys_start);
+                hdr.keys = @as([*]K, @ptrFromInt(ptr + keys_start));
             }
             hdr.capacity = new_capacity;
-            self.metadata = @intToPtr([*]Metadata, metadata);
+            self.metadata = @as([*]Metadata, @ptrFromInt(metadata));
         }
 
         fn deallocate(self: *Self, allocator: Allocator) void {
@@ -1576,7 +1579,7 @@ pub fn HashMapUnmanaged(
 
             const total_size = std.mem.alignForward(vals_end, max_align);
 
-            const slice = @intToPtr([*]align(max_align) u8, @ptrToInt(self.header()))[0..total_size];
+            const slice = @as([*]align(max_align) u8, @ptrFromInt(@intFromPtr(self.header())))[0..total_size];
             allocator.free(slice);
 
             self.metadata = null;
@@ -2107,7 +2110,7 @@ test "std.hash_map getOrPutAdapted" {
 
     var real_keys: [keys.len]u64 = undefined;
 
-    inline for (keys) |key_str, i| {
+    inline for (keys, 0..) |key_str, i| {
         const result = try map.getOrPutAdapted(key_str, AdaptedContext{});
         try testing.expect(!result.found_existing);
         real_keys[i] = std.fmt.parseInt(u64, key_str, 10) catch unreachable;
@@ -2117,7 +2120,7 @@ test "std.hash_map getOrPutAdapted" {
 
     try testing.expectEqual(map.count(), keys.len);
 
-    inline for (keys) |key_str, i| {
+    inline for (keys, 0..) |key_str, i| {
         const result = try map.getOrPutAdapted(key_str, AdaptedContext{});
         try testing.expect(result.found_existing);
         try testing.expectEqual(real_keys[i], result.key_ptr.*);

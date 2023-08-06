@@ -205,7 +205,7 @@ fn run_simulator(
         }
 
         if (mode == .ReleaseSafe) {
-            log.debug("simulator exited with exit code {}.\n", .{@enumToInt(bug)});
+            log.debug("simulator exited with exit code {}.\n", .{@intFromEnum(bug)});
             log.debug("rerunning seed {} in Debug mode.\n", .{seed});
             // Build the simulator binary in Debug mode instead.
             build_simulator(allocator, .Debug);
@@ -236,7 +236,7 @@ fn run_child_process(allocator: mem.Allocator, argv: []const []const u8) u8 {
             switch (code) {
                 6 => {
                     log.debug("exit with signal: {}. Indicates a crash bug.\n", .{code});
-                    return @enumToInt(Bug.crash);
+                    return @intFromEnum(Bug.crash);
                 },
                 else => {
                     fatal("the simulator exited with an unexpected signal. Term: {}\n", .{term});
@@ -365,7 +365,7 @@ fn create_report(allocator: mem.Allocator, bug: Bug, seed: u64) Report {
     var message = Report{
         .checksum = undefined,
         .bug = bug_type,
-        .seed = @bitCast([8]u8, @byteSwap(seed)),
+        .seed = @as([8]u8, @bitCast(@byteSwap(seed))),
         .commit = commit_byte_array,
     };
 

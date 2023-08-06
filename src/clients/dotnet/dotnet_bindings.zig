@@ -186,7 +186,7 @@ fn emit_enum(
         , .{});
     }
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         try emit_docs(buffer, mapping, field.name);
@@ -196,7 +196,7 @@ fn emit_enum(
         ++ value_fmt ++ ",\n\n", .{
             to_case(field.name, .pascal),
             if (@typeInfo(Type) == .Enum)
-                @enumToInt(@field(Type, field.name))
+                @intFromEnum(@field(Type, field.name))
             else
                 i, // packed struct field.
         });

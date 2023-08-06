@@ -130,7 +130,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const links = try allocator.alloc(Link, @as(usize, process_count_) * process_count_);
             errdefer allocator.free(links);
 
-            for (links) |*link, i| {
+            for (links, 0..) |*link, i| {
                 errdefer for (links[0..i]) |l| l.queue.deinit();
 
                 var queue = PriorityQueue(LinkPacket, void, order_packets).init(allocator, {});
@@ -148,7 +148,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             const auto_partition_nodes = try allocator.alloc(u8, @as(usize, options.node_count));
             errdefer allocator.free(auto_partition_nodes);
-            for (auto_partition_nodes) |*node, i| node.* = @intCast(u8, i);
+            for (auto_partition_nodes, 0..) |*node, i| node.* = @as(u8, @intCast(i));
 
             return Self{
                 .options = options,
@@ -275,7 +275,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     const partition_size =
                         1 + random.uintAtMost(u8, self.options.node_count - 2);
                     random.shuffle(u8, self.auto_partition_nodes);
-                    for (self.auto_partition_nodes) |r, i| {
+                    for (self.auto_partition_nodes, 0..) |r, i| {
                         partition[r] = i < partition_size;
                     }
                 },

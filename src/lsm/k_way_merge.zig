@@ -269,20 +269,20 @@ fn TestContext(comptime k_max: u32) type {
 
             var streams: [k_max][]Value = undefined;
 
-            for (streams_keys) |stream_keys, i| {
+            for (streams_keys, 0..) |stream_keys, i| {
                 errdefer for (streams[0..i]) |s| testing.allocator.free(s);
                 streams[i] = try testing.allocator.alloc(Value, stream_keys.len);
-                for (stream_keys) |key, j| {
+                for (stream_keys, 0..) |key, j| {
                     streams[i][j] = .{
                         .key = key,
-                        .version = @intCast(u32, i),
+                        .version = @as(u32, @intCast(i)),
                     };
                 }
             }
             defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
             var context: Self = .{ .streams = streams };
-            var kway = KWay.init(&context, @intCast(u32, streams_keys.len), direction);
+            var kway = KWay.init(&context, @as(u32, @intCast(streams_keys.len)), direction);
 
             while (try kway.pop()) |value| {
                 try actual.append(value);
@@ -322,11 +322,11 @@ fn TestContext(comptime k_max: u32) type {
                 }
 
                 var expect_buffer_len: usize = 0;
-                for (streams[0..k]) |stream, version| {
+                for (streams[0..k], 0..) |stream, version| {
                     for (stream) |key| {
                         expect_buffer[expect_buffer_len] = .{
                             .key = key,
-                            .version = @intCast(u32, version),
+                            .version = @as(u32, @intCast(version)),
                         };
                         expect_buffer_len += 1;
                     }

@@ -31,11 +31,11 @@ pub const DotnetDocs = Docs{
     .test_source_path = "",
 
     .name = "tigerbeetle-dotnet",
-    .description = 
+    .description =
     \\The TigerBeetle client for .NET.
     ,
 
-    .prerequisites = 
+    .prerequisites =
     \\* .NET >= 2.1
     \\And if you do not already have NuGet.org as a package
     \\source, make sure to add it:
@@ -51,7 +51,7 @@ pub const DotnetDocs = Docs{
     .test_file_name = "Program",
 
     .install_prereqs = "",
-    .install_sample_file = 
+    .install_sample_file =
     \\using System;
     \\
     \\using TigerBeetle;
@@ -64,11 +64,11 @@ pub const DotnetDocs = Docs{
     .current_commit_pre_install_hook = current_commit_pre_install_hook,
     .current_commit_post_install_hook = null,
 
-    .install_commands = 
+    .install_commands =
     \\dotnet new console
     \\dotnet add package tigerbeetle
     ,
-    .build_commands = 
+    .build_commands =
     \\dotnet restore
     \\dotnet clean
     \\dotnet build
@@ -83,7 +83,7 @@ pub const DotnetDocs = Docs{
 
     .examples = "",
 
-    .client_object_example = 
+    .client_object_example =
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
     \\  clusterID: 0,
@@ -91,7 +91,7 @@ pub const DotnetDocs = Docs{
     \\);
     ,
 
-    .client_object_documentation = 
+    .client_object_documentation =
     \\If you create a `Client` like this, don't forget to call
     \\`client.Dispose()` when you are done with it. Otherwise you
     \\can use the `using` syntax:
@@ -107,7 +107,7 @@ pub const DotnetDocs = Docs{
     \\to more than one TigerBeetle cluster.
     ,
 
-    .create_accounts_example = 
+    .create_accounts_example =
     \\var accounts = new[] {
     \\  new Account
     \\  {
@@ -122,13 +122,13 @@ pub const DotnetDocs = Docs{
     \\var createAccountsError = client.CreateAccounts(accounts);
     ,
 
-    .create_accounts_documentation = 
+    .create_accounts_documentation =
     \\All TigerBeetle's IDs are 128-bit integers, and the .NET client
     \\accepts a wide range of values: `int`, `uint`, `long`, `ulong`,
     \\`Guid`, `byte[]` and `TigerBeetle.UInt128`.
     ,
 
-    .account_flags_documentation = 
+    .account_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
     \\`AccountFlags` object with bitwise-or:
     \\
@@ -138,7 +138,7 @@ pub const DotnetDocs = Docs{
     \\* `AccountFlags.CreditsMustNotExceedDebits`
     ,
 
-    .account_flags_example = 
+    .account_flags_example =
     \\var account0 = new Account{ /* ... account values ... */ };
     \\var account1 = new Account{ /* ... account values ... */ };
     \\account0.Flags = AccountFlags.Linked;
@@ -146,7 +146,7 @@ pub const DotnetDocs = Docs{
     \\createAccountsError = client.CreateAccounts(new []{account0, account1});
     ,
 
-    .create_accounts_errors_example = 
+    .create_accounts_errors_example =
     \\var account2 = new Account{ /* ... account values ... */ };
     \\var account3 = new Account{ /* ... account values ... */ };
     \\var account4 = new Account{ /* ... account values ... */ };
@@ -160,11 +160,11 @@ pub const DotnetDocs = Docs{
 
     .create_accounts_errors_documentation = "",
 
-    .lookup_accounts_example = 
+    .lookup_accounts_example =
     \\accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 137, 138 });
     ,
 
-    .create_transfers_example = 
+    .create_transfers_example =
     \\var transfers = new[] {
     \\  new Transfer
     \\  {
@@ -185,7 +185,7 @@ pub const DotnetDocs = Docs{
 
     .create_transfers_documentation = "",
 
-    .create_transfers_errors_example = 
+    .create_transfers_errors_example =
     \\foreach (var error in createTransfersError) {
     \\  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
     \\  return;
@@ -194,14 +194,14 @@ pub const DotnetDocs = Docs{
 
     .create_transfers_errors_documentation = "",
 
-    .no_batch_example = 
+    .no_batch_example =
     \\foreach(var t in transfers) {
     \\  createTransfersError = client.CreateTransfers(new []{t});
     \\  // error handling omitted
     \\}
     ,
 
-    .batch_example = 
+    .batch_example =
     \\var BATCH_SIZE = 8191;
     \\for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
     \\  var batchSize = BATCH_SIZE;
@@ -214,7 +214,7 @@ pub const DotnetDocs = Docs{
     \\}
     ,
 
-    .transfer_flags_documentation = 
+    .transfer_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
     \\`TransferFlags` object with bitwise-or:
     \\
@@ -225,14 +225,14 @@ pub const DotnetDocs = Docs{
     \\* `TransferFlags.VoidPendingTransfer`
     ,
 
-    .transfer_flags_link_example = 
+    .transfer_flags_link_example =
     \\var transfer0 = new Transfer{ /* ... account values ... */ };
     \\var transfer1 = new Transfer{ /* ... account values ... */ };
     \\transfer0.Flags = TransferFlags.Linked;
     \\createTransfersError = client.CreateTransfers(new Transfer[] {transfer0, transfer1});
     ,
 
-    .transfer_flags_post_example = 
+    .transfer_flags_post_example =
     \\var transfer = new Transfer
     \\{
     \\  Id = 2,
@@ -243,7 +243,7 @@ pub const DotnetDocs = Docs{
     \\// error handling omitted
     ,
 
-    .transfer_flags_void_example = 
+    .transfer_flags_void_example =
     \\transfer = new Transfer
     \\{
     \\  Id = 2,
@@ -254,11 +254,11 @@ pub const DotnetDocs = Docs{
     \\// error handling omitted
     ,
 
-    .lookup_transfers_example = 
+    .lookup_transfers_example =
     \\transfers = client.LookupTransfers(new TigerBeetle.UInt128[] {1, 2});
     ,
 
-    .linked_events_example = 
+    .linked_events_example =
     \\var batch = new System.Collections.Generic.List<Transfer>();
     \\
     \\// An individual transfer (successful):
@@ -288,7 +288,7 @@ pub const DotnetDocs = Docs{
 
     .developer_setup_documentation = "",
 
-    .developer_setup_sh_commands = 
+    .developer_setup_sh_commands =
     \\cd src/clients/dotnet
     \\dotnet restore
     \\dotnet clean
@@ -296,7 +296,7 @@ pub const DotnetDocs = Docs{
     \\if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
     ,
 
-    .developer_setup_pwsh_commands = 
+    .developer_setup_pwsh_commands =
     \\cd src/clients/dotnet
     \\dotnet restore
     \\dotnet clean
@@ -304,7 +304,7 @@ pub const DotnetDocs = Docs{
     \\if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
     ,
 
-    .test_main_prefix = 
+    .test_main_prefix =
     \\using System;
     \\using System.Diagnostics;
     \\

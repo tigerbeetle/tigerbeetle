@@ -49,17 +49,17 @@ pub const IdPermutation = union(enum) {
 
     pub fn decode(self: *const IdPermutation, id: u128) usize {
         return switch (self.*) {
-            .identity => @intCast(usize, id),
-            .inversion => @intCast(usize, std.math.maxInt(u128) - id),
+            .identity => @as(usize, @intCast(id)),
+            .inversion => @as(usize, @intCast(std.math.maxInt(u128) - id)),
             .zigzag => {
                 if (id % 2 == 0) {
-                    return @intCast(usize, id);
+                    return @as(usize, @intCast(id));
                 } else {
                     // -1 to stay odd.
-                    return @intCast(usize, std.math.maxInt(u128) - id -% 1);
+                    return @as(usize, @intCast(std.math.maxInt(u128) - id -% 1));
                 }
             },
-            .random => @truncate(usize, id >> 32),
+            .random => @as(usize, @truncate(id >> 32)),
         };
     }
 

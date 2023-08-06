@@ -161,7 +161,7 @@ const Command = struct {
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
-            .node_count = @intCast(u8, args.addresses.len),
+            .node_count = @as(u8, @intCast(args.addresses.len)),
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,

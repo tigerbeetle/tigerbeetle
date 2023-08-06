@@ -82,8 +82,8 @@ pub fn main() !void {
         var total_compressed: f64 = 0.0;
         i = 0;
         while (i < samples) : (i += 1) {
-            total_uncompressed += @intToFloat(f64, bitsets[i].len * @sizeOf(usize));
-            total_compressed += @intToFloat(f64, bitset_lengths[i]);
+            total_uncompressed += @as(f64, @floatFromInt(bitsets[i].len * @sizeOf(usize)));
+            total_compressed += @as(f64, @floatFromInt(bitset_lengths[i]));
         }
 
         try stdout.print("Words={:_>3} E(Run)={:_>3} E(Literal)={:_>3} EncTime={:_>6}ns DecTime={:_>6}ns Ratio={d:_>6.2}\n", .{

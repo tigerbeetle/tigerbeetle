@@ -19,7 +19,7 @@ pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T)
         assert(info == .Int);
         assert(info.Int.signedness == .unsigned);
     }
-    const exp = random.floatExp(f64) * @intToFloat(f64, avg);
+    const exp = random.floatExp(f64) * @as(f64, @floatFromInt(avg));
     return std.math.lossyCast(T, exp);
 }
 
@@ -36,7 +36,7 @@ pub fn random_enum_distribution(
     var distribution: Distribution(Enum) = undefined;
     var total: f64 = 0;
     inline for (fields) |field| {
-        const p = @intToFloat(f64, random.uintLessThan(u8, 10));
+        const p = @as(f64, @floatFromInt(random.uintLessThan(u8, 10)));
         @field(distribution, field.name) = p;
         total += p;
     }
@@ -62,7 +62,7 @@ pub fn random_enum(
     var choice = random.float(f64) * total;
     inline for (fields) |field| {
         choice -= @field(distribution, field.name);
-        if (choice < 0) return @intToEnum(Enum, field.value);
+        if (choice < 0) return @as(Enum, @enumFromInt(field.value));
     }
     unreachable;
 }
@@ -127,7 +127,7 @@ pub fn parse_fuzz_args(args_allocator: mem.Allocator) !FuzzArgs {
         // If no seed was given, use a random seed instead.
         var buffer: [@sizeOf(u64)]u8 = undefined;
         try std.os.getrandom(&buffer);
-        seed = @bitCast(u64, buffer);
+        seed = @as(u64, @bitCast(buffer));
     }
 
     log.info("Fuzz seed = {}", .{seed.?});

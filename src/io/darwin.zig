@@ -94,8 +94,8 @@ pub const IO = struct {
             if (change_events == 0 and self.completed.empty()) {
                 if (wait_for_completions) {
                     const timeout_ns = next_timeout orelse @panic("kevent() blocking forever");
-                    ts.tv_nsec = @intCast(@TypeOf(ts.tv_nsec), timeout_ns % std.time.ns_per_s);
-                    ts.tv_sec = @intCast(@TypeOf(ts.tv_sec), timeout_ns / std.time.ns_per_s);
+                    ts.tv_nsec = @as(@TypeOf(ts.tv_nsec), @intCast(timeout_ns % std.time.ns_per_s));
+                    ts.tv_sec = @as(@TypeOf(ts.tv_sec), @intCast(timeout_ns / std.time.ns_per_s));
                 } else if (self.io_inflight == 0) {
                     return;
                 }
@@ -118,7 +118,7 @@ pub const IO = struct {
             self.io_inflight -= new_events;
 
             for (events[0..new_events]) |event| {
-                const completion = @intToPtr(*Completion, event.udata);
+                const completion = @as(*Completion, @ptrFromInt(event.udata));
                 completion.next = null;
                 self.completed.push(completion);
             }
@@ -132,7 +132,7 @@ pub const IO = struct {
     }
 
     fn flush_io(_: *IO, events: []os.Kevent, io_pending_top: *?*Completion) usize {
-        for (events) |*event, flushed| {
+        for (events, 0..) |*event, flushed| {
             const completion = io_pending_top.* orelse return flushed;
             io_pending_top.* = completion.next;
 
@@ -147,12 +147,12 @@ pub const IO = struct {
             };
 
             event.* = .{
-                .ident = @intCast(u32, event_info[0]),
-                .filter = @intCast(i16, event_info[1]),
+                .ident = @as(u32, @intCast(event_info[0])),
+                .filter = @as(i16, @intCast(event_info[1])),
                 .flags = os.system.EV_ADD | os.system.EV_ENABLE | os.system.EV_ONESHOT,
                 .fflags = 0,
                 .data = 0,
-                .udata = @ptrToInt(completion),
+                .udata = @intFromPtr(completion),
             };
         }
         return events.len;
@@ -266,7 +266,7 @@ pub const IO = struct {
 
                 // Complete the Completion
                 return callback(
-                    @intToPtr(Context, @ptrToInt(_completion.context)),
+                    @as(Context, @ptrFromInt(@intFromPtr(_completion.context))),
                     _completion,
                     result,
                 );
@@ -455,7 +455,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
@@ -465,10 +465,10 @@ pub const IO = struct {
                             op.fd,
                             op.buf,
                             op.len,
-                            @bitCast(isize, op.offset),
+                            @as(isize, @bitCast(op.offset)),
                         );
                         return switch (os.errno(rc)) {
-                            .SUCCESS => @intCast(usize, rc),
+                            .SUCCESS => @as(usize, @intCast(rc)),
                             .INTR => continue,
                             .AGAIN => error.WouldBlock,
                             .BADF => error.NotOpenForReading,
@@ -514,7 +514,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
             },
             struct {
                 fn do_operation(op: anytype) RecvError!usize {
@@ -547,7 +547,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
             },
             struct {
                 fn do_operation(op: anytype) SendError!usize {
@@ -580,7 +580,7 @@ pub const IO = struct {
                 .callback = struct {
                     fn on_complete(_io: *IO, _completion: *Completion) void {
                         _ = _io;
-                        const _context = @intToPtr(Context, @ptrToInt(_completion.context));
+                        const _context = @as(Context, @ptrFromInt(@intFromPtr(_completion.context)));
                         callback(_context, _completion, {});
                     }
                 }.on_complete,
@@ -630,7 +630,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @intCast(u32, buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
@@ -786,15 +786,15 @@ pub const IO = struct {
             .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
             .fst_posmode = F_PEOFPOSMODE,
             .fst_offset = 0,
-            .fst_length = @intCast(os.off_t, size),
+            .fst_length = @as(os.off_t, @intCast(size)),
             .fst_bytesalloc = 0,
         };
 
         // Try to pre-allocate contiguous space and fall back to default non-contiguous.
-        var res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+        var res = os.system.fcntl(fd, os.F.PREALLOCATE, @intFromPtr(&store));
         if (os.errno(res) != .SUCCESS) {
             store.fst_flags = F_ALLOCATEALL;
-            res = os.system.fcntl(fd, os.F.PREALLOCATE, @ptrToInt(&store));
+            res = os.system.fcntl(fd, os.F.PREALLOCATE, @intFromPtr(&store));
         }
 
         switch (os.errno(res)) {

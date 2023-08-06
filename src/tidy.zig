@@ -56,7 +56,7 @@ fn is_naughty(path: []const u8) bool {
         // Separator-agnostic path comparison.
         if (naughty_path.len == path.len) {
             var equal_paths = true;
-            for (naughty_path) |c, i| {
+            for (naughty_path, 0..) |c, i| {
                 equal_paths = equal_paths and
                     (path[i] == c or (path[i] == fs.path.sep and c == fs.path.sep_posix));
             }

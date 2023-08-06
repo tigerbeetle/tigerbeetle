@@ -493,10 +493,7 @@ pub fn TableType(
                 if (data.key_count > 0) {
                     assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
 
-                    const key_layout_bytes = @alignCast(
-                        @alignOf(Key),
-                        block[data.key_layout_offset..][0..data.key_layout_size],
-                    );
+                    const key_layout_bytes = block[data.key_layout_offset..][0..data.key_layout_size];
                     const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
                     const e = eytzinger(data.key_count, data.value_count_max);
@@ -506,7 +503,7 @@ pub fn TableType(
                         key_from_value,
                         sentinel_key,
                         values,
-                        key_layout,
+                        @alignCast(key_layout),
                     );
                 }
 
@@ -517,15 +514,15 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .context = @bitCast(u128, schema.TableData.Context{
+                    .context = @as(u128, @bitCast(schema.TableData.Context{
                         .key_count = data.key_count,
                         .key_layout_size = data.key_layout_size,
                         .value_count_max = data.value_count_max,
                         .value_size = value_size,
-                    }),
+                    })),
                     .op = options.address,
                     .request = builder.value_count,
-                    .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
+                    .size = block_size - @as(u32, @intCast(values_padding.len + block_padding.len)),
                     .command = .block,
                     .operation = BlockType.data.operation(),
                 };
@@ -581,9 +578,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, builder.filter_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .context = @bitCast(u128, schema.TableFilter.Context{
+                    .context = @as(u128, @bitCast(schema.TableFilter.Context{
                         .data_block_count_max = data_block_count_max,
-                    }),
+                    })),
                     .op = options.address,
                     .size = block_size - filter.padding_size,
                     .command = .block,
@@ -634,12 +631,12 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .context = @bitCast(u128, schema.TableIndex.Context{
+                    .context = @as(u128, @bitCast(schema.TableIndex.Context{
                         .filter_block_count = builder.filter_block_count,
                         .filter_block_count_max = index.filter_block_count_max,
                         .data_block_count = builder.data_block_count,
                         .data_block_count_max = index.data_block_count_max,
-                    }),
+                    })),
                     .request = index.key_size,
                     .op = options.address,
                     .timestamp = options.snapshot_min,
@@ -745,10 +742,7 @@ pub fn TableType(
                 if (data.key_count == 0) break :blk data_block_values_used(data_block);
 
                 assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-                const key_layout_bytes = @alignCast(
-                    @alignOf(Key),
-                    data_block[data.key_layout_offset..][0..data.key_layout_size],
-                );
+                const key_layout_bytes = data_block[data.key_layout_offset..][0..data.key_layout_size];
                 const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
                 const e = eytzinger(data.key_count, data.value_count_max);
@@ -756,7 +750,7 @@ pub fn TableType(
                     Key,
                     Value,
                     compare_keys,
-                    key_layout,
+                    @alignCast(key_layout),
                     data_block_values_used(data_block),
                     key,
                 );

@@ -59,13 +59,13 @@ pub const AOFEntry = extern struct {
     }
 
     pub fn header(self: *AOFEntry) *Header {
-        return @ptrCast(*Header, &self.message);
+        return @as(*Header, @ptrCast(&self.message));
     }
 
     /// Turn an AOFEntry back into a Message.
     pub fn to_message(self: *AOFEntry, target: *Message) void {
         stdx.copy_disjoint(.inexact, u8, target.buffer, self.message[0..self.header().size]);
-        target.header = @ptrCast(*Header, target.buffer);
+        target.header = @as(*Header, @ptrCast(target.buffer));
     }
 
     pub fn from_message(
@@ -315,7 +315,7 @@ pub const AOFReplayClient = struct {
             allocator,
             std.crypto.random.int(u128),
             0,
-            @intCast(u8, addresses.len),
+            @as(u8, @intCast(addresses.len)),
             message_pool,
             .{
                 .configuration = addresses,
@@ -366,7 +366,7 @@ pub const AOFReplayClient = struct {
                 .timestamp = header.timestamp,
             };
 
-            self.client.raw_request(@ptrToInt(self), AOFReplayClient.replay_callback, message);
+            self.client.raw_request(@intFromPtr(self), AOFReplayClient.replay_callback, message);
 
             // Process messages one by one for now
             while (self.client.request_queue.count > 0) {
@@ -384,7 +384,7 @@ pub const AOFReplayClient = struct {
         _ = operation;
         _ = result;
 
-        const self = @intToPtr(*AOFReplayClient, @intCast(u64, user_data));
+        const self = @as(*AOFReplayClient, @ptrFromInt(@as(u64, @intCast(user_data))));
         assert(self.inflight_message != null);
         self.inflight_message = null;
     }
@@ -431,7 +431,7 @@ pub fn aof_merge(
     // located.
     try stdout.print("Building checksum map...\n", .{});
     var current_parent: ?u128 = null;
-    for (aofs[0..aof_count]) |*aof, i| {
+    for (aofs[0..aof_count], 0..) |*aof, i| {
         // While building our checksum map, don't validate our hash chain. We might have a file that
         // has a broken chain, but still contains valid data that can be used for recovery with
         // other files.
@@ -603,8 +603,8 @@ test "aof write / read" {
         .request = 0,
         .cluster = 0,
         .command = vsr.Command.prepare,
-        .operation = @intToEnum(vsr.Operation, 4),
-        .size = @intCast(u32, @sizeOf(Header) + demo_payload.len),
+        .operation = @as(vsr.Operation, @enumFromInt(4)),
+        .size = @as(u32, @intCast(@sizeOf(Header) + demo_payload.len)),
     };
 
     const body = demo_message.body();
@@ -742,7 +742,7 @@ pub fn main() !void {
 
             // The body isn't the only important information, there's also the operation
             // and the timestamp which are in the header. Include those in our hash too.
-            if (@enumToInt(header.operation) > constants.vsr_operations_reserved) {
+            if (@intFromEnum(header.operation) > constants.vsr_operations_reserved) {
                 blake3.update(std.mem.asBytes(&header.checksum_body));
                 blake3.update(std.mem.asBytes(&header.timestamp));
                 blake3.update(std.mem.asBytes(&header.operation));
@@ -751,7 +751,7 @@ pub fn main() !void {
         blake3.final(data_checksum[0..]);
         try stdout.print(
             "\nData checksum chain: {}\n",
-            .{@bitCast(u128, data_checksum[0..@sizeOf(u128)].*)},
+            .{@as(u128, @bitCast(data_checksum[0..@sizeOf(u128)].*))},
         );
     } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
         try aof_merge(allocator, paths[0 .. count - 2], "prepared.aof");

@@ -108,7 +108,7 @@ pub fn main() !void {
         allocator,
         client_id,
         cluster_id,
-        @intCast(u8, addresses.len),
+        @as(u8, @intCast(addresses.len)),
         &message_pool,
         .{
             .configuration = addresses,
@@ -399,7 +399,7 @@ const Benchmark = struct {
 
         stdout.print("{} batches in {d:.2} s\n", .{
             b.batch_index,
-            @intToFloat(f64, total_ns) / std.time.ns_per_s,
+            @as(f64, @floatFromInt(total_ns)) / std.time.ns_per_s,
         }) catch unreachable;
         stdout.print("load offered = {} tx/s\n", .{
             b.transfer_count_per_second,
@@ -433,7 +433,7 @@ const Benchmark = struct {
         );
 
         b.client.request(
-            @intCast(u128, @ptrToInt(b)),
+            @as(u128, @intCast(@intFromPtr(b))),
             send_complete,
             operation,
             b.message.?,
@@ -468,7 +468,7 @@ const Benchmark = struct {
             else => unreachable,
         }
 
-        const b = @intToPtr(*Benchmark, @intCast(u64, user_data));
+        const b = @as(*Benchmark, @ptrFromInt(@as(u64, @intCast(user_data))));
 
         b.client.unref(b.message.?);
         b.message = null;

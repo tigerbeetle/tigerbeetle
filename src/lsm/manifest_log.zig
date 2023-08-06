@@ -153,7 +153,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
             var blocks: [blocks_count_max]BlockPtr = undefined;
-            for (blocks) |*block, i| {
+            for (blocks, 0..) |*block, i| {
                 errdefer for (blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }
@@ -815,7 +815,7 @@ fn ManifestLogBlockType(comptime Storage: type, comptime TableInfo: type) type {
             const labels_size = entry_count_max * @sizeOf(Label);
             const tables_size = header.size - @sizeOf(vsr.Header) - labels_size;
 
-            const entry_count_ = @intCast(u32, @divExact(tables_size, @sizeOf(TableInfo)));
+            const entry_count_ = @as(u32, @intCast(@divExact(tables_size, @sizeOf(TableInfo))));
             assert(entry_count_ > 0);
             assert(entry_count_ <= entry_count_max);
             return entry_count_;

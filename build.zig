@@ -11,7 +11,7 @@ pub fn build(b: *std.build.Builder) void {
     b.reference_trace = 10;
 
     const target = b.standardTargetOptions(.{});
-    const mode = b.standardReleaseOptions();
+    const mode = b.standardOptimizeOption(.{});
     const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
 
     const options = b.addOptions();

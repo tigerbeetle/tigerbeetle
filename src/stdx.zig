@@ -62,7 +62,7 @@ pub inline fn copy_left(
     }
 
     if (!disjoint_slices(T, T, target, source)) {
-        assert(@ptrToInt(target.ptr) < @ptrToInt(source.ptr));
+        assert(@intFromPtr(target.ptr) < @intFromPtr(source.ptr));
     }
     std.mem.copy(T, target, source);
 }
@@ -71,7 +71,7 @@ test "copy_left" {
     const a = try std.testing.allocator.alloc(usize, 8);
     defer std.testing.allocator.free(a);
 
-    for (a) |*v, i| v.* = i;
+    for (a, 0..) |*v, i| v.* = i;
     copy_left(.exact, usize, a[0..6], a[2..]);
     try std.testing.expect(std.mem.eql(usize, a, &.{ 2, 3, 4, 5, 6, 7, 6, 7 }));
 }
@@ -88,7 +88,7 @@ pub inline fn copy_right(
     }
 
     if (!disjoint_slices(T, T, target, source)) {
-        assert(@ptrToInt(target.ptr) > @ptrToInt(source.ptr));
+        assert(@intFromPtr(target.ptr) > @intFromPtr(source.ptr));
     }
     std.mem.copyBackwards(T, target, source);
 }
@@ -97,7 +97,7 @@ test "copy_right" {
     const a = try std.testing.allocator.alloc(usize, 8);
     defer std.testing.allocator.free(a);
 
-    for (a) |*v, i| v.* = i;
+    for (a, 0..) |*v, i| v.* = i;
     copy_right(.exact, usize, a[2..], a[0..6]);
     try std.testing.expect(std.mem.eql(usize, a, &.{ 0, 1, 0, 1, 2, 3, 4, 5 }));
 }
@@ -118,8 +118,8 @@ pub inline fn copy_disjoint(
 }
 
 pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
-    return @ptrToInt(a.ptr) + a.len * @sizeOf(A) <= @ptrToInt(b.ptr) or
-        @ptrToInt(b.ptr) + b.len * @sizeOf(B) <= @ptrToInt(a.ptr);
+    return @intFromPtr(a.ptr) + a.len * @sizeOf(A) <= @intFromPtr(b.ptr) or
+        @intFromPtr(b.ptr) + b.len * @sizeOf(B) <= @intFromPtr(a.ptr);
 }
 
 test "disjoint_slices" {
@@ -260,7 +260,7 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
     assert(a_words.len == b_words.len);
 
     var total: Word = 0;
-    for (a_words) |a_word, i| {
+    for (a_words, 0..) |a_word, i| {
         const b_word = b_words[i];
         total |= a_word ^ b_word;
     }
@@ -369,36 +369,36 @@ inline fn low_level_hash(seed: u64, input: anytype) u64 {
         defer state = dup[0] ^ dup[1];
 
         while (in.len > 64) : (in = in[64..]) {
-            for (@bitCast([2][4]u64, in[0..64].*)) |chunk, i| {
+            for (@as([2][4]u64, @bitCast(in[0..64].*)), 0..) |chunk, i| {
                 const mix1 = @as(u128, chunk[0] ^ salt[(i * 2) + 1]) *% (chunk[1] ^ dup[i]);
                 const mix2 = @as(u128, chunk[2] ^ salt[(i * 2) + 2]) *% (chunk[3] ^ dup[i]);
-                dup[i] = @truncate(u64, mix1 ^ (mix1 >> 64));
-                dup[i] ^= @truncate(u64, mix2 ^ (mix2 >> 64));
+                dup[i] = @as(u64, @truncate(mix1 ^ (mix1 >> 64)));
+                dup[i] ^= @as(u64, @truncate(mix2 ^ (mix2 >> 64)));
             }
         }
     }
 
     while (in.len > 16) : (in = in[16..]) {
-        const chunk = @bitCast([2]u64, in[0..16].*);
+        const chunk = @as([2]u64, @bitCast(in[0..16].*));
         const mixed = @as(u128, chunk[0] ^ salt[1]) *% (chunk[1] ^ state);
-        state = @truncate(u64, mixed ^ (mixed >> 64));
+        state = @as(u64, @truncate(mixed ^ (mixed >> 64)));
     }
 
     var chunk = std.mem.zeroes([2]u64);
     if (in.len > 8) {
-        chunk[0] = @bitCast(u64, in[0..8].*);
-        chunk[1] = @bitCast(u64, in[in.len - 8 ..][0..8].*);
+        chunk[0] = @as(u64, @bitCast(in[0..8].*));
+        chunk[1] = @as(u64, @bitCast(in[in.len - 8 ..][0..8].*));
     } else if (in.len > 3) {
-        chunk[0] = @bitCast(u32, in[0..4].*);
-        chunk[1] = @bitCast(u32, in[in.len - 4 ..][0..4].*);
+        chunk[0] = @as(u32, @bitCast(in[0..4].*));
+        chunk[1] = @as(u32, @bitCast(in[in.len - 4 ..][0..4].*));
     } else if (in.len > 0) {
         chunk[0] = (@as(u64, in[0]) << 16) | (@as(u64, in[in.len / 2]) << 8) | in[in.len - 1];
     }
 
     var mixed = @as(u128, chunk[0] ^ salt[1]) *% (chunk[1] ^ state);
-    mixed = @truncate(u64, mixed ^ (mixed >> 64));
+    mixed = @as(u64, @truncate(mixed ^ (mixed >> 64)));
     mixed *%= (@as(u64, starting_len) ^ salt[1]);
-    return @truncate(u64, mixed ^ (mixed >> 64));
+    return @as(u64, @truncate(mixed ^ (mixed >> 64)));
 }
 
 test "hash_inline" {
@@ -444,13 +444,13 @@ pub inline fn union_field_parent_ptr(
         var stub_field_ptr = &@field(stub, @tagName(field));
         assert(@TypeOf(stub_field_ptr) == @TypeOf(child));
 
-        break :blk @ptrToInt(stub_field_ptr) - @ptrToInt(&stub);
+        break :blk @intFromPtr(stub_field_ptr) - @intFromPtr(&stub);
     };
 
     return if (comptime offset == 0)
-        @ptrCast(*Union, @alignCast(@alignOf(Union), child))
+        @as(*Union, @ptrCast(@alignCast(child)))
     else
-        @intToPtr(*Union, @ptrToInt(child) - offset);
+        @as(*Union, @ptrFromInt(@intFromPtr(child) - offset));
 }
 
 test "union_field_parent_ptr" {

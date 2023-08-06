@@ -24,8 +24,8 @@ const body_fmt = "{:_>2}B/{:_>3}B {:_>4}/{:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns"
 
 const summary_sizes = blk: {
     var sizes: [values_per_page.len][summary_fractions.len]usize = undefined;
-    for (values_per_page) |values_count, v| {
-        for (summary_fractions) |fraction, k| {
+    for (values_per_page, 0..) |values_count, v| {
+        for (summary_fractions, 0..) |fraction, k| {
             // Set in reverse order so that the summary sizes ascend.
             sizes[v][summary_fractions.len - k - 1] = values_count / fraction;
         }
@@ -56,7 +56,7 @@ pub fn main() !void {
     var blob = try arena.allocator().alloc(u8, blob_size);
 
     inline for (kv_types) |kv| {
-        inline for (values_per_page) |values_count, v| {
+        inline for (values_per_page, 0..) |values_count, v| {
             inline for (summary_sizes[v]) |keys_count| {
                 try run_benchmark(.{
                     .blob_size = blob_size,
@@ -91,7 +91,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
     var pages = try blob_alloc.allocator().alloc(Page, page_count);
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
-        for (page.values) |*value, i| value.key = i;
+        for (page.values, 0..) |*value, i| value.key = i;
         Eytzinger.layout_from_keys_or_values(K, V, V.key_from_value, V.max_key, &page.values, &page.keys);
     }
 
@@ -238,10 +238,10 @@ const Benchmark = struct {
 
     fn begin() !Benchmark {
         var perf_fds = [1]std.os.fd_t{-1} ** perf_counters.len;
-        for (perf_counters) |counter, i| {
+        for (perf_counters, 0..) |counter, i| {
             var attr: std.os.linux.perf_event_attr = .{
                 .type = PERF.TYPE.HARDWARE,
-                .config = @enumToInt(counter),
+                .config = @intFromEnum(counter),
                 .flags = .{
                     .disabled = true,
                     .exclude_kernel = true,
@@ -265,7 +265,7 @@ const Benchmark = struct {
 
     fn end(self: *Benchmark, samples: usize) !BenchmarkResult {
         defer {
-            for (perf_counters) |_, i| {
+            for (perf_counters, 0..) |_, i| {
                 std.os.close(self.perf_fds[i]);
                 self.perf_fds[i] = -1;
             }
@@ -289,15 +289,15 @@ const Benchmark = struct {
 // shuffle([0,1,…,n-1])
 fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
     var indices: [n]usize = undefined;
-    for (indices) |*i, j| i.* = j;
+    for (indices, 0..) |*i, j| i.* = j;
     rand.shuffle(usize, indices[0..]);
     return indices;
 }
 
 fn timeval_to_ns(tv: std.os.timeval) u64 {
     const ns_per_us = std.time.ns_per_s / std.time.us_per_s;
-    return @bitCast(u64, tv.tv_sec) * std.time.ns_per_s +
-        @bitCast(u64, tv.tv_usec) * ns_per_us;
+    return @as(u64, @bitCast(tv.tv_sec)) * std.time.ns_per_s +
+        @as(u64, @bitCast(tv.tv_usec)) * ns_per_us;
 }
 
 fn readPerfFd(fd: std.os.fd_t) !usize {
