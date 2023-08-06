@@ -812,7 +812,7 @@ pub fn main() !void {
         if (std.mem.eql(u8, arg, "--language")) {
             var filter = args.next().?;
             skipLanguage = [_]bool{true} ** languages.len;
-            for (languages) |language, i| {
+            for (languages, 0..) |language, i| {
                 if (std.mem.eql(u8, filter, language.directory)) {
                     skipLanguage[i] = false;
                 }
@@ -836,7 +836,7 @@ pub fn main() !void {
         }
     }
 
-    for (languages) |language, i| {
+    for (languages, 0..) |language, i| {
         if (skipLanguage[i]) {
             continue;
         }

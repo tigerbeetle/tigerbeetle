@@ -277,7 +277,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
         }
 
         pub fn run_fuzz_ops(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-            for (fuzz_ops) |fuzz_op, op_index| {
+            for (fuzz_ops, 0..) |fuzz_op, op_index| {
                 log.debug("Running fuzz_ops[{}/{}] == {}", .{ op_index, fuzz_ops.len, fuzz_op });
                 switch (fuzz_op) {
                     .insert_tables => |amount| try env.insert_tables(amount),
@@ -398,7 +398,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 assert(level_table.equal(env_table));
 
                 env.level.set_snapshot_max(env.snapshot, .{
-                    .table_info = @intToPtr(*TableInfo, @ptrToInt(level_table)),
+                    .table_info = @as(*TableInfo, @ptrFromInt(@intFromPtr(level_table))),
                     .generation = env.level.generation,
                 });
                 // This is required to keep the table in the fuzzer's environment consistent with

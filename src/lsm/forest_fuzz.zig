@@ -358,7 +358,7 @@ const Environment = struct {
         var model = Model.init();
         defer model.deinit();
 
-        for (fuzz_ops) |fuzz_op, fuzz_op_index| {
+        for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
             assert(env.state == .fuzzing);
             log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
 
@@ -368,7 +368,7 @@ const Environment = struct {
             const model_size = (model.log.readableLength() + model.checkpointed.count()) * @sizeOf(Account);
             // NOTE: This isn't accurate anymore because the model can contain multiple copies of an account in the log
             log.debug("space_amplification ~= {d:.2}", .{
-                @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
+                @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
             });
 
             // Apply fuzz_op to the forest and the model.
@@ -523,7 +523,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     var op: u64 = 1;
     var persisted_op: u64 = op;
     var puts_since_compact: usize = 0;
-    for (fuzz_ops) |*fuzz_op, fuzz_op_index| {
+    for (fuzz_ops, 0..) |*fuzz_op, fuzz_op_index| {
         const action_tag: FuzzOpActionTag = if (puts_since_compact >= Environment.puts_since_compact_max)
             // We have to compact before doing any other operations.
             .compact

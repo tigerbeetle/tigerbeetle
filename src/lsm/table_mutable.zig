@@ -166,7 +166,7 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn count(table: *const TableMutable) u32 {
-            const value = @intCast(u32, table.values.count());
+            const value = @as(u32, @intCast(table.values.count()));
             assert(value <= value_count_max);
             return value;
         }

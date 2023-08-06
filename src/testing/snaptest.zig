@@ -217,7 +217,7 @@ fn snap_range(text: []const u8, src_line: u32) Range {
 }
 
 fn is_multiline_string(line: []const u8) bool {
-    for (line) |c, i| {
+    for (line, 0..) |c, i| {
         switch (c) {
             ' ' => {},
             '\\' => return (i + 1 < line.len and line[i + 1] == '\\'),
@@ -228,7 +228,7 @@ fn is_multiline_string(line: []const u8) bool {
 }
 
 fn get_indent(line: []const u8) []const u8 {
-    for (line) |c, i| {
+    for (line, 0..) |c, i| {
         if (c != ' ') return line[0..i];
     }
     return line;

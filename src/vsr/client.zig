@@ -139,7 +139,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     .id = id,
                     .after = 30000 / constants.tick_ms,
                 },
-                .prng = std.rand.DefaultPrng.init(@truncate(u64, id)),
+                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(id))),
             };
 
             self.ping_timeout.start();
@@ -204,7 +204,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
             message_body_size: usize,
         ) void {
-            assert(@enumToInt(operation) >= constants.vsr_operations_reserved);
+            assert(@intFromEnum(operation) >= constants.vsr_operations_reserved);
 
             self.register();
             assert(self.request_number > 0);
@@ -216,7 +216,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(u32, @sizeOf(Header) + message_body_size),
+                .size = @as(u32, @intCast(@sizeOf(Header) + message_body_size)),
             };
 
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
@@ -479,7 +479,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // We assume the primary is down and round-robin through the cluster:
             self.send_message_to_replica(
-                @intCast(u8, (self.view + self.request_timeout.attempts) % self.replica_count),
+                @as(u8, @intCast((self.view + self.request_timeout.attempts) % self.replica_count)),
                 message,
             );
         }
@@ -602,7 +602,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // If our view number is out of date, then the old primary will forward our request.
             // If the primary is offline, then our request timeout will fire and we will round-robin.
-            self.send_message_to_replica(@intCast(u8, self.view % self.replica_count), message);
+            self.send_message_to_replica(@as(u8, @intCast(self.view % self.replica_count)), message);
         }
     };
 }

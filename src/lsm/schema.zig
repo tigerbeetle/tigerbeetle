@@ -164,7 +164,7 @@ pub const TableIndex = struct {
         assert(BlockType.from(header.operation) == .index);
         assert(header.op > 0);
 
-        const context = @bitCast(Context, header.context);
+        const context = @as(Context, @bitCast(header.context));
         assert(context.filter_block_count <= context.filter_block_count_max);
         assert(context.data_block_count <= context.data_block_count_max);
 
@@ -176,7 +176,7 @@ pub const TableIndex = struct {
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
-        return @alignCast(@alignOf(u64), mem.bytesAsSlice(
+        return @alignCast(mem.bytesAsSlice(
             u64,
             index_block[index.data_addresses_offset..][0..index.data_addresses_size],
         ));
@@ -186,15 +186,15 @@ pub const TableIndex = struct {
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u64 {
-        const slice = @alignCast(@alignOf(u64), mem.bytesAsSlice(
+        const slice = mem.bytesAsSlice(
             u64,
             index_block[index.data_addresses_offset..][0..index.data_addresses_size],
-        ));
-        return slice[0..index.data_blocks_used(index_block)];
+        );
+        return @alignCast(slice[0..index.data_blocks_used(index_block)]);
     }
 
     pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
-        return @alignCast(@alignOf(u128), mem.bytesAsSlice(
+        return @alignCast(mem.bytesAsSlice(
             u128,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
         ));
@@ -204,15 +204,15 @@ pub const TableIndex = struct {
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u128 {
-        const slice = @alignCast(@alignOf(u128), mem.bytesAsSlice(
+        const slice = mem.bytesAsSlice(
             u128,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
-        ));
-        return slice[0..index.data_blocks_used(index_block)];
+        );
+        return @alignCast(slice[0..index.data_blocks_used(index_block)]);
     }
 
     pub inline fn filter_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
-        return @alignCast(@alignOf(u64), mem.bytesAsSlice(
+        return @alignCast(mem.bytesAsSlice(
             u64,
             index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
         ));
@@ -222,7 +222,7 @@ pub const TableIndex = struct {
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u64 {
-        const slice = @alignCast(@alignOf(u64), mem.bytesAsSlice(
+        const slice: []const u64 = @alignCast(mem.bytesAsSlice(
             u64,
             index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
         ));
@@ -230,7 +230,7 @@ pub const TableIndex = struct {
     }
 
     pub inline fn filter_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
-        return @alignCast(@alignOf(u128), mem.bytesAsSlice(
+        return @alignCast(mem.bytesAsSlice(
             u128,
             index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
         ));
@@ -240,11 +240,11 @@ pub const TableIndex = struct {
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u128 {
-        const slice = @alignCast(@alignOf(u128), mem.bytesAsSlice(
+        const slice = mem.bytesAsSlice(
             u128,
             index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-        ));
-        return slice[0..index.filter_blocks_used(index_block)];
+        );
+        return @alignCast(slice[0..index.filter_blocks_used(index_block)]);
     }
 
     inline fn blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
@@ -254,8 +254,8 @@ pub const TableIndex = struct {
 
     inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
         const header = header_from_block(index_block);
-        const context = @bitCast(Context, header.context);
-        const value = @intCast(u32, context.filter_block_count);
+        const context = @as(Context, @bitCast(header.context));
+        const value = @as(u32, @intCast(context.filter_block_count));
         assert(value > 0);
         assert(value <= index.filter_block_count_max);
         return value;
@@ -263,8 +263,8 @@ pub const TableIndex = struct {
 
     pub inline fn data_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
         const header = header_from_block(index_block);
-        const context = @bitCast(Context, header.context);
-        const value = @intCast(u32, context.data_block_count);
+        const context = @as(Context, @bitCast(header.context));
+        const value = @as(u32, @intCast(context.data_block_count));
         assert(value > 0);
         assert(value <= index.data_block_count_max);
         return value;
@@ -318,7 +318,7 @@ pub const TableFilter = struct {
         assert(BlockType.from(header.operation) == .filter);
         assert(header.op > 0);
 
-        return TableFilter.init(@bitCast(Context, header.context));
+        return TableFilter.init(@as(Context, @bitCast(header.context)));
     }
 
     pub inline fn block_filter(
@@ -403,21 +403,21 @@ pub const TableData = struct {
         assert(BlockType.from(header.operation) == .data);
         assert(header.op > 0);
 
-        return TableData.init(@bitCast(Context, header.context));
+        return TableData.init(@as(Context, @bitCast(header.context)));
     }
 
     pub inline fn block_values_bytes(
         schema: *const TableData,
         data_block: BlockPtr,
     ) []align(16) u8 {
-        return @alignCast(16, data_block[schema.values_offset..][0..schema.values_size]);
+        return @alignCast(data_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_bytes_const(
         schema: *const TableData,
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
-        return @alignCast(16, data_block[schema.values_offset..][0..schema.values_size]);
+        return @alignCast(data_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_used_bytes(
@@ -427,7 +427,7 @@ pub const TableData = struct {
         const header = header_from_block(data_block);
         // TODO we should be able to cross-check this with the header size
         // for more safety.
-        const used_values = @intCast(u32, header.request);
+        const used_values = @as(u32, @intCast(header.request));
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
 

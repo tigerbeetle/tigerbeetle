@@ -316,7 +316,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             var model = std.hash_map.AutoHashMap(Key, Key.Value).init(allocator);
             defer model.deinit();
 
-            for (fuzz_ops) |fuzz_op, fuzz_op_index| {
+            for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
                 assert(env.state == .fuzzing);
                 log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
 
@@ -325,7 +325,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 const model_size = model.count() * @sizeOf(Key.Value);
                 log.debug("space_amplification = {d:.2}", .{
-                    @intToFloat(f64, storage_size_used) / @intToFloat(f64, model_size),
+                    @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
                 });
 
                 // Apply fuzz_op to the tree and the model.

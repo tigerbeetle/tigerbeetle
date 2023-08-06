@@ -51,7 +51,7 @@ pub const ClientSessions = struct {
         var entries_by_client: EntriesByClient = .{};
         errdefer entries_by_client.deinit(allocator);
 
-        try entries_by_client.ensureTotalCapacity(allocator, @intCast(u32, constants.clients_max));
+        try entries_by_client.ensureTotalCapacity(allocator, @as(u32, @intCast(constants.clients_max)));
         assert(entries_by_client.capacity() >= constants.clients_max);
 
         var entries = try allocator.alloc(Entry, constants.clients_max);
@@ -139,7 +139,7 @@ pub const ClientSessions = struct {
 
         assert(@alignOf(vsr.Header) == 16);
         size = std.mem.alignForward(size, 16);
-        const headers = @alignCast(@alignOf(vsr.Header), mem.bytesAsSlice(
+        const headers: []const vsr.Header = @alignCast(mem.bytesAsSlice(
             vsr.Header,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
         ));
@@ -155,7 +155,7 @@ pub const ClientSessions = struct {
 
         assert(size == encode_size_max);
 
-        for (headers) |*header, i| {
+        for (headers, 0..) |*header, i| {
             const session = sessions[i];
             if (session == 0) {
                 assert(std.meta.eql(header.*, std.mem.zeroes(vsr.Header)));

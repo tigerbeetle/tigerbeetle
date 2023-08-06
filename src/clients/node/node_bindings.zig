@@ -102,7 +102,7 @@ fn emit_enum(
 
         try buffer.writer().print("  {s} = {d},\n", .{
             field.name,
-            @enumToInt(@field(Type, field.name)),
+            @intFromEnum(@field(Type, field.name)),
         });
     }
 
@@ -122,7 +122,7 @@ fn emit_packed_struct(
         \\
     , .{mapping.name});
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.hidden(field.name)) continue;
 
         try emit_docs(buffer, mapping, 1, field.name);

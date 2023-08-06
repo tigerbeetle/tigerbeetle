@@ -444,7 +444,7 @@ pub fn CompactionType(
         fn iterator_check(compaction: *Compaction, input_level: InputLevel) void {
             assert(compaction.state == .compacting);
 
-            if (compaction.values_in[@enumToInt(input_level)].len > 0) {
+            if (compaction.values_in[@intFromEnum(input_level)].len > 0) {
                 // Still have values on this input_level, no need to refill.
                 compaction.iterator_check_finish(input_level);
             } else if (input_level == .a and compaction.context.table_info_a == .immutable) {
@@ -498,7 +498,7 @@ pub fn CompactionType(
         fn iterator_next(compaction: *Compaction, data_block: ?BlockPtrConst) void {
             assert(compaction.state == .iterator_next);
             const input_level = compaction.state.iterator_next;
-            const index = @enumToInt(input_level);
+            const index = @intFromEnum(input_level);
 
             if (data_block) |block| {
                 // `data_block` is only valid for this callback, so copy its contents.
@@ -578,10 +578,10 @@ pub fn CompactionType(
 
         fn copy(compaction: *Compaction, input_level: InputLevel) void {
             assert(compaction.state == .compacting);
-            assert(compaction.values_in[@enumToInt(input_level) +% 1].len == 0);
+            assert(compaction.values_in[@intFromEnum(input_level) +% 1].len == 0);
             assert(compaction.table_builder.value_count < Table.layout.block_value_count_max);
 
-            const values_in = compaction.values_in[@enumToInt(input_level)];
+            const values_in = compaction.values_in[@intFromEnum(input_level)];
             const values_out = compaction.table_builder.data_block_values();
             var values_out_index = compaction.table_builder.value_count;
 
@@ -596,8 +596,8 @@ pub fn CompactionType(
                 values_in[0..len],
             );
 
-            compaction.values_in[@enumToInt(input_level)] = values_in[len..];
-            compaction.table_builder.value_count += @intCast(u32, len);
+            compaction.values_in[@intFromEnum(input_level)] = values_in[len..];
+            compaction.table_builder.value_count += @as(u32, @intCast(len));
         }
 
         fn copy_drop_tombstones(compaction: *Compaction) void {

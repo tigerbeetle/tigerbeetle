@@ -126,9 +126,9 @@ fn test_quorums_working(
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
     std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
-    for (headers) |*header, i| {
+    for (headers, 0..) |*header, i| {
         header.* = std.mem.zeroInit(SuperBlockHeader, .{
-            .copy = @intCast(u8, i),
+            .copy = @as(u8, @intCast(i)),
             .version = SuperBlockVersion,
             .storage_size_max = superblock.data_file_size_min,
             .sequence = copies[i].sequence,
@@ -269,9 +269,9 @@ pub fn fuzz_quorum_repairs(
 
     const headers_valid = blk: {
         var headers: [superblock_copies]SuperBlockHeader = undefined;
-        for (&headers) |*header, i| {
+        for (&headers, 0..) |*header, i| {
             header.* = std.mem.zeroInit(SuperBlockHeader, .{
-                .copy = @intCast(u8, i),
+                .copy = @as(u8, @intCast(i)),
                 .version = SuperBlockVersion,
                 .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
@@ -303,7 +303,7 @@ pub fn fuzz_quorum_repairs(
     }
 
     var working_headers: [superblock_copies]SuperBlockHeader = undefined;
-    for (&working_headers) |*header, i| {
+    for (&working_headers, 0..) |*header, i| {
         header.* = if (valid.isSet(i)) headers_valid[i] else header_invalid;
     }
     random.shuffle(SuperBlockHeader, &working_headers);

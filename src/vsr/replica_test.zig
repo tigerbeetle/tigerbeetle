@@ -189,7 +189,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         t.replica(.R0),
         t.replica(.R1),
         t.replica(.R2),
-    }) |replica, i| {
+    }, 0..) |replica, i| {
         var address: u64 = 1 + i; // Addresses start at 1.
         while (address <= vsr.superblock.grid_blocks_max) : (address += 3) {
             // Leave every third address un-corrupt.
@@ -1150,7 +1150,7 @@ const TestContext = struct {
     fn on_client_reply(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void {
         _ = request;
         _ = reply;
-        const t = @ptrCast(*TestContext, @alignCast(@alignOf(TestContext), cluster.context.?));
+        const t = @as(*TestContext, @ptrCast(@alignCast(cluster.context.?)));
         t.client_replies[client] += 1;
     }
 
@@ -1176,21 +1176,21 @@ const TestContext = struct {
             .S3 => array.appendAssumeCapacity(.{ .replica = replica_count + 3 }),
             .S4 => array.appendAssumeCapacity(.{ .replica = replica_count + 4 }),
             .S5 => array.appendAssumeCapacity(.{ .replica = replica_count + 5 }),
-            .A0 => array.appendAssumeCapacity(.{ .replica = @intCast(u8, (view + 0) % replica_count) }),
-            .B1 => array.appendAssumeCapacity(.{ .replica = @intCast(u8, (view + 1) % replica_count) }),
-            .B2 => array.appendAssumeCapacity(.{ .replica = @intCast(u8, (view + 2) % replica_count) }),
-            .B3 => array.appendAssumeCapacity(.{ .replica = @intCast(u8, (view + 3) % replica_count) }),
-            .B4 => array.appendAssumeCapacity(.{ .replica = @intCast(u8, (view + 4) % replica_count) }),
-            .B5 => array.appendAssumeCapacity(.{ .replica = @intCast(u8, (view + 5) % replica_count) }),
+            .A0 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 0) % replica_count)) }),
+            .B1 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 1) % replica_count)) }),
+            .B2 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 2) % replica_count)) }),
+            .B3 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 3) % replica_count)) }),
+            .B4 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 4) % replica_count)) }),
+            .B5 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 5) % replica_count)) }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
-                    for (t.cluster.replicas[0..replica_count]) |_, i| {
-                        array.appendAssumeCapacity(.{ .replica = @intCast(u8, i) });
+                    for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
+                        array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast(i)) });
                     }
                 }
                 if (selector == .__ or selector == .S_) {
-                    for (t.cluster.replicas[replica_count..]) |_, i| {
-                        array.appendAssumeCapacity(.{ .replica = @intCast(u8, replica_count + i) });
+                    for (t.cluster.replicas[replica_count..], 0..) |_, i| {
+                        array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast(replica_count + i)) });
                     }
                 }
                 if (selector == .__ or selector == .C_) {

@@ -175,7 +175,7 @@ const ConfigCluster = struct {
         }
         var target: [32]u8 = undefined;
         hasher.final(&target);
-        return @bitCast(u128, target[0..@sizeOf(u128)].*);
+        return @as(u128, @bitCast(target[0..@sizeOf(u128)].*));
     }
 };
 

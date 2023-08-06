@@ -395,7 +395,7 @@ pub const Storage = struct {
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
     fn assert_alignment(buffer: []const u8, offset: u64) void {
-        assert(@ptrToInt(buffer.ptr) % constants.sector_size == 0);
+        assert(@intFromPtr(buffer.ptr) % constants.sector_size == 0);
         assert(buffer.len % constants.sector_size == 0);
         assert(offset % constants.sector_size == 0);
     }

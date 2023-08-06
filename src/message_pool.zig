@@ -152,7 +152,7 @@ pub const MessagePool = struct {
         if (message.references == 0) {
             message.header = undefined;
             if (constants.verify) {
-                @memset(message.buffer, undefined, message.buffer.len);
+                @memset(message.buffer, undefined);
             }
             message.next = pool.free_list;
             pool.free_list = message;

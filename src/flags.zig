@@ -141,7 +141,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     // not confused for a misspelled `--foo=92`. Using `std.sort` for comptime-only values does not
     // work, so open-code insertion sort, and comptime assert order during the actual parsing.
     comptime {
-        for (fields[0..field_count]) |*field_right, i| {
+        for (fields[0..field_count], 0..) |*field_right, i| {
             for (fields[0..i]) |*field_left| {
                 if (field_left.name.len < field_right.name.len) {
                     std.mem.swap(std.builtin.Type.StructField, field_left, field_right);
@@ -167,7 +167,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
         if (@hasField(Flags, "positional")) {
             counts.positional += 1;
-            inline for (positional_fields) |positional_field, positional_index| {
+            inline for (positional_fields, 0..) |positional_field, positional_index| {
                 const flag = comptime flag_name_positional(positional_field);
 
                 if (arg.len == 0) fatal("{s}: empty argument", .{flag});
@@ -202,7 +202,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     if (@hasField(Flags, "positional")) {
         assert(counts.positional <= positional_fields.len);
-        inline for (positional_fields) |positional_field, positional_index| {
+        inline for (positional_fields, 0..) |positional_field, positional_index| {
             if (counts.positional == positional_index) {
                 const flag = comptime flag_name_positional(positional_field);
                 fatal("{s}: argument is required", .{flag});
@@ -320,12 +320,10 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
         }
     };
 
-    var bytes: u64 = undefined;
-    if (@mulWithOverflow(u64, amount, unit.scale, &bytes)) {
-        fatal("{s}: size in bytes exceeds 64-bit unsigned integer: '{s}'", .{
-            flag, value,
-        });
-    }
+    const bytes = std.math.mul(u64, amount, unit.scale) catch fatal(
+        "{s}: size in bytes exceeds 64-bit unsigned integer: '{s}'",
+        .{ flag, value },
+    );
     return ByteSize{ .bytes = bytes };
 }
 
@@ -394,10 +392,7 @@ fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8
 /// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
 fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type {
     return if (field.default_value) |default_opaque|
-        @ptrCast(
-            *const field.field_type,
-            @alignCast(@alignOf(field.field_type), default_opaque),
-        ).*
+        @as(*const field.field_type, @ptrCast(@alignCast(default_opaque))).*
     else
         null;
 }
@@ -548,7 +543,7 @@ test "flags" {
             defer t.gpa.free(argv);
 
             argv[0] = t.flags_exe;
-            for (argv[1..]) |*arg, i| {
+            for (argv[1..], 0..) |*arg, i| {
                 arg.* = cli[i];
             }
             if (cli.len > 0) {

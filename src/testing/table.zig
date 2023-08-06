@@ -55,7 +55,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
                 const Field = value_field.field_type;
                 if (value_field.default_value) |ptr| {
                     if (eat(tokens, "_")) {
-                        const value_ptr = @ptrCast(*const Field, @alignCast(@alignOf(Field), ptr));
+                        const value_ptr = @as(*const Field, @ptrCast(@alignCast(ptr)));
                         @field(data, value_field.name) = value_ptr.*;
                     } else {
                         @field(data, value_field.name) = parse_data(Field, tokens);
@@ -117,7 +117,7 @@ fn test_parse(
     const rows_actual = parse(Row, string).constSlice();
     try std.testing.expectEqual(rows_expect.len, rows_actual.len);
 
-    for (rows_expect) |row, i| {
+    for (rows_expect, 0..) |row, i| {
         try std.testing.expectEqual(row, rows_actual[i]);
     }
 }

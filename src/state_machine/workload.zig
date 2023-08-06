@@ -100,10 +100,10 @@ const TransferBatch = struct {
 const transfer_templates = table: {
     @setEvalBranchQuota(2000);
 
-    const SNGL = @enumToInt(TransferPlan.Method.single_phase);
-    const PEND = @enumToInt(TransferPlan.Method.pending);
-    const POST = @enumToInt(TransferPlan.Method.post_pending);
-    const VOID = @enumToInt(TransferPlan.Method.void_pending);
+    const SNGL = @intFromEnum(TransferPlan.Method.single_phase);
+    const PEND = @intFromEnum(TransferPlan.Method.pending);
+    const POST = @intFromEnum(TransferPlan.Method.post_pending);
+    const VOID = @intFromEnum(TransferPlan.Method.void_pending);
     const Result = accounting_auditor.CreateTransferResultSet;
     const result = Result.init;
 
@@ -179,10 +179,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             .layout = .Auto,
             .tag_type = u8,
             .fields = &[_]std.builtin.Type.EnumField{
-                .{ .name = "create_accounts", .value = @enumToInt(Operation.create_accounts) },
-                .{ .name = "create_transfers", .value = @enumToInt(Operation.create_transfers) },
-                .{ .name = "lookup_accounts", .value = @enumToInt(Operation.lookup_accounts) },
-                .{ .name = "lookup_transfers", .value = @enumToInt(Operation.lookup_transfers) },
+                .{ .name = "create_accounts", .value = @intFromEnum(Operation.create_accounts) },
+                .{ .name = "create_transfers", .value = @intFromEnum(Operation.create_transfers) },
+                .{ .name = "lookup_accounts", .value = @intFromEnum(Operation.lookup_accounts) },
+                .{ .name = "lookup_transfers", .value = @intFromEnum(Operation.lookup_transfers) },
             },
             .decls = &.{},
             .is_exhaustive = true,
@@ -247,7 +247,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 options.auditor_options.client_count * constants.client_request_queue_max,
             );
 
-            for (auditor.accounts) |*account, i| {
+            for (auditor.accounts, 0..) |*account, i| {
                 account.* = std.mem.zeroInit(tb.Account, .{
                     .id = auditor.account_index_to_id(i),
                     .ledger = 1,
@@ -320,7 +320,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(size <= body.len);
 
             return .{
-                .operation = @intToEnum(Operation, @enumToInt(action)),
+                .operation = @as(Operation, @enumFromInt(@intFromEnum(action))),
                 .size = size,
             };
         }
@@ -368,7 +368,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {
             const results = self.auditor.expect_create_accounts(client_index);
-            for (accounts) |*account, i| {
+            for (accounts, 0..) |*account, i| {
                 const account_index = self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
                 account.* = self.auditor.accounts[account_index];
                 account.debits_pending = 0;
@@ -534,9 +534,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 break :method default;
             };
 
-            const index_valid = @boolToInt(transfer_plan.valid);
-            const index_limit = @boolToInt(transfer_plan.limit);
-            const index_method = @enumToInt(method);
+            const index_valid = @intFromBool(transfer_plan.valid);
+            const index_limit = @intFromBool(transfer_plan.limit);
+            const index_method = @intFromEnum(method);
             const transfer_template = &transfer_templates[index_valid][index_limit][index_method];
 
             const limit_debits = transfer_plan.limit and self.random.boolean();
@@ -643,7 +643,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn transfer_id_to_index(self: *const Self, id: u128) usize {
             // -1 because id=0 is not valid, so index=0→id=1.
-            return @intCast(usize, self.options.transfer_id_permutation.decode(id)) - 1;
+            return @as(usize, @intCast(self.options.transfer_id_permutation.decode(id))) - 1;
         }
 
         fn transfer_index_to_id(self: *const Self, index: usize) u128 {

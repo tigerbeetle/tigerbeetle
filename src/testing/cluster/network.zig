@@ -148,8 +148,8 @@ pub const Network = struct {
             while (it_target.next()) |replica_target| {
                 if (replica_target != replica_source) {
                     network.link_filter(.{
-                        .source = .{ .replica = @intCast(u8, replica_source) },
-                        .target = .{ .replica = @intCast(u8, replica_target) },
+                        .source = .{ .replica = @as(u8, @intCast(replica_source)) },
+                        .target = .{ .replica = @as(u8, @intCast(replica_target)) },
                     }).* = LinkFilter.initFull();
                 }
             }
@@ -165,7 +165,7 @@ pub const Network = struct {
             },
         };
 
-        for (network.processes.items) |existing_process, i| {
+        for (network.processes.items, 0..) |existing_process, i| {
             if (existing_process == raw_process) {
                 network.buses.items[i] = message_bus;
                 break;
@@ -237,13 +237,13 @@ pub const Network = struct {
     }
 
     fn process_to_address(network: *const Network, process: Process) u8 {
-        for (network.processes.items) |p, i| {
+        for (network.processes.items, 0..) |p, i| {
             if (std.meta.eql(raw_process_to_process(p), process)) {
                 switch (process) {
                     .replica => assert(i < network.options.node_count),
                     .client => assert(i >= network.options.node_count),
                 }
-                return @intCast(u8, i);
+                return @as(u8, @intCast(i));
             }
         }
         log.err("no such process: {} (have {any})", .{ process, network.processes.items });
@@ -298,7 +298,7 @@ pub const Network = struct {
 
     fn raw_process_to_process(raw: u128) Process {
         switch (raw) {
-            0...(constants.members_max - 1) => return .{ .replica = @intCast(u8, raw) },
+            0...(constants.members_max - 1) => return .{ .replica = @as(u8, @intCast(raw)) },
             else => {
                 assert(raw >= constants.members_max);
                 return .{ .client = raw };

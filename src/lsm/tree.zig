@@ -567,7 +567,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     context.tree.filter_block_hits += 1;
                     tracer.plot(
                         .{ .filter_block_hits = .{ .tree_name = context.tree.config.name } },
-                        @intToFloat(f64, context.tree.filter_block_hits),
+                        @as(f64, @floatFromInt(context.tree.filter_block_hits)),
                     );
 
                     context.tree.grid.read_block_from_cache_or_storage(
@@ -581,7 +581,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     context.tree.filter_block_misses += 1;
                     tracer.plot(
                         .{ .filter_block_misses = .{ .tree_name = context.tree.config.name } },
-                        @intToFloat(f64, context.tree.filter_block_misses),
+                        @as(f64, @floatFromInt(context.tree.filter_block_misses)),
                     );
 
                     // The key is not present in this table, check the next level.
@@ -669,7 +669,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             fn next(it: *CompactionTableIterator) ?CompactionTableContext {
                 const compaction_beat = it.tree.compaction_op.? % constants.lsm_batch_multiple;
                 const even_levels = compaction_beat < half_bar_beat_count;
-                const level_a = (it.index * 2) + @boolToInt(!even_levels);
+                const level_a = (it.index * 2) + @intFromBool(!even_levels);
                 const level_b = level_a + 1;
 
                 if (level_a >= constants.lsm_levels - 1) return null;

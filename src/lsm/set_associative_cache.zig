@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 const meta = std.meta;
-const Vector = meta.Vector;
 
 const constants = @import("../constants.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
@@ -208,7 +207,7 @@ pub fn SetAssociativeCache(
                 self.hits += 1;
                 tracer.plot(
                     .{ .cache_hits = .{ .cache_name = self.name } },
-                    @intToFloat(f64, self.hits),
+                    @as(f64, @floatFromInt(self.hits)),
                 );
                 const count = self.counts.get(set.offset + way);
                 self.counts.set(set.offset + way, count +| 1);
@@ -217,7 +216,7 @@ pub fn SetAssociativeCache(
                 self.misses += 1;
                 tracer.plot(
                     .{ .cache_misses = .{ .cache_name = self.name } },
-                    @intToFloat(f64, self.misses),
+                    @as(f64, @floatFromInt(self.misses)),
                 );
                 return null;
             }
@@ -225,7 +224,7 @@ pub fn SetAssociativeCache(
 
         pub fn get(self: *Self, key: Key) ?*align(value_alignment) Value {
             const index = self.get_index(key) orelse return null;
-            return @alignCast(value_alignment, &self.values[index]);
+            return @alignCast(&self.values[index]);
         }
 
         /// Remove a key from the set associative cache if present.
@@ -265,11 +264,11 @@ pub fn SetAssociativeCache(
         const Ways = meta.Int(.unsigned, layout.ways);
 
         inline fn search_tags(tags: *const [layout.ways]Tag, tag: Tag) Ways {
-            const x: Vector(layout.ways, Tag) = tags.*;
-            const y: Vector(layout.ways, Tag) = @splat(layout.ways, tag);
+            const x: @Vector(layout.ways, Tag) = tags.*;
+            const y: @Vector(layout.ways, Tag) = @splat(tag);
 
-            const result: Vector(layout.ways, bool) = x == y;
-            return @ptrCast(*const Ways, &result).*;
+            const result: @Vector(layout.ways, bool) = x == y;
+            return @as(*const Ways, @ptrCast(&result)).*;
         }
 
         /// Insert a value, evicting an older entry if needed.
@@ -362,7 +361,7 @@ pub fn SetAssociativeCache(
         inline fn associate(self: *Self, key: Key) Set {
             const entropy = hash(key);
 
-            const tag = @truncate(Tag, entropy >> math.log2_int(u64, self.sets));
+            const tag = @as(Tag, @truncate(entropy >> math.log2_int(u64, self.sets)));
             const index = entropy % self.sets;
             const offset = index * layout.ways;
 
@@ -596,7 +595,7 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
         /// Returns the unsigned integer at `index`.
         pub inline fn get(self: Self, index: u64) UInt {
             // This truncate is safe since we want to mask the right-shifted word by exactly a UInt:
-            return @truncate(UInt, self.word(index).* >> bits_index(index));
+            return @as(UInt, @truncate(self.word(index).* >> bits_index(index)));
         }
 
         /// Sets the unsigned integer at `index` to `value`.
@@ -620,7 +619,7 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
             // the bit index of the highest 2-bit UInt (e.g. bit index + bit length == 64).
             comptime assert(uint_bits * (math.maxInt(WordIndex) + 1) == math.maxInt(BitsIndex) + 1);
 
-            return @as(BitsIndex, uint_bits) * @truncate(WordIndex, index);
+            return @as(BitsIndex, uint_bits) * @as(WordIndex, @truncate(index));
         }
     };
 }
@@ -718,7 +717,7 @@ fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
         }
 
         fn verify(context: *Self) !void {
-            for (context.reference) |value, index| {
+            for (context.reference, 0..) |value, index| {
                 try testing.expectEqual(value, context.array.get(index));
             }
         }
@@ -753,7 +752,7 @@ fn BitIterator(comptime Bits: type) type {
         inline fn next(it: *Self) ?BitIndex {
             if (it.bits == 0) return null;
             // This @intCast() is safe since we never pass 0 to @ctz().
-            const index = @intCast(BitIndex, @ctz(it.bits));
+            const index = @as(BitIndex, @intCast(@ctz(it.bits)));
             // Zero the lowest set bit.
             it.bits &= it.bits - 1;
             return index;
@@ -802,9 +801,9 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
         inline fn search_tags(tags: *[layout.ways]SAC.Tag, tag: SAC.Tag) SAC.Ways {
             var bits: SAC.Ways = 0;
             var count: usize = 0;
-            for (tags) |t, i| {
+            for (tags, 0..) |t, i| {
                 if (t == tag) {
-                    const bit = @intCast(math.Log2Int(SAC.Ways), i);
+                    const bit = @as(math.Log2Int(SAC.Ways), @intCast(i));
                     bits |= (@as(SAC.Ways, 1) << bit);
                     count += 1;
                 }
@@ -826,7 +825,7 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
                 const tag = random.int(SAC.Tag);
 
                 var indexes: [layout.ways]usize = undefined;
-                for (indexes) |*x, i| x.* = i;
+                for (indexes, 0..) |*x, i| x.* = i;
                 random.shuffle(usize, &indexes);
 
                 const matches_count_min = random.uintAtMostBiased(u32, layout.ways);

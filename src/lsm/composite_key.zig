@@ -53,7 +53,7 @@ pub fn CompositeKey(comptime Field: type) type {
         pub inline fn key_from_value(value: *const Value) Self {
             return .{
                 .field = value.field,
-                .timestamp = @truncate(u63, value.timestamp),
+                .timestamp = @as(u63, @truncate(value.timestamp)),
             };
         }
 

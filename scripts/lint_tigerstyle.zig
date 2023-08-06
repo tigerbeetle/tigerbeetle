@@ -75,7 +75,7 @@ pub fn main() !void {
     try stdout.print("total: {d: >7} {d: >9} {d: >5.2}\n", .{
         total_assert_count,
         total_function_count,
-        @intToFloat(f64, total_assert_count) / @intToFloat(f64, total_function_count),
+        @as(f64, @floatFromInt(total_assert_count)) / @as(f64, @floatFromInt(total_function_count)),
     });
     try buffered_writer.flush();
 }
@@ -143,7 +143,7 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
 
     var function_count: u32 = 0;
     var assert_count: u32 = 0;
-    for (node_tags) |tag, node| {
+    for (node_tags, 0..) |tag, node| {
         switch (tag) {
             .fn_decl => {
                 function_count += 1;
@@ -152,7 +152,7 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
                 const body_end = tree.tokenLocation(0, tree.lastToken(body));
                 // Add 1 as the count returned by tokenLocation() is
                 // 0-indexed while most editors start at 1.
-                const line = @intCast(u32, body_start.line + 1);
+                const line = @as(u32, @intCast(body_start.line + 1));
                 const body_lines = body_end.line - body_start.line;
                 if (body_lines > 70 and !whitelisted(file_path, line)) {
                     const stderr = std.io.getStdErr().writer();
@@ -183,6 +183,6 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
         .path = try gpa.dupe(u8, file_path),
         .assert_count = assert_count,
         .function_count = function_count,
-        .ratio = @intToFloat(f64, assert_count) / @intToFloat(f64, function_count),
+        .ratio = @as(f64, @floatFromInt(assert_count)) / @as(f64, @floatFromInt(function_count)),
     });
 }

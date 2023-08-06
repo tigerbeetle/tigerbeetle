@@ -116,7 +116,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             const prng_seed = switch (process_type) {
                 .replica => process.replica,
-                .client => @truncate(u64, process.client),
+                .client => @as(u64, @truncate(process.client)),
             };
 
             var bus: Self = .{
@@ -485,7 +485,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     on_connect_with_exponential_backoff,
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                     &connection.recv_completion,
-                    @intCast(u63, ms * std.time.ns_per_ms),
+                    @as(u63, @intCast(ms * std.time.ns_per_ms)),
                 );
             }
 
@@ -681,8 +681,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return null;
                 }
 
-                const header = @alignCast(
-                    @alignOf(Header),
+                const header: []Header = @alignCast(
                     mem.bytesAsValue(Header, data[0..@sizeOf(Header)]),
                 );
 

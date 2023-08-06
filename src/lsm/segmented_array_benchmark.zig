@@ -142,7 +142,7 @@ pub fn main() !void {
 fn alloc_shuffled_index(allocator: std.mem.Allocator, n: usize, rand: std.rand.Random) ![]usize {
     // Allocate on the heap; the array may be too large to fit on the stack.
     var indices = try allocator.alloc(usize, n);
-    for (indices) |*i, j| i.* = j;
+    for (indices, 0..) |*i, j| i.* = j;
     rand.shuffle(usize, indices[0..]);
     return indices;
 }

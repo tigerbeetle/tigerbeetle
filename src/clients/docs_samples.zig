@@ -5,7 +5,7 @@ pub const samples = [_]Sample{
         .proper_name = "Basic",
         .directory = "basic",
         .short_description = "Create two accounts and transfer an amount between them.",
-        .long_description = 
+        .long_description =
         \\## 1. Create accounts
         \\
         \\This project starts by creating two accounts (`1` and `2`).
@@ -30,11 +30,11 @@ pub const samples = [_]Sample{
     .{
         .proper_name = "Two-Phase Transfer",
         .directory = "two-phase",
-        .short_description = 
+        .short_description =
         \\Create two accounts and start a pending transfer between
         \\them, then post the transfer.
         ,
-        .long_description = 
+        .long_description =
         \\## 1. Create accounts
         \\
         \\This project starts by creating two accounts (`1` and `2`).

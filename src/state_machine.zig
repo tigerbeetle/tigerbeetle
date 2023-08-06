@@ -743,7 +743,7 @@ pub fn StateMachineType(
             var chain: ?usize = null;
             var chain_broken = false;
 
-            for (events) |*event_, index| {
+            for (events, 0..) |*event_, index| {
                 var event = event_.*;
 
                 const result = blk: {
@@ -784,7 +784,7 @@ pub fn StateMachineType(
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
                                 results[count] = .{
-                                    .index = @intCast(u32, chain_index),
+                                    .index = @as(u32, @intCast(chain_index)),
                                     .result = .linked_event_failed,
                                 };
                                 count += 1;
@@ -793,7 +793,7 @@ pub fn StateMachineType(
                             assert(result == .linked_event_failed or result == .linked_event_chain_open);
                         }
                     }
-                    results[count] = .{ .index = @intCast(u32, index), .result = result };
+                    results[count] = .{ .index = @as(u32, @intCast(index)), .result = result };
                     count += 1;
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
@@ -924,7 +924,7 @@ pub fn StateMachineType(
 
         fn create_account_exists(a: *const Account, e: *const AccountImmutable) CreateAccountResult {
             assert(a.id == e.id);
-            if (@bitCast(u16, a.flags) != @bitCast(u16, e.flags)) return .exists_with_different_flags;
+            if (@as(u16, @bitCast(a.flags)) != @as(u16, @bitCast(e.flags))) return .exists_with_different_flags;
             if (a.user_data != e.user_data) return .exists_with_different_user_data;
             assert(zeroed_48_bytes(a.reserved) and zeroed_16_bytes(e.padding));
             if (a.ledger != e.ledger) return .exists_with_different_ledger;
@@ -1076,7 +1076,7 @@ pub fn StateMachineType(
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
             assert(t.id == e.id);
             // The flags change the behavior of the remaining comparisons, so compare the flags first.
-            if (@bitCast(u16, t.flags) != @bitCast(u16, e.flags)) return .exists_with_different_flags;
+            if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) return .exists_with_different_flags;
             if (t.debit_account_id != e.debit_account_id) {
                 return .exists_with_different_debit_account_id;
             }
@@ -1250,7 +1250,7 @@ pub fn StateMachineType(
             assert(t.id == e.id);
 
             // Do not assume that `e` is necessarily a posting or voiding transfer.
-            if (@bitCast(u16, t.flags) != @bitCast(u16, e.flags)) {
+            if (@as(u16, @bitCast(t.flags)) != @as(u16, @bitCast(e.flags))) {
                 return .exists_with_different_flags;
             }
 
@@ -1305,8 +1305,8 @@ pub fn StateMachineType(
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
-            const batch_accounts_max = @intCast(u32, constants.batch_max.create_accounts);
-            const batch_transfers_max = @intCast(u32, constants.batch_max.create_transfers);
+            const batch_accounts_max = @as(u32, @intCast(constants.batch_max.create_accounts));
+            const batch_transfers_max = @as(u32, @intCast(constants.batch_max.create_transfers));
             assert(batch_accounts_max == constants.batch_max.lookup_accounts);
             assert(batch_transfers_max == constants.batch_max.lookup_transfers);
 
@@ -1384,30 +1384,29 @@ pub fn StateMachineType(
 }
 
 fn sum_overflows(a: u64, b: u64) bool {
-    var c: u64 = undefined;
-    return @addWithOverflow(u64, a, b, &c);
+    return std.math.add(u64, a, b) == null;
 }
 
 /// Optimizes for the common case, where the array is zeroed. Completely branchless.
 fn zeroed_16_bytes(a: [16]u8) bool {
-    const x = @bitCast([2]u64, a);
+    const x = @as([2]u64, @bitCast(a));
     return (x[0] | x[1]) == 0;
 }
 
 fn zeroed_32_bytes(a: [32]u8) bool {
-    const x = @bitCast([4]u64, a);
+    const x = @as([4]u64, @bitCast(a));
     return (x[0] | x[1] | x[2] | x[3]) == 0;
 }
 
 fn zeroed_48_bytes(a: [48]u8) bool {
-    const x = @bitCast([6]u64, a);
+    const x = @as([6]u64, @bitCast(a));
     return (x[0] | x[1] | x[2] | x[3] | x[4] | x[5]) == 0;
 }
 
 /// Optimizes for the common case, where the arrays are equal. Completely branchless.
 fn equal_32_bytes(a: [32]u8, b: [32]u8) bool {
-    const x = @bitCast([4]u64, a);
-    const y = @bitCast([4]u64, b);
+    const x = @as([4]u64, @bitCast(a));
+    const y = @as([4]u64, @bitCast(b));
 
     const c = (x[0] ^ y[0]) | (x[1] ^ y[1]);
     const d = (x[2] ^ y[2]) | (x[3] ^ y[3]);
@@ -1416,8 +1415,8 @@ fn equal_32_bytes(a: [32]u8, b: [32]u8) bool {
 }
 
 fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
-    const x = @bitCast([6]u64, a);
-    const y = @bitCast([6]u64, b);
+    const x = @as([6]u64, @bitCast(a));
+    const y = @as([6]u64, @bitCast(b));
 
     const c = (x[0] ^ y[0]) | (x[1] ^ y[1]);
     const d = (x[2] ^ y[2]) | (x[3] ^ y[3]);
@@ -1675,7 +1674,7 @@ fn check(test_table: []const u8) !void {
                     try accounts.put(a.id, event);
                 } else {
                     const result = CreateAccountsResult{
-                        .index = @intCast(u32, @divExact(request.items.len, @sizeOf(Account)) - 1),
+                        .index = @as(u32, @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1)),
                         .result = a.result,
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));
@@ -1691,7 +1690,7 @@ fn check(test_table: []const u8) !void {
                     try transfers.put(t.id, event);
                 } else {
                     const result = CreateTransfersResult{
-                        .index = @intCast(u32, @divExact(request.items.len, @sizeOf(Transfer)) - 1),
+                        .index = @as(u32, @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1)),
                         .result = t.result,
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));

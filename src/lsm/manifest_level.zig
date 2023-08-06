@@ -546,7 +546,7 @@ pub fn ManifestLevelType(
                 if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
-                            .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
+                            .table_info = @as(*TableInfo, @ptrFromInt(@intFromPtr(table))),
                             .generation = level_a.generation,
                         },
                         .range = range,
@@ -684,7 +684,7 @@ pub fn ManifestLevelType(
                 // mutable. That is, the table is not in the .text or .rodata section.
                 if (range.tables.len < max_overlapping_tables) {
                     var table_info_reference = TableInfoReference{
-                        .table_info = @intToPtr(*TableInfo, @ptrToInt(table)),
+                        .table_info = @as(*TableInfo, @ptrFromInt(@intFromPtr(table))),
                         .generation = level.generation,
                     };
                     range.tables.appendAssumeCapacity(table_info_reference);
@@ -977,7 +977,7 @@ pub fn TestContext(
         }
 
         fn delete_tables(context: *Self) !void {
-            const reference_len = @intCast(u32, context.reference.items.len);
+            const reference_len = @as(u32, @intCast(context.reference.items.len));
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, 13);
@@ -1000,7 +1000,7 @@ pub fn TestContext(
                 while (it.next()) |level_table| {
                     if (level_table.equal(table)) {
                         context.level.set_snapshot_max(snapshot, .{
-                            .table_info = @intToPtr(*TableInfo, @ptrToInt(level_table)),
+                            .table_info = @as(*TableInfo, @ptrFromInt(@intFromPtr(level_table))),
                             .generation = context.level.generation,
                         });
                         table.snapshot_max = snapshot;
@@ -1087,7 +1087,7 @@ pub fn TestContext(
         fn verify(context: *Self) !void {
             try context.verify_snapshot(lsm.snapshot_latest, context.reference.items);
 
-            for (context.snapshots.slice()) |snapshot, i| {
+            for (context.snapshots.slice(), 0..) |snapshot, i| {
                 try context.verify_snapshot(snapshot, context.snapshot_tables.get(i).items);
             }
         }
@@ -1144,7 +1144,7 @@ pub fn TestContext(
             }
 
             if (reference.len > 0) {
-                const reference_len = @intCast(u32, reference.len);
+                const reference_len = @as(u32, @intCast(reference.len));
                 const start = context.random.uintLessThanBiased(u32, reference_len);
                 const end = context.random.uintLessThanBiased(u32, reference_len - start) + start;
 

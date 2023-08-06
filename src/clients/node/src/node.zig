@@ -57,7 +57,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     // state.
     translate.set_instance_data(
         env,
-        @ptrCast(*anyopaque, @alignCast(@alignOf(u8), global)),
+        @as(*anyopaque, @ptrCast(@alignCast(global))),
         Globals.destroy,
     ) catch {
         global.deinit();
@@ -115,7 +115,7 @@ const Globals = struct {
 };
 
 fn globalsCast(globals_raw: *anyopaque) *Globals {
-    return @ptrCast(*Globals, @alignCast(@alignOf(Globals), globals_raw));
+    return @as(*Globals, @ptrCast(@alignCast(globals_raw)));
 }
 
 const Context = struct {
@@ -147,7 +147,7 @@ const Context = struct {
             allocator,
             client_id,
             cluster,
-            @intCast(u8, context.addresses.len),
+            @as(u8, @intCast(context.addresses.len)),
             &context.message_pool,
             .{
                 .configuration = context.addresses,
@@ -161,7 +161,7 @@ const Context = struct {
 };
 
 fn contextCast(context_raw: *anyopaque) !*Context {
-    return @ptrCast(*Context, @alignCast(@alignOf(Context), context_raw));
+    return @as(*Context, @ptrCast(@alignCast(context_raw)));
 }
 
 fn validate_timestamp(env: c.napi_env, object: c.napi_value) !u64 {
@@ -188,7 +188,7 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .timeout = try translate.u64_from_object(env, object, "timeout"),
             .ledger = try translate.u32_from_object(env, object, "ledger"),
             .code = try translate.u16_from_object(env, object, "code"),
-            .flags = @bitCast(TransferFlags, try translate.u16_from_object(env, object, "flags")),
+            .flags = @as(TransferFlags, @bitCast(try translate.u16_from_object(env, object, "flags"))),
             .amount = try translate.u64_from_object(env, object, "amount"),
             .timestamp = try validate_timestamp(env, object),
         },
@@ -198,7 +198,7 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .reserved = try translate.bytes_from_object(env, object, 48, "reserved"),
             .ledger = try translate.u32_from_object(env, object, "ledger"),
             .code = try translate.u16_from_object(env, object, "code"),
-            .flags = @bitCast(AccountFlags, try translate.u16_from_object(env, object, "flags")),
+            .flags = @as(AccountFlags, @bitCast(try translate.u16_from_object(env, object, "flags"))),
             .debits_pending = try translate.u64_from_object(env, object, "debits_pending"),
             .debits_posted = try translate.u64_from_object(env, object, "debits_posted"),
             .credits_pending = try translate.u64_from_object(env, object, "credits_pending"),
@@ -259,7 +259,7 @@ fn encode_napi_results_array(
     const results = std.mem.bytesAsSlice(Result, data);
     const napi_array = try translate.create_array(
         env,
-        @intCast(u32, results.len),
+        @as(u32, @intCast(results.len)),
         "Failed to allocate array for results.",
     );
 
@@ -285,7 +285,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "result",
-                    @enumToInt(result.result),
+                    @intFromEnum(result.result),
                     "Failed to set property \"result\" of result.",
                 );
 
@@ -335,7 +335,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "ledger",
-                    @intCast(u32, result.ledger),
+                    @as(u32, @intCast(result.ledger)),
                     "Failed to set property \"ledger\" of account lookup result.",
                 );
 
@@ -343,7 +343,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "code",
-                    @intCast(u16, result.code),
+                    @as(u16, @intCast(result.code)),
                     "Failed to set property \"code\" of account lookup result.",
                 );
 
@@ -351,7 +351,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "flags",
-                    @bitCast(u16, result.flags),
+                    @as(u16, @bitCast(result.flags)),
                     "Failed to set property \"flags\" of account lookup result.",
                 );
 
@@ -473,7 +473,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "ledger",
-                    @intCast(u32, result.ledger),
+                    @as(u32, @intCast(result.ledger)),
                     "Failed to set property \"ledger\" of transfer lookup result.",
                 );
 
@@ -481,7 +481,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "code",
-                    @intCast(u16, result.code),
+                    @as(u16, @intCast(result.code)),
                     "Failed to set property \"code\" of transfer lookup result.",
                 );
 
@@ -489,7 +489,7 @@ fn encode_napi_results_array(
                     env,
                     napi_object,
                     "flags",
-                    @bitCast(u16, result.flags),
+                    @as(u16, @bitCast(result.flags)),
                     "Failed to set property \"flags\" of transfer lookup result.",
                 );
 
@@ -578,7 +578,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
 
-    if (!@intToEnum(vsr.Operation, operation_int).valid(StateMachine)) {
+    if (!@as(vsr.Operation, @enumFromInt(operation_int)).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
@@ -591,7 +591,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     const message = context.client.get_message();
     defer context.client.unref(message);
 
-    const operation = @intToEnum(Operation, @intCast(u8, operation_int));
+    const operation = @as(Operation, @enumFromInt(@as(u8, @intCast(operation_int))));
     const body_length = decode_events(
         env,
         argv[2],
@@ -605,7 +605,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
     // free in order to avoid a leak. We therefore do this last to ensure we cannot fail after
     // taking this reference.
     const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
-    context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
+    context.client.request(@as(u128, @bitCast(user_data)), on_result, operation, message, body_length);
 
     return null;
 }
@@ -633,10 +633,10 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     const context = contextCast(context_raw.?) catch return null;
     const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
 
-    if (!@intToEnum(vsr.Operation, operation_int).valid(StateMachine)) {
+    if (!@as(vsr.Operation, @enumFromInt(operation_int)).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
-    const operation = @intToEnum(Operation, @intCast(u8, operation_int));
+    const operation = @as(Operation, @enumFromInt(@as(u8, @intCast(operation_int))));
 
     if (context.client.messages_available == 0) {
         translate.throw(
@@ -660,7 +660,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
     // free in order to avoid a leak. We therefore do this last to ensure we cannot fail after
     // taking this reference.
     const user_data = translate.user_data_from_value(env, argv[3]) catch return null;
-    context.client.request(@bitCast(u128, user_data), on_result, operation, message, body_length);
+    context.client.request(@as(u128, @bitCast(user_data)), on_result, operation, message, body_length);
 
     return null;
 }
@@ -668,8 +668,8 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
 fn on_result(user_data: u128, operation: Operation, results: []const u8) void {
     // A reference to the user's JS callback was made in `request` or `raw_request`. This MUST be
     // cleaned up regardless of the result of this function.
-    const env = @bitCast(translate.UserData, user_data).env;
-    const callback_reference = @bitCast(translate.UserData, user_data).callback_reference;
+    const env = @as(translate.UserData, @bitCast(user_data)).env;
+    const callback_reference = @as(translate.UserData, @bitCast(user_data)).callback_reference;
     defer translate.delete_reference(env, callback_reference) catch {
         std.log.warn("on_result: Failed to delete reference to user's JS callback.", .{});
     };

@@ -95,7 +95,7 @@ pub fn QuorumsType(comptime options: Options) type {
             quorums.array = undefined;
             quorums.count = 0;
 
-            for (copies) |*copy, index| quorums.count_copy(copy, index, threshold);
+            for (copies, 0..) |*copy, index| quorums.count_copy(copy, index, threshold);
 
             std.sort.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
 
@@ -250,12 +250,12 @@ pub fn QuorumsType(comptime options: Options) type {
                 // for certain which copy this was supposed to be.
                 // We make the assumption that this was not a double-fault (corrupt + misdirect) —
                 // that is, the copy is in the correct slot, and its copy index is simply corrupt.
-                quorum.slots[slot] = @intCast(u8, slot);
+                quorum.slots[slot] = @as(u8, @intCast(slot));
                 quorum.copies.set(slot);
             } else if (quorum.copies.isSet(copy.copy)) {
                 // Ignore the duplicate copy.
             } else {
-                quorum.slots[slot] = @intCast(u8, copy.copy);
+                quorum.slots[slot] = @as(u8, @intCast(copy.copy));
                 quorum.copies.set(copy.copy);
             }
 
@@ -348,11 +348,11 @@ pub fn QuorumsType(comptime options: Options) type {
                 var a: ?u8 = null;
                 var b: ?u8 = null;
                 var c: ?u8 = null;
-                for (iterator.slots) |slot, i| {
-                    if (slot == null and !copies_any.isSet(i)) a = @intCast(u8, i);
-                    if (slot == null and copies_any.isSet(i)) b = @intCast(u8, i);
+                for (iterator.slots, 0..) |slot, i| {
+                    if (slot == null and !copies_any.isSet(i)) a = @as(u8, @intCast(i));
+                    if (slot == null and copies_any.isSet(i)) b = @as(u8, @intCast(i));
                     if (slot) |slot_copy| {
-                        if (slot_copy != i and copies_duplicate.isSet(slot_copy)) c = @intCast(u8, i);
+                        if (slot_copy != i and copies_duplicate.isSet(slot_copy)) c = @as(u8, @intCast(i));
                     }
                 }
 
