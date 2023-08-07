@@ -72,7 +72,34 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
     assert(@typeInfo(Commands) == .Union);
 
-    const first_arg = args.next() orelse fatal("subcommand required", .{});
+    const first_arg = args.next() orelse {
+        const fields = comptime blk: {
+            var fields: [:0]const u8 = "";
+            inline for (std.meta.fields(Commands)) |field, i| {
+                if (i > 0) {
+                    fields = fields ++ ", ";
+                }
+                fields = fields ++ field.name;
+            }
+
+            break :blk fields;
+        };
+
+        const message = comptime blk: {
+            var message: [:0]const u8 = "subcommand required.";
+
+            if (fields.len > 0) {
+                message = message ++ "\n\nExpected one of: " ++ fields ++ ".";
+            }
+
+            if (@hasDecl(Commands, "help")) {
+                message = message ++ "\n\nOr use -h, --help for more information.";
+            }
+
+            break :blk message;
+        };
+        fatal(message, .{});
+    };
 
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
