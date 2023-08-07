@@ -786,10 +786,10 @@ pub fn GrooveType(
                     timestamp,
                 )) {
                     .negative => {
-                        lookup_object_callback(&worker.lookup.object, null);
+                        lookup_object_callback(worker.lookup.get(.object), null);
                     },
                     .positive => |value| {
-                        lookup_object_callback(&worker.lookup.object, value);
+                        lookup_object_callback(worker.lookup.get(.object), value);
                     },
                     .possible => |level_min| {
                         worker.context.groove.objects.lookup_from_levels_storage(.{
