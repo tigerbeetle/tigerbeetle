@@ -139,7 +139,7 @@ pub fn ReplicaType(
         const ForestTableIterator = ForestTableIteratorType(StateMachine.Forest);
 
         const BlockRead = struct {
-            read: Grid.ReadRepair,
+            read: Grid.Read,
             replica: *Self,
             destination: u8,
             message: *Message,
@@ -2285,12 +2285,13 @@ pub fn ReplicaType(
                     .message = reply.ref(),
                 };
 
-                self.grid.read_block_repair_from_cache_and_storage(
+                self.grid.read_block_repair_from_cache_or_storage(
                     on_request_blocks_read_repair,
                     &read.read,
-                    reply.buffer[0..constants.block_size],
+                    //reply.buffer[0..constants.block_size],
                     request.block_address,
                     request.block_checksum,
+                    //.repair,
                 );
             }
         }
@@ -7568,7 +7569,6 @@ pub fn ReplicaType(
                 self.superblock.staging.checkpoint_id(),
             });
 
-            self.grid_scrubber.stop();
             self.sync_tables = null;
 
             // We learned that we are lagging behind the cluster, so we know we shouldn't actually
@@ -7709,6 +7709,7 @@ pub fn ReplicaType(
                 .idle => {},
                 .canceling_commit => {}, // Waiting for an uninterruptible commit step.
                 .canceling_grid => {
+                    self.grid_scrubber.stop();
                     self.grid.cancel(sync_cancel_grid_callback);
 
                     assert(self.grid.read_remote_queue.empty());

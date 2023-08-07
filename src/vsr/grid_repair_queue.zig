@@ -105,6 +105,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         writes: IOPS(Write, grid_repair_writes_max) = .{},
         write_blocks: [grid_repair_writes_max]Grid.BlockPtr,
 
+        /// Guard against new block/table repairs queueing within RepairTable callbacks.
         canceling: bool = false,
 
         checkpoint_tick_context: Grid.NextTick = undefined,
@@ -178,6 +179,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             return requests_count;
         }
 
+        /// Count the number of non-table block repairs available.
         pub fn blocks_available(queue: *const GridRepairQueue) usize {
             const faulty_blocks_free =
                 queue.faulty_blocks.capacity() -
@@ -199,7 +201,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
         pub fn request_block(queue: *GridRepairQueue, address: u64, checksum: u128) void {
             assert(queue.checkpoint_progress == null); // TODO is this possible? we don't stop scrubbing during checkpoint
             assert(queue.blocks_available() > 0);
-            assert(queue.faulty_tables.empty());
+            assert(queue.faulty_tables.empty()); // TODO remove
+            assert(queue.faulty_tables.count <= constants.grid_repair_tables_max);
             assert(!queue.canceling);
             assert(!queue.grid.superblock.free_set.is_free(address));
 
@@ -230,6 +233,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             checksum: u128,
         ) void {
             assert(queue.checkpoint_progress == null);
+            assert(queue.faulty_tables.count < constants.grid_repair_tables_max);
             assert(!queue.canceling);
             assert(!queue.grid.superblock.free_set.is_free(address));
 
@@ -262,8 +266,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 .checksum = checksum,
                 .progress = .{ .table_index = .{ .table = table } },
             });
-
-            // TODO Check grid cache?
+            queue.repair_block_from_cache(address);
         }
 
         fn request_table_tick_callback(tick_context: *Grid.NextTick) void {
@@ -275,6 +278,26 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             assert(table.next == null);
 
             (table.callback)(table, .duplicate);
+        }
+
+        /// Attempt to repair the block directly from the grid cache.
+        /// During table repair after state sync, commit/compaction may simultaneously be retrieving
+        /// blocks using the `Grid.read_remote_queue`. But those blocks aren't written immediately,
+        /// only cached.
+        fn repair_block_from_cache(queue: *GridRepairQueue, address: u64) void {
+            assert(queue.checkpoint_progress == null); // TODO is this possible? we don't stop scrubbing during checkpoint
+            assert(queue.grid.canceling == null);
+            assert(!queue.canceling);
+            assert(!queue.grid.superblock.free_set.is_free(address));
+
+            const fault = queue.faulty_blocks.getPtr(address).?;
+            const block = queue.grid.read_block_from_cache(
+                address,
+                fault.checksum,
+                .repair,
+            ) orelse return;
+
+            queue.repair_block(block) catch |err| assert(err == error.Busy);
         }
 
         /// error.Busy: The block is faulty and needs repair, but the queue is too busy right now.
@@ -456,7 +479,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             queue.faulty_blocks.clearRetainingCapacity();
             queue.faulty_blocks_repair_index = 0;
 
-            // Guard against new block/table repairs queueing within the callbacks.
             queue.canceling = true;
             while (queue.faulty_tables.pop()) |table| (table.callback)(table, .canceled);
             queue.canceling = false;
@@ -485,7 +507,6 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
                 }
             }
 
-            // Guard against new block/table repairs queueing within the callbacks.
             queue.canceling = true;
             var tables: FIFO(RepairTable) = .{ .name = queue.faulty_tables.name };
             while (queue.faulty_tables.pop()) |table| {

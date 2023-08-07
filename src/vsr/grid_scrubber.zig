@@ -38,7 +38,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
         pub const Read = struct {
             scrubber: *GridScrubber,
-            read: Grid.ReadRepair = undefined,
+            read: Grid.Read = undefined,
 
             /// These fields are also on the Grid.ReadRepair, but we will need them even after the
             /// Grid's read is released. (See `reads_faulty`).
@@ -219,7 +219,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.forest.grid.read_block_repair_from_storage(
                 read_next_callback,
                 &read.read,
-                scrubber.read_blocks[read_index],
+                //scrubber.read_blocks[read_index],
                 read.id.block_address,
                 read.id.block_checksum,
             );

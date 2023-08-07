@@ -229,7 +229,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .manifest,
+                    .acquire,
                 );
             } else {
                 // Use next_tick because the manifest may be empty (no blocks to read).
@@ -583,7 +583,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .manifest,
+                    .acquire,
                 );
             } else {
                 manifest_log.read_callback = null;

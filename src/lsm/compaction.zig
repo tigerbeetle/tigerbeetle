@@ -398,7 +398,7 @@ pub fn CompactionType(
                             &compaction.read,
                             table_ref.table_info.address,
                             table_ref.table_info.checksum,
-                            .index,
+                            .acquire,
                         );
                     },
                 }

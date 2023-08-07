@@ -394,7 +394,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
-                    .index,
+                    .acquire,
                 );
             }
 
@@ -417,7 +417,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     completion,
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
-                    .filter,
+                    .acquire,
                 );
             }
 
@@ -442,7 +442,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         completion,
                         context.data_block.?.address,
                         context.data_block.?.checksum,
-                        .data,
+                        .acquire,
                     );
                 } else {
                     context.tree.filter_block_misses += 1;
