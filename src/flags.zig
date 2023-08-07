@@ -75,7 +75,7 @@ pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) C
     const first_arg = args.next() orelse {
         const fields = comptime blk: {
             var fields: [:0]const u8 = "";
-            inline for (std.meta.fields(Commands)) |field, i| {
+            for (std.meta.fields(Commands)) |field, i| {
                 if (i > 0) {
                     fields = fields ++ ", ";
                 }
