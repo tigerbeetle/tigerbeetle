@@ -619,7 +619,11 @@ test "flags" {
     try t.check(&.{}, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: subcommand required
+        \\error: subcommand required.
+        \\
+        \\Expected one of: empty, prefix, pos, required, values.
+        \\
+        \\Or use -h, --help for more information.
         \\
     ));
 
