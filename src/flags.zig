@@ -73,27 +73,26 @@ pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) C
     assert(@typeInfo(Commands) == .Union);
 
     const first_arg = args.next() orelse {
-        const fields = comptime blk: {
-            var fields: [:0]const u8 = "";
-            for (std.meta.fields(Commands)) |field, i| {
-                if (i > 0) {
-                    fields = fields ++ ", ";
+        const formatted_fields = comptime blk: {
+            var formatted_fields: [:0]const u8 = "";
+            const fields = std.meta.fields(Commands);
+            for (fields) |field, i| {
+                if (i == fields.len - 1) {
+                    formatted_fields = formatted_fields ++ ", or ";
+                } else if (i > 0) {
+                    formatted_fields = formatted_fields ++ ", ";
                 }
-                fields = fields ++ field.name;
+                formatted_fields = formatted_fields ++ "'" ++ field.name ++ "'";
             }
 
-            break :blk fields;
+            break :blk formatted_fields;
         };
 
         const message = comptime blk: {
-            var message: [:0]const u8 = "subcommand required.";
+            var message: [:0]const u8 = "subcommand required";
 
-            if (fields.len > 0) {
-                message = message ++ "\n\nExpected one of: " ++ fields ++ ".";
-            }
-
-            if (@hasDecl(Commands, "help")) {
-                message = message ++ "\n\nOr use -h, --help for more information.";
+            if (formatted_fields.len > 0) {
+                message = message ++ ", expected " ++ formatted_fields;
             }
 
             break :blk message;
@@ -619,11 +618,7 @@ test "flags" {
     try t.check(&.{}, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: subcommand required.
-        \\
-        \\Expected one of: empty, prefix, pos, required, values.
-        \\
-        \\Or use -h, --help for more information.
+        \\error: subcommand required, expected 'empty', 'prefix', 'pos', 'required', or 'values'
         \\
     ));
 
