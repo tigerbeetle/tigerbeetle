@@ -850,8 +850,8 @@ pub fn main() !void {
             generator.print("Validating");
 
             for (Generator.tests) |t| {
-                var found = false;
                 if (validate_only.len > 0) {
+                    var found = false;
                     var parts = std.mem.split(u8, validate_only, ",");
                     while (parts.next()) |name| {
                         if (std.mem.eql(u8, name, t.name)) {
