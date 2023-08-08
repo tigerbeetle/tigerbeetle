@@ -152,10 +152,18 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         } else {
             fields[field_count] = field;
             field_count += 1;
-            if (field.field_type == bool) {
-                assert(default_value(field) == false); // boolean flags should have explicit default
-            } else {
-                assert_valid_value_type(field.field_type);
+
+            switch (@typeInfo(field.field_type)) {
+                .Bool => {
+                    assert(default_value(field).? == false); // boolean flags should have a default
+                },
+                .Optional => |optional| {
+                    assert(default_value(field).? == null); // optional flags should have a default
+                    assert_valid_value_type(optional.child);
+                },
+                else => {
+                    assert_valid_value_type(field.field_type);
+                },
             }
         }
     };
@@ -285,9 +293,14 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
     assert(value.len > 0);
 
-    if (T == []const u8 or T == [:0]const u8) return value;
-    if (T == ByteSize) return parse_value_size(flag, value);
-    if (@typeInfo(T) == .Int) return parse_value_int(T, flag, value);
+    const V = switch (@typeInfo(T)) {
+        .Optional => |optional| optional.child,
+        else => T,
+    };
+
+    if (V == []const u8 or V == [:0]const u8) return value;
+    if (V == ByteSize) return parse_value_size(flag, value);
+    if (@typeInfo(V) == .Int) return parse_value_int(V, flag, value);
     comptime unreachable;
 }
 
@@ -458,6 +471,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
             size: ByteSize = .{ .bytes = 0 },
             boolean: bool = false,
             path: []const u8 = "not-set",
+            optional: ?[]const u8 = null,
         },
 
         pub const help =
@@ -501,6 +515,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
                 try out_stream.print("size: {}\n", .{values.size.bytes});
                 try out_stream.print("boolean: {}\n", .{values.boolean});
                 try out_stream.print("path: {s}\n", .{values.path});
+                try out_stream.print("optional: {?s}\n", .{values.optional});
             },
         }
     }
@@ -791,14 +806,18 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--int=92", "--size=1GiB", "--boolean", "--path=/home" }, snap(@src(),
-        \\stdout:
-        \\int: 92
-        \\size: 1073741824
-        \\boolean: true
-        \\path: /home
-        \\
-    ));
+    try t.check(
+        &.{ "values", "--int=92", "--size=1GiB", "--boolean", "--path=/home", "--optional=some" },
+        snap(@src(),
+            \\stdout:
+            \\int: 92
+            \\size: 1073741824
+            \\boolean: true
+            \\path: /home
+            \\optional: some
+            \\
+        ),
+    );
 
     try t.check(&.{"values"}, snap(@src(),
         \\stdout:
@@ -806,6 +825,7 @@ test "flags" {
         \\size: 0
         \\boolean: false
         \\path: not-set
+        \\optional: null
         \\
     ));
 
@@ -843,6 +863,7 @@ test "flags" {
         \\size: 0
         \\boolean: false
         \\path: not-set
+        \\optional: null
         \\
     ));
 
@@ -866,6 +887,7 @@ test "flags" {
         \\size: 3145728
         \\boolean: false
         \\path: not-set
+        \\optional: null
         \\
     ));
 
@@ -882,6 +904,7 @@ test "flags" {
         \\size: 100000000000000000
         \\boolean: false
         \\path: not-set
+        \\optional: null
         \\
     ));
 
@@ -896,6 +919,20 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: --size: expected a size, but found '3Mib' (invalid digit or suffix)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--path=" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --path: argument requires a value
+        \\
+    ));
+
+    try t.check(&.{ "values", "--optional=" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --optional: argument requires a value
         \\
     ));
 }
