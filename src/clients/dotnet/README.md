@@ -120,7 +120,7 @@ var accounts = new[] {
     Ledger = 1,
     Code = 718,
     Flags = AccountFlags.None,
-  },     
+  },
 };
 
 var createAccountsError = client.CreateAccounts(accounts);
@@ -426,7 +426,7 @@ $ git submodule update --init --recursive
 $ ./scripts/install_zig.sh
 $ cd src/clients/dotnet
 $ dotnet restore
-$ dotnet clean
+$ dotnet clean --verbosity minimal
 $ dotnet build
 $ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
 ```
@@ -442,8 +442,7 @@ $ git submodule update --init --recursive
 $ .\scripts\install_zig.bat
 $ cd src/clients/dotnet
 $ dotnet restore
-$ dotnet clean
+$ dotnet clean --verbosity minimal
 $ dotnet build
 $ if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
 ```
-
