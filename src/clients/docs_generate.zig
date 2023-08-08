@@ -820,8 +820,16 @@ pub fn main() !void {
     }
 
     if (cli_args.language) |filter| {
-        for (languages) |language, i| {
-            skip_language[i] = !std.mem.eql(u8, filter, language.directory);
+        skip_language = .{true} ** languages.len;
+
+        var parts = std.mem.split(u8, filter, ",");
+        while (parts.next()) |part| {
+            for (languages) |language, i| {
+                if (std.mem.eql(u8, language.directory, part)) {
+                    skip_language[i] = false;
+                    break;
+                }
+            } else flags.fatal("--language: unknown language '{s}'", .{part});
         }
     }
 
