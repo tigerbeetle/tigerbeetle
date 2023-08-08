@@ -2,6 +2,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 
+const flags = @import("../flags.zig");
+
 const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
 const node = @import("./node/docs.zig").NodeDocs;
@@ -792,44 +794,34 @@ const Generator = struct {
     }
 };
 
+const CliArgs = struct {
+    language: ?[]const u8 = null,
+    validate: ?[]const u8 = null,
+    no_validate: bool = false,
+    no_generate: bool = false,
+    keep_tmp: bool = false,
+};
+
 pub fn main() !void {
     var skip_language = [_]bool{false} ** languages.len;
-    var validate = true;
-    var generate = true;
-    var validate_only: []const u8 = "";
 
     var global_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer global_arena.deinit();
-
-    var keep_tmp = false;
 
     var args = try std.process.argsWithAllocator(global_arena.allocator());
     defer args.deinit();
 
     assert(args.skip());
 
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--language")) {
-            var filter = args.next().?;
-            for (languages) |language, i| {
-                skip_language[i] = !std.mem.eql(u8, filter, language.directory);
-            }
-        }
+    const cli_args = flags.parse_flags(&args, CliArgs);
 
-        if (std.mem.eql(u8, arg, "--validate")) {
-            validate_only = args.next().?;
-        }
+    if (cli_args.validate != null and cli_args.no_validate) {
+        flags.fatal("--validate: conflicts with --no-validate", .{});
+    }
 
-        if (std.mem.eql(u8, arg, "--no-validate")) {
-            validate = false;
-        }
-
-        if (std.mem.eql(u8, arg, "--no-generate")) {
-            generate = false;
-        }
-
-        if (std.mem.eql(u8, arg, "--keep-tmp")) {
-            keep_tmp = true;
+    if (cli_args.language) |filter| {
+        for (languages) |language, i| {
+            skip_language[i] = !std.mem.eql(u8, filter, language.directory);
         }
     }
 
@@ -846,11 +838,11 @@ pub fn main() !void {
         var mw = MarkdownWriter.init(&buf);
 
         var generator = try Generator.init(&arena, language);
-        if (validate) {
+        if (!cli_args.no_validate) {
             generator.print("Validating");
 
             for (Generator.tests) |t| {
-                if (validate_only.len > 0) {
+                if (cli_args.validate) |validate_only| {
                     var parts = std.mem.split(u8, validate_only, ",");
 
                     const found = while (parts.next()) |name| {
@@ -865,11 +857,11 @@ pub fn main() !void {
 
                 const root = try git_root(&arena);
                 try std.os.chdir(root);
-                try t.validate(generator, keep_tmp);
+                try t.validate(generator, cli_args.keep_tmp);
             }
         }
 
-        if (generate) {
+        if (!cli_args.no_generate) {
             generator.print("Generating main README");
             try generator.generate_main_readme(&mw);
 
