@@ -16,11 +16,12 @@ const constants = @import("../constants.zig");
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 const bloom_filter = @import("bloom_filter.zig");
+const schema = @import("schema.zig");
 
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const schema = @import("schema.zig");
+const Fingerprint = bloom_filter.Fingerprint;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -318,7 +319,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         /// Returns the value from the mutable or immutable table (possibly a tombstone),
         /// if one is available for the specified snapshot.
-        pub fn lookup_from_memory(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
+        pub fn lookup_from_memory(
+            tree: *Tree,
+            snapshot: u64,
+            key: Key,
+            fingerprint: Fingerprint,
+        ) LookupMemoryResult {
             if (snapshot >= tree.lookup_snapshot_max.?) {
                 if (tree.table_mutable.get(key)) |value| return .{ .positive = value };
             } else {
@@ -334,7 +340,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(tree.table_immutable.free or snapshot != tree.lookup_snapshot_max.?);
             }
 
-            return tree.lookup_from_levels_cache(snapshot, key);
+            return tree.lookup_from_levels_cache(snapshot, key, fingerprint);
         }
 
         /// Returns:
@@ -347,8 +353,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
         /// the existence of the key in the filter/data block. If any of the blocks needed to
         /// ascertain the existence of the key are not in the Grid cache, it bails out.
-        fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
-            const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
+        fn lookup_from_levels_cache(
+            tree: *Tree,
+            snapshot: u64,
+            key: Key,
+            fingerprint: Fingerprint,
+        ) LookupMemoryResult {
             var iterator = tree.manifest.lookup(snapshot, key, 0);
             while (iterator.next()) |table| {
                 const index_block = tree.grid.read_block_from_cache(
@@ -405,7 +415,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree: *Tree,
             address: u64,
             checksum: u128,
-            fingerprint: bloom_filter.Fingerprint,
+            fingerprint: Fingerprint,
         ) enum { negative, possible, block_not_in_cache } {
             if (tree.grid.read_block_from_cache(address, checksum)) |filter_block| {
                 const filter_schema = schema.TableFilter.from(filter_block);
@@ -447,6 +457,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             context: *LookupContext,
             snapshot: u64,
             key: Key,
+            fingerprint: Fingerprint,
             level_min: u8,
         }) void {
             var index_block_count: u8 = 0;
@@ -473,15 +484,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 return;
             }
 
-            // Hash the key to the fingerprint only once and reuse for all bloom filter checks.
-            const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(parameters.key));
-
             parameters.context.* = .{
                 .tree = tree,
                 .completion = undefined,
 
                 .key = parameters.key,
-                .fingerprint = fingerprint,
+                .fingerprint = parameters.fingerprint,
 
                 .index_block_count = index_block_count,
                 .index_block_addresses = index_block_addresses,
@@ -501,7 +509,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             completion: Read,
 
             key: Key,
-            fingerprint: bloom_filter.Fingerprint,
+            fingerprint: Fingerprint,
 
             /// This value is an index into the index_block_addresses/checksums arrays.
             index_block: u8 = 0,
@@ -1281,6 +1289,38 @@ pub fn table_count_max_for_level(growth_factor: u32, level: u32) u32 {
     assert(level < constants.lsm_levels);
 
     return math.pow(u32, growth_factor, level + 1);
+}
+
+pub inline fn key_fingerprint(key: anytype) Fingerprint {
+    return Fingerprint.create(stdx.hash_inline(
+        // Composite keys are filtered by the prefix only.
+        if (comptime is_composite_key(@TypeOf(key)))
+            key.field
+        else
+            key,
+    ));
+}
+
+fn is_composite_key(comptime Key: type) bool {
+    if (@typeInfo(Key) == .Struct and
+        @hasField(Key, "field") and
+        @hasField(Key, "timestamp"))
+    {
+        const Field = std.meta.fieldInfo(Key, .field).field_type;
+        return Key == CompositeKey(Field);
+    }
+
+    return false;
+}
+
+test "is_composite_key" {
+    const expect = std.testing.expect;
+
+    try expect(is_composite_key(CompositeKey(u128)));
+    try expect(!is_composite_key(u128));
+
+    try expect(is_composite_key(CompositeKey(u64)));
+    try expect(!is_composite_key(u64));
 }
 
 test "table_count_max_for_level/tree" {
