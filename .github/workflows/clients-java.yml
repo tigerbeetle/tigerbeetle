@@ -267,13 +267,13 @@ jobs:
     - if: matrix.os != 'windows-latest'
       run: |
         export PATH="$PATH:$(pwd)/apache-maven-3.9.3/bin"
-        ./zig/zig build client_docs -- --language java
+        ./zig/zig build client_docs -- --language=java
 
     - if: matrix.os == 'windows-latest'
       run: |
         $env:PATH += "$(pwd)/apache-maven-3.9.3/bin"
         .\zig\zig build client_docs
-        .\zig-out\bin\client_docs --language java
+        .\zig-out\bin\client_docs --language=java
 
     - if: matrix.os == 'ubuntu-latest'
       run: ./.github/ci/fail_on_diff.sh

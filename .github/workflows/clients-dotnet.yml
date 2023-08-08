@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0      
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v3
         with:
           dotnet-version: |
@@ -229,9 +229,9 @@ jobs:
 
       # Grab Zig
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
-        
+
       - run: ./zig/zig build client_docs
-      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language dotnet
-      
+      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language=dotnet
+
       - if: matrix.os == 'ubuntu-latest'
         run: .github/ci/fail_on_diff.sh
