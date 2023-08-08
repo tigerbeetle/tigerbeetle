@@ -851,20 +851,14 @@ pub fn main() !void {
 
             for (Generator.tests) |t| {
                 if (validate_only.len > 0) {
-                    var found = false;
                     var parts = std.mem.split(u8, validate_only, ",");
-                    while (parts.next()) |name| {
-                        if (std.mem.eql(u8, name, t.name)) {
-                            found = true;
-                            break;
-                        }
-                    }
+
+                    const found = while (parts.next()) |name| {
+                        if (std.mem.eql(u8, name, t.name)) break true;
+                    } else false;
 
                     if (!found) {
-                        generator.printf(
-                            "Skipping test [{s}]",
-                            .{t.name},
-                        );
+                        generator.printf("Skipping test [{s}]", .{t.name});
                         continue;
                     }
                 }
