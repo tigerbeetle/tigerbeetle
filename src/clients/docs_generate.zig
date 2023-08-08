@@ -15,7 +15,8 @@ const git_root = @import("./shutil.zig").git_root;
 const shell_wrap = @import("./shutil.zig").shell_wrap;
 const run_shell = @import("./shutil.zig").run_shell;
 const cmd_sep = @import("./shutil.zig").cmd_sep;
-const write_shell_newlines_into_single_line = @import("./shutil.zig").write_shell_newlines_into_single_line;
+const write_shell_newlines_into_single_line =
+    @import("./shutil.zig").write_shell_newlines_into_single_line;
 const run_shell_with_env = @import("./shutil.zig").run_shell_with_env;
 const run_with_tb = @import("./run_with_tb.zig").run_with_tb;
 
@@ -171,10 +172,13 @@ pub fn prepare_directory(
     defer std.os.chdir(root) catch unreachable;
 
     cmd.clearRetainingCapacity();
-    try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_install_commands_hook) |hook|
-        try hook(arena, language.install_commands)
-    else
-        language.install_commands);
+    try write_shell_newlines_into_single_line(
+        &cmd,
+        if (language.current_commit_install_commands_hook) |hook|
+            try hook(arena, language.install_commands)
+        else
+            language.install_commands,
+    );
     try run_shell(arena, cmd.items);
 }
 
@@ -197,18 +201,24 @@ pub fn integrate(
     var cmd = std.ArrayList(u8).init(arena.allocator());
     defer cmd.deinit();
 
-    try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_build_commands_hook) |hook|
-        try hook(arena, language.build_commands)
-    else
-        language.build_commands);
+    try write_shell_newlines_into_single_line(
+        &cmd,
+        if (language.current_commit_build_commands_hook) |hook|
+            try hook(arena, language.build_commands)
+        else
+            language.build_commands,
+    );
     try run_shell(arena, cmd.items);
 
     if (run) {
         cmd.clearRetainingCapacity();
-        try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_run_commands_hook) |hook|
-            try hook(arena, language.run_commands)
-        else
-            language.run_commands);
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            if (language.current_commit_run_commands_hook) |hook|
+                try hook(arena, language.run_commands)
+            else
+                language.run_commands,
+        );
 
         try run_with_tb(arena, try shell_wrap(arena, cmd.items), dir);
     }
@@ -243,7 +253,12 @@ const Generator = struct {
         try std.fs.cwd().makePath(path);
     }
 
-    fn build_file_within_project(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
+    fn build_file_within_project(
+        self: Generator,
+        tmp_dir: TmpDir,
+        file: []const u8,
+        run_setup_tests: bool,
+    ) !void {
         try prepare_directory(self.arena, self.language, tmp_dir.path);
 
         var tmp_file_name = self.sprintf(
@@ -377,7 +392,12 @@ const Generator = struct {
         return aggregate.items;
     }
 
-    fn generate_language_setup_steps(self: Generator, mw: *MarkdownWriter, directory_info: []const u8, include_project_file: bool) void {
+    fn generate_language_setup_steps(
+        self: Generator,
+        mw: *MarkdownWriter,
+        directory_info: []const u8,
+        include_project_file: bool,
+    ) void {
         var language = self.language;
 
         const windows_supported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
@@ -757,12 +777,8 @@ const Generator = struct {
             self.generate_language_setup_steps(
                 mw,
                 self.sprintf(
-                    "First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.",
-                    .{
-                        language.directory,
-                        sample.directory,
-                    },
-                ),
+                    \\First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.
+                , .{ language.directory, sample.directory }),
                 false,
             );
 
