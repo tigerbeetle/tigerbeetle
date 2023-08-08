@@ -105,7 +105,6 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     &it.read,
                     it.context.addresses[index],
                     it.context.checksums[index],
-                    .acquire,
                 );
             } else {
                 it.callback = .{ .next_tick = callback };

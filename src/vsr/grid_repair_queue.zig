@@ -237,13 +237,15 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             assert(!queue.canceling);
             assert(!queue.grid.superblock.free_set.is_free(address));
 
+            // 14886089350997791775
+
             // TODO Allow block faults to coexist with table faults.
-            if (constants.verify) {
-                var queued_faults = queue.faulty_blocks.iterator();
-                while (queued_faults.next()) |queued_fault| {
-                    assert(queued_fault.value_ptr.progress != .block);
-                }
-            }
+            //if (constants.verify) {
+            //    var queued_faults = queue.faulty_blocks.iterator();
+            //    while (queued_faults.next()) |queued_fault| {
+            //        assert(queued_fault.value_ptr.progress != .block);
+            //    }
+            //}
 
             table.* = .{
                 .callback = callback,
@@ -294,7 +296,8 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             const block = queue.grid.read_block_from_cache(
                 address,
                 fault.checksum,
-                .repair,
+                .{ .coherent = false }, // TODO true?
+                //.repair,
             ) orelse return;
 
             queue.repair_block(block) catch |err| assert(err == error.Busy);
@@ -306,7 +309,7 @@ pub fn GridRepairQueueType(comptime Storage: type) type {
             queue: *GridRepairQueue,
             block_data: Grid.BlockPtrConst,
         ) error{Canceling, Busy, Clean}!void {
-            assert(queue.checkpoint_progress == null);
+            //assert(queue.checkpoint_progress == null);
 
             if (queue.grid.canceling) |_| return error.Canceling;
 

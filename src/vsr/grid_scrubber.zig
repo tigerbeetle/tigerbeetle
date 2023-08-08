@@ -1,7 +1,3 @@
-//! The scrubber must not be enabled during the time between:
-//! - request trailers, and
-//! - `SuperBlock.sync`'s completion
-//! otherwise TODO why not?
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.grid_scrubber);
@@ -39,11 +35,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         pub const Read = struct {
             scrubber: *GridScrubber,
             read: Grid.Read = undefined,
-
-            /// These fields are also on the Grid.ReadRepair, but we will need them even after the
-            /// Grid's read is released. (See `reads_faulty`).
-            /// TODO unnecessary; remove
-            id: BlockId,
+            block_type: BlockType,
 
             /// When true: If the read completes and is corrupt, the block will *not* be added to
             /// the repair queue. This avoids a read-barrier at checkpoints (due to released
@@ -61,7 +53,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         options: Options,
 
         reads: IOPS(Read, constants.grid_scrubber_reads_max) = .{},
-        read_blocks: [constants.grid_scrubber_reads_max]Grid.BlockPtr,
+        //read_blocks: [constants.grid_scrubber_reads_max]Grid.BlockPtr,
         /// When `reads_faulty` is set, the corresponding Read in `reads`:
         /// - is not free,
         /// - is complete, and
@@ -71,7 +63,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         /// When null: Scrubbing is disabled.
         /// When non-null: Scrub the entire forest slowly in the background.
         /// TODO Start each replica scrubbing from a (different) random offset.
-        tour: ?union(enum) {
+        tour: union(enum) {
             init,
             done,
             manifest_log: struct {
@@ -98,13 +90,6 @@ pub fn GridScrubberType(comptime Forest: type) type {
             forest: *Forest,
             options: Options,
         ) error{OutOfMemory}!GridScrubber {
-            var read_blocks: [constants.grid_scrubber_reads_max]Grid.BlockPtr = undefined;
-            for (read_blocks) |*buffer, i| {
-                errdefer for (read_blocks[0..i]) |b| allocator.free(b);
-                buffer.* = try allocate_block(allocator);
-            }
-            errdefer for (read_blocks) |buffer| allocator.free(buffer);
-
             var tour_index_block = try allocate_block(allocator);
             errdefer allocator.free(tour_index_block);
 
@@ -112,51 +97,55 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 .superblock = forest.grid.superblock,
                 .forest = forest,
                 .options = options,
-                .read_blocks = read_blocks,
-                .tour = null,
+                .tour = .init,
                 .tour_index_block = tour_index_block,
             };
         }
 
         pub fn deinit(scrubber: *GridScrubber, allocator: std.mem.Allocator) void {
             allocator.free(scrubber.tour_index_block);
-            for (scrubber.read_blocks) |buffer| allocator.free(buffer);
 
             scrubber.* = undefined;
         }
 
-        pub fn start(scrubber: *GridScrubber) void {
-            assert(scrubber.tour == null);
-            assert(scrubber.forest.grid.superblock.opened);
+        pub fn cancel(scrubber: *GridScrubber) void {
+            var reads = scrubber.reads.iterate();
+            while (reads.next()) |read| scrubber.reads.release(read);
+
+            var reads_faulty = scrubber.reads_faulty.iterator(.{});
+            while (reads_faulty.next()) |read_faulty| scrubber.reads_faulty.unset(read_faulty);
 
             scrubber.tour = .init;
-
-            log.debug("{}: start", .{scrubber.options.replica_index});
-        }
-
-        pub fn stop(scrubber: *GridScrubber) void {
-            maybe(scrubber.tour == null);
-
-            var reads = scrubber.reads.iterate();
-            while (reads.next()) |read| scrubber.cancel_read(read);
-
-            scrubber.tour = null;
         }
 
         pub fn checkpoint(scrubber: *GridScrubber) void {
+            assert(scrubber.forest.grid.superblock.opened);
+
             var reads = scrubber.reads.iterate();
             while (reads.next()) |read| {
-                assert(!scrubber.superblock.free_set.is_free(read.id.block_address));
+                assert(!scrubber.superblock.free_set.is_free(read.read.address));
 
-                if (scrubber.superblock.free_set.is_released(read.id.block_address)) {
-                    scrubber.cancel_read(read);
+                if (scrubber.superblock.free_set.is_released(read.read.address)) {
+                    const read_index = scrubber.reads.index(read);
+                    assert(!scrubber.reads.free.isSet(read_index));
+
+                    if (scrubber.reads_faulty.isSet(read_index)) {
+                        // This read already finished, so we can release it immediately.
+                        assert(!read.ignore);
+
+                        scrubber.reads_faulty.unset(read_index);
+                        scrubber.reads.release(read);
+                    } else {
+                        // Reads in progress will be cleaned up when they complete.
+                        maybe(read.ignore);
+
+                        read.ignore = true;
+                    }
                 }
             }
 
-            if (scrubber.tour != null and
-                scrubber.tour.? == .table_content)
-            {
-                const index_address = scrubber.tour.?.table_content.index_address;
+            if (scrubber.tour == .table_content) {
+                const index_address = scrubber.tour.table_content.index_address;
                 assert(!scrubber.superblock.free_set.is_free(index_address));
 
                 if (scrubber.superblock.free_set.is_released(index_address)) {
@@ -165,26 +154,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
         }
 
-        fn cancel_read(scrubber: *GridScrubber, read: *Read) void {
-            const read_index = scrubber.reads.index(read);
-            assert(!scrubber.reads.free.isSet(read_index));
-
-            if (scrubber.reads_faulty.isSet(read_index)) {
-                // This read already finished, so we can release it immediately.
-                assert(!read.ignore);
-
-                scrubber.reads_faulty.unset(read_index);
-                scrubber.reads.release(read);
-            } else {
-                // Reads in progress will be cleaned up when they complete.
-                maybe(read.ignore);
-
-                read.ignore = true;
-            }
-        }
-
         pub fn read_next(scrubber: *GridScrubber) enum { read, busy, done } {
-            assert(scrubber.tour != null);
+            assert(scrubber.forest.grid.superblock.opened);
+            assert(scrubber.forest.grid.canceling == null);
 
             if (scrubber.reads.available() == 0) return .busy;
 
@@ -192,7 +164,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 if (scrubber.reads.executing() > 0) return .busy;
 
                 assert(scrubber.reads_faulty.count() == 0);
-                assert(scrubber.tour.? == .done);
+                assert(scrubber.tour == .done);
 
                 log.debug("{}: read_next: completed cycle", .{ scrubber.options.replica_index });
 
@@ -213,65 +185,69 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
             read.* = .{
                 .scrubber = scrubber,
-                .id = block_id,
+                .block_type = block_id.block_type,
             };
 
-            scrubber.forest.grid.read_block_repair_from_storage(
-                read_next_callback,
+            scrubber.forest.grid.read_block_async(
+                .{ .local = read_next_callback },
                 &read.read,
-                //scrubber.read_blocks[read_index],
-                read.id.block_address,
-                read.id.block_checksum,
+                block_id.block_address,
+                block_id.block_checksum,
+                .{
+                    // This read is coherent as-of this moment.
+                    // However, this read may span across a checkpoint where the block is freed.
+                    .coherent = false,
+                    .cache_check = false,
+                    .cache_update = false,
+                },
             );
             return .read;
         }
 
-        fn read_next_callback(grid_read: *Grid.ReadRepair, result: Grid.ReadBlockResult) void {
+        fn read_next_callback(grid_read: *Grid.Read, result: Grid.ReadBlockResult) void {
             const read = @fieldParentPtr(Read, "read", grid_read);
             const read_index = read.scrubber.reads.index(read);
-            const read_block = read.scrubber.read_blocks[read_index];
-            const read_id = read.id;
             const scrubber = read.scrubber;
             assert(!scrubber.reads_faulty.isSet(read_index));
-            assert(read_id.block_checksum == grid_read.checksum);
-            assert(read_id.block_address == grid_read.address);
+            assert(read.read.checksum == grid_read.checksum);
+            assert(read.read.address == grid_read.address);
 
-            log.debug("{}: read_next: result={s} (address={} checksum={} type={s} ignore={})", .{
+            log.debug("{}: read_next_callback: result={s} " ++
+                "(address={} checksum={} type={s} ignore={})", .{
                 scrubber.options.replica_index,
                 @tagName(result),
-                read_id.block_address,
-                read_id.block_checksum,
-                @tagName(read_id.block_type),
+                read.read.address,
+                read.read.checksum,
+                read.block_type,
                 read.ignore,
             });
 
             if (read.ignore) {
                 scrubber.reads.release(read);
             } else {
+                if (scrubber.tour == .table_content and
+                    scrubber.tour.table_content.index_block == null and
+                    scrubber.tour.table_content.index_checksum == read.read.checksum and
+                    scrubber.tour.table_content.index_address == read.read.address)
+                {
+                    assert(scrubber.tour.table_content.content_index == 0);
+
+                    if (result == .valid) {
+                        stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, result.valid);
+                        scrubber.tour.table_content.index_block = scrubber.tour_index_block;
+                    } else {
+                        scrubber.tour_skip_content();
+                    }
+                }
+
                 if (result == .valid) {
-                    const read_header = schema.header_from_block(read_block);
-                    assert(read_header.checksum == read_id.block_checksum);
-                    assert(read_header.op == read_id.block_address);
-                    assert(BlockType.from(read_header.operation) == read_id.block_type);
+                    const read_header = schema.header_from_block(result.valid);
+                    assert(read_header.checksum == read.read.checksum);
+                    assert(read_header.op == read.read.address);
 
                     scrubber.reads.release(read);
                 } else {
                     scrubber.reads_faulty.set(read_index);
-                }
-
-                if (scrubber.tour.? == .table_content and
-                    scrubber.tour.?.table_content.index_block == null and
-                    scrubber.tour.?.table_content.index_checksum == read_id.block_checksum and
-                    scrubber.tour.?.table_content.index_address == read_id.block_address)
-                {
-                    assert(scrubber.tour.?.table_content.content_index == 0);
-
-                    if (result == .valid) {
-                        stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, read_block);
-                        scrubber.tour.?.table_content.index_block = scrubber.tour_index_block;
-                    } else {
-                        scrubber.tour_skip_content();
-                    }
                 }
             }
         }
@@ -283,17 +259,20 @@ pub fn GridScrubberType(comptime Forest: type) type {
             const read = &scrubber.reads.items[read_index];
             assert(!read.ignore);
 
-            const block_id = read.id;
+            const read_id = BlockId{
+                .block_address = read.read.address,
+                .block_checksum = read.read.checksum,
+                .block_type = read.block_type,
+            };
+
             scrubber.reads.release(read);
             scrubber.reads_faulty.unset(read_index);
 
-            return block_id;
+            return read_id;
         }
 
         fn tour_next(scrubber: *GridScrubber) ?BlockId {
-            assert(scrubber.tour != null);
-
-            const tour = &scrubber.tour.?;
+            const tour = &scrubber.tour;
             if (tour.* == .init) {
                 tour.* = .{ .table_index = .{ .tables = ForestTableIterator{} } };
             }
@@ -367,10 +346,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         fn tour_skip_content(scrubber: *GridScrubber) void {
-            assert(scrubber.tour != null);
-            assert(scrubber.tour.? == .table_content);
+            assert(scrubber.tour == .table_content);
 
-            const tables = scrubber.tour.?.table_content.tables;
+            const tables = scrubber.tour.table_content.tables;
             scrubber.tour = .{ .table_index = .{ .tables = tables } };
         }
     };

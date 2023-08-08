@@ -123,7 +123,6 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
                     &it.read,
                     table_info.address,
                     table_info.checksum,
-                    .index,
                 );
             } else {
                 it.callback = .{ .next_tick = callback };

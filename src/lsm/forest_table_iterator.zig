@@ -13,12 +13,13 @@
 //!
 //! Pseudocode for this iterator:
 //!
-//!   for level in lsm_levels→0:
+//!   for level in 0→lsm_levels:
 //!     for tree in forest.trees:
 //!       for table in tree.manifest.levels[level]:
 //!         yield table
 //!
-//! TODO must go from top to bottom because of move-table
+//! The iterator must traverse from the top (level 0) to the bottom of each tree to avoid skipping
+//! tables that are compacted with move-table.
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -73,49 +74,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         } });
     };
 
-    //const TreeTableIterators = types: {
-    //    const StructField = std.builtin.TypeInfo.StructField;
-    //
-    //    var fields: []const StructField = &[_]StructField{};
-    //    for (std.meta.fields(Forest.Grooves)) |groove_field| {
-    //        const Groove = groove_field.field_type;
-    //        types = types ++ &[_]type{ Groove.ObjectTree };
-    //        if (Groove.IdTree != void) {
-    //            types = types ++ &[_]type{ Groove.IdTree };
-    //        }
-    //        for (std.meta.fields(Groove.IndexTrees)) |tree_field| {
-    //            types = types ++ &[_]type{ tree_field.field_type };
-    //        }
-    //    }
-    //    break :types types;
-    //};
-    //
-    //
-    //// struct { (Tree.name) → TreeTableIteratorType(Tree) }
-    //const TreeTableIterators = blk: {
-    //
-    //
-    //
-    //    const StructField = std.builtin.TypeInfo.StructField;
-    //    var fields: []const StructField = &[_]StructField{};
-    //    for (tree_types) |Tree, i| {
-    //        fields = fields ++ &[_]StructField{.{
-    //            .name = 
-    //            .field_type = TreeTableIteratorType(Tree),
-    //            .default_value = .{},
-    //            .is_comptime = false,
-    //            .alignment = @alignOf(TreeTableIteratorType(Tree)),
-    //        }};
-    //    }
-    //
-    //    break :blk @Type(.{ .Struct = .{
-    //        .layout = .Auto,
-    //        .fields = fields,
-    //        .decls = &.{},
-    //        .is_tuple = false,
-    //    } });
-    //};
-
     return struct {
         const ForestTableIterator = @This();
 
@@ -126,10 +84,9 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             address: u64,
             flags: u64,
             snapshot_min: u64,
-            snapshot_max: u64,// = math.maxInt(u64), TODO why did I write this?
+            snapshot_max: u64,
         };
 
-        //level: ?u8 = constants.lsm_levels - 1,
         level: u8 = 0,
         trees: TreeTableIterators = .{},
 
@@ -138,8 +95,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                 inline for (std.meta.fields(Forest.Grooves)) |groove_field| {
                     const Groove = groove_field.field_type;
                     const groove = &@field(forest.grooves, groove_field.name);
-
-                    //std.debug.print("{}: LOOP: {s} level={}\n", .{groove.objects.grid.superblock.replica(), groove_field.name, iterator.level});
 
                     if (iterator.next_from_tree(
                         groove_field.name,
@@ -170,19 +125,11 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                         }
                     }
                 }
-
-                //std.debug.print("DONE: {}\n", .{level});
-                //if (level == 0) {
-                //    iterator.level = null;
-                //} else {
-                //    iterator.level = level - 1;
-                //}
             }
 
             // Sanity-check, since all of this code generation is tricky to follow.
             inline for (std.meta.fields(TreeTableIterators)) |field| {
                 const tree_iterator = @field(iterator.trees, field.name);
-                //assert(tree_iterator.done);
                 assert(tree_iterator.level == constants.lsm_levels);
             }
             return null;
@@ -196,12 +143,10 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         ) ?TableInfo {
             const tree_iterator = &@field(iterator.trees, iterator_field);
             if (tree_iterator.level > iterator.level) {
-                //std.debug.print("{s}: A={}<{}\n", .{iterator_field, tree_iterator.level, iterator.level});
                 return null;
             }
 
             if (tree_iterator.next(tree)) |table| {
-                //std.debug.print("{s}: B={}<{}: {}\n", .{iterator_field, tree_iterator.level, iterator.level, table});
                 return TableInfo{
                     .checksum = table.checksum,
                     .address = table.address,
@@ -210,7 +155,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                     .snapshot_max = table.snapshot_max,
                 };
             } else {
-                //assert(tree_iterator.done);
                 assert(tree_iterator.level == constants.lsm_levels);
                 return null;
             }
@@ -227,8 +171,6 @@ fn TreeTableIteratorType(comptime Tree: type) type {
         const TreeTableIterator = @This();
 
         level: u8 = 0,
-        //level: u8 = constants.lsm_levels - 1,
-        //done: bool = false,
 
         position: ?struct {
             /// Corresponds to `ManifestLevel.generation`.
@@ -243,45 +185,29 @@ fn TreeTableIteratorType(comptime Tree: type) type {
         fn next(iterator: *TreeTableIterator, tree: *const Tree) ?*const Tree.Manifest.TableInfo {
             assert(tree.manifest.manifest_log.opened);
 
-            //if (iterator.done) return null;
-
-                    //std.debug.print("{s}: NEXT\n", .{tree.config.name});
-
             while (iterator.level < constants.lsm_levels) : ({
                 iterator.level += 1;
                 iterator.position = null;
-                //if (iterator.level > 0) {
-                //    iterator.level -= 1;
-                //    std.debug.print("{s}: level -> {}\n", .{tree.config.name, iterator.level});
-                //    iterator.position = null;
-                //} else {
-                //    iterator.done = true;
-                //}
             }) {
-                //assert(!iterator.done); // TODO remove
                 const level: *const Tree.Manifest.Level = &tree.manifest.levels[iterator.level];
-
-                    //std.debug.print("{s}: NEXT:LEVEL={}\n", .{tree.config.name, iterator.level});
 
                 var table_iterator = tables: {
                     if (iterator.position) |position| {
                         if (position.generation == level.generation) {
-                            //std.debug.print("GENERATION_OK\n", .{});
                             break :tables position.iterator;
                         } else {
-                            //std.debug.print("GENERATION_CHANGE\n", .{});
                             // The ManifestLevel was mutated since the last iteration, so our
                             // position's cursor/ManifestLevel.Iterator is invalid.
                             break :tables level.tables.iterator_from_cursor(
                                 level.tables.search(.{
                                     .key_max = position.previous.key_max,
-                                    .snapshot_min = position.previous.snapshot_min, // TODO +1 to avoid repeats?
+                                    // +1 to skip past the previous table.
+                                    .snapshot_min = position.previous.snapshot_min + 1,
                                 }),
                                 .ascending,
                             );
                         }
                     } else {
-                        //std.debug.print("GENERATION_INIT\n", .{});
                         break :tables level.tables.iterator_from_cursor(
                             level.tables.first(),
                             .ascending,
@@ -289,21 +215,7 @@ fn TreeTableIteratorType(comptime Tree: type) type {
                     }
                 };
 
-                //{
-                //    var it =   level.tables.iterator_from_cursor(level.tables.first(), .ascending);
-                //    while (it.next()) |t| {
-                //        //if (position.previous.snapshot_min == 76)  {
-                //        if (t.checksum == 25215638319991117136832403508585030204) {
-                //            std.debug.print("{s}: TT!={}\n", .{tree.config.name, t.checksum});
-                //        } else {
-                //            std.debug.print("{s}: TT?={}\n", .{tree.config.name, t.checksum});
-                //        }
-                //    }
-                //}
-
                 const table = table_iterator.next() orelse continue;
-
-                //std.debug.print("{s}: HIT: {}\n" ,.{tree.config.name, table.checksum});
 
                 iterator.position = .{
                     .generation = level.generation,
