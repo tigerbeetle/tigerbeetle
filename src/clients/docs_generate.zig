@@ -80,7 +80,7 @@ const MarkdownWriter = struct {
         mw.buf.clearRetainingCapacity();
     }
 
-    fn diffOnDisk(mw: *MarkdownWriter, filename: []const u8) !bool {
+    fn diff_on_disk(mw: *MarkdownWriter, filename: []const u8) !bool {
         const file = std.fs.cwd().createFile(
             filename,
             .{ .read = true, .truncate = false },
@@ -116,7 +116,7 @@ const MarkdownWriter = struct {
     // changed compared to what's on disk, so that file modify time stays
     // reasonable.
     fn save(mw: *MarkdownWriter, filename: []const u8) !void {
-        var diff = try mw.diffOnDisk(filename);
+        var diff = try mw.diff_on_disk(filename);
         if (!diff) {
             return;
         }
@@ -308,15 +308,15 @@ const Generator = struct {
         ) catch unreachable;
     }
 
-    fn validate_minimal(self: Generator, keepTmp: bool) !void {
+    fn validate_minimal(self: Generator, keep_tmp: bool) !void {
         // Test the sample file
         self.print("Building minimal sample file");
         var tmp_dir = try TmpDir.init(self.arena);
-        defer if (!keepTmp) tmp_dir.deinit();
+        defer if (!keep_tmp) tmp_dir.deinit();
         try self.build_file_within_project(tmp_dir, self.language.install_sample_file, true);
     }
 
-    fn validate_aggregate(self: Generator, keepTmp: bool) !void {
+    fn validate_aggregate(self: Generator, keep_tmp: bool) !void {
         // Test major parts of sample code
         var sample = try self.make_aggregate_sample();
         self.print("Aggregate");
@@ -328,7 +328,7 @@ const Generator = struct {
         }
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
-        defer if (!keepTmp) tmp_dir.deinit();
+        defer if (!keep_tmp) tmp_dir.deinit();
         try self.build_file_within_project(tmp_dir, sample, false);
     }
 
@@ -378,7 +378,7 @@ const Generator = struct {
     fn generate_language_setup_steps(self: Generator, mw: *MarkdownWriter, directory_info: []const u8, include_project_file: bool) void {
         var language = self.language;
 
-        const windowsSupported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
+        const windows_supported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
             " and Windows"
         else
             ". Windows is not yet supported";
@@ -386,7 +386,7 @@ const Generator = struct {
             \\Linux >= 5.6 is the only production environment we
             \\support. But for ease of development we also support macOS{s}.
             \\
-        , .{windowsSupported});
+        , .{windows_supported});
         mw.paragraph(language.prerequisites);
 
         mw.header(2, "Setup");
@@ -793,15 +793,15 @@ const Generator = struct {
 };
 
 pub fn main() !void {
-    var skipLanguage = [_]bool{false} ** languages.len;
+    var skip_language = [_]bool{false} ** languages.len;
     var validate = true;
     var generate = true;
-    var validateOnly: []const u8 = "";
+    var validate_only: []const u8 = "";
 
     var global_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer global_arena.deinit();
 
-    var keepTmp = false;
+    var keep_tmp = false;
 
     var args = try std.process.argsWithAllocator(global_arena.allocator());
     defer args.deinit();
@@ -812,12 +812,12 @@ pub fn main() !void {
         if (std.mem.eql(u8, arg, "--language")) {
             var filter = args.next().?;
             for (languages) |language, i| {
-                skipLanguage[i] = !std.mem.eql(u8, filter, language.directory);
+                skip_language[i] = !std.mem.eql(u8, filter, language.directory);
             }
         }
 
         if (std.mem.eql(u8, arg, "--validate")) {
-            validateOnly = args.next().?;
+            validate_only = args.next().?;
         }
 
         if (std.mem.eql(u8, arg, "--no-validate")) {
@@ -829,12 +829,12 @@ pub fn main() !void {
         }
 
         if (std.mem.eql(u8, arg, "--keep-tmp")) {
-            keepTmp = true;
+            keep_tmp = true;
         }
     }
 
     for (languages) |language, i| {
-        if (skipLanguage[i]) {
+        if (skip_language[i]) {
             continue;
         }
 
@@ -851,8 +851,8 @@ pub fn main() !void {
 
             for (Generator.tests) |t| {
                 var found = false;
-                if (validateOnly.len > 0) {
-                    var parts = std.mem.split(u8, validateOnly, ",");
+                if (validate_only.len > 0) {
+                    var parts = std.mem.split(u8, validate_only, ",");
                     while (parts.next()) |name| {
                         if (std.mem.eql(u8, name, t.name)) {
                             found = true;
@@ -871,7 +871,7 @@ pub fn main() !void {
 
                 const root = try git_root(&arena);
                 try std.os.chdir(root);
-                try t.validate(generator, keepTmp);
+                try t.validate(generator, keep_tmp);
             }
         }
 
