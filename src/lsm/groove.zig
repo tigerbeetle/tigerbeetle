@@ -389,16 +389,17 @@ pub fn GrooveType(
 
         const primary_field = if (has_id) "id" else "timestamp";
         const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
-        const PrefetchKey = struct {
-            key: union(enum) {
+
+        const PrefetchKeys = std.AutoArrayHashMapUnmanaged(
+            union(enum) {
                 id: PrimaryKey,
                 timestamp: u64,
             },
-            fingerprint: Fingerprint,
-            level: u8,
-        };
-
-        const PrefetchKeys = std.AutoArrayHashMapUnmanaged(PrefetchKey, void);
+            struct {
+                fingerprint: Fingerprint,
+                level: u8,
+            },
+        );
 
         const PrefetchObjectsContext = struct {
             pub inline fn hash(_: PrefetchObjectsContext, object: Object) u64 {
@@ -614,11 +615,13 @@ pub fn GrooveType(
                     groove.prefetch_from_memory_by_timestamp(id_tree_value.timestamp);
                 },
                 .possible => |level| {
-                    groove.prefetch_keys.putAssumeCapacity(.{
-                        .key = .{ .id = id },
-                        .level = level,
-                        .fingerprint = fingerprint,
-                    }, {});
+                    groove.prefetch_keys.putAssumeCapacity(
+                        .{ .id = id },
+                        .{
+                            .level = level,
+                            .fingerprint = fingerprint,
+                        },
+                    );
                 },
             }
         }
@@ -640,11 +643,13 @@ pub fn GrooveType(
                     groove.prefetch_objects.putAssumeCapacity(object.*, {});
                 },
                 .possible => |level| {
-                    groove.prefetch_keys.putAssumeCapacity(.{
-                        .key = .{ .timestamp = timestamp },
-                        .fingerprint = fingerprint,
-                        .level = level,
-                    }, {});
+                    groove.prefetch_keys.putAssumeCapacity(
+                        .{ .timestamp = timestamp },
+                        .{
+                            .fingerprint = fingerprint,
+                            .level = level,
+                        },
+                    );
                 },
             }
         }
@@ -747,38 +752,49 @@ pub fn GrooveType(
             lookup: LookupContext = undefined,
 
             fn lookup_start_next(worker: *PrefetchWorker) void {
-                const prefetch_key: *const PrefetchKey = blk: {
-                    const entry = worker.context.key_iterator.next() orelse {
-                        worker.context.worker_finished();
-                        return;
-                    };
-                    break :blk entry.key_ptr;
+                const prefetch_entry = worker.context.key_iterator.next() orelse {
+                    worker.context.worker_finished();
+                    return;
                 };
 
                 // prefetch_enqueue() ensures that the tree's cache is checked before queueing the
                 // object for prefetching. If not in the LSM tree's cache, the object must be read
                 // from disk and added to the auxiliary prefetch_objects hash map.
-                switch (prefetch_key.key) {
+                switch (prefetch_entry.key_ptr.*) {
                     .id => |id| {
+                        if (constants.verify) {
+                            assert(std.meta.eql(
+                                prefetch_entry.value_ptr.fingerprint,
+                                key_fingerprint(id),
+                            ));
+                        }
+
                         if (has_id) {
                             worker.context.groove.ids.lookup_from_levels_storage(.{
                                 .callback = lookup_id_callback,
                                 .context = worker.lookup.get(.id),
                                 .snapshot = worker.context.snapshot,
                                 .key = id,
-                                .fingerprint = prefetch_key.fingerprint,
-                                .level_min = prefetch_key.level,
+                                .fingerprint = prefetch_entry.value_ptr.fingerprint,
+                                .level_min = prefetch_entry.value_ptr.level,
                             });
                         } else unreachable;
                     },
                     .timestamp => |timestamp| {
+                        if (constants.verify) {
+                            assert(std.meta.eql(
+                                prefetch_entry.value_ptr.fingerprint,
+                                key_fingerprint(timestamp),
+                            ));
+                        }
+
                         worker.context.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_object_callback,
                             .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .fingerprint = prefetch_key.fingerprint,
-                            .level_min = prefetch_key.level,
+                            .fingerprint = prefetch_entry.value_ptr.fingerprint,
+                            .level_min = prefetch_entry.value_ptr.level,
                         });
                     },
                 }
