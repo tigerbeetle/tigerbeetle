@@ -85,7 +85,7 @@ pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) C
     inline for (comptime std.meta.fields(Commands)) |field| {
         comptime assert(std.mem.indexOf(u8, field.name, "_") == null);
         if (std.mem.eql(u8, first_arg, field.name)) {
-            return @unionInit(Commands, field.name, parse_flags(args, field.field_type));
+            return @unionInit(Commands, field.name, parse_flags(args, field.type));
         }
     }
     fatal("unknown subcommand: '{s}'", .{first_arg});
@@ -117,19 +117,19 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     comptime for (std.meta.fields(Flags)) |field| {
         if (std.mem.eql(u8, field.name, "positional")) {
-            assert(@typeInfo(field.field_type) == .Struct);
-            positional_fields = std.meta.fields(field.field_type);
+            assert(@typeInfo(field.type) == .Struct);
+            positional_fields = std.meta.fields(field.type);
             for (positional_fields) |positional_field| {
                 assert(default_value(positional_field) == null);
-                assert_valid_value_type(positional_field.field_type);
+                assert_valid_value_type(positional_field.type);
             }
         } else {
             fields[field_count] = field;
             field_count += 1;
-            if (field.field_type == bool) {
+            if (field.type == bool) {
                 assert(default_value(field) == false); // boolean flags should have explicit default
             } else {
-                assert_valid_value_type(field.field_type);
+                assert_valid_value_type(field.type);
             }
         }
     };
@@ -159,7 +159,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             field_len_prev = field.name.len;
             if (std.mem.startsWith(u8, arg, flag)) {
                 @field(counts, field.name) += 1;
-                const flag_value = parse_flag(field.field_type, flag, arg);
+                const flag_value = parse_flag(field.type, flag, arg);
                 @field(result, field.name) = flag_value;
                 continue :next_arg;
             }
@@ -177,7 +177,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 if (arg[0] == '-') fatal("unexpected argument: '{s}'", .{arg});
 
                 @field(result.positional, positional_field.name) =
-                    parse_value(positional_field.field_type, flag, arg);
+                    parse_value(positional_field.type, flag, arg);
                 if (positional_index + 1 == counts.positional) {
                     continue :next_arg;
                 }
@@ -390,9 +390,9 @@ fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8
 }
 
 /// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
-fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type {
+fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
     return if (field.default_value) |default_opaque|
-        @as(*const field.field_type, @ptrCast(@alignCast(default_opaque))).*
+        @as(*const field.type, @ptrCast(@alignCast(default_opaque))).*
     else
         null;
 }

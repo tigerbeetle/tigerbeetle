@@ -112,11 +112,11 @@ fn emit_struct(
 
     inline for (type_info.fields) |field| {
         try buffer.writer().print("    {s} {s}", .{
-            resolve_c_type(field.field_type),
+            resolve_c_type(field.type),
             field.name,
         });
 
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => |array| try buffer.writer().print("[{d}]", .{array.len}),
             else => {},
         }

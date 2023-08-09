@@ -18,7 +18,7 @@ const compaction_snapshot_for_op = @import("tree.zig").compaction_snapshot_for_o
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
 
     return struct {
         inline fn compare_keys(timestamp_a: u64, timestamp_b: u64) std.math.Order {
@@ -166,10 +166,10 @@ pub fn GrooveType(
     @setEvalBranchQuota(64000);
 
     const has_id = @hasField(Object, "id");
-    if (has_id) assert(std.meta.fieldInfo(Object, .id).field_type == u128);
+    if (has_id) assert(std.meta.fieldInfo(Object, .id).type == u128);
 
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
 
     comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
@@ -189,13 +189,13 @@ pub fn GrooveType(
         if (!ignored) {
             const IndexTree = IndexTreeType(
                 Storage,
-                field.field_type,
+                field.type,
                 @field(groove_options.value_count_max, field.name),
             );
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
                     .name = field.name,
-                    .field_type = IndexTree,
+                    .type = IndexTree,
                     .default_value = null,
                     .is_comptime = false,
                     .alignment = @alignOf(IndexTree),
@@ -236,7 +236,7 @@ pub fn GrooveType(
         index_fields = index_fields ++ &.{
             .{
                 .name = field.name,
-                .field_type = IndexTree,
+                .type = IndexTree,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(IndexTree),
@@ -246,11 +246,11 @@ pub fn GrooveType(
 
     comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
     for (index_fields) |index_field| {
-        const IndexTree = index_field.field_type;
+        const IndexTree = index_field.type;
         index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = index_field.name,
-                .field_type = IndexTree.Options,
+                .type = IndexTree.Options,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(IndexTree.Options),
@@ -491,7 +491,7 @@ pub fn GrooveType(
                 // No value cache for index trees, since they only do range queries.
                 assert(@field(options.tree_options_index, field.name).cache_entries_max == 0);
 
-                @field(index_trees, field.name) = try field.field_type.init(
+                @field(index_trees, field.name) = try field.type.init(
                     allocator,
                     node_pool,
                     grid,
@@ -710,7 +710,7 @@ pub fn GrooveType(
 
                 pub const Field = std.meta.FieldEnum(LookupContext);
                 pub fn FieldType(comptime field: Field) type {
-                    return std.meta.fieldInfo(LookupContext, field).field_type;
+                    return std.meta.fieldInfo(LookupContext, field).type;
                 }
 
                 pub inline fn parent(

@@ -188,7 +188,7 @@ fn emit_struct(
     const min_len = calculate_min_len(type_info);
     var flagsField = false;
     inline for (type_info.fields) |field| {
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => |array| {
                 try buffer.writer().print("\t{s} [{d}]{s}\n", .{
                     to_pascal_case(field.name, min_len),
@@ -205,7 +205,7 @@ fn emit_struct(
                     "\t{s} {s}\n",
                     .{
                         to_pascal_case(field.name, min_len),
-                        go_type(field.field_type),
+                        go_type(field.type),
                     },
                 );
             },

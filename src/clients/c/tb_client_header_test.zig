@@ -105,7 +105,7 @@ test "valid tb_client.h" {
 
                     inline for (std.meta.fields(ty)) |field| {
                         // In C, packed structs and enums are replaced with integers.
-                        comptime var field_type = field.field_type;
+                        comptime var field_type = field.type;
                         switch (@typeInfo(field_type)) {
                             .Struct => |info| {
                                 comptime assert(info.layout == .Packed);

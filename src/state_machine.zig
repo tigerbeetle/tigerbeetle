@@ -314,7 +314,7 @@ pub fn StateMachineType(
 
             pub const Field = std.meta.FieldEnum(PrefetchContext);
             pub fn FieldType(comptime field: Field) type {
-                return std.meta.fieldInfo(PrefetchContext, field).field_type;
+                return std.meta.fieldInfo(PrefetchContext, field).type;
             }
 
             pub inline fn parent(
