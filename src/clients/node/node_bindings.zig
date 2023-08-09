@@ -152,7 +152,7 @@ fn emit_struct(
 
         try emit_docs(buffer, mapping, 1, field.name);
 
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => try buffer.writer().print("  {s}: Buffer\n", .{
                 field.name,
             }),
@@ -160,7 +160,7 @@ fn emit_struct(
                 "  {s}: {s}\n",
                 .{
                     field.name,
-                    typescript_type(field.field_type),
+                    typescript_type(field.type),
                 },
             ),
         }

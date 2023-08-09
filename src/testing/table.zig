@@ -52,7 +52,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
             inline for (std.meta.fields(Data)) |value_field| {
                 // The repeated else branch seems to be necessary to keep Zig from complaining:
                 //   control flow attempts to use compile-time variable at runtime
-                const Field = value_field.field_type;
+                const Field = value_field.type;
                 if (value_field.default_value) |ptr| {
                     if (eat(tokens, "_")) {
                         const value_ptr = @as(*const Field, @ptrCast(@alignCast(ptr)));
@@ -80,7 +80,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
                     return @unionInit(
                         Data,
                         variant_field.name,
-                        parse_data(variant_field.field_type, tokens),
+                        parse_data(variant_field.type, tokens),
                     );
                 }
             }

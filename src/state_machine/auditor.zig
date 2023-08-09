@@ -538,7 +538,7 @@ pub fn IteratorForCreate(comptime Result: type) type {
             return .{ .results = results };
         }
 
-        pub fn take(self: *Self, event_index: usize) ?std.meta.fieldInfo(Result, .result).field_type {
+        pub fn take(self: *Self, event_index: usize) ?std.meta.fieldInfo(Result, .result).type {
             if (self.results.len > 0 and self.results[0].index == event_index) {
                 defer self.results = self.results[1..];
                 return self.results[0].result;

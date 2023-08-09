@@ -19,7 +19,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         groove_fields = groove_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
-                .field_type = Groove,
+                .type = Groove,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(Groove),
@@ -29,7 +29,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         groove_options_fields = groove_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
-                .field_type = Groove.Options,
+                .type = Groove.Options,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(Groove),
@@ -60,7 +60,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         comptime var ids: []const u128 = &.{};
 
         inline for (std.meta.fields(_Grooves)) |groove_field| {
-            const Groove = groove_field.field_type;
+            const Groove = groove_field.type;
 
             for (std.meta.fields(@TypeOf(Groove.config.ids))) |field| {
                 const id = @field(Groove.config.ids, field.name);

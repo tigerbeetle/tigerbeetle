@@ -33,7 +33,7 @@ const build_options: BuildOptions = blk: {
         var result: BuildOptions = undefined;
         for (std.meta.fields(BuildOptions)) |field| {
             @field(result, field.name) = launder_type(
-                field.field_type,
+                field.type,
                 @field(vsr_options, field.name),
             );
         }

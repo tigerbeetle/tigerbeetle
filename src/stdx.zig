@@ -279,7 +279,7 @@ fn has_pointers(comptime T: type) bool {
         .Array => |info| return comptime has_pointers(info.child),
         .Struct => |info| {
             inline for (info.fields) |field| {
-                if (comptime has_pointers(field.field_type)) return true;
+                if (comptime has_pointers(field.type)) return true;
             }
             return false;
         },
@@ -299,7 +299,7 @@ pub fn no_padding(comptime T: type) bool {
                     for (info.fields) |field| {
                         const field_offset = @offsetOf(T, field.name);
                         if (offset != field_offset) return false;
-                        offset += @sizeOf(field.field_type);
+                        offset += @sizeOf(field.type);
                     }
                     return offset == @sizeOf(T);
                 },

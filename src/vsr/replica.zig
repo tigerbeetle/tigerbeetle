@@ -3841,7 +3841,7 @@ pub fn ReplicaType(
             self.view_headers.verify();
 
             const BitSet = std.bit_set.IntegerBitSet(128);
-            comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
+            comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).type);
 
             // Collect nack and presence bits for the headers, so that the new primary can run CTRL
             // protocol to truncate uncommitted headers. When:
