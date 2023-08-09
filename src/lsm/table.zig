@@ -12,6 +12,7 @@ const stdx = @import("../stdx.zig");
 const div_ceil = stdx.div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+const key_fingerprint = @import("tree.zig").key_fingerprint;
 
 const allocate_block = @import("grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
@@ -475,7 +476,7 @@ pub fn TableType(
                 const filter_bytes = filter.block_filter(builder.filter_block);
                 for (values) |*value| {
                     const key = key_from_value(value);
-                    const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
+                    const fingerprint = key_fingerprint(key);
                     bloom_filter.add(fingerprint, filter_bytes);
                 }
 
