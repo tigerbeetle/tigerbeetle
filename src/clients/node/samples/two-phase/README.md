@@ -18,8 +18,7 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/node/samples/two-p
 Then, install the TigerBeetle client:
 
 ```console
-$ npm install tigerbeetle-node
-```
+npm install tigerbeetle-node```
 
 ## Start the TigerBeetle server
 
@@ -35,8 +34,7 @@ address of the TigerBeetle server you started.
 Now you can run this sample:
 
 ```console
-$ node main.js
-```
+node main.js```
 
 ## Walkthrough
 

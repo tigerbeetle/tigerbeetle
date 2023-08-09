@@ -63,11 +63,7 @@ const MarkdownWriter = struct {
 
     fn commands(mw: *MarkdownWriter, content: []const u8) void {
         mw.print("```console\n", .{});
-        var splits = std.mem.split(u8, content, "\n");
-        while (splits.next()) |chunk| {
-            mw.print("$ {s}\n", .{chunk});
-        }
-
+        mw.print("{s}", .{content});
         mw.print("```\n\n", .{});
     }
 

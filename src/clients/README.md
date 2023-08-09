@@ -25,7 +25,7 @@ Go to the repo root.
 If you don't already have the TigerBeetle version of `zig` run:
 
 ```console
-$ ./scripts/install_zig.[sh|bat]
+./scripts/install_zig.[sh|bat]
 ```
 
 Use the `.sh` script if you're on macOS or Linux. Use the `.bat`
@@ -34,7 +34,7 @@ script on Windows.
 To build and run the client docs generator:
 
 ```console
-$ ./zig/zig build client_docs --
+./zig/zig build client_docs --
 ```
 
 Note: Omitting the `--` will only build, not run the client_docs script.
@@ -46,7 +46,7 @@ minutes. You can skip validation when you are adding things to docs
 that can't break (such as more documentation, not code).
 
 ```console
-$ ./zig/zig build client_docs -- --no-validate
+./zig/zig build client_docs -- --no-validate
 ```
 
 ### Just one language
@@ -54,11 +54,11 @@ $ ./zig/zig build client_docs -- --no-validate
 To run the generator only for a certain language (defined by `.markdown_name`):
 
 ```console
-$ ./zig/zig build client_docs -- --language=node
+./zig/zig build client_docs -- --language=node
 ```
 
 ```console
-$ ./zig/zig build client_docs -- --language=node,go
+./zig/zig build client_docs -- --language=node,go
 ```
 
 Docs are only regenerated/modified when there would be a diff so the
@@ -83,7 +83,11 @@ server using `run_with_tb` (described below).
 Examples:
 
 ```bash
+<<<<<<< HEAD
 $ ./zig/zig build client_integration -- --language=java --sample=basic
+=======
+./zig/zig build client_integration -- --language java --sample basic
+>>>>>>> 92a071c6 (Regenerate readmes dropping $)
 ```
 
 This corresponds to setting up the sample code in
@@ -113,7 +117,11 @@ directory where the sample code is copied into and where munging takes
 place.
 
 ```bash
+<<<<<<< HEAD
 $ ./zig/zig build client_integration -- --language=java --sample=basic --keep-tmp
+=======
+./zig/zig build client_integration -- --language java --sample basic --keep-tmp
+>>>>>>> 92a071c6 (Regenerate readmes dropping $)
 ```
 
 ## run_with_tb.zig / run_with_tb
@@ -130,13 +138,13 @@ to it. Specifically, it:
 Example:
 
 ```bash
-$ ./zig/zig build run_with_tb -- node $(pwd)/myscript.js
+./zig/zig build run_with_tb -- node $(pwd)/myscript.js
 ```
 
 If you need to run multiple commands you can wrap in `bash -c " ... "`:
 
 ```bash
-$ ./zig/zig build run_with_tb -- bash -c "stuff && otherstuff"
+./zig/zig build run_with_tb -- bash -c "stuff && otherstuff"
 ```
 
 NOTE: All relative file paths in the proxied commands should be
@@ -149,5 +157,5 @@ Since you often need to `cd` to a directory to run a command, there's
 a shorthand via the `R_CWD` environment variable.
 
 ```bash
-$ R_CWD=$(pwd)/src/clients/go/samples/two-phase ./zig/zig build run_with_tb -- go run main.go
+R_CWD=$(pwd)/src/clients/go/samples/two-phase ./zig/zig build run_with_tb -- go run main.go
 ```

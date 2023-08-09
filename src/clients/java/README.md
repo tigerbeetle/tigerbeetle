@@ -77,8 +77,7 @@ Then create `pom.xml` and copy this into it:
 Then, install the TigerBeetle client:
 
 ```console
-$ mvn install
-```
+mvn install```
 
 Now, create `src/main/java/Main.java` and copy this into it:
 
@@ -97,8 +96,7 @@ public final class Main {
 Finally, build and run:
 
 ```console
-$ mvn exec:java
-```
+mvn exec:java```
 
 Now that all prerequisites and dependencies are correctly set
 up, let's dig into using TigerBeetle.
@@ -550,25 +548,23 @@ transferErrors = client.createTransfers(transfers);
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ ./scripts/install_zig.sh
-$ cd src/clients/java
-$ ./scripts/install.sh
-$ if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi
-```
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+./scripts/install_zig.sh
+cd src/clients/java
+./scripts/install.sh
+if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi```
 
 ### On Windows
 
 In PowerShell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ .\scripts\install_zig.bat
-$ cd src/clients/java
-$ .\scripts\install.bat
-$ if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
-```
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+.\scripts\install_zig.bat
+cd src/clients/java
+.\scripts\install.bat
+if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }```
