@@ -279,20 +279,18 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // TODO Fix this assertion:
             // assert(write_ahead_log_zone_size <= storage.size);
 
-            var headers = try allocator.allocAdvanced(
+            var headers = try allocator.alignedAlloc(
                 Header,
                 constants.sector_size,
                 slot_count,
-                .exact,
             );
             errdefer allocator.free(headers);
             for (headers) |*header| header.* = undefined;
 
-            var headers_redundant = try allocator.allocAdvanced(
+            var headers_redundant = try allocator.alignedAlloc(
                 Header,
                 constants.sector_size,
                 slot_count,
-                .exact,
             );
             errdefer allocator.free(headers_redundant);
             for (headers_redundant) |*header| header.* = undefined;
@@ -311,11 +309,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             errdefer allocator.free(prepare_inhabited);
             std.mem.set(bool, prepare_inhabited, false);
 
-            const headers_iops = (try allocator.allocAdvanced(
+            const headers_iops = (try allocator.alignedAlloc(
                 [constants.sector_size]u8,
                 constants.sector_size,
                 constants.journal_iops_write_max,
-                .exact,
             ))[0..constants.journal_iops_write_max];
             errdefer allocator.free(headers_iops);
 
