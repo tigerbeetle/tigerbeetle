@@ -110,6 +110,12 @@ const MarkdownWriter = struct {
     // changed compared to what's on disk, so that file modify time stays
     // reasonable.
     fn save(mw: *MarkdownWriter, filename: []const u8) !void {
+        // Ensure a single trailing newline.
+        assert(std.mem.endsWith(u8, mw.buf.items, "\n\n"));
+        _ = mw.buf.pop();
+        assert(!std.mem.endsWith(u8, mw.buf.items, "\n\n"));
+        assert(std.mem.endsWith(u8, mw.buf.items, "\n"));
+
         if (try mw.diff_on_disk(filename) == .different) {
             try std.fs.cwd().writeFile(filename, mw.buf.items);
         }
