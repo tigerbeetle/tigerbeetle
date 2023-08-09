@@ -54,11 +54,11 @@ $ ./zig/zig build client_docs -- --no-validate
 To run the generator only for a certain language (defined by `.markdown_name`):
 
 ```console
-$ ./zig/zig build client_docs -- --language node
+$ ./zig/zig build client_docs -- --language=node
 ```
 
 ```console
-$ ./zig/zig build client_docs -- --language node,go
+$ ./zig/zig build client_docs -- --language=node,go
 ```
 
 Docs are only regenerated/modified when there would be a diff so the
