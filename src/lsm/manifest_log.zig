@@ -33,7 +33,7 @@ const schema = @import("schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("grid.zig").GridType;
-const BlockType = @import("grid.zig").BlockType;
+const BlockType = @import("schema.zig").BlockType;
 const allocate_block = @import("grid.zig").allocate_block;
 const tree = @import("tree.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
