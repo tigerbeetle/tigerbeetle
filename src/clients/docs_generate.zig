@@ -127,23 +127,14 @@ pub fn prepare_directory(
     language: Docs,
     dir: []const u8,
 ) !void {
-    var cmd = std.ArrayList(u8).init(arena.allocator());
-    defer cmd.deinit();
-
     // Some languages (Java) have an additional project file
     // (pom.xml) they need to have available.
     if (language.project_file.len > 0) {
-        const project_file = try std.fs.cwd().createFile(
-            try std.fmt.allocPrint(
-                arena.allocator(),
-                "{s}/{s}",
-                .{ dir, language.project_file_name },
-            ),
-            .{ .truncate = true },
+        const project_file_path = try std.fs.path.join(
+            arena.allocator(),
+            &.{ dir, language.project_file_name },
         );
-        defer project_file.close();
-
-        _ = try project_file.write(language.project_file);
+        try std.fs.cwd().writeFile(project_file_path, language.project_file);
     }
 
     const root = try git_root(arena);
@@ -155,7 +146,9 @@ pub fn prepare_directory(
     try std.os.chdir(dir);
     defer std.os.chdir(root) catch unreachable;
 
-    cmd.clearRetainingCapacity();
+    var cmd = std.ArrayList(u8).init(arena.allocator());
+    defer cmd.deinit();
+
     try write_shell_newlines_into_single_line(
         &cmd,
         if (language.current_commit_install_commands_hook) |hook|
@@ -255,11 +248,8 @@ const Generator = struct {
             },
         );
         try self.ensure_path(std.fs.path.dirname(tmp_file_name).?);
-        var tmp_file = try std.fs.cwd().createFile(tmp_file_name, .{
-            .truncate = true,
-        });
-        defer tmp_file.close();
-        _ = try tmp_file.write(file);
+
+        try std.fs.cwd().writeFile(tmp_file_name, file);
 
         const root = try git_root(self.arena);
         try std.os.chdir(root);
@@ -272,6 +262,7 @@ const Generator = struct {
 
         var env = std.ArrayList([]const u8).init(self.arena.allocator());
         defer env.deinit();
+
         if (run_setup_tests) {
             // TODO (Phil): Get dotnet tests working outside of linux in CI.
             // They do work locally on my machines but I can't get them working in CI.
@@ -314,6 +305,7 @@ const Generator = struct {
         self.print("Building minimal sample file");
         var tmp_dir = try TmpDir.init(self.arena);
         defer if (!keep_tmp) tmp_dir.deinit();
+
         try self.build_file_within_project(tmp_dir, self.language.install_sample_file, true);
     }
 
@@ -330,6 +322,7 @@ const Generator = struct {
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
         defer if (!keep_tmp) tmp_dir.deinit();
+
         try self.build_file_within_project(tmp_dir, sample, false);
     }
 
