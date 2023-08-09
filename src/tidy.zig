@@ -125,7 +125,6 @@ const naughty_list = [_][]const u8{
     "constants.zig",
     "ewah_benchmark.zig",
     "ewah.zig",
-    "hash_map.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
     "io/linux.zig",

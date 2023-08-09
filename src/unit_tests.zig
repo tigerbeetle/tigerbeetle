@@ -4,7 +4,6 @@ test {
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
     _ = @import("flags.zig");
-    _ = @import("hash_map.zig");
     _ = @import("io.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("shell.zig");
