@@ -51,11 +51,10 @@ fn ReplicaFormatType(comptime Storage: type) type {
             assert(wal_write_size_max % constants.sector_size == 0);
 
             // Direct I/O requires the buffer to be sector-aligned.
-            var wal_buffer = try allocator.allocAdvanced(
+            var wal_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 wal_write_size_max,
-                .exact,
             );
             defer allocator.free(wal_buffer);
 

@@ -28,7 +28,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             assert(node_count > 0);
 
             const size = node_size * node_count;
-            const buffer = try allocator.allocAdvanced(u8, node_alignment, size, .exact);
+            const buffer = try allocator.alignedAlloc(u8, node_alignment, size);
             errdefer allocator.free(buffer);
 
             const free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);

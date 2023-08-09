@@ -310,7 +310,7 @@ pub fn GrooveType(
     const indexes_count_expect = std.meta.fields(Object).len -
         groove_options.ignored.len -
         // The id/timestamp fields are implicitly ignored since it's the primary key for ObjectTree:
-        (1 + @intFromBool(has_id)) +
+        (@as(usize, 1) + @intFromBool(has_id)) +
         std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);

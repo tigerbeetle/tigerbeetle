@@ -162,7 +162,7 @@ pub const Storage = struct {
 
         var prng = std.rand.DefaultPrng.init(options.seed);
         const sector_count = @divExact(size, constants.sector_size);
-        const memory = try allocator.allocAdvanced(u8, constants.sector_size, size, .exact);
+        const memory = try allocator.alignedAlloc(u8, constants.sector_size, size);
         errdefer allocator.free(memory);
 
         var memory_written = try std.DynamicBitSetUnmanaged.initEmpty(allocator, sector_count);

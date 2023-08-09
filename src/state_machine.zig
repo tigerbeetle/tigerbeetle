@@ -195,33 +195,33 @@ pub fn StateMachineType(
             .{
                 .ids = constants.tree_ids.accounts_mutable,
                 .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * @max(
+                    .timestamp = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_max.create_transfers,
-                    ),
+                    )),
                     // Transfers mutate the secondary indices for debits/credits pending/posted.
                     //
                     // * Each mutation results in a remove and an insert: the ×2 multiplier.
                     // * Each transfer modifies two accounts. However, this does not
                     //   necessitate an additional ×2 multiplier — the credits of the debit
                     //   account and the debits of the credit account are not modified.
-                    .debits_pending = config.lsm_batch_multiple * @max(
+                    .debits_pending = config.lsm_batch_multiple *  @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
-                    ),
-                    .debits_posted = config.lsm_batch_multiple * @max(
+                    )),
+                    .debits_posted = config.lsm_batch_multiple *  @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
-                    ),
-                    .credits_pending = config.lsm_batch_multiple * @max(
+                    )),
+                    .credits_pending = config.lsm_batch_multiple *  @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
-                    ),
-                    .credits_posted = config.lsm_batch_multiple * @max(
+                    )),
+                    .credits_posted = config.lsm_batch_multiple *  @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
-                    ),
+                    )),
                 },
                 .ignored = &[_][]const u8{"padding"},
                 .derived = .{},

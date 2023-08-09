@@ -588,17 +588,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
             assert(block_count_limit <= grid_blocks_max);
 
-            const a = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
+            const a = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
             errdefer allocator.free(a);
 
-            const b = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
+            const b = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
             errdefer allocator.free(b);
 
-            const reading = try allocator.allocAdvanced(
+            const reading = try allocator.alignedAlloc(
                 [constants.superblock_copies]SuperBlockHeader,
                 constants.sector_size,
                 1,
-                .exact,
             );
             errdefer allocator.free(reading);
 
@@ -618,27 +617,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
             var client_sessions = try ClientSessions.init(allocator);
             errdefer client_sessions.deinit(allocator);
 
-            const manifest_buffer = try allocator.allocAdvanced(
+            const manifest_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 superblock_trailer_manifest_size_max,
-                .exact,
             );
             errdefer allocator.free(manifest_buffer);
 
-            const free_set_buffer = try allocator.allocAdvanced(
+            const free_set_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 SuperBlockFreeSet.encode_size_max(block_count_limit),
-                .exact,
             );
             errdefer allocator.free(free_set_buffer);
 
-            const client_sessions_buffer = try allocator.allocAdvanced(
+            const client_sessions_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 superblock_trailer_client_sessions_size_max,
-                .exact,
             );
             errdefer allocator.free(client_sessions_buffer);
 
