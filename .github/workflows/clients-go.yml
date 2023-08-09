@@ -80,13 +80,13 @@ jobs:
       - run: ./zig/zig build client_integration
 
       - if: matrix.os != 'windows-latest'
-        run: ./zig-out/bin/client_integration --language go --sample ${{ matrix.sample }}
+        run: ./zig-out/bin/client_integration --language=go --sample=${{ matrix.sample }}
 
       # Set CC='zig.exe cc' for Windows.
       - if: matrix.os == 'windows-latest'
         run: |
           $env:CC = "$(pwd)\zig\zig.exe cc"
-          ./zig-out/bin/client_integration.exe --language go --sample ${{ matrix.sample }}
+          ./zig-out/bin/client_integration.exe --language=go --sample=${{ matrix.sample }}
 
   docs:
     timeout-minutes: 20

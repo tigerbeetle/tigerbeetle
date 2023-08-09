@@ -83,7 +83,7 @@ server using `run_with_tb` (described below).
 Examples:
 
 ```bash
-$ ./zig/zig build client_integration -- --language java --sample basic
+$ ./zig/zig build client_integration -- --language=java --sample=basic
 ```
 
 This corresponds to setting up the sample code in
@@ -113,7 +113,7 @@ directory where the sample code is copied into and where munging takes
 place.
 
 ```bash
-$ ./zig/zig build client_integration -- --language java --sample basic --keep-tmp
+$ ./zig/zig build client_integration -- --language=java --sample=basic --keep-tmp
 ```
 
 ## run_with_tb.zig / run_with_tb

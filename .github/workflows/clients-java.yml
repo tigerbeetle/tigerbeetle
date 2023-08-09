@@ -226,7 +226,7 @@ jobs:
 
     # Run the tests
     - run: ./zig/zig build client_integration
-    - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language java --sample ${{ matrix.sample }}
+    - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language=java --sample=${{ matrix.sample }}
 
   docs:
     timeout-minutes: 30
