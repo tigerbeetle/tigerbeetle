@@ -67,6 +67,7 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
         var offset_checked: usize = 0;
         while (offset_checked < write_size) {
             const offset_header_next = std.mem.alignForward(
+                usize,
                 offset + offset_checked,
                 constants.message_size_max,
             ) - offset;

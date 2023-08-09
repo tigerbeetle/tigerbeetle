@@ -217,9 +217,9 @@ pub fn GrooveType(
         }
 
         // Make sure the function takes in a reference to the Value:
-        const derive_arg = derive_func_info.args[0];
+        const derive_arg = derive_func_info.params[0];
         if (derive_arg.is_generic) @compileError("expected derive fn arg to not be generic");
-        if (derive_arg.arg_type != *const Object) {
+        if (derive_arg.type != *const Object) {
             @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 

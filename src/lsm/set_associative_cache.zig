@@ -570,11 +570,11 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
 
     assert(builtin.target.cpu.arch.endian() == .Little);
     assert(@typeInfo(UInt).Int.signedness == .unsigned);
-    assert(@typeInfo(UInt).Int.bits < meta.bitCount(u8));
+    assert(@typeInfo(UInt).Int.bits < @bitCount(u8));
     assert(math.isPowerOfTwo(@typeInfo(UInt).Int.bits));
 
-    const word_bits = meta.bitCount(Word);
-    const uint_bits = meta.bitCount(UInt);
+    const word_bits = @bitCount(Word);
+    const uint_bits = @bitCount(UInt);
     const uints_per_word = @divExact(word_bits, uint_bits);
 
     // An index bounded by the number of unsigned integers that fit exactly into a word.
@@ -583,7 +583,7 @@ fn PackedUnsignedIntegerArray(comptime UInt: type) type {
 
     // An index bounded by the number of bits (not unsigned integers) that fit exactly into a word.
     const BitsIndex = math.Log2Int(Word);
-    assert(math.maxInt(BitsIndex) == meta.bitCount(Word) - 1);
+    assert(math.maxInt(BitsIndex) == @bitCount(Word) - 1);
     assert(math.maxInt(BitsIndex) == word_bits - 1);
     assert(math.maxInt(BitsIndex) == uint_bits * (math.maxInt(WordIndex) + 1) - 1);
 
