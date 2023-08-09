@@ -106,11 +106,11 @@ fn make_bitset(allocator: std.mem.Allocator, config: BitSetConfig) ![]usize {
         const literals_length = prng.random().uintLessThan(usize, 2 * config.literals_length_e);
         const run_bit = prng.random().boolean();
 
-        const run_end = std.math.min(w + run_length, words.len);
+        const run_end = @min(w + run_length, words.len);
         while (w < run_end) : (w += 1) {
             words[w] = if (run_bit) std.math.maxInt(usize) else 0;
         }
-        const literals_end = std.math.min(w + literals_length, words.len);
+        const literals_end = @min(w + literals_length, words.len);
         while (w < literals_end) : (w += 1) {
             words[w] = literal;
             literal += 1;

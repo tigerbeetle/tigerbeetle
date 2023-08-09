@@ -1317,20 +1317,20 @@ pub fn exponential_backoff_with_jitter(
 
     // Do not use `@truncate(u6, attempt)` since that only discards the high bits:
     // We want a saturating exponent here instead.
-    const exponent = @as(u6, @intCast(std.math.min(std.math.maxInt(u6), attempt)));
+    const exponent = @as(u6, @intCast(@min(std.math.maxInt(u6), attempt)));
 
     // A "1" shifted left gives any power of two:
     // 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8
     const power = std.math.shlExact(u128, 1, exponent) catch unreachable; // Do not truncate.
 
-    // Ensure that `backoff` is calculated correctly when min is 0, taking `std.math.max(1, min)`.
+    // Ensure that `backoff` is calculated correctly when min is 0, taking `@max(1, min)`.
     // Otherwise, the final result will always be 0. This was an actual bug we encountered.
-    const min_non_zero = std.math.max(1, min);
+    const min_non_zero = @max(1, min);
     assert(min_non_zero > 0);
     assert(power > 0);
 
     // Calculate the capped exponential backoff component, `min(range, min * 2 ^ attempt)`:
-    const backoff = std.math.min(range, min_non_zero * power);
+    const backoff = @min(range, min_non_zero * power);
     const jitter = random.uintAtMostBiased(u64, backoff);
 
     const result = @as(u64, @intCast(min + jitter));
@@ -1516,7 +1516,7 @@ pub fn quorums(replica_count: u8) struct {
     assert(constants.quorum_replication_max >= 2);
     // For replica_count=2, set quorum_replication=2 even though =1 would intersect.
     // This improves durability of small clusters.
-    const quorum_replication = if (replica_count == 2) 2 else std.math.min(
+    const quorum_replication = if (replica_count == 2) 2 else @min(
         constants.quorum_replication_max,
         stdx.div_ceil(replica_count, 2),
     );
@@ -1876,7 +1876,7 @@ const ViewChangeHeadersArray = struct {
         assert(headers.array.len >= constants.view_change_headers_suffix_max);
         assert(headers.array.len >= constants.pipeline_prepare_queue_max + 1);
 
-        const commit_max = std.math.max(
+        const commit_max = @max(
             headers.array.get(0).op -| constants.pipeline_prepare_queue_max,
             headers.array.get(0).commit,
         );

@@ -57,7 +57,7 @@ pub const Storage = struct {
                 max -= partial_sector_read;
             }
 
-            return read.buffer[0..std.math.min(read.buffer.len, max)];
+            return read.buffer[0..@min(read.buffer.len, max)];
         }
     };
 

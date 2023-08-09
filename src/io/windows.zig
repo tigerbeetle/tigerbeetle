@@ -147,7 +147,7 @@ pub const IO = struct {
             // if it's still waiting, update min_timeout
             const expires = completion.operation.timeout.deadline - now;
             if (min_expires) |current_min_expires| {
-                min_expires = std.math.min(expires, current_min_expires);
+                min_expires = @min(expires, current_min_expires);
             } else {
                 min_expires = expires;
             }

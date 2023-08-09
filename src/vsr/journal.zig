@@ -1043,7 +1043,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
-            const max = std.math.min(constants.message_size_max, headers_size - offset);
+            const max = @min(constants.message_size_max, headers_size - offset);
             assert(max % constants.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
             return message.buffer[0..max];
@@ -1225,7 +1225,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
 
-            const prepare_op_max = std.math.max(
+            const prepare_op_max = @max(
                 replica.op_checkpoint(),
                 op_maximum_headers_untrusted(replica.cluster, journal.headers),
             );
@@ -2422,7 +2422,7 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
 
     var headers = std.mem.bytesAsSlice(Header, target);
     const headers_past = @divExact(offset_logical, @sizeOf(Header));
-    const headers_count = std.math.min(headers.len, slot_count - headers_past);
+    const headers_count = @min(headers.len, slot_count - headers_past);
 
     for (headers[0..headers_count], 0..) |*header, i| {
         const slot = @divExact(offset_logical, @sizeOf(Header)) + i;

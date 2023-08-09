@@ -144,7 +144,7 @@ pub fn TableType(
             // Y = (body - (R * body / ((R + 1) * value_size)) * value_size) / key_size
             // Y = (body - (R / (R + 1)) * body) / key_size
             // Y = body / ((R + 1) * key_size)
-            var block_keys_layout_count = math.min(
+            var block_keys_layout_count = @min(
                 block_body_size / ((constants.lsm_value_to_key_layout_ratio_min + 1) * key_size),
                 block_body_size / (value_size + key_size),
             );
@@ -196,7 +196,7 @@ pub fn TableType(
                 .filter_block_count_max = filter_blocks,
 
                 // The number of data blocks covered by a single filter block.
-                .filter_data_block_count_max = std.math.min(
+                .filter_data_block_count_max = @min(
                     filter_data_block_count_max,
                     data_blocks,
                 ),

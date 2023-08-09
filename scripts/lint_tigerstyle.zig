@@ -43,7 +43,7 @@ pub fn main() !void {
     var total_assert_count: usize = 0;
     var total_function_count: usize = 0;
     for (file_stats.items) |stats| {
-        max_path_len = math.max(max_path_len, stats.path.len);
+        max_path_len = @max(max_path_len, stats.path.len);
         total_assert_count += stats.assert_count;
         total_function_count += stats.function_count;
     }

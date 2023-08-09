@@ -79,7 +79,7 @@ pub fn main() !void {
             NodePool,
             // Must be max of both to avoid hitting SegmentedArray's assertion:
             //   assert(element_count_max > node_capacity);
-            comptime std.math.max(
+            comptime @max(
                 options.value_count,
                 @divFloor(options.node_size, @sizeOf(Key)) + 1,
             ),
@@ -119,7 +119,7 @@ pub fn main() !void {
         defer allocator.free(queries);
 
         var timer = try std.time.Timer.start();
-        const repetitions = std.math.max(1, @divFloor(samples, queries.len));
+        const repetitions = @max(1, @divFloor(samples, queries.len));
         var j: usize = 0;
         while (j < repetitions) : (j += 1) {
             for (queries) |query| {

@@ -108,7 +108,7 @@ pub fn ewah(comptime Word: type) type {
                 const uniform_word_count = count: {
                     if (is_literal(word)) break :count 0;
                     // Measure run length.
-                    const uniform_max = math.min(source_words.len - source_index, marker_uniform_word_count_max);
+                    const uniform_max = @min(source_words.len - source_index, marker_uniform_word_count_max);
                     var uniform: usize = 1;
                     while (uniform < uniform_max and source_words[source_index + uniform] == word) uniform += 1;
                     break :count uniform;
@@ -118,7 +118,7 @@ pub fn ewah(comptime Word: type) type {
                 const uniform_bit = if (uniform_word_count == 0) 0 else @as(u1, @intCast(word & 1));
 
                 // Count sequential literals that immediately follow the run.
-                const literals_max = math.min(source_words.len - source_index, marker_literal_word_count_max);
+                const literals_max = @min(source_words.len - source_index, marker_literal_word_count_max);
                 const literal_word_count = for (source_words[source_index..][0..literals_max], 0..) |w, i| {
                     if (!is_literal(w)) break i;
                 } else literals_max;

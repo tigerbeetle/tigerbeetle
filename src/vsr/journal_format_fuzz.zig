@@ -81,7 +81,7 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
                 offset_checked += @sizeOf(vsr.Header);
             } else {
                 // Message body.
-                const offset_message_end = std.math.min(offset_header_next, write_size);
+                const offset_message_end = @min(offset_header_next, write_size);
                 const message_body_bytes = write[offset_checked..offset_message_end];
                 var byte: usize = 0;
                 for (std.mem.bytesAsSlice(usize, message_body_bytes)) |b| byte |= b;
