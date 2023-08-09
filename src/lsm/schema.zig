@@ -47,7 +47,6 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
 const stdx = @import("../stdx.zig");
-const BlockType = @import("grid.zig").BlockType;
 
 const address_size = @sizeOf(u64);
 const checksum_size = @sizeOf(u128);
@@ -65,6 +64,28 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     assert(header.size <= block.len);
     return header;
 }
+
+/// A block's type is implicitly determined by how its address is stored (e.g. in the index block).
+/// BlockType is an additional check that a block has the expected type on read.
+///
+/// The BlockType is stored in the block's `header.operation`.
+pub const BlockType = enum(u8) {
+    /// Unused; verifies that no block is written with a default 0 operation.
+    reserved = 0,
+
+    manifest = 1,
+    index = 2,
+    filter = 3,
+    data = 4,
+
+    pub inline fn from(vsr_operation: vsr.Operation) BlockType {
+        return @intToEnum(BlockType, @enumToInt(vsr_operation));
+    }
+
+    pub inline fn operation(block_type: BlockType) vsr.Operation {
+        return @intToEnum(vsr.Operation, @enumToInt(block_type));
+    }
+};
 
 pub const TableIndex = struct {
     /// Every table has exactly one index block.
