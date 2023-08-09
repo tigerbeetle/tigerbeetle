@@ -83,12 +83,12 @@ pub const ClientSessions = struct {
         // First goes the vsr headers for the entries.
         // This takes advantage of the buffer alignment to avoid adding padding for the headers.
         assert(@alignOf(vsr.Header) == 16);
-        size_max = std.mem.alignForward(size_max, 16);
+        size_max = std.mem.alignForward(usize, size_max, 16);
         size_max += @sizeOf(vsr.Header) * constants.clients_max;
 
         // Then follows the session values for the entries.
         assert(@alignOf(u64) == 8);
-        size_max = std.mem.alignForward(size_max, 8);
+        size_max = std.mem.alignForward(usize, size_max, 8);
         size_max += @sizeOf(u64) * constants.clients_max;
 
         break :blk size_max;
@@ -101,7 +101,7 @@ pub const ClientSessions = struct {
 
         // Write all headers:
         assert(@alignOf(vsr.Header) == 16);
-        var new_size = std.mem.alignForward(size, 16);
+        var new_size = std.mem.alignForward(usize, size, 16);
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
@@ -112,7 +112,7 @@ pub const ClientSessions = struct {
 
         // Write all sessions:
         assert(@alignOf(u64) == 8);
-        new_size = std.mem.alignForward(size, 8);
+        new_size = std.mem.alignForward(usize, size, 8);
         std.mem.set(u8, target[size..new_size], 0);
         size = new_size;
 
@@ -138,7 +138,7 @@ pub const ClientSessions = struct {
         assert(source.len <= encode_size_max);
 
         assert(@alignOf(vsr.Header) == 16);
-        size = std.mem.alignForward(size, 16);
+        size = std.mem.alignForward(usize, size, 16);
         const headers: []const vsr.Header = @alignCast(mem.bytesAsSlice(
             vsr.Header,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
@@ -146,7 +146,7 @@ pub const ClientSessions = struct {
         size += mem.sliceAsBytes(headers).len;
 
         assert(@alignOf(u64) == 8);
-        size = std.mem.alignForward(size, 8);
+        size = std.mem.alignForward(usize, size, 8);
         const sessions = mem.bytesAsSlice(
             u64,
             source[size..][0 .. constants.clients_max * @sizeOf(u64)],

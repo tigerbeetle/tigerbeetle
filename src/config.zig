@@ -157,6 +157,7 @@ const ConfigCluster = struct {
         return @max(
             sector_size,
             std.mem.alignForward(
+                usize,
                 @sizeOf(vsr.Header) + clients_max * @sizeOf(vsr.Header),
                 sector_size,
             ),

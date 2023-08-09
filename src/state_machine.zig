@@ -174,11 +174,11 @@ pub fn StateMachineType(
             .{
                 .ids = constants.tree_ids.accounts_immutable,
                 .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * @max(
+                    .timestamp = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_max.create_transfers,
-                    ),
+                    )),
                     .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     .user_data = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,

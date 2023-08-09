@@ -90,7 +90,7 @@ pub fn dir_exists(shell: *Shell, path: []const u8) !bool {
         else => return err,
     };
 
-    return stat.kind == .Directory;
+    return stat.kind == .directory;
 }
 
 /// Analogue of the `find` utility, returns a set of paths matching filtering criteria.
