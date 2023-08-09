@@ -100,4 +100,3 @@ And that **account `2`** has:
  * `credits_posted = 500`
  * `debits_pending = 0`
  * and `credits_pending = 0`
-

@@ -71,7 +71,7 @@ Then create `pom.xml` and copy this into it:
       <version>0.0.1-3431</version>
     </dependency>
   </dependencies>
-</project> 
+</project>
 ```
 
 Then, install the TigerBeetle client:
@@ -245,7 +245,7 @@ while (accountErrors.next()) {
     switch (accountErrors.getResult()) {
         case Exists:
             System.err.printf("Account at %d already exists.\n",
-                accountErrors.getIndex());        
+                accountErrors.getIndex());
             break;
 
         default:
@@ -314,7 +314,7 @@ while (transferErrors.next()) {
     switch (transferErrors.getResult()) {
         case ExceedsCredits:
             System.err.printf("Transfer at %d exceeds credits.\n",
-                transferErrors.getIndex());        
+                transferErrors.getIndex());
             break;
 
         default:
@@ -573,4 +573,3 @@ $ cd src/clients/java
 $ .\scripts\install.bat
 $ if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
 ```
-

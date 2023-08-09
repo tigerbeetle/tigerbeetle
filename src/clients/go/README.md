@@ -105,7 +105,7 @@ environment variable and defaults to port `3000`.
 tbAddress := os.Getenv("TB_ADDRESS")
 if len(tbAddress) == 0 {
   tbAddress = "3000"
-} 
+}
 client, err := tb.NewClient(0, []string{tbAddress}, 32)
 if err != nil {
 	log.Printf("Error creating client: %s", err)
@@ -496,4 +496,3 @@ $ .\zig\zig build go_client -Drelease-safe
 $ cd src\clients\go
 $ if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
 ```
-

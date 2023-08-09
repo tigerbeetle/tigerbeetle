@@ -252,7 +252,7 @@ distinguish accounts.
 ```javascript
 const accounts = await client.lookupAccounts([137n, 138n]);
 console.log(accounts);
-/*    
+/*
  * [{
  *   id: 137n,
  *   user_data: 0n,
@@ -589,7 +589,7 @@ const errors = await client.createTransfers(batch);
  *  { index: 2, error: 1 },  // linked_event_failed
  *  { index: 3, error: 25 }, // exists
  *  { index: 4, error: 1 },  // linked_event_failed
- * 
+ *
  *  { index: 6, error: 17 }, // exists_with_different_flags
  *  { index: 7, error: 1 },  // linked_event_failed
  * ]
@@ -615,4 +615,3 @@ $ npm pack
 ### On Windows
 
 Not yet supported.
-
