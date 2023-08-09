@@ -251,7 +251,7 @@ fn SegmentedArrayType(
 
             var i: u32 = 0;
             while (i < elements.len) {
-                const batch = math.min(node_capacity, elements.len - i);
+                const batch = @min(node_capacity, elements.len - i);
                 array.insert_elements_batch(
                     node_pool,
                     absolute_index + i,
@@ -448,7 +448,7 @@ fn SegmentedArrayType(
 
             var i: u32 = remove_count;
             while (i > 0) {
-                const batch = math.min(half, i);
+                const batch = @min(half, i);
                 array.remove_elements_batch(node_pool, absolute_index, batch);
                 i -= batch;
             }

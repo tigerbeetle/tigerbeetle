@@ -485,7 +485,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             };
 
             // +1 to make the span-max inclusive.
-            const lookup_window_size = std.math.min(
+            const lookup_window_size = @min(
                 fuzz.random_int_exponential(
                     self.random,
                     usize,
@@ -576,7 +576,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .pending => {
                     transfer.flags = .{ .pending = true };
                     // Bound the timeout to ensure we never hit `overflows_timeout`.
-                    transfer.timeout = 1 + std.math.min(
+                    transfer.timeout = 1 + @min(
                         std.math.maxInt(u64) / 2,
                         fuzz.random_int_exponential(
                             self.random,
@@ -593,8 +593,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     var iterator = self.auditor.pending_transfers.keyIterator();
                     while (iterator.next()) |id| {
                         if (previous == null or
-                            std.math.max(target, id.*) - std.math.min(target, id.*) <
-                            std.math.max(target, previous.?) - std.math.min(target, previous.?))
+                            @max(target, id.*) - @min(target, id.*) <
+                            @max(target, previous.?) - @min(target, previous.?))
                         {
                             previous = id.*;
                         }

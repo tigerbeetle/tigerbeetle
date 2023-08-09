@@ -209,7 +209,7 @@ pub const FreeSet = struct {
         ) orelse return null;
 
         // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
-        var block = std.math.max(shard_start * shard_bits, set.reservation_blocks);
+        var block = @max(shard_start * shard_bits, set.reservation_blocks);
         var reserved: usize = 0;
         while (reserved < reserve_count) : (reserved += 1) {
             block = 1 + (find_bit(
@@ -272,7 +272,7 @@ pub const FreeSet = struct {
         ) orelse return null;
         assert(!set.index.isSet(shard));
 
-        const reservation_start = std.math.max(
+        const reservation_start = @max(
             shard * shard_bits,
             reservation.block_base,
         );

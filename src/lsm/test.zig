@@ -258,7 +258,7 @@ const Environment = struct {
 
             fn verify(assertion: *@This()) void {
                 assert(assertion.verify_count == 0);
-                assertion.verify_count = std.math.min(commit_entries_max, assertion.objects.len);
+                assertion.verify_count = @min(commit_entries_max, assertion.objects.len);
                 if (assertion.verify_count == 0) return;
 
                 assertion.groove.prefetch_setup(null);

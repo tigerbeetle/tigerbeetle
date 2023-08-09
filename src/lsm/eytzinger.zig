@@ -214,7 +214,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // This must be an exclusive upper bound but upper_bound is inclusive. Thus, add 1.
             const values_upper = if (upper_bound) |u| tree[u] + 1 - exclusion else values.len;
 
-            return values[values_lower..math.min(values.len, values_upper)];
+            return values[values_lower..@min(values.len, values_upper)];
         }
 
         /// Returns an upper bound index into the corresponding values. The returned index is

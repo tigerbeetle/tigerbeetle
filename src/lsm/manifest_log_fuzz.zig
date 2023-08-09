@@ -39,7 +39,7 @@ pub fn main() !void {
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 
-    const events_count = std.math.min(
+    const events_count = @min(
         args.events_max orelse @as(usize, 2e5),
         fuzz.random_int_exponential(prng.random(), usize, 1e4),
     );

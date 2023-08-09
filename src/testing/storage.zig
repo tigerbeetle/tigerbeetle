@@ -673,8 +673,8 @@ const SectorRange = struct {
         if (a.max <= b.min) return null;
         if (b.max <= a.min) return null;
         return SectorRange{
-            .min = std.math.max(a.min, b.min),
-            .max = std.math.min(a.max, b.max),
+            .min = @max(a.min, b.min),
+            .max = @min(a.max, b.max),
         };
     }
 };

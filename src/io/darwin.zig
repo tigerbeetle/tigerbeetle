@@ -178,7 +178,7 @@ pub const IO = struct {
 
             const timeout_ns = expires - now;
             if (min_timeout) |min_ns| {
-                min_timeout = std.math.min(min_ns, timeout_ns);
+                min_timeout = @min(min_ns, timeout_ns);
             } else {
                 min_timeout = timeout_ns;
             }

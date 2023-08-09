@@ -56,7 +56,7 @@ pub fn StateMachineType(
                 }
 
                 fn operation_batch_max(comptime operation: Operation) usize {
-                    return @divFloor(message_body_size_max, std.math.max(
+                    return @divFloor(message_body_size_max, @max(
                         @sizeOf(Event(operation)),
                         @sizeOf(Result(operation)),
                     ));
@@ -174,7 +174,7 @@ pub fn StateMachineType(
             .{
                 .ids = constants.tree_ids.accounts_immutable,
                 .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * math.max(
+                    .timestamp = config.lsm_batch_multiple * @max(
                         constants.batch_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_max.create_transfers,
@@ -195,7 +195,7 @@ pub fn StateMachineType(
             .{
                 .ids = constants.tree_ids.accounts_mutable,
                 .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * math.max(
+                    .timestamp = config.lsm_batch_multiple * @max(
                         constants.batch_max.create_accounts,
                         // ×2 because creating a transfer will update 2 accounts.
                         2 * constants.batch_max.create_transfers,
@@ -206,19 +206,19 @@ pub fn StateMachineType(
                     // * Each transfer modifies two accounts. However, this does not
                     //   necessitate an additional ×2 multiplier — the credits of the debit
                     //   account and the debits of the credit account are not modified.
-                    .debits_pending = config.lsm_batch_multiple * math.max(
+                    .debits_pending = config.lsm_batch_multiple * @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     ),
-                    .debits_posted = config.lsm_batch_multiple * math.max(
+                    .debits_posted = config.lsm_batch_multiple * @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     ),
-                    .credits_pending = config.lsm_batch_multiple * math.max(
+                    .credits_pending = config.lsm_batch_multiple * @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     ),
-                    .credits_posted = config.lsm_batch_multiple * math.max(
+                    .credits_posted = config.lsm_batch_multiple * @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     ),
@@ -995,13 +995,13 @@ pub fn StateMachineType(
 
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_mut.debits_posted + dr_mut.debits_pending;
-                    amount = std.math.min(amount, dr_mut.credits_posted -| dr_balance);
+                    amount = @min(amount, dr_mut.credits_posted -| dr_balance);
                     if (amount == 0) return .exceeds_credits;
                 }
 
                 if (t.flags.balancing_credit) {
                     const cr_balance = cr_mut.credits_posted + cr_mut.credits_pending;
-                    amount = std.math.min(amount, cr_mut.debits_posted -| cr_balance);
+                    amount = @min(amount, cr_mut.debits_posted -| cr_balance);
                     if (amount == 0) return .exceeds_debits;
                 }
                 break :amount amount;
@@ -1312,7 +1312,7 @@ pub fn StateMachineType(
 
             return .{
                 .accounts_immutable = .{
-                    .prefetch_entries_max = std.math.max(
+                    .prefetch_entries_max = @max(
                         // create_account()/lookup_account() looks up 1 AccountImmutable per item.
                         batch_accounts_max,
                         // create_transfer()/post_or_void_pending_transfer() looks up 2
@@ -1332,7 +1332,7 @@ pub fn StateMachineType(
                     },
                 },
                 .accounts_mutable = .{
-                    .prefetch_entries_max = std.math.max(
+                    .prefetch_entries_max = @max(
                         // create_account()/lookup_account() looks up 1 AccountMutable per item.
                         batch_accounts_max,
                         // create_transfer()/post_or_void_pending_transfer() looks up 2

@@ -154,7 +154,7 @@ const ConfigCluster = struct {
     /// The smallest possible message_size_max (for use in the simulator to improve performance).
     /// The message body must have room for pipeline_prepare_queue_max headers in the DVC.
     pub fn message_size_max_min(clients_max: usize) usize {
-        return std.math.max(
+        return @max(
             sector_size,
             std.mem.alignForward(
                 @sizeOf(vsr.Header) + clients_max * @sizeOf(vsr.Header),

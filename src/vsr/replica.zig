@@ -592,7 +592,7 @@ pub fn ReplicaType(
             assert(op_head.? <= self.op_checkpoint_trigger());
 
             self.op = op_head.?;
-            self.commit_max = std.math.max(
+            self.commit_max = @max(
                 self.commit_max,
                 self.op -| constants.pipeline_prepare_queue_max,
             );
@@ -2029,7 +2029,7 @@ pub fn ReplicaType(
             assert(op_max >= op_min);
 
             // We must add 1 because op_max and op_min are both inclusive:
-            const count_max = std.math.min(constants.request_headers_max, op_max - op_min + 1);
+            const count_max = @min(constants.request_headers_max, op_max - op_min + 1);
             assert(count_max * @sizeOf(vsr.Header) <= constants.message_body_size_max);
 
             const count = self.journal.copy_latest_headers_between(
@@ -2741,7 +2741,7 @@ pub fn ReplicaType(
                 // But due to our sync target (from pings), we might know that the cluster is even
                 // farther ahead in a view that we have not joined.
                 const primary_commit_max =
-                    std.math.max(self.commit_max, self.sync_target_max.?.checkpoint_op);
+                    @max(self.commit_max, self.sync_target_max.?.checkpoint_op);
                 const primary_repair_min = (primary_commit_max +
                     constants.pipeline_prepare_queue_max) -|
                     (constants.journal_slot_count - 1);
@@ -5014,7 +5014,7 @@ pub fn ReplicaType(
                     assert(self.status == .normal or self.do_view_change_quorum or self.solo());
                     // This is the oldest op that is guaranteed to be in the WALs of any replica.
                     // (Assuming that this primary has not been superseded.)
-                    break :op std.math.min(
+                    break :op @min(
                         // Add the oldest pipeline_prepare_queue_max ops because they may have been
                         // newer ops which were then truncated by a view-change, causing the head op
                         // to backtrack.
@@ -5053,7 +5053,7 @@ pub fn ReplicaType(
             assert(self.op <= self.op_checkpoint_trigger());
             assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
-            return std.math.min(self.commit_max, self.op_checkpoint_trigger());
+            return @min(self.commit_max, self.op_checkpoint_trigger());
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -5095,10 +5095,10 @@ pub fn ReplicaType(
             });
 
             // Guard against the wall clock going backwards by taking the max with timestamps issued:
-            self.state_machine.prepare_timestamp = std.math.max(
+            self.state_machine.prepare_timestamp = @max(
                 // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
                 // may be our first prepare as a recently elected primary:
-                std.math.max(
+                @max(
                     self.state_machine.prepare_timestamp,
                     self.state_machine.commit_timestamp,
                 ) + 1,
@@ -6736,7 +6736,7 @@ pub fn ReplicaType(
 
             if (op < self.op) {
                 // Uncommitted ops may not survive a view change, but never truncate committed ops.
-                assert(op >= std.math.max(commit_max, self.commit_max));
+                assert(op >= @max(commit_max, self.commit_max));
             }
 
             // We expect that our commit numbers may also be greater even than `commit_max` because
@@ -6768,7 +6768,7 @@ pub fn ReplicaType(
 
             // Crucially, we must never rewind `commit_max` (and then `commit_min`) because
             // `commit_min` represents what we have already applied to our state machine:
-            self.commit_max = std.math.max(self.commit_max, commit_max);
+            self.commit_max = @max(self.commit_max, commit_max);
             assert(self.commit_max >= self.commit_min);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
@@ -6871,7 +6871,7 @@ pub fn ReplicaType(
             // 4. Remaining `do_view_change` messages arrive, completing the quorum.
             // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
             // Don't let the commit backtrack.
-            const commit_max = std.math.max(
+            const commit_max = @max(
                 self.commit_min,
                 DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
             );
@@ -7702,7 +7702,7 @@ pub fn ReplicaType(
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
-            self.commit_max = std.math.max(stage.target.checkpoint_op, self.commit_max);
+            self.commit_max = @max(stage.target.checkpoint_op, self.commit_max);
 
             self.sync_message_timeout.stop();
             self.superblock.sync(
@@ -7777,7 +7777,7 @@ pub fn ReplicaType(
 
             // When commit_min=op_checkpoint, the checkpoint may be missing.
             // valid_hash_chain_between() will still verify that we are connected.
-            const op_verify_min = std.math.max(self.commit_min, self.op_checkpoint() + 1);
+            const op_verify_min = @max(self.commit_min, self.op_checkpoint() + 1);
 
             // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
             if (!self.valid_hash_chain_between(op_verify_min, self.op)) {
@@ -8424,8 +8424,8 @@ const DVCQuorum = struct {
                 const headers_a = message_body_as_view_headers(dvc_a);
                 const headers_b = message_body_as_view_headers(dvc_b);
                 // Find the intersection of the ops covered by each DVC.
-                const op_max = std.math.min(dvc_a.header.op, dvc_b.header.op);
-                const op_min = std.math.max(
+                const op_max = @min(dvc_a.header.op, dvc_b.header.op);
+                const op_min = @max(
                     headers_a.slice[headers_a.slice.len - 1].op,
                     headers_b.slice[headers_b.slice.len - 1].op,
                 );
@@ -8569,10 +8569,10 @@ const DVCQuorum = struct {
             const dvc_commit_max_pipeline =
                 dvc.header.op -| constants.pipeline_prepare_queue_max;
 
-            commit_max_ = std.math.max(commit_max_, dvc_commit_max_tail);
-            commit_max_ = std.math.max(commit_max_, dvc_commit_max_pipeline);
-            commit_max_ = std.math.max(commit_max_, dvc.header.commit);
-            commit_max_ = std.math.max(commit_max_, dvc_headers.slice[0].commit);
+            commit_max_ = @max(commit_max_, dvc_commit_max_tail);
+            commit_max_ = @max(commit_max_, dvc_commit_max_pipeline);
+            commit_max_ = @max(commit_max_, dvc.header.commit);
+            commit_max_ = @max(commit_max_, dvc_headers.slice[0].commit);
         }
         return commit_max_;
     }
