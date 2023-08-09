@@ -83,58 +83,42 @@ const MarkdownWriter = struct {
         mw.buf.clearRetainingCapacity();
     }
 
-    fn diff_on_disk(mw: *MarkdownWriter, filename: []const u8) !bool {
-        const file = std.fs.cwd().createFile(
-            filename,
-            .{ .read = true, .truncate = false },
-        ) catch |e| {
+    fn diff_on_disk(mw: *MarkdownWriter, filename: []const u8) !enum { same, different } {
+        const file = std.fs.cwd().openFile(filename, .{}) catch |e| {
             std.debug.print("Could not open file for reading: {s}.\n", .{filename});
             return e;
         };
-        const fSize = (try file.stat()).size;
-        if (fSize != mw.buf.items.len) {
-            return true;
-        }
 
         var buf = std.mem.zeroes([4096]u8);
-        var cursor: usize = 0;
-        while (cursor < fSize) {
-            var maxCanRead = if (fSize - cursor > 4096) 4096 else fSize - cursor;
-            // Phil: Sometimes this infinite loops and returns `0` but
-            // I don't know why. Allowing it to just overwrite solves the problem.
-            var n = try file.read(buf[0..maxCanRead]);
-            if (n == 0 and maxCanRead != n) {
-                return true;
+        var remaining = mw.buf.items;
+
+        while (true) {
+            var n = try file.read(&buf);
+            if (n == 0) {
+                return if (remaining.len == 0) .same else .different;
             }
 
-            if (std.mem.eql(u8, buf[0..], mw.buf.items[cursor..n])) {
-                return false;
+            if (std.mem.startsWith(u8, remaining, buf[0..n])) {
+                remaining = remaining[n..];
+            } else {
+                return .different;
             }
         }
-
-        return true;
     }
 
     // save() only actually writes the buffer to disk if it has
     // changed compared to what's on disk, so that file modify time stays
     // reasonable.
     fn save(mw: *MarkdownWriter, filename: []const u8) !void {
-        var diff = try mw.diff_on_disk(filename);
-        if (!diff) {
-            return;
+        // Ensure a single trailing newline.
+        assert(std.mem.endsWith(u8, mw.buf.items, "\n\n"));
+        _ = mw.buf.pop();
+        assert(!std.mem.endsWith(u8, mw.buf.items, "\n\n"));
+        assert(std.mem.endsWith(u8, mw.buf.items, "\n"));
+
+        if (try mw.diff_on_disk(filename) == .different) {
+            try std.fs.cwd().writeFile(filename, mw.buf.items);
         }
-
-        const file = try std.fs.cwd().openFile(
-            filename,
-            .{ .mode = .write_only },
-        );
-        defer file.close();
-
-        // First truncate(0) the file.
-        try file.setEndPos(0);
-
-        // Then write what we need.
-        try file.writeAll(mw.buf.items);
     }
 };
 
