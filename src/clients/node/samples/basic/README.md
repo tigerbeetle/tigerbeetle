@@ -61,4 +61,3 @@ checks that **account `1`** has:
 And that **account `2`** has:
  * `debits_posted= 0`
  * and `credits_posted = 10`
-
