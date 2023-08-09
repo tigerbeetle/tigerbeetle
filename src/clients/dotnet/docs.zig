@@ -41,7 +41,7 @@ pub const DotnetDocs = Docs{
     \\source, make sure to add it:
     \\
     \\```console
-    \\$ dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+    \\dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
     \\```
     ,
 

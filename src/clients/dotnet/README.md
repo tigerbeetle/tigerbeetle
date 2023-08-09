@@ -17,7 +17,7 @@ And if you do not already have NuGet.org as a package
 source, make sure to add it:
 
 ```console
-$ dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
 ```
 
 ## Setup
@@ -27,9 +27,8 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-$ dotnet new console
-$ dotnet add package tigerbeetle
-```
+dotnet new console
+dotnet add package tigerbeetle```
 
 Now, create `Program.cs` and copy this into it:
 
@@ -46,8 +45,7 @@ Console.WriteLine("SUCCESS");
 Finally, build and run:
 
 ```console
-$ dotnet run
-```
+dotnet run```
 
 Now that all prerequisites and dependencies are correctly set
 up, let's dig into using TigerBeetle.
@@ -419,29 +417,27 @@ createTransfersError = client.CreateTransfers(batch.ToArray());
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ ./scripts/install_zig.sh
-$ cd src/clients/dotnet
-$ dotnet restore
-$ dotnet clean --verbosity minimal
-$ dotnet build
-$ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
-```
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+./scripts/install_zig.sh
+cd src/clients/dotnet
+dotnet restore
+dotnet clean --verbosity minimal
+dotnet build
+if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi```
 
 ### On Windows
 
 In PowerShell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ .\scripts\install_zig.bat
-$ cd src/clients/dotnet
-$ dotnet restore
-$ dotnet clean --verbosity minimal
-$ dotnet build
-$ if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
-```
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+.\scripts\install_zig.bat
+cd src/clients/dotnet
+dotnet restore
+dotnet clean --verbosity minimal
+dotnet build
+if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }```
