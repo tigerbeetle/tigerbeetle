@@ -473,9 +473,8 @@ const Generator = struct {
             \\ID and replica addresses are both chosen by the system that
             \\starts the TigerBeetle cluster.
             \\
-            \\Clients are thread-safe. But for better
-            \\performance, a single instance should be shared between
-            \\multiple concurrent tasks.
+            \\Clients are thread-safe and a single instance should be shared
+            \\between multiple concurrent tasks.
             \\
             \\Multiple clients are useful when connecting to more than
             \\one TigerBeetle cluster.
