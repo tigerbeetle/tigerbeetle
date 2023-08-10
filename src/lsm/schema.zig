@@ -63,7 +63,10 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
+    assert(header.size >= @sizeOf(vsr.Header));
     assert(header.size <= block.len);
+    assert(BlockType.valid(header.operation));
+    assert(BlockType.from(header.operation) != .reserved);
     return header;
 }
 
@@ -79,6 +82,12 @@ pub const BlockType = enum(u8) {
     index = 2,
     filter = 3,
     data = 4,
+
+    pub fn valid(vsr_operation: vsr.Operation) bool {
+        _ = std.meta.intToEnum(BlockType, @enumToInt(vsr_operation)) catch return false;
+
+        return true;
+    }
 
     pub inline fn from(vsr_operation: vsr.Operation) BlockType {
         return @intToEnum(BlockType, @enumToInt(vsr_operation));
