@@ -12,7 +12,7 @@ const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 const Direction = @import("direction.zig").Direction;
-const GridType = @import("grid.zig").GridType;
+const GridType = @import("../vsr/grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);

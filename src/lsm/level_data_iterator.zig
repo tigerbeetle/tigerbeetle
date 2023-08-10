@@ -8,8 +8,8 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const ManifestType = @import("manifest.zig").ManifestType;
-const allocate_block = @import("grid.zig").allocate_block;
-const GridType = @import("grid.zig").GridType;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
+const GridType = @import("../vsr/grid.zig").GridType;
 const Direction = @import("direction.zig").Direction;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 

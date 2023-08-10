@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 
 const Direction = @import("direction.zig").Direction;
 const ManifestType = @import("manifest.zig").ManifestType;
-const GridType = @import("grid.zig").GridType;
+const GridType = @import("../vsr/grid.zig").GridType;
 
 /// A LevelIndexIterator iterates the index blocks of every table in a key range in ascending key order.
 pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type {

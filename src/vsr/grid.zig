@@ -5,15 +5,15 @@ const mem = std.mem;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const free_set = @import("../vsr/superblock_free_set.zig");
-const schema = @import("schema.zig");
+const free_set = @import("superblock_free_set.zig");
+const schema = @import("../lsm/schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
-const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
+const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
-const BlockType = @import("schema.zig").BlockType;
+const BlockType = schema.BlockType;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
