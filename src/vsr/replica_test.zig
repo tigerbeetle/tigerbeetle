@@ -1528,7 +1528,7 @@ const TestClients = struct {
                     defer client.unref(message);
 
                     const body_size = 123;
-                    std.mem.set(u8, message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
+                    @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
                     t.cluster.request(c, .echo, message, body_size);
                 }
             }

@@ -54,7 +54,7 @@ pub fn ClockType(comptime Time: type) type {
             }
 
             fn reset(epoch: *Epoch, clock: *Self) void {
-                std.mem.set(?Sample, epoch.sources, null);
+                @memset(epoch.sources, null);
                 // A replica always has zero clock offset and network delay to its own system time reading:
                 epoch.sources[clock.replica] = Sample{
                     .clock_offset = 0,

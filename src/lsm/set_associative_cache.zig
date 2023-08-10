@@ -195,9 +195,9 @@ pub fn SetAssociativeCache(
         }
 
         pub fn reset(self: *Self) void {
-            mem.set(Tag, self.tags, 0);
-            mem.set(u64, self.counts.words, 0);
-            mem.set(u64, self.clocks.words, 0);
+            @memset(self.tags, 0);
+            @memset(self.counts.words, 0);
+            @memset(self.clocks.words, 0);
         }
 
         pub fn get_index(self: *Self, key: Key) ?usize {
@@ -687,8 +687,8 @@ fn PackedUnsignedIntegerArrayFuzzTest(comptime UInt: type) type {
             const reference = try testing.allocator.alloc(UInt, len);
             errdefer testing.allocator.free(reference);
 
-            mem.set(u64, words, 0);
-            mem.set(UInt, reference, 0);
+            @memset(words, 0);
+            @memset(reference, 0);
 
             return Self{
                 .random = random,

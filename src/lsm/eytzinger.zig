@@ -114,7 +114,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // If we did not do this, the level in the tree with 16 great great
             // grand childern would be split across cache lines with one child
             // in the first cache line and the other 15 in the second.
-            mem.set(u8, mem.asBytes(&layout[0]), 0);
+            @memset(mem.asBytes(&layout[0]), 0);
             // 0 8 4 12 2 6 10 14 1 3 5 7 9 11 13 15
             // ^
             // padding element

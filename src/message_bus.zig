@@ -104,15 +104,15 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             const connections = try allocator.alloc(Connection, constants.connections_max);
             errdefer allocator.free(connections);
-            mem.set(Connection, connections, .{});
+            @memset(connections, .{});
 
             const replicas = try allocator.alloc(?*Connection, options.configuration.len);
             errdefer allocator.free(replicas);
-            mem.set(?*Connection, replicas, null);
+            @memset(replicas, null);
 
             const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
-            mem.set(u64, replicas_connect_attempts, 0);
+            @memset(replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_type) {
                 .replica => process.replica,
@@ -780,7 +780,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
                         assert(message.buffer.len == constants.message_size_max);
-                        mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
+                        @memset(message.buffer[message.header.size..sector_ceil], 0);
                     }
                 }
 

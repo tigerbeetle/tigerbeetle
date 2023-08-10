@@ -109,7 +109,7 @@ pub const AOFEntry = extern struct {
             self.message[0..message.header.size],
             message.buffer[0..message.header.size],
         );
-        std.mem.set(u8, self.message[message.header.size..self.message.len], 0);
+        @memset(self.message[message.header.size..self.message.len], 0);
     }
 };
 

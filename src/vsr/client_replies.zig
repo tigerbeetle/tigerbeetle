@@ -339,7 +339,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 // Zero sector padding to ensure deterministic storage.
                 const size = message.header.size;
                 const size_ceil = vsr.sector_ceil(size);
-                std.mem.set(u8, message.buffer[size..size_ceil], 0);
+                @memset(message.buffer[size..size_ceil], 0);
 
                 client_replies.writing.set(write.slot.index);
                 client_replies.storage.write_sectors(

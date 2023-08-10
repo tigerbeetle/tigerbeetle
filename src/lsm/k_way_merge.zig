@@ -375,7 +375,7 @@ fn TestContext(comptime k_max: u32) type {
             const key_max = random.intRangeLessThanBiased(u32, 512, 1024);
             switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => {
-                    mem.set(u32, stream, random.int(u32));
+                    @memset(stream, random.int(u32));
                 },
                 else => {
                     random.bytes(mem.sliceAsBytes(stream));

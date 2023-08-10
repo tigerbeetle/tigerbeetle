@@ -257,7 +257,7 @@ pub const Storage = struct {
                     // TODO This could be an interesting avenue to explore further, whether
                     // temporary or permanent EIO errors should be conflated with checksum failures.
                     assert(target.len > 0);
-                    std.mem.set(u8, target, 0);
+                    @memset(target, 0);
 
                     // We could set `read.target_max` to `vsr.sector_ceil(read.buffer.len)` here
                     // in order to restart our pseudo-binary search on the rest of the sectors to be

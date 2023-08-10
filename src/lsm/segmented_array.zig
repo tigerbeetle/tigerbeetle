@@ -132,7 +132,7 @@ fn SegmentedArrayType(
             const indexes = try allocator.create([node_count_max + 1]u32);
             errdefer allocator.destroy(indexes);
 
-            mem.set(?*[node_capacity]T, nodes, null);
+            @memset(nodes, null);
             indexes[0] = 0;
 
             const array = Self{
@@ -158,7 +158,7 @@ fn SegmentedArrayType(
         }
 
         pub fn reset(array: *Self) void {
-            mem.set(?*[node_capacity]T, array.nodes, null);
+            @memset(array.nodes, null);
             array.indexes[0] = 0;
 
             array.* = .{

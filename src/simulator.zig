@@ -368,7 +368,7 @@ pub const Simulator = struct {
 
         var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
-        std.mem.set(usize, replica_stability, 0);
+        @memset( replica_stability, 0);
 
         var reply_sequence = try ReplySequence.init(allocator);
         errdefer reply_sequence.deinit(allocator);

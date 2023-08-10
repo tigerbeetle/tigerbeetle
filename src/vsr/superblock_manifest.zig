@@ -75,9 +75,9 @@ pub const Manifest = struct {
         try compaction_set.ensureTotalCapacity(allocator, manifest_block_count_max);
         errdefer compaction_set.deinit(allocator);
 
-        mem.set(u128, trees, 0);
-        mem.set(u128, checksums, 0);
-        mem.set(u64, addresses, 0);
+        @memset(trees, 0);
+        @memset(checksums, 0);
+        @memset(addresses, 0);
 
         return Manifest{
             .trees = trees,
@@ -101,9 +101,9 @@ pub const Manifest = struct {
     }
 
     pub fn reset(manifest: *Manifest) void {
-        mem.set(u128, manifest.trees, 0);
-        mem.set(u128, manifest.checksums, 0);
-        mem.set(u64, manifest.addresses, 0);
+        @memset(manifest.trees, 0);
+        @memset(manifest.checksums, 0);
+        @memset(manifest.addresses, 0);
 
         manifest.count = 0;
         manifest.tables.clearRetainingCapacity();
@@ -145,7 +145,7 @@ pub const Manifest = struct {
         );
         size += addresses.len;
 
-        mem.set(u8, target[size..], 0);
+        @memset(target[size..], 0);
 
         assert(@divExact(size, BlockReferenceSize) == manifest.count);
 
@@ -192,9 +192,9 @@ pub const Manifest = struct {
         assert(size == source.len);
         assert(@divExact(size, BlockReferenceSize) == manifest.count);
 
-        mem.set(u128, manifest.trees[manifest.count..], 0);
-        mem.set(u128, manifest.checksums[manifest.count..], 0);
-        mem.set(u64, manifest.addresses[manifest.count..], 0);
+        @memset(manifest.trees[manifest.count..], 0);
+        @memset(manifest.checksums[manifest.count..], 0);
+        @memset(manifest.addresses[manifest.count..], 0);
 
         if (constants.verify) manifest.verify();
     }

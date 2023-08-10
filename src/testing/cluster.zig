@@ -180,7 +180,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             const replica_health = try allocator.alloc(ReplicaHealth, node_count);
             errdefer allocator.free(replica_health);
-            mem.set(ReplicaHealth, replica_health, .up);
+            @memset(replica_health, .up);
 
             var client_pools = try allocator.alloc(MessagePool, options.client_count);
             errdefer allocator.free(client_pools);
