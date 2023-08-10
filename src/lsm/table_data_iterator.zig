@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const schema = @import("schema.zig");
 
 const stdx = @import("../stdx.zig");
-const GridType = @import("grid.zig").GridType;
+const GridType = @import("../vsr/grid.zig").GridType;
 const Direction = @import("direction.zig").Direction;
 
 /// A TableDataIterator iterates a table's data blocks in ascending key order.

@@ -14,7 +14,7 @@ const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
 
-const allocate_block = @import("grid.zig").allocate_block;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const schema = @import("schema.zig");
 
