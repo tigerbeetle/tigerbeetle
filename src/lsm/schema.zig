@@ -27,6 +27,7 @@
 //! Filter block schema:
 //! │ vsr.Header │ operation=BlockType.filter,
 //! │            │ context=schema.TableFilter.context
+//! │            │ timestamp=snapshot_min
 //! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 //! │            │   `filter_data_block_count_max` data blocks.
 //!
@@ -34,6 +35,7 @@
 //! │ vsr.Header               │ operation=BlockType.data,
 //! │                          │ context=schema.TableData.context,
 //! │                          │ request=values_count
+//! │                          │ timestamp=snapshot_min
 //! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
@@ -61,7 +63,10 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
+    assert(header.size >= @sizeOf(vsr.Header));
     assert(header.size <= block.len);
+    assert(BlockType.valid(header.operation));
+    assert(BlockType.from(header.operation) != .reserved);
     return header;
 }
 
@@ -77,6 +82,12 @@ pub const BlockType = enum(u8) {
     index = 2,
     filter = 3,
     data = 4,
+
+    pub fn valid(vsr_operation: vsr.Operation) bool {
+        _ = std.meta.intToEnum(BlockType, @enumToInt(vsr_operation)) catch return false;
+
+        return true;
+    }
 
     pub inline fn from(vsr_operation: vsr.Operation) BlockType {
         return @intToEnum(BlockType, @enumToInt(vsr_operation));
@@ -184,6 +195,7 @@ pub const TableIndex = struct {
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .index);
         assert(header.op > 0);
+        assert(header.timestamp > 0);
 
         const context = @bitCast(Context, header.context);
         assert(context.filter_block_count <= context.filter_block_count_max);
@@ -338,6 +350,7 @@ pub const TableFilter = struct {
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .filter);
         assert(header.op > 0);
+        assert(header.timestamp > 0);
 
         return TableFilter.init(@bitCast(Context, header.context));
     }
@@ -423,6 +436,7 @@ pub const TableData = struct {
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .data);
         assert(header.op > 0);
+        assert(header.timestamp > 0);
 
         return TableData.init(@bitCast(Context, header.context));
     }
