@@ -149,7 +149,6 @@ const naughty_list = [_][]const u8{
     "lsm/table_data_iterator.zig",
     "lsm/table_mutable.zig",
     "lsm/table.zig",
-    "lsm/test.zig",
     "lsm/tree_fuzz.zig",
     "message_bus.zig",
     "message_pool.zig",
