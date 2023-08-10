@@ -30,6 +30,12 @@ pub const BlockType = enum(u8) {
     filter = 3,
     data = 4,
 
+    pub fn valid(vsr_operation: vsr.Operation) bool {
+        _ = std.meta.intToEnum(BlockType, @enumToInt(vsr_operation)) catch return false;
+
+        return true;
+    }
+
     pub inline fn from(vsr_operation: vsr.Operation) BlockType {
         return @intToEnum(BlockType, @enumToInt(vsr_operation));
     }

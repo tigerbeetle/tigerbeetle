@@ -64,7 +64,10 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
+    assert(header.size >= @sizeOf(vsr.Header));
     assert(header.size <= block.len);
+    assert(BlockType.valid(header.operation));
+    assert(BlockType.from(header.operation) != .reserved);
     return header;
 }
 
