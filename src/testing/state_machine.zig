@@ -14,7 +14,7 @@ pub fn StateMachineType(
 ) type {
     return struct {
         const StateMachine = @This();
-        const Grid = @import("../lsm/grid.zig").GridType(Storage);
+        const Grid = @import("../vsr/grid.zig").GridType(Storage);
 
         pub const Workload = WorkloadType(StateMachine);
 

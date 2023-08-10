@@ -87,7 +87,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         // Expose the Table & hash for the Groove.
         pub const Table = TreeTable;
 
-        const Grid = @import("grid.zig").GridType(Storage);
+        const Grid = @import("../vsr/grid.zig").GridType(Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
         const KeyRange = Manifest.KeyRange;
 
