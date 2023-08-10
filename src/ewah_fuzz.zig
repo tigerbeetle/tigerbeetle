@@ -59,7 +59,7 @@ fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) voi
 
     // Start off full or empty to save some work.
     const init_empty = bits_set_total < @divExact(bits_total, 2);
-    std.mem.set(u8, data, if (init_empty) @as(u8, 0) else std.math.maxInt(u8));
+    @memset(data, if (init_empty) @as(u8, 0) else std.math.maxInt(u8));
 
     var bits_set = if (init_empty) 0 else bits_total;
     while (bits_set != bits_set_total) {

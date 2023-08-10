@@ -172,7 +172,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         pub fn reset(manifest_log: *ManifestLog) void {
-            for (manifest_log.blocks.buffer) |block| std.mem.set(u8, block, 0);
+            for (manifest_log.blocks.buffer) |block| @memset(block, 0);
 
             manifest_log.* = .{
                 .superblock = manifest_log.superblock,
@@ -721,10 +721,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             header.size = Block.size(entry_count);
 
             // Zero unused labels:
-            mem.set(u8, mem.sliceAsBytes(Block.labels(block)[entry_count..]), 0);
+            @memset(mem.sliceAsBytes(Block.labels(block)[entry_count..]), 0);
 
             // Zero unused tables, and padding:
-            mem.set(u8, block[header.size..], 0);
+            @memset(block[header.size..], 0);
 
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
             header.set_checksum();

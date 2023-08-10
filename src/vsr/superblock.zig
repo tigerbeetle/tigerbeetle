@@ -721,7 +721,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
 
-            mem.set(SuperBlockHeader.Snapshot, &superblock.working.snapshots, .{
+            @memset(&superblock.working.snapshots, .{
                 .created = 0,
                 .queried = 0,
                 .timeout = 0,
@@ -922,8 +922,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     superblock.staging.vsr_headers_all[0..headers.array.len],
                     headers.array.constSlice(),
                 );
-                std.mem.set(
-                    vsr.Header,
+                @memset(
                     superblock.staging.vsr_headers_all[headers.array.len..],
                     std.mem.zeroes(vsr.Header),
                 );
@@ -1038,7 +1037,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = trailer_buffer_all[0..trailer_size_ceil];
             assert(trailer_checksum_ == vsr.checksum(buffer[0..trailer_size_]));
 
-            mem.set(u8, buffer[trailer_size_..], 0); // Zero sector padding.
+            @memset(buffer[trailer_size_..], 0); // Zero sector padding.
 
             const offset = trailer.zone().start_for_copy(context.copy.?);
             log.debug("{s}: write_trailer_next: " ++

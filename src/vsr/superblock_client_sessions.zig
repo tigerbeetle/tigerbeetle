@@ -56,7 +56,7 @@ pub const ClientSessions = struct {
 
         var entries = try allocator.alloc(Entry, constants.clients_max);
         errdefer allocator.free(entries);
-        std.mem.set(Entry, entries, std.mem.zeroes(Entry));
+        @memset(entries, std.mem.zeroes(Entry));
 
         return ClientSessions{
             .entries_by_client = entries_by_client,
@@ -70,7 +70,7 @@ pub const ClientSessions = struct {
     }
 
     pub fn reset(client_sessions: *ClientSessions) void {
-        std.mem.set(Entry, client_sessions.entries, std.mem.zeroes(Entry));
+        @memset(client_sessions.entries, std.mem.zeroes(Entry));
         client_sessions.entries_by_client.clearRetainingCapacity();
         client_sessions.entries_free = EntriesFree.initFull();
     }
@@ -102,7 +102,7 @@ pub const ClientSessions = struct {
         // Write all headers:
         assert(@alignOf(vsr.Header) == 16);
         var new_size = std.mem.alignForward(usize, size, 16);
-        std.mem.set(u8, target[size..new_size], 0);
+        @memset(target[size..new_size], 0);
         size = new_size;
 
         for (client_sessions.entries) |*entry| {
@@ -113,7 +113,7 @@ pub const ClientSessions = struct {
         // Write all sessions:
         assert(@alignOf(u64) == 8);
         new_size = std.mem.alignForward(usize, size, 8);
-        std.mem.set(u8, target[size..new_size], 0);
+        @memset(target[size..new_size], 0);
         size = new_size;
 
         for (client_sessions.entries) |*entry| {

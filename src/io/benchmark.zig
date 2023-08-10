@@ -23,7 +23,7 @@ pub fn main() !void {
 
     const buffer = try allocator.alloc(u8, buffer_size * 2);
     defer allocator.free(buffer);
-    std.mem.set(u8, buffer, 0);
+    @memset(buffer, 0);
 
     var self = Context{
         .io = try IO.init(32, 0),

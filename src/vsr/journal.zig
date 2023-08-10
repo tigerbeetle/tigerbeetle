@@ -303,11 +303,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             var prepare_checksums = try allocator.alloc(u128, slot_count);
             errdefer allocator.free(prepare_checksums);
-            std.mem.set(u128, prepare_checksums, 0);
+            @memset(prepare_checksums, 0);
 
             var prepare_inhabited = try allocator.alloc(bool, slot_count);
             errdefer allocator.free(prepare_inhabited);
-            std.mem.set(bool, prepare_inhabited, false);
+            @memset(prepare_inhabited, false);
 
             const headers_iops = (try allocator.alignedAlloc(
                 [constants.sector_size]u8,
@@ -544,7 +544,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             var copied: usize = 0;
             // Poison all slots; only slots less than `copied` are used.
-            std.mem.set(Header, dest, undefined);
+            @memset(dest, undefined);
 
             // Start at op_max + 1 and do the decrement upfront to avoid overflow when op_min == 0:
             var op = op_max + 1;
@@ -755,7 +755,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     message.header.* = exact.*;
                     // Normally the message's padding would have been zeroed by the MessageBus,
                     // but we are copying (only) a message header into a new buffer.
-                    std.mem.set(u8, message.buffer[@sizeOf(Header)..constants.sector_size], 0);
+                    @memset(message.buffer[@sizeOf(Header)..constants.sector_size], 0);
                     callback(replica, message, destination_replica);
                     return;
                 } else {
@@ -2466,7 +2466,7 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
             const message_slot = @divFloor(sector, sectors_per_message);
             assert(message_slot < slot_count);
 
-            std.mem.set(u8, sector_data, 0);
+            @memset(sector_data, 0);
             if (sector % sectors_per_message == 0) {
                 // The header goes in the first sector of the message.
                 var sector_header = std.mem.bytesAsValue(Header, sector_data[0..@sizeOf(Header)]);

@@ -424,9 +424,9 @@ pub fn TableType(
             }
 
             pub fn reset(builder: *Builder) void {
-                std.mem.set(u8, builder.index_block, 0);
-                std.mem.set(u8, builder.filter_block, 0);
-                std.mem.set(u8, builder.data_block, 0);
+                @memset(builder.index_block, 0);
+                @memset(builder.filter_block, 0);
+                @memset(builder.data_block, 0);
 
                 builder.* = .{
                     .index_block = builder.index_block,

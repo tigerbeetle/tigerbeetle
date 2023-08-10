@@ -112,7 +112,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             errdefer node_map.deinit();
 
             const sentinel = random.int(u64);
-            mem.set(u64, mem.bytesAsSlice(u64, node_pool.buffer), sentinel);
+            @memset(mem.bytesAsSlice(u64, node_pool.buffer), sentinel);
 
             return Self{
                 .node_count = node_count,
@@ -169,7 +169,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
 
             // Write unique data into the node so we can test that it doesn't get overwritten.
             const id = context.random.int(u64);
-            mem.set(u64, mem.bytesAsSlice(u64, node), id);
+            @memset(mem.bytesAsSlice(u64, node), id);
             gop.value_ptr.* = id;
 
             context.acquires += 1;
@@ -187,7 +187,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
                 try testing.expectEqual(id, word);
             }
 
-            mem.set(u64, mem.bytesAsSlice(u64, node), context.sentinel);
+            @memset(mem.bytesAsSlice(u64, node), context.sentinel);
             context.node_pool.release(node);
             context.node_map.swapRemoveAt(index);
 

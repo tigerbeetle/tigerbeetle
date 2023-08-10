@@ -144,7 +144,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             const auto_partition = try allocator.alloc(bool, @as(usize, options.node_count));
             errdefer allocator.free(auto_partition);
-            std.mem.set(bool, auto_partition, false);
+            @memset(auto_partition, false);
 
             const auto_partition_nodes = try allocator.alloc(u8, @as(usize, options.node_count));
             errdefer allocator.free(auto_partition_nodes);
@@ -269,7 +269,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const random = self.prng.random();
             var partition = self.auto_partition;
             switch (self.options.partition_mode) {
-                .none => std.mem.set(bool, partition, false),
+                .none => @memset(partition, false),
                 .uniform_size => {
                     // Exclude cases partition_size == 0 and partition_size == node_count
                     const partition_size =
@@ -296,7 +296,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     }
                 },
                 .isolate_single => {
-                    std.mem.set(bool, partition, false);
+                    @memset(partition, false);
                     const n = random.uintLessThan(u8, self.options.node_count);
                     partition[n] = true;
                 },
@@ -333,7 +333,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     if (self.should_unpartition()) {
                         self.auto_partition_active = false;
                         self.auto_partition_stability = self.options.unpartition_stability;
-                        std.mem.set(bool, self.auto_partition, false);
+                        @memset(self.auto_partition, false);
                         for (self.links) |*link| link.filter = LinkFilter.initFull();
                         log.warn("unpartitioned network: partition={any}", .{self.auto_partition});
                     }

@@ -72,8 +72,7 @@ pub fn ewah(comptime Word: type) type {
             while (source_index < source_words.len) {
                 const marker = @as(*const Marker, @ptrCast(&source_words[source_index]));
                 source_index += 1;
-                std.mem.set(
-                    Word,
+                @memset(
                     target_words[target_index..][0..marker.uniform_word_count],
                     if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
                 );
@@ -98,7 +97,7 @@ pub fn ewah(comptime Word: type) type {
             assert(disjoint_slices(Word, u8, source_words, target));
 
             const target_words = mem.bytesAsSlice(Word, target);
-            std.mem.set(Word, target_words, 0);
+            @memset(target_words, 0);
 
             var target_index: usize = 0;
             var source_index: usize = 0;
@@ -163,10 +162,10 @@ test "ewah encode→decode cycle" {
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
         var decoded: [4096]Word = undefined;
 
-        std.mem.set(Word, &decoded, 0);
+        @memset(&decoded, 0);
         try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
 
-        std.mem.set(Word, &decoded, std.math.maxInt(Word));
+        @memset(&decoded, std.math.maxInt(Word));
         try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
 
         prng.random().bytes(std.mem.asBytes(&decoded));

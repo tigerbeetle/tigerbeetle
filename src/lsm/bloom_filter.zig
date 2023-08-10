@@ -99,7 +99,7 @@ const test_bloom_filter = struct {
 
         // `block_size` is currently the only size bloom_filter that we use.
         const filter = try std.testing.allocator.alloc(u8, block_size);
-        std.mem.set(u8, filter, 0);
+        @memset(filter, 0);
         defer std.testing.allocator.free(filter);
 
         for (keys) |key| {

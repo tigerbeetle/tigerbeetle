@@ -123,11 +123,11 @@ pub const AccountingAuditor = struct {
 
         const accounts = try allocator.alloc(tb.Account, options.accounts_max);
         errdefer allocator.free(accounts);
-        std.mem.set(tb.Account, accounts, undefined);
+        @memset(accounts, undefined);
 
         const accounts_created = try allocator.alloc(bool, options.accounts_max);
         errdefer allocator.free(accounts_created);
-        std.mem.set(bool, accounts_created, false);
+        @memset(accounts_created, false);
 
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
         errdefer pending_transfers.deinit(allocator);
@@ -143,11 +143,11 @@ pub const AccountingAuditor = struct {
 
         var creates_sent = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_sent);
-        std.mem.set(usize, creates_sent, 0);
+        @memset(creates_sent, 0);
 
         var creates_delivered = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_delivered);
-        std.mem.set(usize, creates_delivered, 0);
+        @memset(creates_delivered, 0);
 
         return Self{
             .random = random,

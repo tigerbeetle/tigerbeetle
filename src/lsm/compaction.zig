@@ -256,10 +256,10 @@ pub fn CompactionType(
             compaction.table_builder.reset();
 
             // Zero the blocks because allocate_block() returns a zeroed block.
-            std.mem.set(u8, compaction.index_block_a, 0);
-            std.mem.set(u8, compaction.index_block_b, 0);
+            @memset(compaction.index_block_a, 0);
+            @memset(compaction.index_block_b, 0);
             for (compaction.data_blocks) |data_block| {
-                std.mem.set(u8, data_block, 0);
+                @memset(data_block, 0);
             }
         }
 
