@@ -13,6 +13,9 @@ const StateMachineType = @import("../testing/state_machine.zig").StateMachineTyp
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
+const Storage = @import("../testing/storage.zig").Storage;
+const StorageArea = @import("../testing/storage.zig").Area;
+const schema = @import("../lsm/schema.zig");
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = checkpoint_1_trigger - constants.lsm_batch_multiple;
@@ -942,7 +945,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
-    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Block sync for now.)
+    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Prevent sync for now.)
     a0.diverge();
 
     // Prior to the checkpoint, the cluster has not realized that A0 diverged.
@@ -977,6 +980,9 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
     try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
+
+    try TestReplicas.expect_equal_grid(&b1, &a0);
+    try TestReplicas.expect_equal_grid(&b2, &a0);
 }
 
 test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
@@ -1008,6 +1014,58 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try expectEqual(t.replica(.R_).sync_status(), .idle);
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+}
+
+test "Cluster: scrub: background scrubber, fully corrupt grid" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+
+    var a0 = t.replica(.A0);
+    var b2 = t.replica(.B2);
+
+    // Corrupt the entirety of B2's grid.
+    // Disable read/write faults so that we can use `storage.faults` to track repairs.
+    b2.stop();
+    b2.storage().options.read_fault_probability = 0;
+    b2.storage().options.write_fault_probability = 0;
+    {
+        var address: u64 = 1;
+        while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+            b2.corrupt(.{ .grid_block = address });
+        }
+    }
+    try b2.open();
+
+    // Loop until B2's grid repair stops making progress.
+    var faults_before = b2.storage().faults.count();
+    while (true) {
+        t.run();
+
+        var faults_after = b2.storage().faults.count();
+        assert(faults_after <= faults_before);
+        if (faults_after == faults_before) break;
+
+        faults_before = faults_after;
+    }
+
+    // Verify that B2 repaired all blocks.
+    try TestReplicas.expect_equal_grid(&a0, &b2);
+    try TestReplicas.expect_equal_grid(&b2, &b2);
+
+    var address: u64 = 1;
+    while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+        if (a0.free_set().is_free(address)) {
+            assert(b2.free_set().is_free(address));
+            assert(b2.storage().area_faulty(.{ .grid = .{ .address = address } }));
+        } else {
+            assert(!b2.free_set().is_free(address));
+            assert(!b2.storage().area_faulty(.{ .grid = .{ .address = address } }));
+        }
+    }
 }
 
 const ProcessSelector = enum {
@@ -1374,6 +1432,16 @@ const TestReplicas = struct {
         return t.cluster.replicas[t.replicas.get(0)].view_headers.array.constSlice();
     }
 
+    pub fn free_set(t: *const TestReplicas) *const Cluster.Replica.SuperBlock.FreeSet {
+        assert(t.replicas.len == 1);
+        return &t.cluster.replicas[t.replicas.get(0)].superblock.free_set;
+    }
+
+    pub fn storage(t: *const TestReplicas) *Storage {
+        assert(t.replicas.len == 1);
+        return &t.cluster.storages[t.replicas.get(0)];
+    }
+
     /// Simulate a storage determinism bug.
     /// (Replicas must be running and between compaction beats for this to run.)
     pub fn diverge(t: *TestReplicas) void {
@@ -1496,6 +1564,26 @@ const TestReplicas = struct {
             }
         }
         return paths;
+    }
+
+    fn expect_equal_grid(want: *const TestReplicas, got: *const TestReplicas) !void {
+        assert(want.replicas.len == 1);
+        assert(got.replicas.len == 1);
+
+        var address: u64 = 1;
+        while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+            const address_free = want.free_set().is_free(address);
+            assert(address_free == got.free_set().is_free(address));
+            if (address_free) continue;
+
+            const block_want = want.storage().area_memory(.{ .grid = .{ .address = address } });
+            const block_got = got.storage().area_memory(.{ .grid = .{ .address = address } });
+
+            try expectEqual(
+                std.mem.bytesToValue(vsr.Header, block_want[0..@sizeOf(vsr.Header)]),
+                std.mem.bytesToValue(vsr.Header, block_got[0..@sizeOf(vsr.Header)]),
+            );
+        }
     }
 };
 

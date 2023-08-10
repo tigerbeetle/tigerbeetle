@@ -281,11 +281,29 @@ pub const grid_repair_request_max = config.process.grid_repair_request_max;
 /// The number of grid reads allocated to handle incoming command=request_blocks messages.
 pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
 
-/// The number of grid writes allocated to handle incoming command=block messages.
-pub const grid_repair_writes_max = config.process.grid_repair_writes_max;
+/// Immediately after state sync we want access to all of the grid's write bandwidth to rapidly sync
+/// table blocks.
+pub const grid_repair_writes_max = grid_iops_write_max;
 
 /// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
 pub const grid_cache_size_default = config.process.grid_cache_size_default;
+
+/// The maximum capacity (in blocks) of the GridRepairQueue.
+/// (TODO explain relation to manifest sync and grid_repair_tables_max)
+/// As this increases:
+/// - GridRepairQueue allocates more memory.
+/// - The "period" of GridRepairQueue's requests increases.
+///   This makes the repair protocol more tolerant of network latency.
+pub const grid_repair_blocks_max = config.process.grid_repair_blocks_max;
+
+/// The number of tables that can be synced simultaneously.
+/// "Table" in this context is the number of table index blocks to hold in memory while syncing
+/// their content.
+///
+/// As this increases:
+/// - GridRepairQueue allocates more memory (~2 block for each).
+/// - Syncing is more efficient, as more blocks can be fetched concurrently.
+pub const grid_repair_tables_max = config.process.grid_repair_tables_max;
 
 comptime {
     assert(grid_repair_request_max > 0);
@@ -294,6 +312,38 @@ comptime {
 
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
+
+    assert(grid_repair_blocks_max > 0);
+    assert(grid_repair_tables_max > 0);
+}
+
+/// The maximum number of concurrent scrubber reads.
+///
+/// Unless the scrubber cycle is extremely short and the data file very large there is no need to
+/// set this higher than 1.
+pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
+
+/// Napkin math for the "worst case" (fully-loaded data file):
+///
+///   storage_size_max            = 16TiB
+///   block_size                  = 64KiB
+///   grid_scrubber_cycle_seconds = 365 * 24 * 60 * 60 (1 cycle/year)
+///   grid_blocks_max             = storage_size_max / block_size
+///   seconds_per_block           = seconds_per_year / grid_blocks_max = 0.12s/block
+///
+pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
+
+/// Accelerate/throttle scrubber reads if they are less/more frequent than this range.
+pub const grid_scrubber_interval_ticks_min = config.process.grid_scrubber_interval_min_ms / tick_ms;
+pub const grid_scrubber_interval_ticks_max = config.process.grid_scrubber_interval_max_ms / tick_ms;
+
+comptime {
+    assert(grid_scrubber_reads_max > 0);
+    assert(grid_scrubber_reads_max <= grid_iops_read_max);
+    assert(grid_scrubber_cycle_ticks > 0);
+    assert(grid_scrubber_interval_ticks_min > 0);
+    assert(grid_scrubber_interval_ticks_max > 0);
+    assert(grid_scrubber_interval_ticks_max >= grid_scrubber_interval_ticks_min);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.

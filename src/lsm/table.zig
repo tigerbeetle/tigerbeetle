@@ -209,6 +209,7 @@ pub fn TableType(
         pub const block_count_max =
             index_block_count + filter_block_count_max + data_block_count_max;
 
+        // TODO index_schema
         const index = schema.TableIndex.init(.{
             .key_size = key_size,
             .filter_block_count_max = filter_block_count_max,
@@ -453,6 +454,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -518,6 +520,7 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
+                    .parent = @bitCast(u128, schema.TableData.Parent{ .tree_id = options.tree_id }),
                     .context = @bitCast(u128, schema.TableData.Context{
                         .key_count = data.key_count,
                         .key_layout_size = data.key_layout_size,
@@ -574,6 +577,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -584,6 +588,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, builder.filter_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
+                    .parent = @bitCast(u128, schema.TableFilter.Parent{
+                        .tree_id = options.tree_id,
+                    }),
                     .context = @bitCast(u128, schema.TableFilter.Context{
                         .data_block_count_max = data_block_count_max,
                     }),
@@ -620,6 +627,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
@@ -638,6 +646,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
+                    .parent = @bitCast(u128, schema.TableIndex.Parent{
+                        .tree_id = options.tree_id,
+                    }),
                     .context = @bitCast(u128, schema.TableIndex.Context{
                         .filter_block_count = builder.filter_block_count,
                         .filter_block_count_max = index.filter_block_count_max,
@@ -794,7 +805,7 @@ pub fn TableType(
 
         pub fn verify(
             comptime Storage: type,
-            storage: *Storage,
+            storage: *const Storage,
             index_address: u64,
             key_min: ?Key,
             key_max: ?Key,
@@ -803,20 +814,17 @@ pub fn TableType(
                 // Too complicated to do async verification
                 return;
 
-            const index_block = storage.grid_block(index_address);
-            const addresses = index.data_addresses(index_block);
-            const data_blocks_used = index.data_blocks_used(index_block);
-            var data_block_index: usize = 0;
-            while (data_block_index < data_blocks_used) : (data_block_index += 1) {
-                const address = addresses[data_block_index];
-                const data_block = storage.grid_block(address);
+            const index_block = storage.grid_block(index_address).?;
+            const data_block_addresses = index.data_addresses_used(index_block);
+            for (data_block_addresses) |data_block_address, data_block_index| {
+                const data_block = storage.grid_block(data_block_address).?;
                 const values = data_block_values_used(data_block);
                 if (values.len > 0) {
                     if (data_block_index == 0) {
                         assert(key_min == null or
                             compare_keys(key_min.?, key_from_value(&values[0])) == .eq);
                     }
-                    if (data_block_index == data_blocks_used - 1) {
+                    if (data_block_index == data_block_addresses.len - 1) {
                         assert(key_max == null or
                             compare_keys(key_from_value(&values[values.len - 1]), key_max.?) == .eq);
                     }

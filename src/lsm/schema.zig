@@ -15,6 +15,7 @@
 //! Index block schema:
 //! │ vsr.Header                   │ operation=BlockType.index,
 //! │                              │ context=schema.TableIndex.Context,
+//! │                              │ parent=schema.TableIndex.Parent,
 //! │                              │ request=@sizeOf(Key)
 //! │                              │ timestamp=snapshot_min
 //! │ [filter_block_count_max]u128 │ checksums of filter blocks
@@ -27,6 +28,7 @@
 //! Filter block schema:
 //! │ vsr.Header │ operation=BlockType.filter,
 //! │            │ context=schema.TableFilter.context
+//! │            │ parent=schema.TableFilter.Parent,
 //! │            │ timestamp=snapshot_min
 //! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 //! │            │   `filter_data_block_count_max` data blocks.
@@ -34,6 +36,7 @@
 //! Data block schema:
 //! │ vsr.Header               │ operation=BlockType.data,
 //! │                          │ context=schema.TableData.context,
+//! │                          │ parent=schema.TableData.Parent,
 //! │                          │ request=values_count
 //! │                          │ timestamp=snapshot_min
 //! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
@@ -72,9 +75,6 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
 }
 
 pub const TableIndex = struct {
-    /// Every table has exactly one index block.
-    const index_block_count = 1;
-
     /// Stored in every index block's header's `context` field.
     ///
     /// The max-counts are stored in the header despite being available (per-tree) at comptime:
@@ -91,6 +91,11 @@ pub const TableIndex = struct {
             assert(@sizeOf(Context) == @sizeOf(u128));
             assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
         }
+    };
+
+    pub const Parent = extern struct {
+        // TODO u16 + padding.
+        tree_id: u128,
     };
 
     key_size: u32,
@@ -253,9 +258,37 @@ pub const TableIndex = struct {
         return slice[0..index.filter_blocks_used(index_block)];
     }
 
-    inline fn blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        return index_block_count + index.filter_blocks_used(index_block) +
-            data_blocks_used(index_block);
+    pub inline fn content_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
+        return index.filter_blocks_used(index_block) + index.data_blocks_used(index_block);
+    }
+
+    pub fn content_block(
+        index: *const TableIndex,
+        index_block: BlockPtrConst,
+        content_block_index: usize,
+    ) struct {
+        block_checksum: u128,
+        block_address: u64,
+        block_type: BlockType,
+    } {
+        assert(content_block_index < index.content_blocks_used(index_block));
+
+        const filter_blocks_used_ = index.filter_blocks_used(index_block);
+        if (filter_blocks_used_ > content_block_index) {
+            const filter_block_index = content_block_index;
+            return .{
+                .block_checksum = index.filter_checksums_used(index_block)[filter_block_index],
+                .block_address = index.filter_addresses_used(index_block)[filter_block_index],
+                .block_type = .filter,
+            };
+        } else {
+            const data_block_index = content_block_index - filter_blocks_used_;
+            return .{
+                .block_checksum = index.data_checksums_used(index_block)[data_block_index],
+                .block_address = index.data_addresses_used(index_block)[data_block_index],
+                .block_type = .data,
+            };
+        }
     }
 
     inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
@@ -287,6 +320,11 @@ pub const TableFilter = struct {
             assert(@sizeOf(Context) == @sizeOf(u128));
             assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
         }
+    };
+
+    pub const Parent = extern struct {
+        // TODO u16 + padding.
+        tree_id: u128,
     };
 
     /// The number of data blocks summarized by a single filter block.
@@ -355,6 +393,11 @@ pub const TableData = struct {
             assert(@sizeOf(Context) == @sizeOf(u128));
             assert(@bitSizeOf(Context) == @sizeOf(Context) * 8);
         }
+    };
+
+    pub const Parent = extern struct {
+        // TODO u16 + padding.
+        tree_id: u128,
     };
 
     // The number of keys in the Eytzinger layout per data block.

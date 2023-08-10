@@ -129,19 +129,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             tree_lookup,
         };
 
-        const GridRepairQueue = std.ArrayList(struct {
-            address: u64,
-            checksum: u128,
-        });
-
         state: State,
         storage: *Storage,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
         grid: Grid,
-        grid_repair_write: Grid.Write,
-        grid_repair_block: Grid.BlockPtr,
-        grid_repair_queue: GridRepairQueue,
         node_pool: NodePool,
         tree: Tree,
         lookup_context: Tree.LookupContext,
@@ -159,17 +151,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             });
             defer env.superblock.deinit(allocator);
 
-            env.grid = try Grid.init(allocator, .{
-                .superblock = &env.superblock,
-                .on_read_fault = on_grid_read_fault,
-            });
+            env.grid = try Grid.init(allocator, .{ .superblock = &env.superblock });
             defer env.grid.deinit(allocator);
-
-            env.grid_repair_block = try allocate_block(allocator);
-            defer allocator.free(env.grid_repair_block);
-
-            env.grid_repair_queue = GridRepairQueue.init(allocator);
-            defer env.grid_repair_queue.deinit();
 
             env.node_pool = try NodePool.init(allocator, node_count);
             defer env.node_pool.deinit(allocator);
@@ -265,6 +248,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
                 .commit_min = op,
                 .commit_max = op + 1,
+                .commit_unsynced_min = 0,
+                .commit_unsynced_max = 0,
             });
         }
 
@@ -366,51 +351,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     },
                 }
             }
-        }
-
-        fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
-            const env = @fieldParentPtr(Environment, "grid", grid);
-            const writing = grid.writing(read.address, null);
-            // If the same block faulted more than once, we should only repair once.
-            if (writing == .repair) return;
-            assert(writing == .none);
-
-            env.grid_repair_queue.append(.{
-                .address = read.address,
-                .checksum = read.checksum,
-            }) catch unreachable;
-
-            if (env.grid_repair_queue.items.len == 1) env.repair_block();
-        }
-
-        fn on_block_write_repair(write: *Grid.Write) void {
-            const env = @fieldParentPtr(Environment, "grid_repair_write", write);
-            const wrote = env.grid_repair_queue.swapRemove(0);
-            assert(wrote.address == write.address);
-
-            if (env.grid_repair_queue.items.len > 0) env.repair_block();
-        }
-
-        fn repair_block(env: *Environment) void {
-            const repair = env.grid_repair_queue.items[0];
-            const block = &env.grid_repair_block;
-
-            assert(repair.address > 0);
-            assert(!env.grid.superblock.free_set.is_free(repair.address));
-
-            const actual_block = env.grid.superblock.storage.grid_block(repair.address);
-            stdx.copy_disjoint(.exact, u8, block.*, actual_block);
-
-            const header = schema.header_from_block(block.*);
-            assert(header.op == repair.address);
-            assert(header.checksum == repair.checksum);
-
-            env.grid.write_block_repair(
-                on_block_write_repair,
-                &env.grid_repair_write,
-                block,
-                repair.address,
-            );
         }
     };
 }

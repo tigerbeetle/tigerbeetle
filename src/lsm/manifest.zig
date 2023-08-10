@@ -15,6 +15,13 @@ const GridType = @import("grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
+const snapshot_min_for_table_output =
+    @import("../lsm/compaction.zig").snapshot_min_for_table_output;
+
+pub fn snapshot_from_op(op: u64) u64 {
+    //return snapshot_min_for_table_output(op - op % @divExact(constants.lsm_batch_multiple, 2));
+    return op + 1;
+}
 
 pub fn TableInfoType(comptime Table: type) type {
     const Key = Table.Key;
@@ -114,7 +121,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         const Callback = fn (*Manifest) void;
 
         /// Here, we use a structure with indexes over the segmented array for performance.
-        const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
+        pub const Level = ManifestLevelType(NodePool, Key, TableInfo, compare_keys, table_count_max);
         const KeyRange = Level.KeyRange;
 
         const ManifestLog = ManifestLogType(Storage, TableInfo);
@@ -573,34 +580,30 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             callback(manifest);
         }
 
-        pub fn verify(manifest: *Manifest, snapshot: u64) void {
-            // TODO: When state sync is proactive, re-enable this.
-            if (true) return;
-
-            // TODO s/prev/previous; s/iter/iterator.
+        pub fn verify(manifest: *const Manifest, snapshot: u64) void {
             for (manifest.levels) |*level| {
-                var key_max_prev: ?Key = null;
-                var table_info_iter = level.iterator(
-                    .visible,
-                    &.{snapshot},
-                    .ascending,
-                    null,
-                );
-                while (table_info_iter.next()) |table_info| {
-                    if (key_max_prev) |k| {
-                        assert(compare_keys(k, table_info.key_min) == .lt);
+                var key_max_previous: ?Key = null;
+                var table_info_iterator = level.iterator(.visible, &.{snapshot}, .ascending, null);
+                while (table_info_iterator.next()) |table_info| {
+                    if (key_max_previous) |key| {
+                        assert(compare_keys(key, table_info.key_min) == .lt);
                     }
                     // We could have key_min == key_max if there is only one value.
                     assert(compare_keys(table_info.key_min, table_info.key_max) != .gt);
-                    key_max_prev = table_info.key_max;
+                    key_max_previous = table_info.key_max;
 
-                    Table.verify(
-                        Storage,
-                        manifest.manifest_log.grid.superblock.storage,
-                        table_info.address,
-                        table_info.key_min,
-                        table_info.key_max,
-                    );
+                    const vsr_state = &manifest.manifest_log.grid.superblock.working.vsr_state;
+                    if (table_info.snapshot_min < snapshot_from_op(vsr_state.commit_unsynced_min) or
+                        table_info.snapshot_min > snapshot_from_op(vsr_state.commit_unsynced_max))
+                    {
+                        Table.verify(
+                            Storage,
+                            manifest.manifest_log.grid.superblock.storage,
+                            table_info.address,
+                            table_info.key_min,
+                            table_info.key_max,
+                        );
+                    }
                 }
             }
         }

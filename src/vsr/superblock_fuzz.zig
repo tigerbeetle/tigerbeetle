@@ -424,6 +424,8 @@ const Environment = struct {
             .commit_min_checksum = vsr_state.commit_min_checksum,
             .commit_min = vsr_state.commit_min,
             .commit_max = vsr_state.commit_max,
+            .commit_unsynced_min = 0,
+            .commit_unsynced_max = 0,
         });
     }
 

@@ -85,7 +85,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub const Table = TreeTable;
 
         const Grid = @import("grid.zig").GridType(Storage);
-        const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
+        pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
         pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
 
@@ -161,6 +161,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// (Constructed by the Forest.)
         pub const Config = struct {
             /// Unique (stable) identifier, across all trees in the forest.
+            /// TODO(Unified manifest): Change to u16, since this will go into the Manifest entries.
             id: u128,
             /// Human-readable tree name for logging.
             name: []const u8,
@@ -209,7 +210,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             var manifest = try Manifest.init(allocator, node_pool, grid, config.id);
             errdefer manifest.deinit(allocator);
 
-            var compaction_table_immutable = try Compaction.init(allocator, config.name);
+            var compaction_table_immutable = try Compaction.init(allocator, config);
             errdefer compaction_table_immutable.deinit(allocator);
 
             var compaction_table: [@divFloor(constants.lsm_levels, 2)]Compaction = undefined;
@@ -217,7 +218,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 comptime var i: usize = 0;
                 inline while (i < compaction_table.len) : (i += 1) {
                     errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
-                    compaction_table[i] = try Compaction.init(allocator, config.name);
+                    compaction_table[i] = try Compaction.init(allocator, config);
                 }
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);
@@ -394,7 +395,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
-                    .index,
                 );
             }
 
@@ -417,7 +417,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     completion,
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
-                    .filter,
                 );
             }
 
@@ -442,7 +441,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         completion,
                         context.data_block.?.address,
                         context.data_block.?.checksum,
-                        .data,
                     );
                 } else {
                     context.tree.filter_block_misses += 1;

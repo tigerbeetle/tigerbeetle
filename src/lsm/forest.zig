@@ -83,6 +83,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
             open,
         };
 
+        pub const Storage = Storage;
         pub const groove_config = groove_config;
         pub const Grooves = Grooves;
         pub const GroovesOptions = _GroovesOptions;
@@ -203,10 +204,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
                             }
 
                             if (join_op == .checkpoint) {
-                                if (Storage == @import("../testing/storage.zig").Storage) {
-                                    // We should have finished all checkpoint writes by now.
-                                    forest.grid.superblock.storage.assert_no_pending_writes(.grid);
-                                }
+                                // We should have finished all checkpoint writes by now.
+                                forest.grid.assert_only_repairing();
                             }
 
                             const callback = forest.join_callback.?;
@@ -239,10 +238,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_config: anytype) type 
         }
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
-            if (Storage == @import("../testing/storage.zig").Storage) {
-                // We should have finished all pending io before checkpointing.
-                forest.grid.superblock.storage.assert_no_pending_writes(.grid);
-            }
+            // We should have finished all pending (non-repair) io before checkpointing.
+            forest.grid.assert_only_repairing();
 
             const Join = JoinType(.checkpoint);
             Join.start(forest, callback);

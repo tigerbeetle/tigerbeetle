@@ -229,7 +229,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .manifest,
                 );
             } else {
                 // Use next_tick because the manifest may be empty (no blocks to read).
@@ -478,12 +477,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 entry_count,
             });
 
-            manifest_log.grid.write_block(
-                write_block_callback,
-                &manifest_log.write,
-                block,
-                address,
-            );
+            manifest_log.grid.create_block(write_block_callback, &manifest_log.write, block);
             manifest_log.blocks.advance_head();
         }
 
@@ -583,7 +577,6 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .manifest,
                 );
             } else {
                 manifest_log.read_callback = null;

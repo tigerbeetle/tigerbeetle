@@ -24,6 +24,10 @@ pub const Manifest = struct {
     addresses: []u64,
 
     count: u32,
+    /// The number of blocks that are part of the latest checkpoint.
+    /// This is used by the scrubber, to avoid scrubbing manifest blocks before they are written.
+    /// TODO(Unified manifest) Get rid of this.
+    count_checkpointed: u32,
     count_max: u32,
 
     /// A map from table address to the manifest block and entry that is the latest extent version.
@@ -84,6 +88,7 @@ pub const Manifest = struct {
             .checksums = checksums,
             .addresses = addresses,
             .count = 0,
+            .count_checkpointed = 0,
             .count_max = manifest_block_count_max,
             .tables = tables,
             .compaction_set = compaction_set,
@@ -106,12 +111,15 @@ pub const Manifest = struct {
         mem.set(u64, manifest.addresses, 0);
 
         manifest.count = 0;
+        manifest.count_checkpointed = 0;
         manifest.tables.clearRetainingCapacity();
         manifest.compaction_set.clearRetainingCapacity();
     }
 
-    pub fn encode(manifest: *const Manifest, target: []align(@alignOf(u128)) u8) u64 {
+    pub fn encode(manifest: *Manifest, target: []align(@alignOf(u128)) u8) u64 {
         if (constants.verify) manifest.verify();
+
+        manifest.count_checkpointed = manifest.count;
 
         assert(target.len > 0);
         assert(target.len % @sizeOf(u128) == 0);
@@ -158,6 +166,7 @@ pub const Manifest = struct {
         assert(manifest.compaction_set.count() == 0);
 
         manifest.count = @intCast(u32, @divExact(source.len, BlockReferenceSize));
+        manifest.count_checkpointed = manifest.count;
         assert(manifest.count <= manifest.count_max);
 
         var size: u64 = 0;
@@ -247,6 +256,7 @@ pub const Manifest = struct {
         stdx.copy_left(.inexact, u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
         stdx.copy_left(.inexact, u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
         manifest.count -= 1;
+        manifest.count_checkpointed -= @boolToInt(index < manifest.count_checkpointed);
 
         manifest.trees[manifest.count] = 0;
         manifest.checksums[manifest.count] = 0;

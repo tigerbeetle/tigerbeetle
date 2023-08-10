@@ -9,9 +9,9 @@
 //!  the block, this check will need to be removed or use a different strategy.
 //!
 //! Areas verified at checkpoint:
-//! - SuperBlock Manifest, FreeSet, ClientSessions
-//! - ClientReplies
-//! - Acquired Grid blocks
+//! - SuperBlock trailers (Manifest, FreeSet, ClientSessions)
+//! - ClientReplies (when repair finishes)
+//! - Acquired Grid blocks (when syncing finishes)
 //!
 //! Areas not verified:
 //! - SuperBlock headers, which hold replica-specific state.
@@ -26,9 +26,9 @@ const log = std.log.scoped(.storage_checker);
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const superblock = @import("../../vsr/superblock.zig");
-const SuperBlockHeader = superblock.SuperBlockHeader;
-const Storage = @import("../storage.zig").Storage;
+const schema = @import("../../lsm/schema.zig");
+const BlockType = @import("../../lsm/grid.zig").BlockType;
+const TestStorage = @import("../storage.zig").Storage;
 
 /// After each compaction half measure, save the cumulative hash of all acquired grid blocks.
 ///
@@ -44,159 +44,179 @@ const Compactions = std.ArrayList(u128);
 /// op to be skipped in Checkpoints).
 const Checkpoints = std.AutoHashMap(u64, Checkpoint);
 
-const Checkpoint = struct {
-    // The superblock trailers are an XOR of all copies of all respective trailers, not the
-    // `SuperBlockHeader.{trailer}_checksum`.
-    checksum_superblock_manifest: u128,
-    checksum_superblock_free_set: u128,
-    checksum_superblock_client_sessions: u128,
-    checksum_client_replies: u128,
-    checksum_grid: u128,
+const CheckpointCheck = enum {
+    superblock_manifest,
+    superblock_free_set,
+    superblock_client_sessions,
+    client_replies,
+    grid,
 };
 
-pub fn StorageCheckerType(comptime Replica: type) type {
+const Checkpoint = std.enums.EnumArray(CheckpointCheck, u128);
+
+// TODO ReplicaStorageChecker vs ClusterStorageChecker?
+
+pub fn StorageCheckerType(comptime Storage: type) type {
     return struct {
         const Self = @This();
+        const SuperBlock = vsr.SuperBlockType(Storage);
 
-        allocator: std.mem.Allocator,
         compactions: Compactions,
         checkpoints: Checkpoints,
 
-        pub fn init(allocator: std.mem.Allocator) Self {
+        free_set: SuperBlock.FreeSet,
+
+        pub fn init(allocator: std.mem.Allocator) !Self {
             var compactions = Compactions.init(allocator);
             errdefer compactions.deinit();
 
             var checkpoints = Checkpoints.init(allocator);
             errdefer checkpoints.deinit();
 
+            var free_set = try SuperBlock.FreeSet.init(allocator, vsr.superblock.grid_blocks_max);
+            errdefer free_set.deinit(allocator);
+
             return Self{
-                .allocator = allocator,
                 .compactions = compactions,
                 .checkpoints = checkpoints,
+                .free_set = free_set,
             };
         }
 
-        pub fn deinit(checker: *Self) void {
-            checker.compactions.deinit();
+        pub fn deinit(checker: *Self, allocator: std.mem.Allocator) void {
+            checker.free_set.deinit(allocator);
             checker.checkpoints.deinit();
+            checker.compactions.deinit();
         }
 
-        pub fn replica_compact(checker: *Self, replica: *const Replica) !void {
-            // If we are recovering from a crash, don't test the checksum until we are caught up.
-            // Until then our grid's checksum is too far ahead.
-            if (replica.superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
+        pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
+            // TODO iterate superblock manifest, check tables not in snapshot range
+            const replica_checkpoint_op = superblock.working.vsr_state.commit_min;
 
-            const half_measure_beat_count = @divExact(constants.lsm_batch_multiple, 2);
-            if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
-
-            // TODO(Unified Manifest) The issue is:
-            // 1. Open manifest log blocks are acquired from the freeset but not written yet.
-            // 2. We can't defer acquiring manifest log block addresses until close-time.
-            //    This is because `append()` needs the block address in order to update the
-            //    superblock manifest table extents.
-            // 3. We can't defer the superblock manifest table extent updates because then they
-            //    would be out of order with respect to the table extent *removes* performed
-            //    during manifest compaction.
-            // Hopefully with a unified manifest another approach will open up.
-            if (1 == 1) return;
-
-            const checksum = checksum_grid(replica);
-            log.debug("{}: replica_compact: op={} area=grid checksum={x:0>32}", .{
-                replica.replica,
-                replica.commit_min,
-                checksum,
+            var checkpoint_actual = std.enums.EnumMap(CheckpointCheck, u128).init(.{
+                .superblock_manifest = checksum_trailer(superblock, .manifest),
+                .superblock_free_set = checksum_trailer(superblock, .free_set),
+                .superblock_client_sessions = checksum_trailer(superblock, .client_sessions),
             });
 
-            // -1 since we never compact op=1.
-            const compactions_index = @divExact(replica.commit_min + 1, half_measure_beat_count) - 1;
-            if (compactions_index == checker.compactions.items.len) {
-                try checker.compactions.append(checksum);
-            } else {
-                const checksum_expect = checker.compactions.items[compactions_index];
-                if (checksum_expect != checksum) {
-                    log.err("{}: replica_compact: mismatch area=grid expect={x:0>32} actual={x:0>32}", .{
-                        replica.replica,
-                        checksum_expect,
-                        checksum,
-                    });
-                    return error.StorageMismatch;
-                }
-            }
-        }
-
-        pub fn replica_checkpoint(checker: *Self, replica: *const Replica) !void {
-            const storage = replica.superblock.storage;
-            const working = replica.superblock.working;
-
-            var checkpoint = Checkpoint{
-                .checksum_superblock_manifest = 0,
-                .checksum_superblock_free_set = 0,
-                .checksum_superblock_client_sessions = 0,
-                // TODO State sync: Enable this when proactive client replies sync is implemented.
-                // .checksum_client_replies = checksum_client_replies(storage),
-                .checksum_client_replies = 0,
-                // TODO: State sync: Enable this (again) when proactive table sync is implemented.
-                // .checksum_grid = checksum_grid(replica),
-                .checksum_grid = 0,
-            };
-
-            inline for (comptime std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
-                const trailer_size = @field(working, @tagName(trailer) ++ "_size");
-                var copy: u8 = 0;
-                while (copy < constants.superblock_copies) : (copy += 1) {
-                    const trailer_start = trailer.zone().start_for_copy(copy);
-                    @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer)) |=
-                        vsr.checksum(storage.memory[trailer_start..][0..trailer_size]);
-                }
+            const syncing = superblock.working.vsr_state.commit_unsynced_max > 0;
+            if (!syncing) {
+                checkpoint_actual.put(.client_replies, checksum_client_replies(superblock));
+                checkpoint_actual.put(.grid, checker.checksum_grid(superblock));
             }
 
-            inline for (std.meta.fields(Checkpoint)) |field| {
+            for (std.enums.values(CheckpointCheck)) |check| {
                 log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:0>32}", .{
-                    replica.replica,
-                    replica.op_checkpoint(),
-                    field.name,
-                    @field(checkpoint, field.name),
+                    superblock.replica(),
+                    replica_checkpoint_op,
+                    @tagName(check),
+                    checkpoint_actual.get(check),
                 });
             }
 
-            const checkpoint_expect = checker.checkpoints.get(replica.op_checkpoint()) orelse {
-                // This replica is the first to reach op_checkpoint.
-                try checker.checkpoints.putNoClobber(replica.op_checkpoint(), checkpoint);
+            const checkpoint_expect = checker.checkpoints.get(replica_checkpoint_op) orelse {
+                if (!syncing) {
+                    // This replica is the first to reach op_checkpoint.
+                    // Save its state for other replicas to check themselves against.
+                    var checkpoint: Checkpoint = undefined;
+                    for (std.enums.values(CheckpointCheck)) |check| {
+                        checkpoint.set(check, checkpoint_actual.get(check).?);
+                    }
+                    try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint);
+                }
                 return;
             };
 
-            var fail: bool = false;
-            inline for (std.meta.fields(Checkpoint)) |field| {
-                const field_actual = @field(checkpoint, field.name);
-                const field_expect = @field(checkpoint_expect, field.name);
-                if (!std.meta.eql(field_expect, field_actual)) {
-                    fail = true;
-                    log.err("{}: replica_checkpoint: mismatch area={s} expect={x:0>32} actual={x:0>32}", .{
-                        replica.replica,
-                        field.name,
-                        @field(checkpoint_expect, field.name),
-                        @field(checkpoint, field.name),
+            var mismatch: bool = false;
+            for (std.enums.values(CheckpointCheck)) |check| {
+                const checksum_actual = checkpoint_actual.get(check) orelse continue;
+                const checksum_expect = checkpoint_expect.get(check);
+                if (checksum_expect != checksum_actual) {
+                    log.warn("{}: replica_checkpoint: mismatch " ++
+                        "area={s} expect={x:0>32} actual={x:0>32}", .{
+                        superblock.replica(),
+                        @tagName(check),
+                        checksum_expect,
+                        checksum_actual,
                     });
+
+                    mismatch = true;
                 }
             }
-            if (fail) return error.StorageMismatch;
+            if (mismatch) return error.StorageMismatch;
         }
 
-        fn checksum_client_replies(storage: *const Storage) u128 {
-            const offset = vsr.Zone.client_replies.offset(0);
-            const size = constants.clients_max * constants.message_size_max;
-            return vsr.checksum(storage.memory[offset..][0..size]);
+        fn checksum_trailer(superblock: *const SuperBlock, trailer: vsr.SuperBlockTrailer) u128 {
+            const trailer_size = superblock.working.trailer_size(trailer);
+            const trailer_checksum = superblock.working.trailer_checksum(trailer);
+
+            var copy: u8 = 0;
+            while (copy < constants.superblock_copies) : (copy += 1) {
+                const trailer_start = trailer.zone().start_for_copy(copy);
+
+                assert(trailer_checksum ==
+                    vsr.checksum(superblock.storage.memory[trailer_start..][0..trailer_size]));
+            }
+
+            return trailer_checksum;
         }
 
-        fn checksum_grid(replica: *const Replica) u128 {
-            const storage = replica.superblock.storage;
-            var acquired = replica.superblock.free_set.blocks.iterator(.{});
+        fn checksum_client_replies(superblock: *const SuperBlock) u128 {
+            assert(superblock.working.vsr_state.commit_unsynced_max == 0);
+
             var checksum: u128 = 0;
-            while (acquired.next()) |address_index| {
-                const block = storage.grid_block(address_index + 1);
-                const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            for (superblock.client_sessions.entries) |client_session, slot| {
+                if (client_session.session == 0) {
+                    // Empty slot.
+                } else {
+                    assert(client_session.header.command == .reply);
+
+                    if (client_session.header.size == @sizeOf(vsr.Header)) {
+                        // ClientReplies won't store this entry.
+                    } else {
+                        checksum ^= vsr.checksum(superblock.storage.area_memory(
+                            .{ .client_replies = .{ .slot = slot } },
+                        )[0 .. vsr.sector_ceil(client_session.header.size)]);
+                    }
+                }
+            }
+            return checksum;
+        }
+
+        fn checksum_grid(checker: *Self, superblock: *const SuperBlock) u128 {
+            assert(superblock.working.vsr_state.commit_unsynced_max == 0);
+
+            const free_set_zone = vsr.SuperBlockTrailer.free_set.zone();
+            const free_set_offset = vsr.Zone.superblock.offset(free_set_zone.start_for_copy(0));
+            const free_set_size = superblock.working.free_set_size;
+            const free_set_buffer = superblock.storage.memory[free_set_offset..][0..free_set_size];
+            assert(vsr.checksum(free_set_buffer) == superblock.working.free_set_checksum);
+
+            checker.free_set.decode(free_set_buffer);
+            defer checker.free_set.reset();
+
+            var checksum: u128 = 0;
+            var blocks_missing: usize = 0;
+            var blocks_acquired = checker.free_set.blocks.iterator(.{});
+            while (blocks_acquired.next()) |block_address_index| {
+                const block_address: u64 = block_address_index + 1;
+                const block = superblock.storage.grid_block(block_address) orelse {
+                    log.err("{}: checksum_grid: missing block_address={}", .{
+                        superblock.replica(),
+                        block_address,
+                    });
+
+                    blocks_missing += 1;
+                    continue;
+                };
+
+                const block_header = schema.header_from_block(block);
+                assert(block_header.op == block_address);
+
                 checksum ^= vsr.checksum(block[0..block_header.size]);
             }
+            assert(blocks_missing == 0);
+
             return checksum;
         }
     };

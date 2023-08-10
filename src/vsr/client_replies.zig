@@ -20,6 +20,7 @@
 //! client to create a new session.
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const mem = std.mem;
 const log = std.log.scoped(.client_replies);
 
@@ -32,6 +33,8 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Slot = @import("superblock_client_sessions.zig").ReplySlot;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
+
+// TODO mark all as faulty during sync
 
 const client_replies_iops_max =
     constants.client_replies_iops_read_max + constants.client_replies_iops_write_max;
@@ -83,6 +86,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             std.StaticBitSet(constants.clients_max).initEmpty(),
         /// Track which slots hold a corrupt reply, or are otherwise missing the reply
         /// that ClientSessions believes they should hold.
+        ///
+        /// Invariants:
+        /// - Set bits must correspond to occupied slots in ClientSessions.
+        /// - Set bits must correspond to entries in ClientSessions with
+        ///   `header.size > @sizeOf(vsr.Header)`.
         faulty: std.StaticBitSet(constants.clients_max) =
             std.StaticBitSet(constants.clients_max).initEmpty(),
 
@@ -285,18 +293,24 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         pub fn remove_reply(client_replies: *ClientReplies, slot: Slot) void {
+            maybe(client_replies.faulty.isSet(slot.index));
+
             client_replies.faulty.unset(slot.index);
         }
 
         /// The caller is responsible for ensuring that the ClientReplies is able to write
         /// by calling `write_reply()` after `ready()` finishes.
         pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
-            assert(client_replies.ready_callback == null);
+            assert(client_replies.ready_callback == null); // TODO vopr crash?
             assert(client_replies.writes.available() > 0);
+            maybe(client_replies.writing.isSet(slot.index));
+            maybe(client_replies.faulty.isSet(slot.index));
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the client sessions superblock trailer.
             assert(message.header.size != @sizeOf(vsr.Header));
+
+            client_replies.faulty.unset(slot.index);
 
             const write = client_replies.writes.acquire().?;
             write.* = .{
@@ -354,6 +368,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const write = @fieldParentPtr(ClientReplies.Write, "completion", completion);
             const client_replies = write.client_replies;
             const message = write.message;
+            assert(client_replies.writing.isSet(write.slot.index));
+            maybe(client_replies.faulty.isSet(write.slot.index));
 
             log.debug("{}: write_reply: wrote (client={} request={})", .{
                 client_replies.replica,
@@ -361,10 +377,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 message.header.request,
             });
 
+            // Clear the fault again, since a read may have re-marked it as faulty during the write.
+            client_replies.faulty.unset(write.slot.index);
             // Release the write *before* invoking the callback, so that if the callback
             // checks .writes.available() we doesn't appear busy when we're not.
             client_replies.writing.unset(write.slot.index);
-            client_replies.faulty.unset(write.slot.index);
             client_replies.writes.release(write);
 
             client_replies.message_pool.unref(message);

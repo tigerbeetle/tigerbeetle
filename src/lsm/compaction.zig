@@ -105,6 +105,7 @@ pub fn CompactionType(
 
         // Passed by `init`.
         tree_name: []const u8,
+        tree_id: u128,
 
         // Allocated during `init`.
         iterator_a: TableDataIterator,
@@ -169,7 +170,7 @@ pub fn CompactionType(
         tracer_slot: ?tracer.SpanStart,
         iterator_tracer_slot: ?tracer.SpanStart,
 
-        pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
+        pub fn init(allocator: Allocator, config: Tree.Config) !Compaction {
             var iterator_a = TableDataIterator.init();
             errdefer iterator_a.deinit();
 
@@ -194,7 +195,8 @@ pub fn CompactionType(
             errdefer table_builder.deinit(allocator);
 
             return Compaction{
-                .tree_name = tree_name,
+                .tree_name = config.name,
+                .tree_id = config.id,
 
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
@@ -229,6 +231,7 @@ pub fn CompactionType(
         pub fn reset(compaction: *Compaction) void {
             compaction.* = .{
                 .tree_name = compaction.tree_name,
+                .tree_id = compaction.tree_id,
 
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
@@ -328,6 +331,7 @@ pub fn CompactionType(
 
             compaction.* = .{
                 .tree_name = compaction.tree_name,
+                .tree_id = compaction.tree_id,
 
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
@@ -398,7 +402,6 @@ pub fn CompactionType(
                             &compaction.read,
                             table_ref.table_info.address,
                             table_ref.table_info.checksum,
-                            .index,
                         );
                     },
                 }
@@ -714,6 +717,7 @@ pub fn CompactionType(
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    .tree_id = compaction.tree_id,
                 });
                 WriteBlock(.data).write_block(compaction);
             }
@@ -730,6 +734,7 @@ pub fn CompactionType(
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    .tree_id = compaction.tree_id,
                 });
                 WriteBlock(.filter).write_block(compaction);
             }
@@ -743,6 +748,7 @@ pub fn CompactionType(
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    .tree_id = compaction.tree_id,
                 });
                 // Make this table visible at the end of this half-bar.
                 compaction.manifest_entries.appendAssumeCapacity(.{
@@ -774,12 +780,7 @@ pub fn CompactionType(
                         .index => &compaction.table_builder.index_block,
                     };
                     compaction.state.tables_writing.pending += 1;
-                    compaction.context.grid.write_block(
-                        on_write,
-                        write,
-                        block,
-                        Table.block_address(block.*),
-                    );
+                    compaction.context.grid.create_block(on_write, write, block);
                 }
 
                 fn on_write(write: *Grid.Write) void {
