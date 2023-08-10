@@ -42,8 +42,8 @@ const tracer = @import("../tracer.zig");
 const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
-const GridType = @import("grid.zig").GridType;
-const allocate_block = @import("grid.zig").allocate_block;
+const GridType = @import("../vsr/grid.zig").GridType;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");

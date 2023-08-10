@@ -34,7 +34,7 @@ pub fn StateMachineType(
 
     return struct {
         const StateMachine = @This();
-        const Grid = @import("lsm/grid.zig").GridType(Storage);
+        const Grid = @import("vsr/grid.zig").GridType(Storage);
         const GrooveType = @import("lsm/groove.zig").GrooveType;
         const ForestType = @import("lsm/forest.zig").ForestType;
 
@@ -1447,7 +1447,7 @@ const TestContext = struct {
     const Storage = @import("testing/storage.zig").Storage;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
-    const Grid = @import("lsm/grid.zig").GridType(Storage);
+    const Grid = @import("vsr/grid.zig").GridType(Storage);
     const StateMachine = StateMachineType(Storage, .{
         // Overestimate the batch size because the test never compacts.
         .message_body_size_max = TestContext.message_body_size_max,
