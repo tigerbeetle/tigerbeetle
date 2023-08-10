@@ -321,7 +321,7 @@ pub fn StateMachineType(
                 comptime field: Field,
                 completion: *FieldType(field),
             ) *StateMachine {
-                const context = stdx.union_field_parent_ptr(PrefetchContext, field, completion);
+                const context = @fieldParentPtr(PrefetchContext, @tagName(field), completion);
                 return @fieldParentPtr(StateMachine, "prefetch_context", context);
             }
 
@@ -1384,7 +1384,8 @@ pub fn StateMachineType(
 }
 
 fn sum_overflows(a: u64, b: u64) bool {
-    return std.math.add(u64, a, b) == null;
+    _ = std.math.add(u64, a, b) catch return true;
+    return false;
 }
 
 /// Optimizes for the common case, where the array is zeroed. Completely branchless.

@@ -674,7 +674,7 @@ pub fn GrooveType(
                 // rely on `context` being well-defined for the loop condition.
                 context.workers_busy += 1;
 
-                for (context.workers) |*worker| {
+                for (&context.workers) |*worker| {
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
                     worker.lookup_start_next();
@@ -717,7 +717,7 @@ pub fn GrooveType(
                     comptime field: Field,
                     completion: *FieldType(field),
                 ) *PrefetchWorker {
-                    const lookup = stdx.union_field_parent_ptr(LookupContext, field, completion);
+                    const lookup = @fieldParentPtr(LookupContext, @tagName(field), completion);
                     return @fieldParentPtr(PrefetchWorker, "lookup", lookup);
                 }
 
@@ -919,7 +919,7 @@ pub fn GrooveType(
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
-        const join_pending_max = 1 + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
+        const join_pending_max = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
 
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {
