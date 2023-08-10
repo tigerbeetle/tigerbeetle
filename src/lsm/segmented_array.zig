@@ -806,11 +806,30 @@ fn SegmentedArrayType(
                 assert(cursor.node == 0);
                 assert(cursor.relative_index == 0);
 
-                return Iterator{
+                return .{
                     .array = array,
                     .direction = direction,
                     .cursor = .{ .node = 0, .relative_index = 0 },
                     .done = true,
+                };
+            } else if (cursor.node == array.node_count - 1 and
+                cursor.relative_index == array.count(cursor.node))
+            {
+                return switch (direction) {
+                    .ascending => .{
+                        .array = array,
+                        .direction = direction,
+                        .cursor = .{ .node = 0, .relative_index = 0 },
+                        .done = true,
+                    },
+                    .descending => .{
+                        .array = array,
+                        .direction = direction,
+                        .cursor = .{
+                            .node = cursor.node,
+                            .relative_index = cursor.relative_index - 1,
+                        },
+                    },
                 };
             } else {
                 assert(cursor.node < array.node_count);
@@ -855,10 +874,7 @@ fn SegmentedArrayType(
         pub usingnamespace if (Key) |K| struct {
             /// Returns a cursor to the index of the key either exactly equal to the target key or,
             /// if there is no exact match, the next greatest key.
-            pub fn search(
-                array: *const Self,
-                key: K,
-            ) Cursor {
+            pub fn search(array: *const Self, key: K) Cursor {
                 if (array.node_count == 0) {
                     return .{
                         .node = 0,
