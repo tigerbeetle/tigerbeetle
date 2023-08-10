@@ -82,12 +82,8 @@ server using `run_with_tb` (described below).
 
 Examples:
 
-```bash
-<<<<<<< HEAD
-$ ./zig/zig build client_integration -- --language=java --sample=basic
-=======
-./zig/zig build client_integration -- --language java --sample basic
->>>>>>> 92a071c6 (Regenerate readmes dropping $)
+```console
+./zig/zig build client_integration -- --language=java --sample=basic
 ```
 
 This corresponds to setting up the sample code in
@@ -116,12 +112,8 @@ If you need to debug the munging though you can run this script with
 directory where the sample code is copied into and where munging takes
 place.
 
-```bash
-<<<<<<< HEAD
-$ ./zig/zig build client_integration -- --language=java --sample=basic --keep-tmp
-=======
-./zig/zig build client_integration -- --language java --sample basic --keep-tmp
->>>>>>> 92a071c6 (Regenerate readmes dropping $)
+```console
+./zig/zig build client_integration -- --language=java --sample=basic --keep-tmp
 ```
 
 ## run_with_tb.zig / run_with_tb
@@ -137,13 +129,13 @@ to it. Specifically, it:
 
 Example:
 
-```bash
+```console
 ./zig/zig build run_with_tb -- node $(pwd)/myscript.js
 ```
 
 If you need to run multiple commands you can wrap in `bash -c " ... "`:
 
-```bash
+```console
 ./zig/zig build run_with_tb -- bash -c "stuff && otherstuff"
 ```
 
@@ -156,6 +148,6 @@ run in the current directory.
 Since you often need to `cd` to a directory to run a command, there's
 a shorthand via the `R_CWD` environment variable.
 
-```bash
+```console
 R_CWD=$(pwd)/src/clients/go/samples/two-phase ./zig/zig build run_with_tb -- go run main.go
 ```
