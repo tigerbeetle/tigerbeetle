@@ -713,6 +713,7 @@ pub fn CompactionType(
                 table_builder.data_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                 });
                 WriteBlock(.data).write_block(compaction);
             }
@@ -728,6 +729,7 @@ pub fn CompactionType(
                 table_builder.filter_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                 });
                 WriteBlock(.filter).write_block(compaction);
             }

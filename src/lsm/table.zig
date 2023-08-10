@@ -452,6 +452,7 @@ pub fn TableType(
             const DataFinishOptions = struct {
                 cluster: u32,
                 address: u64,
+                snapshot_min: u64,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -524,6 +525,7 @@ pub fn TableType(
                         .value_size = value_size,
                     }),
                     .op = options.address,
+                    .timestamp = options.snapshot_min,
                     .request = builder.value_count,
                     .size = block_size - @intCast(u32, values_padding.len + block_padding.len),
                     .command = .block,
@@ -571,6 +573,7 @@ pub fn TableType(
             const FilterFinishOptions = struct {
                 cluster: u32,
                 address: u64,
+                snapshot_min: u64,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -585,6 +588,7 @@ pub fn TableType(
                         .data_block_count_max = data_block_count_max,
                     }),
                     .op = options.address,
+                    .timestamp = options.snapshot_min,
                     .size = block_size - filter.padding_size,
                     .command = .block,
                     .operation = BlockType.filter.operation(),
