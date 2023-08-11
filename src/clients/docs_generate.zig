@@ -812,7 +812,7 @@ pub fn main() !void {
 
         var parts = std.mem.split(u8, filter, ",");
         while (parts.next()) |part| {
-            for (languages) |language, i| {
+            for (languages, 0..) |language, i| {
                 if (std.mem.eql(u8, language.directory, part)) {
                     skip_language[i] = false;
                     break;
