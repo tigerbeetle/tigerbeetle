@@ -9,18 +9,24 @@ running server and do some accounting!
 
 First install the Node client.
 
-```javascript
-$ npm install -g tigerbeetle-node
+```console
+npm install -g tigerbeetle-node
 ```
 
 Then create a client connection.
 
-```javascript
-$ node
+```console
+node
+```
+```console
 Welcome to Node.js v16.14.0.
 Type ".help" for more information.
-> let { createClient } = require('tigerbeetle-node');
-> let client = createClient({ cluster_id: 0, replica_addresses: ['3000'] });
+```
+```javascript
+let { createClient } = require('tigerbeetle-node');
+let client = createClient({ cluster_id: 0, replica_addresses: ['3000'] });
+```
+```console
 info(message_bus): connected to replica 0
 ```
 
@@ -28,7 +34,7 @@ Now create two accounts. (Don't worry about the details, you can
 read about them later.)
 
 ```javascript
-> let errors = await client.createAccounts([
+let errors = await client.createAccounts([
   {
     id: 1n,
     ledger: 1,
@@ -56,14 +62,16 @@ read about them later.)
     timestamp: 0n,
   },
 ]);
-> errors
+errors;
+```
+```javascript
 []
 ```
 
 Now create a transfer of `10` (of some amount/currency) between the two accounts.
 
 ```javascript
-> errors = await client.createTransfers([
+errors = await client.createTransfers([
   {
     id: 1n,
     debit_account_id: 1n,
@@ -86,13 +94,15 @@ from account `1`. Let's query TigerBeetle for these two accounts to
 verify!
 
 ```javascript
-> let accounts = await client.lookupAccounts([1n, 2n]);
-> console.log(accounts.map(a => ({
-    id: a.id,
-	debits_posted: a.debits_posted,
-	credits_posted: a.credits_posted,
-	timestamp: a.timestamp,
-  })));
+let accounts = await client.lookupAccounts([1n, 2n]);
+console.log(accounts.map(a => ({
+  id: a.id,
+  debits_posted: a.debits_posted,
+  credits_posted: a.credits_posted,
+  timestamp: a.timestamp,
+})));
+```
+```javascript
 [
   {
     id: 1n,

@@ -31,8 +31,8 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-$ go mod init tbtest
-$ go get github.com/tigerbeetle/tigerbeetle-go
+go mod init tbtest
+go get github.com/tigerbeetle/tigerbeetle-go
 ```
 
 Now, create `main.go` and copy this into it:
@@ -51,7 +51,7 @@ func main() {
 Finally, build and run:
 
 ```console
-$ go run main.go
+go run main.go
 ```
 
 Now that all prerequisites and dependencies are correctly set
@@ -473,13 +473,13 @@ transfersRes, err = client.CreateTransfers(batch)
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ ./scripts/install_zig.sh
-$ ./zig/zig build go_client -Drelease-safe
-$ cd src/clients/go
-$ if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+./scripts/install_zig.sh
+./zig/zig build go_client -Drelease-safe
+cd src/clients/go
+if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
 ```
 
 ### On Windows
@@ -487,11 +487,11 @@ $ if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests";
 In PowerShell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ .\scripts\install_zig.bat
-$ .\zig\zig build go_client -Drelease-safe
-$ cd src\clients\go
-$ if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+.\scripts\install_zig.bat
+.\zig\zig build go_client -Drelease-safe
+cd src\clients\go
+if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
 ```
