@@ -21,7 +21,8 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-npm install tigerbeetle-node```
+npm install tigerbeetle-node
+```
 
 Now, create `main.js` and copy this into it:
 
@@ -33,7 +34,8 @@ console.log("Import ok!");
 Finally, build and run:
 
 ```console
-node main.js```
+node main.js
+```
 
 Now that all prerequisites and dependencies are correctly set
 up, let's dig into using TigerBeetle.
@@ -606,7 +608,8 @@ git submodule update --init --recursive
 ./scripts/install_zig.sh
 cd src/clients/node
 npm install --include dev
-npm pack```
+npm pack
+```
 
 ### On Windows
 

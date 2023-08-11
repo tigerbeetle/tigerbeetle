@@ -25,7 +25,8 @@ Then, install the TigerBeetle client:
 
 ```console
 dotnet new console
-dotnet add package tigerbeetle```
+dotnet add package tigerbeetle
+```
 
 ## Start the TigerBeetle server
 
@@ -41,7 +42,8 @@ address of the TigerBeetle server you started.
 Now you can run this sample:
 
 ```console
-dotnet run```
+dotnet run
+```
 
 ## Walkthrough
 

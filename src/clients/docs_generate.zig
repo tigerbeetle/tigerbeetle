@@ -63,7 +63,7 @@ const MarkdownWriter = struct {
 
     fn commands(mw: *MarkdownWriter, content: []const u8) void {
         mw.print("```console\n", .{});
-        mw.print("{s}", .{content});
+        mw.print("{s}\n", .{content});
         mw.print("```\n\n", .{});
     }
 
