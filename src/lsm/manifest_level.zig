@@ -42,9 +42,9 @@ pub fn ManifestLevelType(
             TableInfo,
             NodePool,
             table_count_max,
-            KeyAndSnapshot,
+            KeyMaxSnapshotMin,
             struct {
-                inline fn key_from_value(table_info: *const TableInfo) KeyAndSnapshot {
+                inline fn key_from_value(table_info: *const TableInfo) KeyMaxSnapshotMin {
                     return .{
                         .key_max = table_info.key_max,
                         .snapshot_min = table_info.snapshot_min,
@@ -52,9 +52,9 @@ pub fn ManifestLevelType(
                 }
             }.key_from_value,
             struct {
-                inline fn compare_key_and_snapshot(
-                    key_a: KeyAndSnapshot,
-                    key_b: KeyAndSnapshot,
+                inline fn compare_key_max_snapshot_min(
+                    key_a: KeyMaxSnapshotMin,
+                    key_b: KeyMaxSnapshotMin,
                 ) math.Order {
                     const order = compare_keys(key_a.key_max, key_b.key_max);
                     if (order == .eq) {
@@ -63,11 +63,11 @@ pub fn ManifestLevelType(
                         return order;
                     }
                 }
-            }.compare_key_and_snapshot,
+            }.compare_key_max_snapshot_min,
             .{},
         );
 
-        const KeyAndSnapshot = struct {
+        const KeyMaxSnapshotMin = struct {
             key_max: Key,
             snapshot_min: u64,
         };
@@ -212,10 +212,6 @@ pub fn ManifestLevelType(
             const absolute_index_tables = level.tables.insert_element(node_pool, table.*);
             assert(absolute_index_tables < level.tables.len());
 
-            // `keys` may have duplicate entries due to tables with the same key_max, but different
-            // snapshots.
-            maybe(absolute_index_keys != absolute_index_tables);
-
             if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
             level.generation +%= 1;
 
@@ -226,6 +222,18 @@ pub fn ManifestLevelType(
 
             if (constants.verify) {
                 assert(level.contains(table));
+
+                // `keys` may have duplicate entries due to tables with the same key_max, but
+                // different snapshots.
+                maybe(absolute_index_keys != absolute_index_tables);
+
+                var keys_iterator =
+                    level.keys.iterator_from_index(absolute_index_tables, .ascending);
+                var tables_iterator =
+                    level.tables.iterator_from_index(absolute_index_keys, .ascending);
+
+                assert(compare_keys(keys_iterator.next().?.*, table.key_max) == .eq);
+                assert(compare_keys(tables_iterator.next().?.key_max, table.key_max) == .eq);
             }
             assert(level.keys.len() == level.tables.len());
         }
