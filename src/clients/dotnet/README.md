@@ -28,7 +28,8 @@ Then, install the TigerBeetle client:
 
 ```console
 dotnet new console
-dotnet add package tigerbeetle```
+dotnet add package tigerbeetle
+```
 
 Now, create `Program.cs` and copy this into it:
 
@@ -45,7 +46,8 @@ Console.WriteLine("SUCCESS");
 Finally, build and run:
 
 ```console
-dotnet run```
+dotnet run
+```
 
 Now that all prerequisites and dependencies are correctly set
 up, let's dig into using TigerBeetle.
@@ -425,7 +427,8 @@ cd src/clients/dotnet
 dotnet restore
 dotnet clean --verbosity minimal
 dotnet build
-if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi```
+if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
+```
 
 ### On Windows
 
@@ -440,4 +443,5 @@ cd src/clients/dotnet
 dotnet restore
 dotnet clean --verbosity minimal
 dotnet build
-if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }```
+if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
+```

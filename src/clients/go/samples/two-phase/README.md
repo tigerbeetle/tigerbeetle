@@ -24,7 +24,8 @@ Then, install the TigerBeetle client:
 
 ```console
 go mod init tbtest
-go get github.com/tigerbeetle/tigerbeetle-go```
+go get github.com/tigerbeetle/tigerbeetle-go
+```
 
 ## Start the TigerBeetle server
 
@@ -40,7 +41,8 @@ address of the TigerBeetle server you started.
 Now you can run this sample:
 
 ```console
-go run main.go```
+go run main.go
+```
 
 ## Walkthrough
 
