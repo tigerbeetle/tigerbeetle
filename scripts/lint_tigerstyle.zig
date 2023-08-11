@@ -32,7 +32,7 @@ pub fn main() !void {
 
     assert(args.skip());
     while (args.next()) |raw_path| {
-        const path = mem.span(raw_path);
+        const path = mem.span(@as([*c]const u8, raw_path));
         lint_file(path, fs.cwd(), path) catch |err| switch (err) {
             error.IsDir, error.AccessDenied => try lint_dir(path, fs.cwd(), path),
             else => return err,
@@ -95,7 +95,7 @@ fn lint_dir(file_path: []const u8, parent_dir: fs.Dir, parent_sub_path: []const 
 
     var dir_it = dir_iterable.iterate();
     while (try dir_it.next()) |entry| {
-        const is_dir = entry.kind == .Directory;
+        const is_dir = entry.kind == .directory;
 
         if (is_dir and std.mem.eql(u8, entry.name, "zig-cache")) continue;
 
@@ -118,7 +118,7 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
 
     const stat = try source_file.stat();
 
-    if (stat.kind == .Directory) return error.IsDir;
+    if (stat.kind == .directory) return error.IsDir;
 
     // Add to set after no longer possible to get error.IsDir.
     if (try seen.fetchPut(gpa, stat.inode, {})) |_| return;
@@ -132,7 +132,7 @@ fn lint_file(file_path: []const u8, dir: fs.Dir, sub_path: []const u8) LintError
     );
     defer gpa.free(source);
 
-    var tree = try std.zig.parse(gpa, source);
+    var tree = try std.zig.Ast.parse(gpa, source, .zig);
     defer tree.deinit(gpa);
 
     if (tree.errors.len != 0) return error.ParseError;

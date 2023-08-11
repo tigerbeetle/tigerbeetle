@@ -206,19 +206,19 @@ pub fn StateMachineType(
                     // * Each transfer modifies two accounts. However, this does not
                     //   necessitate an additional ×2 multiplier — the credits of the debit
                     //   account and the debits of the credit account are not modified.
-                    .debits_pending = config.lsm_batch_multiple *  @as(usize, @max(
+                    .debits_pending = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     )),
-                    .debits_posted = config.lsm_batch_multiple *  @as(usize, @max(
+                    .debits_posted = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     )),
-                    .credits_pending = config.lsm_batch_multiple *  @as(usize, @max(
+                    .credits_pending = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     )),
-                    .credits_posted = config.lsm_batch_multiple *  @as(usize, @max(
+                    .credits_posted = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     )),
