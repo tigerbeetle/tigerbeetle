@@ -1449,7 +1449,7 @@ pub fn ReplicaType(
                 message.header.request,
             });
 
-            self.client_replies.write_reply(slot, message);
+            self.client_replies.write_reply(slot, message, .repair);
         }
 
         /// Known issue:
@@ -3761,7 +3761,7 @@ pub fn ReplicaType(
             if (reply.header.size == @sizeOf(Header)) {
                 self.client_replies.remove_reply(reply_slot);
             } else {
-                self.client_replies.write_reply(reply_slot, reply);
+                self.client_replies.write_reply(reply_slot, reply, .create);
             }
         }
 
@@ -3799,7 +3799,7 @@ pub fn ReplicaType(
                 if (entry.header.size == @sizeOf(Header)) {
                     self.client_replies.remove_reply(reply_slot);
                 } else {
-                    self.client_replies.write_reply(reply_slot, reply);
+                    self.client_replies.write_reply(reply_slot, reply, .create);
                 }
             } else {
                 // If no entry exists, then the session must have been evicted while being prepared.

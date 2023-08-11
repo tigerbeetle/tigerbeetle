@@ -300,14 +300,31 @@ pub fn ClientRepliesType(comptime Storage: type) type {
 
         /// The caller is responsible for ensuring that the ClientReplies is able to write
         /// by calling `write_reply()` after `ready()` finishes.
-        pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
-            assert(client_replies.ready_callback == null);
+        pub fn write_reply(
+            client_replies: *ClientReplies,
+            slot: Slot,
+            message: *Message,
+            trigger: enum { create, repair },
+        ) void {
             assert(client_replies.writes.available() > 0);
             maybe(client_replies.writing.isSet(slot.index));
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the client sessions superblock trailer.
             assert(message.header.size != @sizeOf(vsr.Header));
+
+            switch (trigger) {
+                .create => {
+                    assert(client_replies.ready_callback == null);
+                    assert(client_replies.checkpoint_callback == null);
+                    maybe(client_replies.faulty.isSet(slot.index));
+                },
+                .repair => {
+                    maybe(client_replies.ready_callback == null);
+                    maybe(client_replies.checkpoint_callback == null);
+                    assert(client_replies.faulty.isSet(slot.index));
+                },
+            }
 
             const write = client_replies.writes.acquire().?;
             write.* = .{
@@ -365,6 +382,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const write = @fieldParentPtr(ClientReplies.Write, "completion", completion);
             const client_replies = write.client_replies;
             const message = write.message;
+            assert(client_replies.writing.isSet(write.slot.index));
+            maybe(client_replies.faulty.isSet(write.slot.index));
 
             log.debug("{}: write_reply: wrote (client={} request={})", .{
                 client_replies.replica,
