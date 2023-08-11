@@ -200,6 +200,8 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
 /// Run the command and return its stdout.
 ///
 /// Returns an error if the command exists with a non-zero status or a non-empty stderr.
+///
+/// Trims the trailing newline, if any.
 pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) ![]const u8 {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
@@ -229,7 +231,12 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     }
 
     if (res.stderr.len > 0) return error.NonEmptyStderr;
-    return res.stdout;
+
+    const trailing_newline = if (std.mem.indexOf(u8, res.stdout, "\n")) |first_newline|
+        first_newline == res.stdout.len - 1
+    else
+        false;
+    return res.stdout[0 .. res.stdout.len - if (trailing_newline) @as(usize, 1) else 0];
 }
 
 /// Spawns the process, piping its stdout and stderr.
@@ -289,7 +296,7 @@ fn echo_command(child: *const std.ChildProcess) void {
     assert(child.stdout_behavior == .Inherit);
 
     std.debug.print("$ ", .{});
-    for (child.argv) |arg, i| {
+    for (child.argv, 0..) |arg, i| {
         if (i != 0) std.debug.print(" ", .{});
         std.debug.print("{s}", .{arg});
     }
@@ -299,9 +306,8 @@ fn echo_command(child: *const std.ChildProcess) void {
 /// Returns current git commit hash as an ASCII string.
 pub fn git_commit(shell: *Shell) ![]const u8 {
     const stdout = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
-    // +1 for trailing newline.
-    if (stdout.len != 40 + 1) return error.InvalidCommitFormat;
-    return stdout[0..40];
+    if (stdout.len != 40) return error.InvalidCommitFormat;
+    return stdout;
 }
 
 /// Returns current git tag.
