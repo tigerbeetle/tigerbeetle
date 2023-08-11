@@ -3239,7 +3239,7 @@ fn JniInterface(comptime T: type) type {
             const fn_ptr = @as(*const Fn, @ptrCast(@alignCast(
                 vtable.functions[@intFromEnum(function)],
             )));
-            return @call(.{}, fn_ptr, .{self} ++ args);
+            return @call(.auto, fn_ptr, .{self} ++ args);
         }
     };
 }

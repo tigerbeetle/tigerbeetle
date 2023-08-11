@@ -131,26 +131,28 @@ fn to_case(
     comptime input: []const u8,
     comptime case: enum { camel, pascal, upper },
 ) []const u8 {
-    var output: [input.len]u8 = undefined;
-    if (case == .upper) {
-        return std.ascii.upperString(output[0..], input);
-    } else {
-        var len: usize = 0;
-        var iterator = std.mem.tokenize(u8, input, "_");
-        while (iterator.next()) |word| {
-            _ = std.ascii.lowerString(output[len..], word);
-            output[len] = std.ascii.toUpper(output[len]);
-            len += word.len;
+    return comptime blk: {
+        var output: [input.len]u8 = undefined;
+        if (case == .upper) {
+            break :blk std.ascii.upperString(output[0..], input);
+        } else {
+            var len: usize = 0;
+            var iterator = std.mem.tokenize(u8, input, "_");
+            while (iterator.next()) |word| {
+                _ = std.ascii.lowerString(output[len..], word);
+                output[len] = std.ascii.toUpper(output[len]);
+                len += word.len;
+            }
+
+            output[0] = switch (case) {
+                .camel => std.ascii.toLower(output[0]),
+                .pascal => std.ascii.toUpper(output[0]),
+                .upper => unreachable,
+            };
+
+            break :blk output[0..len];
         }
-
-        output[0] = switch (case) {
-            .camel => std.ascii.toLower(output[0]),
-            .pascal => std.ascii.toUpper(output[0]),
-            .upper => unreachable,
-        };
-
-        return output[0..len];
-    }
+    };
 }
 
 fn emit_enum(

@@ -32,8 +32,8 @@ pub const IO = struct {
         // Detect the linux version to ensure that we support all io_uring ops used.
         const uts = std.os.uname();
         const release = std.mem.sliceTo(&uts.release, 0);
-        const version = try std.builtin.Version.parse(release);
-        if (version.order(std.builtin.Version{ .major = 5, .minor = 5 }) == .lt) {
+        const version = try std.SemanticVersion.parse(release);
+        if (version.order(std.SemanticVersion{ .major = 5, .minor = 5, .patch = 0 }) == .lt) {
             @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
         }
 
