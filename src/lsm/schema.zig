@@ -84,17 +84,17 @@ pub const BlockType = enum(u8) {
     data = 4,
 
     pub fn valid(vsr_operation: vsr.Operation) bool {
-        _ = std.meta.intToEnum(BlockType, @enumToInt(vsr_operation)) catch return false;
+        _ = std.meta.intToEnum(BlockType, @intFromEnum(vsr_operation)) catch return false;
 
         return true;
     }
 
     pub inline fn from(vsr_operation: vsr.Operation) BlockType {
-        return @intToEnum(BlockType, @enumToInt(vsr_operation));
+        return @as(BlockType, @enumFromInt(@intFromEnum(vsr_operation)));
     }
 
     pub inline fn operation(block_type: BlockType) vsr.Operation {
-        return @intToEnum(vsr.Operation, @enumToInt(block_type));
+        return @as(vsr.Operation, @enumFromInt(@intFromEnum(block_type)));
     }
 };
 

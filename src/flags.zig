@@ -413,7 +413,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
         assert(field_count >= 2);
 
         var result: []const u8 = "";
-        for (std.meta.fields(E)) |field, field_index| {
+        for (std.meta.fields(E), 0..) |field, field_index| {
             const separator = switch (field_index) {
                 0 => "",
                 else => ", ",
@@ -426,7 +426,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
 }
 
 fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
-    comptime {
+    return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 
         var result: []const u8 = "--";
@@ -436,8 +436,8 @@ fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
             index = index + i + 1;
         }
         result = result ++ field.name[index..];
-        return result;
-    }
+        break :blk result;
+    };
 }
 
 test flag_name {

@@ -1263,7 +1263,7 @@ fn is_composite_key(comptime Key: type) bool {
         @hasField(Key, "field") and
         @hasField(Key, "timestamp"))
     {
-        const Field = std.meta.fieldInfo(Key, .field).field_type;
+        const Field = std.meta.fieldInfo(Key, .field).type;
         return Key == CompositeKey(Field);
     }
 
