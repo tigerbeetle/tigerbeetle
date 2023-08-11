@@ -797,7 +797,7 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
-            for (self.grid_write_blocks, 0..) |*block, i| {
+            for (&self.grid_write_blocks, 0..) |*block, i| {
                 errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }
@@ -2029,7 +2029,7 @@ pub fn ReplicaType(
             assert(op_max >= op_min);
 
             // We must add 1 because op_max and op_min are both inclusive:
-            const count_max = @min(constants.request_headers_max, op_max - op_min + 1);
+            const count_max: usize = @min(constants.request_headers_max, op_max - op_min + 1);
             assert(count_max * @sizeOf(vsr.Header) <= constants.message_body_size_max);
 
             const count = self.journal.copy_latest_headers_between(
@@ -3893,7 +3893,7 @@ pub fn ReplicaType(
             }
 
             message.header.* = .{
-                .size = @as(u32, @intCast(@sizeOf(Header) * (1 + self.view_headers.array.len))),
+                .size = @as(u32, @intCast(@as(usize, @sizeOf(Header)) * (1 + self.view_headers.array.len))),
                 .command = command,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -9043,7 +9043,7 @@ const PipelineCache = struct {
     }
 
     fn deinit(pipeline: *PipelineCache, message_pool: *MessagePool) void {
-        for (pipeline.prepares) |*entry| {
+        for (&pipeline.prepares) |*entry| {
             if (entry.*) |m| {
                 message_pool.unref(m);
                 entry.* = null;

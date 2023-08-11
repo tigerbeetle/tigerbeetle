@@ -2294,7 +2294,7 @@ fn recovery_case(header: ?*const Header, prepare: ?*const Header, prepare_op_max
     };
 
     var result: ?*const Case = null;
-    for (recovery_cases) |*case| {
+    for (&recovery_cases) |*case| {
         const match = case.check(parameters) catch {
             log.err("recovery_case: impossible state: case={s} parameters={any}", .{
                 case.label,

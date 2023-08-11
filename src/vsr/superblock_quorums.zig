@@ -97,7 +97,7 @@ pub fn QuorumsType(comptime options: Options) type {
 
             for (copies, 0..) |*copy, index| quorums.count_copy(copy, index, threshold);
 
-            std.sort.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
+            std.mem.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
 
             for (quorums.slice()) |quorum| {
                 if (quorum.copies.count() == options.superblock_copies) {

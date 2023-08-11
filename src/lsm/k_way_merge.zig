@@ -332,7 +332,7 @@ fn TestContext(comptime k_max: u32) type {
                     }
                 }
                 const expect_with_duplicates = expect_buffer[0..expect_buffer_len];
-                std.sort.sort(Value, expect_with_duplicates, {}, value_less_than);
+                std.mem.sort(Value, expect_with_duplicates, {}, value_less_than);
 
                 var target: usize = 0;
                 var previous_key: ?u32 = null;
@@ -382,7 +382,7 @@ fn TestContext(comptime k_max: u32) type {
                 },
             }
             for (stream) |*key| key.* = key.* % key_max;
-            std.sort.sort(u32, stream, {}, key_less_than);
+            std.mem.sort(u32, stream, {}, key_less_than);
         }
 
         fn key_less_than(_: void, a: u32, b: u32) bool {

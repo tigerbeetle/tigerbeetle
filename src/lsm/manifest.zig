@@ -159,11 +159,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             tree_id: u128,
         ) !Manifest {
             var levels: [constants.lsm_levels]Level = undefined;
-            for (levels, 0..) |*level, i| {
+            for (&levels, 0..) |*level, i| {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
             }
-            errdefer for (levels) |*level| level.deinit(allocator, node_pool);
+            errdefer for (&levels) |*level| level.deinit(allocator, node_pool);
 
             var manifest_log = try ManifestLog.init(allocator, grid, tree_id);
             errdefer manifest_log.deinit(allocator);
@@ -176,13 +176,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-            for (manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
+            for (&manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
 
             manifest.manifest_log.deinit(allocator);
         }
 
         pub fn reset(manifest: *Manifest) void {
-            for (manifest.levels) |*level| level.reset();
+            for (&manifest.levels) |*level| level.reset();
 
             manifest.manifest_log.reset();
 
@@ -304,7 +304,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest.manifest_log.opened);
 
             var manifest_range: ?KeyRange = null;
-            for (manifest.levels) |*level| {
+            for (&manifest.levels) |*level| {
                 if (level.key_range.key_range) |level_range| {
                     if (manifest_range) |*range| {
                         if (compare_keys(level_range.key_min, range.key_min) == .lt) {
@@ -404,7 +404,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         };
 
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
-            for (manifest.levels, 0..) |*manifest_level, index| {
+            for (&manifest.levels, 0..) |*manifest_level, index| {
                 const level = @as(u8, @intCast(index));
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);

@@ -168,7 +168,7 @@ const ConfigCluster = struct {
     /// It is used to assert that all cluster members share the same config.
     pub fn checksum(comptime config: ConfigCluster) u128 {
         @setEvalBranchQuota(10_000);
-        var hasher = std.crypto.hash.Blake3.init(.{});
+        var hasher = std.crypto.hash.blake2.Blake2s256.init(.{});
         inline for (std.meta.fields(ConfigCluster)) |field| {
             const value = @field(config, field.name);
             const value_64 = @as(u64, value);

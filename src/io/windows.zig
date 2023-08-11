@@ -786,6 +786,7 @@ pub const IO = struct {
                         error.BrokenPipe => unreachable,
                         error.ConnectionTimedOut => unreachable,
                         error.AccessDenied => error.InputOutput,
+                        error.NetNameDeleted => unreachable,
                         else => |e| e,
                     };
                 }

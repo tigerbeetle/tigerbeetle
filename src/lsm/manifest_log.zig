@@ -153,7 +153,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
             var blocks: [blocks_count_max]BlockPtr = undefined;
-            for (blocks, 0..) |*block, i| {
+            for (&blocks, 0..) |*block, i| {
                 errdefer for (blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }

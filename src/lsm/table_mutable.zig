@@ -197,7 +197,7 @@ pub fn TableMutableType(comptime Table: type) type {
 
             const values = values_max[0..i];
             assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+            std.mem.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
 
             table.clear();
             assert(table.count() == 0);

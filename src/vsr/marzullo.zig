@@ -52,8 +52,8 @@ pub const Marzullo = struct {
             };
         }
 
-        // Use a simpler sort implementation than the complexity of `std.sort.sort()` for safety:
-        std.sort.insertionSort(Tuple, tuples, {}, less_than);
+        // Use a simpler sort implementation than the complexity of `std.mem.sort()` for safety:
+        std.sort.insertion(Tuple, tuples, {}, less_than);
 
         // Here is a description of the algorithm:
         // https://en.wikipedia.org/wiki/Marzullo%27s_algorithm#Method
