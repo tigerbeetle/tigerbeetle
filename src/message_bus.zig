@@ -681,9 +681,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return null;
                 }
 
-                const header: []Header = @alignCast(
-                    mem.bytesAsValue(Header, data[0..@sizeOf(Header)]),
-                );
+                const header: *const Header = @alignCast(mem.bytesAsValue(Header, data[0..@sizeOf(Header)]));
 
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {

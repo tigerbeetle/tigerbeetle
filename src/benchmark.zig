@@ -392,8 +392,8 @@ const Benchmark = struct {
                 return ns1 < ns2;
             }
         }).lessThan;
-        std.sort.sort(u64, b.batch_latency_ns.items, {}, less_than_ns);
-        std.sort.sort(u64, b.transfer_latency_ns.items, {}, less_than_ns);
+        std.mem.sort(u64, b.batch_latency_ns.items, {}, less_than_ns);
+        std.mem.sort(u64, b.transfer_latency_ns.items, {}, less_than_ns);
 
         const stdout = std.io.getStdOut().writer();
 

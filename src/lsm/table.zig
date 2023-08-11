@@ -503,7 +503,7 @@ pub fn TableType(
                         key_from_value,
                         sentinel_key,
                         values,
-                        @alignCast(key_layout),
+                        key_layout,
                     );
                 }
 
@@ -750,7 +750,7 @@ pub fn TableType(
                     Key,
                     Value,
                     compare_keys,
-                    @alignCast(key_layout),
+                    key_layout,
                     data_block_values_used(data_block),
                     key,
                 );

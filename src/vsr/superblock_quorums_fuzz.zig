@@ -124,7 +124,7 @@ fn test_quorums_working(
     }
 
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
-    std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
+    std.mem.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
     for (headers, 0..) |*header, i| {
         header.* = std.mem.zeroInit(SuperBlockHeader, .{

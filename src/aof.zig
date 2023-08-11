@@ -399,7 +399,7 @@ pub fn aof_merge(
 
     var aofs: [constants.members_max]AOF.Iterator = undefined;
     var aof_count: usize = 0;
-    defer for (aofs[0..aof_count]) |*it| it.close();
+    defer for (&aofs[0..aof_count]) |*it| it.close();
 
     assert(input_paths.len < aofs.len);
 
@@ -431,7 +431,7 @@ pub fn aof_merge(
     // located.
     try stdout.print("Building checksum map...\n", .{});
     var current_parent: ?u128 = null;
-    for (aofs[0..aof_count], 0..) |*aof, i| {
+    for (&aofs[0..aof_count], 0..) |*aof, i| {
         // While building our checksum map, don't validate our hash chain. We might have a file that
         // has a broken chain, but still contains valid data that can be used for recovery with
         // other files.

@@ -248,7 +248,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
             assert(tree.tracer_slot == null);
 
-            for (tree.compaction_table) |*compaction| compaction.deinit(allocator);
+            for (&tree.compaction_table) |*compaction| compaction.deinit(allocator);
             tree.compaction_table_immutable.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
@@ -268,7 +268,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.reset();
 
             tree.compaction_table_immutable.reset();
-            for (tree.compaction_table) |*compaction| compaction.reset();
+            for (&tree.compaction_table) |*compaction| compaction.reset();
 
             if (tree.values_cache) |cache| cache.reset();
 
@@ -1114,7 +1114,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             // Assert no outstanding compactions.
             assert(tree.compaction_table_immutable.state == .idle);
-            for (tree.compaction_table) |*compaction| {
+            for (&tree.compaction_table) |*compaction| {
                 assert(compaction.state == .idle);
             }
 

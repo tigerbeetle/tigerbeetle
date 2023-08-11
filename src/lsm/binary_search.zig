@@ -394,7 +394,7 @@ const test_binary_search = struct {
 
         const keys = try allocator.alloc(u32, keys_count);
         for (keys) |*key| key.* = fuzz.random_int_exponential(random, u32, 100);
-        std.sort.sort(u32, keys, {}, less_than_key);
+        std.mem.sort(u32, keys, {}, less_than_key);
 
         return keys;
     }

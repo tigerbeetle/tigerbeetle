@@ -193,7 +193,7 @@ const Command = struct {
             var node_maybe = arena.state.buffer_list.first;
             while (node_maybe) |node| {
                 allocation_count += 1;
-                allocation_size += node.data.len;
+                allocation_size += node.data;
                 node_maybe = node.next;
             }
         }
