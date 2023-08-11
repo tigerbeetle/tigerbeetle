@@ -290,6 +290,15 @@ pub fn main() !void {
             }
         }
     } else {
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                std.debug.print("{}: journal: {}\n" ,.{replica.replica, replica.journal.faulty.count});
+                std.debug.print("{}: client_replies: {}\n" ,.{replica.replica, replica.client_replies.faulty.count()});
+                std.debug.print("{}: grid_repair_tables: {}\n" ,.{replica.replica, replica.grid_repair_tables.executing()});
+                std.debug.print("{}: sync_tables: {}\n" ,.{replica.replica, replica.sync_tables == null});
+            }
+        }
+
         if (simulator.core_missing_primary()) {
             stdx.unimplemented("repair requires reachable primary");
         } else if (simulator.core_missing_quorum()) {

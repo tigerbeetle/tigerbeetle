@@ -300,15 +300,29 @@ pub fn ClientRepliesType(comptime Storage: type) type {
 
         /// The caller is responsible for ensuring that the ClientReplies is able to write
         /// by calling `write_reply()` after `ready()` finishes.
-        pub fn write_reply(client_replies: *ClientReplies, slot: Slot, message: *Message) void {
-            assert(client_replies.ready_callback == null); // TODO vopr crash?
+        pub fn write_reply(
+            client_replies: *ClientReplies,
+            slot: Slot,
+            message: *Message,
+            trigger: enum { create, repair },
+        ) void {
             assert(client_replies.writes.available() > 0);
             maybe(client_replies.writing.isSet(slot.index));
-            maybe(client_replies.faulty.isSet(slot.index));
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
             // stored safely in the client sessions superblock trailer.
             assert(message.header.size != @sizeOf(vsr.Header));
+
+            switch (trigger) {
+                .create => {
+                    assert(client_replies.ready_callback == null);
+                    maybe(client_replies.faulty.isSet(slot.index));
+                },
+                .repair => {
+                    maybe(client_replies.ready_callback == null);
+                    assert(client_replies.faulty.isSet(slot.index));
+                },
+            }
 
             client_replies.faulty.unset(slot.index);
 

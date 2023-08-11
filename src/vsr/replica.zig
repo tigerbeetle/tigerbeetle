@@ -1501,7 +1501,7 @@ pub fn ReplicaType(
                 message.header.request,
             });
 
-            self.client_replies.write_reply(slot, message);
+            self.client_replies.write_reply(slot, message, .repair);
         }
 
         /// Known issue:
@@ -3851,7 +3851,7 @@ pub fn ReplicaType(
             if (reply.header.size == @sizeOf(Header)) {
                 self.client_replies.remove_reply(reply_slot);
             } else {
-                self.client_replies.write_reply(reply_slot, reply);
+                self.client_replies.write_reply(reply_slot, reply, .create);
             }
         }
 
@@ -3889,7 +3889,7 @@ pub fn ReplicaType(
                 if (entry.header.size == @sizeOf(Header)) {
                     self.client_replies.remove_reply(reply_slot);
                 } else {
-                    self.client_replies.write_reply(reply_slot, reply);
+                    self.client_replies.write_reply(reply_slot, reply, .create);
                 }
             } else {
                 // If no entry exists, then the session must have been evicted while being prepared.
@@ -7574,6 +7574,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.status != .recovering);
             assert(self.syncing != .idle);
+            assert(self.sync_tables == null);
 
             log.debug("{}: sync_start_from_sync " ++
                 "(checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7989,9 +7990,8 @@ pub fn ReplicaType(
 
             self.grid_repair_tables.release(table);
 
-            switch (result) {
-                .repaired => if (self.sync_tables) |_| self.sync_request_tables(),
-                .canceled => {},
+            if (self.sync_tables) |_| {
+                self.sync_request_tables();
             }
         }
 

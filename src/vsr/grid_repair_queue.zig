@@ -10,8 +10,6 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.grid_repair_queue);
 const maybe = stdx.maybe;
 
-// 952788207565583899
-
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
@@ -74,9 +72,8 @@ pub const GridRepairQueue = struct {
         const TableContent = struct { table: *RepairTable, index: usize };
     };
 
-    pub const RepairTableResult = enum { canceled, repaired };
+    pub const RepairTableResult = enum { repaired, canceled, released };
     pub const RepairTable = struct {
-        // TODO rename "table_address"/"table_checksum"?
         index_address: u64,
         index_checksum: u128,
         /// TODO(Congestion control): This bitset is currently used only for extra validation.
@@ -376,6 +373,7 @@ pub const GridRepairQueue = struct {
 
     pub fn cancel(queue: *GridRepairQueue) void {
         assert(!queue.canceling);
+        assert(queue.checkpointing == null);
 
         queue.faulty_blocks.clearRetainingCapacity();
         queue.faulty_blocks_repair_index = 0;
@@ -390,6 +388,7 @@ pub const GridRepairQueue = struct {
         free_set: *const vsr.superblock.SuperBlockFreeSet,
     ) void {
         assert(!queue.canceling);
+        assert(queue.checkpointing == null);
 
         var aborting: usize = 0;
 
@@ -415,19 +414,17 @@ pub const GridRepairQueue = struct {
             }
         }
 
-        queue.canceling = true;
         var tables: FIFO(RepairTable) = .{ .name = queue.faulty_tables.name };
         while (queue.faulty_tables.pop()) |table| {
             assert(!free_set.is_free(table.index_address));
 
             if (free_set.is_released(table.index_address)) {
-                (table.callback)(table, .canceled);
+                (table.callback)(table, .released);
             } else {
                 tables.push(table);
             }
         }
         queue.faulty_tables = tables;
-        queue.canceling = false;
 
         queue.checkpointing = .{ .aborting = aborting };
     }
