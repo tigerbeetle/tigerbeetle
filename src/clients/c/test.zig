@@ -8,7 +8,6 @@ const c = @cImport({
     @cInclude("tb_client.h");
 });
 
-
 const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");
 const Packet = @import("tb_client/packet.zig").Packet;

@@ -579,7 +579,7 @@ const JNIHelper = struct {
         const message = std.fmt.bufPrintZ(&buf, fmt, args) catch |err| switch (err) {
             error.NoSpaceLeft => blk: {
                 buf[255] = 0;
-                break :blk std.meta.assumeSentinel(buf[0..255], 0);
+                break :blk @as([:0]const u8, @ptrCast(buf[0..255]));
             },
         };
 
@@ -673,9 +673,6 @@ const JNIHelper = struct {
         const length = env.get_string_utf_length(string);
         if (length < 0) return null;
 
-        return std.meta.assumeSentinel(
-            address[0..@as(usize, @intCast(length))],
-            0,
-        );
+        return @ptrCast(address[0..@as(usize, @intCast(length))]);
     }
 };

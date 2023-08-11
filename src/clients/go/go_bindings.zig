@@ -188,7 +188,7 @@ fn emit_struct(
     });
 
     const min_len = calculate_min_len(type_info);
-    var flagsField = false;
+    comptime var flagsField = false;
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
             .Array => |array| {
@@ -216,7 +216,7 @@ fn emit_struct(
 
     try buffer.writer().print("}}\n\n", .{});
 
-    if (comptime flagsField) {
+    if (flagsField) {
         const flagType = if (comptime std.mem.eql(u8, name, "Account")) tb.AccountFlags else tb.TransferFlags;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
         try buffer.writer().print(
@@ -279,8 +279,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
             .Struct => |info| switch (info.layout) {
                 .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
                 .Packed => try emit_packed_struct(buffer, info, name, comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
-                else => {},
-                // .Extern => try emit_struct(buffer, info, name),
+                .Extern => try emit_struct(buffer, info, name),
             },
             .Enum => try emit_enum(buffer, ZigType, name, type_mapping[2], comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),

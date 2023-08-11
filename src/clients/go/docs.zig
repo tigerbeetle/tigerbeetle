@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Docs = @import("../docs_types.zig").Docs;
 const run = @import("../shutil.zig").run;
@@ -11,11 +12,20 @@ fn go_current_commit_pre_install_hook(
     _: []const u8,
 ) !void {
     for (&[_][]const u8{ "go.mod", "go.sum" }) |file| {
-        std.os.unlink(try std.fmt.allocPrint(
+        const path = try std.fmt.allocPrint(
             arena.allocator(),
             "{s}/{s}",
             .{ sample_dir, file },
-        )) catch {
+        );
+        // TODO: Mismatching internal std.os.unlink() error in Zig 0.11.0
+        const unlink_result = switch (builtin.os.tag) {
+            .windows => blk: {
+                const path_w = try std.os.windows.sliceToPrefixedFileW(path);
+                break :blk std.os.windows.DeleteFile(path_w.span(), .{ .dir = std.fs.cwd().fd });
+            },
+            else => std.os.unlink(path),
+        };
+        unlink_result catch {
             // Delete only if they exist.
         };
     }
