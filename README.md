@@ -2,7 +2,7 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-TigerBeetle is not yet production-ready. In particular, the protocol and data file formats may change and [might not be compatible across different commits](https://github.com/tigerbeetle/tigerbeetle/issues/1109), while we nail down and tune the optimal format ahead of release.
+TigerBeetle is not yet production-ready. In particular, the protocol and data file formats may change and [might not be compatible across different commits](https://github.com/tigerbeetle/tigerbeetle/issues/1109), while we fine-tune the format ahead of release.
 
 The production version of **TigerBeetle is now under active development**.
 
