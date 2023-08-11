@@ -52,6 +52,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 replica: u8,
                 /// The file descriptor for the process on which to accept connections.
                 accept_fd: os.socket_t,
+                /// Address the accept_fd is bound to, as reported by `getsockname`.
+                ///
+                /// This allows passing port 0 as an address for the OS to pick an open port for us
+                /// in a TOCTOU immune way and logging the resulting port number.
+                accept_address: std.net.Address,
                 accept_completion: IO.Completion = undefined,
                 /// The connection reserved for the currently in progress accept operation.
                 /// This is non-null exactly when an accept operation is submitted.
@@ -125,9 +130,13 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 .cluster = cluster,
                 .configuration = options.configuration,
                 .process = switch (process_type) {
-                    .replica => .{
-                        .replica = process.replica,
-                        .accept_fd = try init_tcp(options.io, options.configuration[process.replica]),
+                    .replica => blk: {
+                        const tcp = try init_tcp(options.io, options.configuration[process.replica]);
+                        break :blk .{
+                            .replica = process.replica,
+                            .accept_fd = tcp.fd,
+                            .accept_address = tcp.address,
+                        };
                     },
                     .client => {},
                 },
@@ -161,7 +170,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             allocator.free(bus.replicas_connect_attempts);
         }
 
-        fn init_tcp(io: *IO, address: std.net.Address) !os.socket_t {
+        fn init_tcp(io: *IO, address: std.net.Address) !struct {
+            fd: os.socket_t,
+            address: std.net.Address,
+        } {
             const fd = try io.open_socket(
                 address.any.family,
                 os.SOCK.STREAM,
@@ -225,9 +237,17 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             try set(fd, os.SOL.SOCKET, os.SO.REUSEADDR, 1);
             try os.bind(fd, &address.any, address.getOsSockLen());
+
+            // Resolve port 0 to an actual port picked by the OS.
+            var address_resolved: std.net.Address = .{ .any = undefined };
+            var addrlen: os.socklen_t = @sizeOf(std.net.Address);
+            try os.getsockname(fd, &address_resolved.any, &addrlen);
+            assert(address_resolved.getOsSockLen() == addrlen);
+            assert(address_resolved.any.family == address.any.family);
+
             try os.listen(fd, constants.tcp_backlog);
 
-            return fd;
+            return .{ .fd = fd, .address = address_resolved };
         }
 
         pub fn tick(bus: *Self) void {

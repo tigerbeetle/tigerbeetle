@@ -12,9 +12,9 @@ const stdx = @import("../stdx.zig");
 const div_ceil = stdx.div_ceil;
 const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
+const key_fingerprint = @import("tree.zig").key_fingerprint;
 
-const BlockType = @import("grid.zig").BlockType;
-const allocate_block = @import("grid.zig").allocate_block;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const schema = @import("schema.zig");
 
@@ -452,6 +452,7 @@ pub fn TableType(
             const DataFinishOptions = struct {
                 cluster: u32,
                 address: u64,
+                snapshot_min: u64,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -476,7 +477,7 @@ pub fn TableType(
                 const filter_bytes = filter.block_filter(builder.filter_block);
                 for (values) |*value| {
                     const key = key_from_value(value);
-                    const fingerprint = bloom_filter.Fingerprint.create(stdx.hash_inline(key));
+                    const fingerprint = key_fingerprint(key);
                     bloom_filter.add(fingerprint, filter_bytes);
                 }
 
@@ -521,10 +522,11 @@ pub fn TableType(
                         .value_size = value_size,
                     })),
                     .op = options.address,
+                    .timestamp = options.snapshot_min,
                     .request = builder.value_count,
                     .size = block_size - @as(u32, @intCast(values_padding.len + block_padding.len)),
                     .command = .block,
-                    .operation = BlockType.data.operation(),
+                    .operation = schema.BlockType.data.operation(),
                 };
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
@@ -568,6 +570,7 @@ pub fn TableType(
             const FilterFinishOptions = struct {
                 cluster: u32,
                 address: u64,
+                snapshot_min: u64,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -582,9 +585,10 @@ pub fn TableType(
                         .data_block_count_max = data_block_count_max,
                     })),
                     .op = options.address,
+                    .timestamp = options.snapshot_min,
                     .size = block_size - filter.padding_size,
                     .command = .block,
-                    .operation = BlockType.filter.operation(),
+                    .operation = schema.BlockType.filter.operation(),
                 };
 
                 const body = builder.filter_block[@sizeOf(vsr.Header)..header.size];
@@ -642,7 +646,7 @@ pub fn TableType(
                     .timestamp = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
-                    .operation = BlockType.index.operation(),
+                    .operation = schema.BlockType.index.operation(),
                 };
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();

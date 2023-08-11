@@ -22,7 +22,6 @@ pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
-    .grid = @import("lsm/grid.zig"),
     .groove = @import("lsm/groove.zig"),
     .forest = @import("lsm/forest.zig"),
 };
@@ -41,6 +40,7 @@ pub const SyncTargetQuorum = @import("vsr/sync.zig").TargetQuorum;
 pub const SyncTrailer = @import("vsr/sync.zig").Trailer;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
+pub const GridType = @import("vsr/grid.zig").GridType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;

@@ -207,7 +207,7 @@ const Command = struct {
         log_main.info("{}: cluster={}: listening on {}", .{
             replica.replica,
             replica.cluster,
-            args.addresses[replica.replica],
+            replica.message_bus.process.accept_address,
         });
 
         if (constants.aof_recovery) {

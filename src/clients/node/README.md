@@ -21,7 +21,7 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-$ npm install tigerbeetle-node
+npm install tigerbeetle-node
 ```
 
 Now, create `main.js` and copy this into it:
@@ -34,7 +34,7 @@ console.log("Import ok!");
 Finally, build and run:
 
 ```console
-$ node main.js
+node main.js
 ```
 
 Now that all prerequisites and dependencies are correctly set
@@ -74,9 +74,8 @@ addresses for all replicas in the cluster. The cluster
 ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
-Clients are thread-safe. But for better
-performance, a single instance should be shared between
-multiple concurrent tasks.
+Clients are thread-safe and a single instance should be shared
+between multiple concurrent tasks.
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -252,7 +251,7 @@ distinguish accounts.
 ```javascript
 const accounts = await client.lookupAccounts([137n, 138n]);
 console.log(accounts);
-/*    
+/*
  * [{
  *   id: 137n,
  *   user_data: 0n,
@@ -589,7 +588,7 @@ const errors = await client.createTransfers(batch);
  *  { index: 2, error: 1 },  // linked_event_failed
  *  { index: 3, error: 25 }, // exists
  *  { index: 4, error: 1 },  // linked_event_failed
- * 
+ *
  *  { index: 6, error: 17 }, // exists_with_different_flags
  *  { index: 7, error: 1 },  // linked_event_failed
  * ]
@@ -603,16 +602,15 @@ const errors = await client.createTransfers(batch);
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ ./scripts/install_zig.sh
-$ cd src/clients/node
-$ npm install --include dev
-$ npm pack
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+./scripts/install_zig.sh
+cd src/clients/node
+npm install --include dev
+npm pack
 ```
 
 ### On Windows
 
 Not yet supported.
-

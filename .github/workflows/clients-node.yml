@@ -116,7 +116,7 @@ jobs:
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
       - run: ./zig/zig build client_integration
-      - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node --sample ${{ matrix.sample }}
+      - run: ./zig-out/bin/client_integration${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language=node --sample=${{ matrix.sample }}
 
   docs:
     if: inputs.version == ''
@@ -139,7 +139,7 @@ jobs:
       - run: ./scripts/install.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
 
       - run: ./zig/zig build client_docs
-      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language node
+      - run: ./zig-out/bin/client_docs${{ matrix.os == 'windows-latest' && '.exe' || '' }} --language=node
 
       - if: matrix.os == 'ubuntu-latest'
         run: ./.github/ci/fail_on_diff.sh

@@ -19,7 +19,7 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/java/samples/basic
 Then, install the TigerBeetle client:
 
 ```console
-$ mvn install
+mvn install
 ```
 
 ## Start the TigerBeetle server
@@ -36,7 +36,7 @@ address of the TigerBeetle server you started.
 Now you can run this sample:
 
 ```console
-$ mvn exec:java
+mvn exec:java
 ```
 
 ## Walkthrough
@@ -62,4 +62,3 @@ checks that **account `1`** has:
 And that **account `2`** has:
  * `debits_posted= 0`
  * and `credits_posted = 10`
-

@@ -7,7 +7,7 @@ const mem = std.mem;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
-const GridType = @import("grid.zig").GridType;
+const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 
 pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {

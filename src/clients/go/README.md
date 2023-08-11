@@ -31,8 +31,8 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-$ go mod init tbtest
-$ go get github.com/tigerbeetle/tigerbeetle-go
+go mod init tbtest
+go get github.com/tigerbeetle/tigerbeetle-go
 ```
 
 Now, create `main.go` and copy this into it:
@@ -51,7 +51,7 @@ func main() {
 Finally, build and run:
 
 ```console
-$ go run main.go
+go run main.go
 ```
 
 Now that all prerequisites and dependencies are correctly set
@@ -90,9 +90,8 @@ addresses for all replicas in the cluster. The cluster
 ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
-Clients are thread-safe. But for better
-performance, a single instance should be shared between
-multiple concurrent tasks.
+Clients are thread-safe and a single instance should be shared
+between multiple concurrent tasks.
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -105,7 +104,7 @@ environment variable and defaults to port `3000`.
 tbAddress := os.Getenv("TB_ADDRESS")
 if len(tbAddress) == 0 {
   tbAddress = "3000"
-} 
+}
 client, err := tb.NewClient(0, []string{tbAddress}, 32)
 if err != nil {
 	log.Printf("Error creating client: %s", err)
@@ -474,13 +473,13 @@ transfersRes, err = client.CreateTransfers(batch)
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ ./scripts/install_zig.sh
-$ ./zig/zig build go_client -Drelease-safe
-$ cd src/clients/go
-$ if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+./scripts/install_zig.sh
+./zig/zig build go_client -Drelease-safe
+cd src/clients/go
+if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
 ```
 
 ### On Windows
@@ -488,12 +487,11 @@ $ if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests";
 In PowerShell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ .\scripts\install_zig.bat
-$ .\zig\zig build go_client -Drelease-safe
-$ cd src\clients\go
-$ if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+.\scripts\install_zig.bat
+.\zig\zig build go_client -Drelease-safe
+cd src\clients\go
+if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
 ```
-

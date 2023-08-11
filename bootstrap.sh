@@ -20,6 +20,9 @@
     os="$(uname)"
     arch="$(uname -m)"
     if [ "$from_source" = "" ]; then
+	echo "Downloading pre-built TigerBeetle binary for your machine."
+	echo ""
+	
 	if [ "$os" = "Darwin" ]; then
 	    arch="universal"
 	    os="macos"
@@ -34,11 +37,18 @@
 	unzip -qo "tigerbeetle-$arch-$os-$version.zip"
 	chmod +x tigerbeetle
     else
+	echo "Building TigerBeetle binary from source for your machine."
+	echo ""
+	
 	git checkout "$version"
 	./scripts/install.sh
     fi
 
-    echo "Installed at $(pwd)/tigerbeetle: $(./tigerbeetle version)."
+    echo "Successfully set up $(./tigerbeetle version).
+
+To get started running TigerBeetle and interacting with it, see:
+
+  https://github.com/tigerbeetle/tigerbeetle#running-tigerbeetle"
 
     # See https://stackoverflow.com/a/2358432/1507139.
     exit 0

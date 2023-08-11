@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const assert = std.debug.assert;
 
 pub const cmd_sep = if (builtin.os.tag == .windows) ";" else "&&";
 
@@ -144,38 +145,11 @@ pub const TmpDir = struct {
 };
 
 pub fn git_root(arena: *std.heap.ArenaAllocator) ![]const u8 {
-    var prefix: []const u8 = "";
-    var tries: i32 = 0;
-    while (tries < 100) {
-        var dir = std.fs.cwd().openDir(
-            try std.fmt.allocPrint(
-                arena.allocator(),
-                "{s}.git",
-                .{prefix},
-            ),
-            .{},
-        ) catch {
-            prefix = try std.fmt.allocPrint(
-                arena.allocator(),
-                "../{s}",
-                .{prefix},
-            );
-            tries += 1;
-            continue;
-        };
-
-        // When looking up realpathAlloc, it can't be an empty string.
-        if (prefix.len == 0) {
-            prefix = ".";
-        }
-
-        const path = try std.fs.cwd().realpathAlloc(arena.allocator(), prefix);
-        dir.close();
-        return path;
-    }
-
-    std.debug.print("Failed to find .git root of TigerBeetle repo.\n", .{});
-    return error.CouldNotFindGitRoot;
+    const exec_result = try exec(arena, &.{ "git", "rev-parse", "--show-toplevel" });
+    // As conventional, output includes a trailing `\n` which we need to strip away.
+    assert(!std.mem.endsWith(u8, exec_result.stdout, "\r\n"));
+    assert(std.mem.endsWith(u8, exec_result.stdout, "\n"));
+    return exec_result.stdout[0 .. exec_result.stdout.len - 1];
 }
 
 // Makes sure a local script name has the platform-appropriate folder

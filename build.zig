@@ -1031,6 +1031,7 @@ fn client_integration(
         .root_source_file = .{ .path = "src/clients/integration.zig" },
         .target = target,
         .optimize = mode,
+        .main_pkg_path = "src",
     });
 
     const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
@@ -1054,6 +1055,7 @@ fn client_docs(
         .root_source_file = .{ .path = "src/clients/docs_generate.zig" },
         .target = target,
         .optimize = mode,
+        .main_pkg_path = "src",
     });
 
     const client_docs_build = b.step("client_docs", "Generate documentation for a client library");

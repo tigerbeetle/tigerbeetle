@@ -36,7 +36,7 @@ pub const Fingerprint = struct {
 
         return .{
             .hash = hash_upper,
-            .mask = @as(@Vector(8, u32), @splat(1)) << @truncate(bit_indexes),
+            .mask = @as(@Vector(8, u32), @splat(1)) << @intCast(bit_indexes),
         };
     }
 };
@@ -75,7 +75,7 @@ inline fn block_index(hash: u32, size: usize) u32 {
     assert(size > 0);
 
     const block_count = @divExact(size, @sizeOf(@Vector(8, u32)));
-    return @as(u32, @intCast((@as(u64, hash) * block_count) >> 32));
+    return @intCast((@as(u64, hash) * block_count) >> 32);
 }
 
 test "bloom filter: refAllDecls" {

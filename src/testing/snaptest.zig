@@ -135,6 +135,10 @@ pub const Snap = struct {
         );
 
         if (!snapshot.should_update()) {
+            std.debug.print(
+                "Rerun with SNAP_UPDATE=1 environmental variable to update the snapshot.\n",
+                .{},
+            );
             return error.SnapDiff;
         }
 

@@ -23,8 +23,8 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/go/samples/two-pha
 Then, install the TigerBeetle client:
 
 ```console
-$ go mod init tbtest
-$ go get github.com/tigerbeetle/tigerbeetle-go
+go mod init tbtest
+go get github.com/tigerbeetle/tigerbeetle-go
 ```
 
 ## Start the TigerBeetle server
@@ -41,7 +41,7 @@ address of the TigerBeetle server you started.
 Now you can run this sample:
 
 ```console
-$ go run main.go
+go run main.go
 ```
 
 ## Walkthrough
@@ -106,4 +106,3 @@ And that **account `2`** has:
  * `credits_posted = 500`
  * `debits_pending = 0`
  * and `credits_pending = 0`
-

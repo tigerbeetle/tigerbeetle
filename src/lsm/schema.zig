@@ -27,6 +27,7 @@
 //! Filter block schema:
 //! │ vsr.Header │ operation=BlockType.filter,
 //! │            │ context=schema.TableFilter.context
+//! │            │ timestamp=snapshot_min
 //! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 //! │            │   `filter_data_block_count_max` data blocks.
 //!
@@ -34,6 +35,7 @@
 //! │ vsr.Header               │ operation=BlockType.data,
 //! │                          │ context=schema.TableData.context,
 //! │                          │ request=values_count
+//! │                          │ timestamp=snapshot_min
 //! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
@@ -47,7 +49,6 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
 const stdx = @import("../stdx.zig");
-const BlockType = @import("grid.zig").BlockType;
 
 const address_size = @sizeOf(u64);
 const checksum_size = @sizeOf(u128);
@@ -62,9 +63,40 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
+    assert(header.size >= @sizeOf(vsr.Header));
     assert(header.size <= block.len);
+    assert(BlockType.valid(header.operation));
+    assert(BlockType.from(header.operation) != .reserved);
     return header;
 }
+
+/// A block's type is implicitly determined by how its address is stored (e.g. in the index block).
+/// BlockType is an additional check that a block has the expected type on read.
+///
+/// The BlockType is stored in the block's `header.operation`.
+pub const BlockType = enum(u8) {
+    /// Unused; verifies that no block is written with a default 0 operation.
+    reserved = 0,
+
+    manifest = 1,
+    index = 2,
+    filter = 3,
+    data = 4,
+
+    pub fn valid(vsr_operation: vsr.Operation) bool {
+        _ = std.meta.intToEnum(BlockType, @enumToInt(vsr_operation)) catch return false;
+
+        return true;
+    }
+
+    pub inline fn from(vsr_operation: vsr.Operation) BlockType {
+        return @intToEnum(BlockType, @enumToInt(vsr_operation));
+    }
+
+    pub inline fn operation(block_type: BlockType) vsr.Operation {
+        return @intToEnum(vsr.Operation, @enumToInt(block_type));
+    }
+};
 
 pub const TableIndex = struct {
     /// Every table has exactly one index block.
@@ -163,6 +195,7 @@ pub const TableIndex = struct {
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .index);
         assert(header.op > 0);
+        assert(header.timestamp > 0);
 
         const context = @as(Context, @bitCast(header.context));
         assert(context.filter_block_count <= context.filter_block_count_max);
@@ -317,6 +350,7 @@ pub const TableFilter = struct {
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .filter);
         assert(header.op > 0);
+        assert(header.timestamp > 0);
 
         return TableFilter.init(@as(Context, @bitCast(header.context)));
     }
@@ -402,6 +436,7 @@ pub const TableData = struct {
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .data);
         assert(header.op > 0);
+        assert(header.timestamp > 0);
 
         return TableData.init(@as(Context, @bitCast(header.context)));
     }
