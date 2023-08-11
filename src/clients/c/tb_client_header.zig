@@ -20,7 +20,7 @@ const type_mappings = .{
 };
 
 fn resolve_c_type(comptime Type: type) []const u8 {
-    comptime switch (@typeInfo(Type)) {
+    switch (@typeInfo(Type)) {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
         .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
@@ -53,16 +53,16 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                 }
             }
 
-            return resolve_c_type(info.child) ++ "*";
+            return comptime resolve_c_type(info.child) ++ "*";
         },
         .Void, .Opaque => return "void",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
-    };
+    }
 }
 
 fn to_uppercase(comptime input: []const u8) []const u8 {
     comptime var output: [input.len]u8 = undefined;
-    inline for (output, 0..) |*char, i| {
+    inline for (&output, 0..) |*char, i| {
         char.* = input[i];
         char.* -= 32 * @as(u8, @intFromBool(char.* >= 'a' and char.* <= 'z'));
     }

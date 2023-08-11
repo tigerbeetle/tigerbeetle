@@ -63,12 +63,13 @@ pub fn build(b: *std.Build) void {
     ) orelse .none;
     options.addOption(config.HashLogMode, "hash_log_mode", hash_log_mode);
 
+    const vsr_options_module = options.createModule();
     const vsr_module = b.addModule("vsr", .{
         .source_file = .{ .path = "src/vsr.zig" },
         .dependencies = &.{
             .{
                 .name = "vsr_options",
-                .module = options.createModule(),
+                .module = vsr_options_module,
             },
         },
     });
@@ -83,6 +84,7 @@ pub fn build(b: *std.Build) void {
         _ = tigerbeetle.getEmittedLlvmIr();
     }
     tigerbeetle.addModule("vsr", vsr_module);
+    tigerbeetle.addModule("vsr_options", vsr_options_module);
     b.installArtifact(tigerbeetle);
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
@@ -266,7 +268,7 @@ pub fn build(b: *std.Build) void {
                 demo_exe.addModule("vsr", vsr_module);
                 test_step.dependOn(&demo_exe.step);
             }
-        } 
+        }
     }
 
     // Clients build:
@@ -700,7 +702,7 @@ fn java_client(
 
         // NB: New way to do lib.setOutputDir()
         const lib_install = b_isolated.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "src/clients/java/src/main/resources/lib/" ++ platform[0]};
+        lib_install.dest_dir = .{ .custom = "src/clients/java/src/main/resources/lib/" ++ platform[0] };
 
         if (cross_target.os_tag.? == .windows) {
             lib.linkSystemLibrary("ws2_32");
@@ -754,7 +756,7 @@ fn dotnet_client(
 
         // NB: New way to do lib.setOutputDir()
         const lib_install = b_isolated.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native"};
+        lib_install.dest_dir = .{ .custom = "src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native" };
 
         if (cross_target.os_tag.? == .windows) {
             lib.linkSystemLibrary("ws2_32");
@@ -785,7 +787,7 @@ fn node_client(
 
     const bindings = b.addExecutable(.{
         .name = "node_bindings",
-        .root_source_file = .{ .path = "src/clients/node/node_bindings.zig"},
+        .root_source_file = .{ .path = "src/clients/node/node_bindings.zig" },
         .target = target,
         .main_pkg_path = .{ .path = "src" },
     });
@@ -801,7 +803,7 @@ fn node_client(
         } else {
             const lib = b_isolated.addSharedLibrary(.{
                 .name = "tb_nodeclient",
-                .root_source_file = .{ .path = "src/clients/node/src/node.zig"},
+                .root_source_file = .{ .path = "src/clients/node/src/node.zig" },
                 .target = cross_target,
                 .optimize = mode,
                 .main_pkg_path = .{ .path = "src" },
@@ -814,7 +816,7 @@ fn node_client(
 
             // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
             // if you're running zig build node_client manually.
-            lib.addSystemIncludePath(.{ .path = "src/clients/node/node_modules/node-api-headers/include"});
+            lib.addSystemIncludePath(.{ .path = "src/clients/node/node_modules/node-api-headers/include" });
             lib.linker_allow_shlib_undefined = true;
 
             if (cross_target.os_tag.? == .windows) {
@@ -859,14 +861,14 @@ fn c_client(
 
         const shared_lib = b_isolated.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client.zig"},
+            .root_source_file = .{ .path = "src/clients/c/tb_client.zig" },
             .target = cross_target,
             .optimize = mode,
             .main_pkg_path = .{ .path = "src" },
         });
         const static_lib = b_isolated.addStaticLibrary(.{
             .name = "tb_client",
-            .root_source_file = .{ .path = "src/clients/c/tb_client.zig"},
+            .root_source_file = .{ .path = "src/clients/c/tb_client.zig" },
             .target = cross_target,
             .optimize = mode,
             .main_pkg_path = .{ .path = "src" },
@@ -911,7 +913,7 @@ fn c_client_sample(
 
     const static_lib = b.addStaticLibrary(.{
         .name = "tb_client",
-        .root_source_file = .{ .path = "src/clients/c/tb_client.zig"},
+        .root_source_file = .{ .path = "src/clients/c/tb_client.zig" },
         .target = target,
         .optimize = mode,
         .main_pkg_path = .{ .path = "src" },
@@ -1002,7 +1004,7 @@ fn run_with_tb(
 ) void {
     const binary = b.addExecutable(.{
         .name = "run_with_tb",
-        .root_source_file = .{ .path = "src/clients/run_with_tb.zig"},
+        .root_source_file = .{ .path = "src/clients/run_with_tb.zig" },
         .target = target,
         .optimize = mode,
     });
@@ -1025,7 +1027,7 @@ fn client_integration(
 ) void {
     const binary = b.addExecutable(.{
         .name = "client_integration",
-        .root_source_file = .{ .path = "src/clients/integration.zig"},
+        .root_source_file = .{ .path = "src/clients/integration.zig" },
         .target = target,
         .optimize = mode,
     });
@@ -1048,7 +1050,7 @@ fn client_docs(
 ) void {
     const binary = b.addExecutable(.{
         .name = "client_docs",
-        .root_source_file = .{ .path = "src/clients/docs_generate.zig"},
+        .root_source_file = .{ .path = "src/clients/docs_generate.zig" },
         .target = target,
         .optimize = mode,
     });
@@ -1114,7 +1116,7 @@ const JniTestStep = struct {
             java_home,
             if (builtin.os.tag == .windows) "/lib" else "/lib/server",
         });
-        self.tests.addLibraryPath(.{ .path = libjvm_path});
+        self.tests.addLibraryPath(.{ .path = libjvm_path });
 
         switch (builtin.os.tag) {
             .windows => set_windows_dll(builder.allocator, java_home),
