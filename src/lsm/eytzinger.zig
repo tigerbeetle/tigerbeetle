@@ -323,7 +323,7 @@ const test_eytzinger = struct {
         const e = eytzinger(keys_count, values_max);
 
         var values: [values_max]Value = undefined;
-        for (values, 0..) |*v, i| v.* = .{ .key = @as(u32, @intCast(i)) };
+        for (&values, 0..) |*v, i| v.* = .{ .key = @as(u32, @intCast(i)) };
 
         var layout: [keys_count + 1]u32 = undefined;
 
@@ -339,7 +339,7 @@ const test_eytzinger = struct {
         var values_full: [values_max]Value = undefined;
         // This 3 * i + 7 ensures that keys don't line up perfectly with indexes
         // which could potentially catch bugs.
-        for (values_full, 0..) |*v, i| v.* = .{ .key = @as(u32, @intCast(3 * i + 7)) };
+        for (&values_full, 0..) |*v, i| v.* = .{ .key = @as(u32, @intCast(3 * i + 7)) };
 
         var layout: [keys_count + 1]u32 = undefined;
 

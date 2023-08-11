@@ -176,7 +176,6 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     // ```
     const Action = @Type(.{
         .Enum = .{
-            .layout = .Auto,
             .tag_type = u8,
             .fields = &[_]std.builtin.Type.EnumField{
                 .{ .name = "create_accounts", .value = @intFromEnum(Operation.create_accounts) },

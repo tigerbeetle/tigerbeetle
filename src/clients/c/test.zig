@@ -3,7 +3,11 @@ const assert = std.debug.assert;
 
 const testing = std.testing;
 
-const c = @cImport(@cInclude("tb_client.h"));
+const c = @cImport({
+    _ = @import("tb_client.zig"); // Needed for the @export()'ed C ffi functions.
+    @cInclude("tb_client.h");
+});
+
 
 const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");

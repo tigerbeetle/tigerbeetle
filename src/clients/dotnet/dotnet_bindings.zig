@@ -134,23 +134,21 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []const u8 {
-    comptime {
-        var len: usize = 0;
-        var output: [input.len]u8 = undefined;
-        var iterator = std.mem.tokenize(u8, input, "_");
-        while (iterator.next()) |word| {
-            _ = std.ascii.lowerString(output[len..], word);
-            output[len] = std.ascii.toUpper(output[len]);
-            len += word.len;
-        }
-
-        output[0] = switch (case) {
-            .camel => std.ascii.toLower(output[0]),
-            .pascal => std.ascii.toUpper(output[0]),
-        };
-
-        return output[0..len];
+    var len: usize = 0;
+    var output: [input.len]u8 = undefined;
+    var iterator = std.mem.tokenize(u8, input, "_");
+    while (iterator.next()) |word| {
+        _ = std.ascii.lowerString(output[len..], word);
+        output[len] = std.ascii.toUpper(output[len]);
+        len += word.len;
     }
+
+    output[0] = switch (case) {
+        .camel => std.ascii.toLower(output[0]),
+        .pascal => std.ascii.toUpper(output[0]),
+    };
+
+    return output[0..len];
 }
 
 fn emit_enum(

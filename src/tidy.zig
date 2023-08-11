@@ -20,7 +20,7 @@ test "tidy: lines are under 100 characters long" {
     defer walker.deinit();
 
     while (try walker.next()) |entry| {
-        if (entry.kind == .File and mem.endsWith(u8, entry.path, ".zig")) {
+        if (entry.kind == .file and mem.endsWith(u8, entry.path, ".zig")) {
             const source_file = try entry.dir.openFile(entry.basename, .{});
             defer source_file.close();
 

@@ -46,7 +46,9 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    comptime {
+    // TODO: Cleanup when this is fixed after Zig 0.11.
+    // Without the blk, returning the output thinks it's a runtime operation.
+    return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);
         var iterator = std.mem.tokenize(u8, input, "_");
@@ -60,8 +62,8 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
             len += word.len;
         }
 
-        return output[0 .. min_len orelse len];
-    }
+        break :blk output[0 .. min_len orelse len];
+    };
 }
 
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
@@ -277,7 +279,8 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
             .Struct => |info| switch (info.layout) {
                 .Auto => @compileError("Only packed or extern structs are supported: " ++ @typeName(ZigType)),
                 .Packed => try emit_packed_struct(buffer, info, name, comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
-                .Extern => try emit_struct(buffer, info, name),
+                else => {},
+                // .Extern => try emit_struct(buffer, info, name),
             },
             .Enum => try emit_enum(buffer, ZigType, name, type_mapping[2], comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType)))),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
