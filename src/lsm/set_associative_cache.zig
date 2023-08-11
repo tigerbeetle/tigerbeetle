@@ -824,7 +824,7 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
                 const tag = random.int(SAC.Tag);
 
                 var indexes: [layout.ways]usize = undefined;
-                for (indexes, 0..) |*x, i| x.* = i;
+                for (&indexes, 0..) |*x, i| x.* = i;
                 random.shuffle(usize, &indexes);
 
                 const matches_count_min = random.uintAtMostBiased(u32, layout.ways);

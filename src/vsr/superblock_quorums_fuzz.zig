@@ -105,7 +105,7 @@ pub fn fuzz_quorums_working(random: std.rand.Random) !void {
 fn test_quorums_working(
     random: std.rand.Random,
     threshold_count: u8,
-    copies: *[4]CopyTemplate,
+    initial_copies: *const [4]CopyTemplate,
     result: QuorumsType(.{ .superblock_copies = 4 }).Error!u64,
 ) !void {
     const Quorums = QuorumsType(.{ .superblock_copies = 4 });
@@ -116,7 +116,7 @@ fn test_quorums_working(
     // "checksums[i] orelse random.int(u128)", but that currently causes the compiler to segfault
     // during code generation.
     var checksums: [6]u128 = undefined;
-    for (checksums) |*c| c.* = random.int(u128);
+    for (&checksums) |*c| c.* = random.int(u128);
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
@@ -124,9 +124,11 @@ fn test_quorums_working(
     }
 
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
+    var initial_templates = initial_copies.*;
+    const copies = &initial_templates;
     std.mem.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
-    for (headers, 0..) |*header, i| {
+    for (&headers, 0..) |*header, i| {
         header.* = std.mem.zeroInit(SuperBlockHeader, .{
             .copy = @as(u8, @intCast(i)),
             .version = SuperBlockVersion,

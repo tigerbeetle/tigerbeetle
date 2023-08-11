@@ -489,7 +489,13 @@ test "flags" {
         flags_exe: []const u8,
 
         fn init(gpa: std.mem.Allocator) !T {
-            const zig_exe = std.os.getenv("ZIG_EXE") orelse return error.SkipZigTest;
+            // TODO: Avoid std.os.getenv() as it currently causes a linker error on windows.
+            // See: https://github.com/ziglang/zig/issues/8456
+            const zig_exe = std.process.getEnvVarOwned(gpa, "ZIG_EXE") catch |e| switch (e) {
+                error.EnvironmentVariableNotFound => return error.SkipZigTest,
+                error.InvalidUtf8 => unreachable,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
 
             var tmp_dir = std.testing.tmpDir(.{});
             errdefer tmp_dir.cleanup();

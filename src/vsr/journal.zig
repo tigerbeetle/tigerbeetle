@@ -2351,7 +2351,7 @@ test "recovery_cases" {
         }
 
         var case_match: ?*const Case = null;
-        for (recovery_cases) |*case| {
+        for (&recovery_cases) |*case| {
             if (case.check(parameters) catch true) {
                 try std.testing.expectEqual(case_match, null);
                 case_match = case;
