@@ -165,6 +165,7 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
+    echo_command(&child);
     const term = try child.spawnAndWait();
 
     switch (term) {
@@ -273,12 +274,26 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
+    echo_command(&child);
     const term = try child.spawnAndWait();
 
     switch (term) {
         .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
         else => return error.CommandFailed,
     }
+}
+
+/// If we inherit `stdout` to show the output to the user, it's also helpful to echo the command
+/// itself.
+fn echo_command(child: *const std.ChildProcess) void {
+    assert(child.stdout_behavior == .Inherit);
+
+    std.debug.print("$ ", .{});
+    for (child.argv) |arg, i| {
+        if (i != 0) std.debug.print(" ", .{});
+        std.debug.print("{s}", .{arg});
+    }
+    std.debug.print("\n", .{});
 }
 
 /// Returns current git commit hash as an ASCII string.
