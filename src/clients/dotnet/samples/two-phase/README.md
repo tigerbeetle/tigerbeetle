@@ -14,7 +14,7 @@ And if you do not already have NuGet.org as a package
 source, make sure to add it:
 
 ```console
-$ dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
 ```
 
 ## Setup
@@ -24,8 +24,8 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/dotnet/samples/two
 Then, install the TigerBeetle client:
 
 ```console
-$ dotnet new console
-$ dotnet add package tigerbeetle
+dotnet new console
+dotnet add package tigerbeetle
 ```
 
 ## Start the TigerBeetle server
@@ -42,7 +42,7 @@ address of the TigerBeetle server you started.
 Now you can run this sample:
 
 ```console
-$ dotnet run
+dotnet run
 ```
 
 ## Walkthrough
@@ -107,4 +107,3 @@ And that **account `2`** has:
  * `credits_posted = 500`
  * `debits_pending = 0`
  * and `credits_pending = 0`
-

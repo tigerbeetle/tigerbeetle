@@ -14,7 +14,7 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
-const GridType = @import("grid.zig").GridType;
+const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
 const Forest = StateMachine.Forest;
 

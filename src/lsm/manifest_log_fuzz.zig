@@ -22,8 +22,8 @@ const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExtent;
 const Storage = @import("../testing/storage.zig").Storage;
-const Grid = @import("grid.zig").GridType(Storage);
-const BlockType = @import("grid.zig").BlockType;
+const Grid = @import("../vsr/grid.zig").GridType(Storage);
+const BlockType = @import("schema.zig").BlockType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
 const fuzz = @import("../testing/fuzz.zig");
 

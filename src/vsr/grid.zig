@@ -5,39 +5,18 @@ const mem = std.mem;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const free_set = @import("../vsr/superblock_free_set.zig");
-const schema = @import("schema.zig");
+const free_set = @import("superblock_free_set.zig");
+const schema = @import("../lsm/schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
-const SetAssociativeCache = @import("set_associative_cache.zig").SetAssociativeCache;
+const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
+const BlockType = schema.BlockType;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
-
-/// A block's type is implicitly determined by how its address is stored (e.g. in the index block).
-/// BlockType is an additional check that a block has the expected type on read.
-///
-/// The BlockType is stored in the block's `header.operation`.
-pub const BlockType = enum(u8) {
-    /// Unused; verifies that no block is written with a default 0 operation.
-    reserved = 0,
-
-    manifest = 1,
-    index = 2,
-    filter = 3,
-    data = 4,
-
-    pub inline fn from(vsr_operation: vsr.Operation) BlockType {
-        return @as(BlockType, @enumFromInt(@intFromEnum(vsr_operation)));
-    }
-
-    pub inline fn operation(block_type: BlockType) vsr.Operation {
-        return @as(vsr.Operation, @enumFromInt(@intFromEnum(block_type)));
-    }
-};
 
 // Leave this outside GridType so we can call it from modules that don't know about Storage.
 pub fn allocate_block(

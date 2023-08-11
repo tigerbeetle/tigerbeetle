@@ -2,6 +2,8 @@ const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 
+const flags = @import("../flags.zig");
+
 const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
 const node = @import("./node/docs.zig").NodeDocs;
@@ -13,7 +15,8 @@ const git_root = @import("./shutil.zig").git_root;
 const shell_wrap = @import("./shutil.zig").shell_wrap;
 const run_shell = @import("./shutil.zig").run_shell;
 const cmd_sep = @import("./shutil.zig").cmd_sep;
-const write_shell_newlines_into_single_line = @import("./shutil.zig").write_shell_newlines_into_single_line;
+const write_shell_newlines_into_single_line =
+    @import("./shutil.zig").write_shell_newlines_into_single_line;
 const run_shell_with_env = @import("./shutil.zig").run_shell_with_env;
 const run_with_tb = @import("./run_with_tb.zig").run_with_tb;
 
@@ -60,11 +63,7 @@ const MarkdownWriter = struct {
 
     fn commands(mw: *MarkdownWriter, content: []const u8) void {
         mw.print("```console\n", .{});
-        var splits = std.mem.split(u8, content, "\n");
-        while (splits.next()) |chunk| {
-            mw.print("$ {s}\n", .{chunk});
-        }
-
+        mw.print("{s}\n", .{content});
         mw.print("```\n\n", .{});
     }
 
@@ -80,58 +79,42 @@ const MarkdownWriter = struct {
         mw.buf.clearRetainingCapacity();
     }
 
-    fn diffOnDisk(mw: *MarkdownWriter, filename: []const u8) !bool {
-        const file = std.fs.cwd().createFile(
-            filename,
-            .{ .read = true, .truncate = false },
-        ) catch |e| {
+    fn diff_on_disk(mw: *MarkdownWriter, filename: []const u8) !enum { same, different } {
+        const file = std.fs.cwd().openFile(filename, .{}) catch |e| {
             std.debug.print("Could not open file for reading: {s}.\n", .{filename});
             return e;
         };
-        const fSize = (try file.stat()).size;
-        if (fSize != mw.buf.items.len) {
-            return true;
-        }
 
         var buf = std.mem.zeroes([4096]u8);
-        var cursor: usize = 0;
-        while (cursor < fSize) {
-            var maxCanRead = if (fSize - cursor > 4096) 4096 else fSize - cursor;
-            // Phil: Sometimes this infinite loops and returns `0` but
-            // I don't know why. Allowing it to just overwrite solves the problem.
-            var n = try file.read(buf[0..maxCanRead]);
-            if (n == 0 and maxCanRead != n) {
-                return true;
+        var remaining = mw.buf.items;
+
+        while (true) {
+            var n = try file.read(&buf);
+            if (n == 0) {
+                return if (remaining.len == 0) .same else .different;
             }
 
-            if (std.mem.eql(u8, buf[0..], mw.buf.items[cursor..n])) {
-                return false;
+            if (std.mem.startsWith(u8, remaining, buf[0..n])) {
+                remaining = remaining[n..];
+            } else {
+                return .different;
             }
         }
-
-        return true;
     }
 
     // save() only actually writes the buffer to disk if it has
     // changed compared to what's on disk, so that file modify time stays
     // reasonable.
     fn save(mw: *MarkdownWriter, filename: []const u8) !void {
-        var diff = try mw.diffOnDisk(filename);
-        if (!diff) {
-            return;
+        // Ensure a single trailing newline.
+        assert(std.mem.endsWith(u8, mw.buf.items, "\n\n"));
+        _ = mw.buf.pop();
+        assert(!std.mem.endsWith(u8, mw.buf.items, "\n\n"));
+        assert(std.mem.endsWith(u8, mw.buf.items, "\n"));
+
+        if (try mw.diff_on_disk(filename) == .different) {
+            try std.fs.cwd().writeFile(filename, mw.buf.items);
         }
-
-        const file = try std.fs.cwd().openFile(
-            filename,
-            .{ .mode = .write_only },
-        );
-        defer file.close();
-
-        // First truncate(0) the file.
-        try file.setEndPos(0);
-
-        // Then write what we need.
-        try file.writeAll(mw.buf.items);
     }
 };
 
@@ -140,23 +123,14 @@ pub fn prepare_directory(
     language: Docs,
     dir: []const u8,
 ) !void {
-    var cmd = std.ArrayList(u8).init(arena.allocator());
-    defer cmd.deinit();
-
     // Some languages (Java) have an additional project file
     // (pom.xml) they need to have available.
     if (language.project_file.len > 0) {
-        const project_file = try std.fs.cwd().createFile(
-            try std.fmt.allocPrint(
-                arena.allocator(),
-                "{s}/{s}",
-                .{ dir, language.project_file_name },
-            ),
-            .{ .truncate = true },
+        const project_file_path = try std.fs.path.join(
+            arena.allocator(),
+            &.{ dir, language.project_file_name },
         );
-        defer project_file.close();
-
-        _ = try project_file.write(language.project_file);
+        try std.fs.cwd().writeFile(project_file_path, language.project_file);
     }
 
     const root = try git_root(arena);
@@ -168,11 +142,16 @@ pub fn prepare_directory(
     try std.os.chdir(dir);
     defer std.os.chdir(root) catch unreachable;
 
-    cmd.clearRetainingCapacity();
-    try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_install_commands_hook) |hook|
-        try hook(arena, language.install_commands)
-    else
-        language.install_commands);
+    var cmd = std.ArrayList(u8).init(arena.allocator());
+    defer cmd.deinit();
+
+    try write_shell_newlines_into_single_line(
+        &cmd,
+        if (language.current_commit_install_commands_hook) |hook|
+            try hook(arena, language.install_commands)
+        else
+            language.install_commands,
+    );
     try run_shell(arena, cmd.items);
 }
 
@@ -195,18 +174,24 @@ pub fn integrate(
     var cmd = std.ArrayList(u8).init(arena.allocator());
     defer cmd.deinit();
 
-    try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_build_commands_hook) |hook|
-        try hook(arena, language.build_commands)
-    else
-        language.build_commands);
+    try write_shell_newlines_into_single_line(
+        &cmd,
+        if (language.current_commit_build_commands_hook) |hook|
+            try hook(arena, language.build_commands)
+        else
+            language.build_commands,
+    );
     try run_shell(arena, cmd.items);
 
     if (run) {
         cmd.clearRetainingCapacity();
-        try write_shell_newlines_into_single_line(&cmd, if (language.current_commit_run_commands_hook) |hook|
-            try hook(arena, language.run_commands)
-        else
-            language.run_commands);
+        try write_shell_newlines_into_single_line(
+            &cmd,
+            if (language.current_commit_run_commands_hook) |hook|
+                try hook(arena, language.run_commands)
+            else
+                language.run_commands,
+        );
 
         try run_with_tb(arena, try shell_wrap(arena, cmd.items), dir);
     }
@@ -241,7 +226,12 @@ const Generator = struct {
         try std.fs.cwd().makePath(path);
     }
 
-    fn build_file_within_project(self: Generator, tmp_dir: TmpDir, file: []const u8, run_setup_tests: bool) !void {
+    fn build_file_within_project(
+        self: Generator,
+        tmp_dir: TmpDir,
+        file: []const u8,
+        run_setup_tests: bool,
+    ) !void {
         try prepare_directory(self.arena, self.language, tmp_dir.path);
 
         var tmp_file_name = self.sprintf(
@@ -254,11 +244,8 @@ const Generator = struct {
             },
         );
         try self.ensure_path(std.fs.path.dirname(tmp_file_name).?);
-        var tmp_file = try std.fs.cwd().createFile(tmp_file_name, .{
-            .truncate = true,
-        });
-        defer tmp_file.close();
-        _ = try tmp_file.write(file);
+
+        try std.fs.cwd().writeFile(tmp_file_name, file);
 
         const root = try git_root(self.arena);
         try std.os.chdir(root);
@@ -271,6 +258,7 @@ const Generator = struct {
 
         var env = std.ArrayList([]const u8).init(self.arena.allocator());
         defer env.deinit();
+
         if (run_setup_tests) {
             // TODO (Phil): Get dotnet tests working outside of linux in CI.
             // They do work locally on my machines but I can't get them working in CI.
@@ -308,15 +296,16 @@ const Generator = struct {
         ) catch unreachable;
     }
 
-    fn validate_minimal(self: Generator, keepTmp: bool) !void {
+    fn validate_minimal(self: Generator, keep_tmp: bool) !void {
         // Test the sample file
         self.print("Building minimal sample file");
         var tmp_dir = try TmpDir.init(self.arena);
-        defer if (!keepTmp) tmp_dir.deinit();
+        defer if (!keep_tmp) tmp_dir.deinit();
+
         try self.build_file_within_project(tmp_dir, self.language.install_sample_file, true);
     }
 
-    fn validate_aggregate(self: Generator, keepTmp: bool) !void {
+    fn validate_aggregate(self: Generator, keep_tmp: bool) !void {
         // Test major parts of sample code
         var sample = try self.make_aggregate_sample();
         self.print("Aggregate");
@@ -328,7 +317,8 @@ const Generator = struct {
         }
         self.print("Building aggregate sample file");
         var tmp_dir = try TmpDir.init(self.arena);
-        defer if (!keepTmp) tmp_dir.deinit();
+        defer if (!keep_tmp) tmp_dir.deinit();
+
         try self.build_file_within_project(tmp_dir, sample, false);
     }
 
@@ -375,10 +365,15 @@ const Generator = struct {
         return aggregate.items;
     }
 
-    fn generate_language_setup_steps(self: Generator, mw: *MarkdownWriter, directory_info: []const u8, include_project_file: bool) void {
+    fn generate_language_setup_steps(
+        self: Generator,
+        mw: *MarkdownWriter,
+        directory_info: []const u8,
+        include_project_file: bool,
+    ) void {
         var language = self.language;
 
-        const windowsSupported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
+        const windows_supported: []const u8 = if (language.developer_setup_pwsh_commands.len > 0)
             " and Windows"
         else
             ". Windows is not yet supported";
@@ -386,7 +381,7 @@ const Generator = struct {
             \\Linux >= 5.6 is the only production environment we
             \\support. But for ease of development we also support macOS{s}.
             \\
-        , .{windowsSupported});
+        , .{windows_supported});
         mw.paragraph(language.prerequisites);
 
         mw.header(2, "Setup");
@@ -474,9 +469,8 @@ const Generator = struct {
             \\ID and replica addresses are both chosen by the system that
             \\starts the TigerBeetle cluster.
             \\
-            \\Clients are thread-safe. But for better
-            \\performance, a single instance should be shared between
-            \\multiple concurrent tasks.
+            \\Clients are thread-safe and a single instance should be shared
+            \\between multiple concurrent tasks.
             \\
             \\Multiple clients are useful when connecting to more than
             \\one TigerBeetle cluster.
@@ -755,12 +749,8 @@ const Generator = struct {
             self.generate_language_setup_steps(
                 mw,
                 self.sprintf(
-                    "First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.",
-                    .{
-                        language.directory,
-                        sample.directory,
-                    },
-                ),
+                    \\First, clone this repo and `cd` into `tigerbeetle/src/clients/{s}/samples/{s}`.
+                , .{ language.directory, sample.directory }),
                 false,
             );
 
@@ -792,52 +782,47 @@ const Generator = struct {
     }
 };
 
+const CliArgs = struct {
+    language: ?[]const u8 = null,
+    validate: ?[]const u8 = null,
+    no_validate: bool = false,
+    no_generate: bool = false,
+    keep_tmp: bool = false,
+};
+
 pub fn main() !void {
-    var skipLanguage = [_]bool{false} ** languages.len;
-    var validate = true;
-    var generate = true;
-    var validateOnly: []const u8 = "";
+    var skip_language = [_]bool{false} ** languages.len;
 
     var global_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer global_arena.deinit();
-
-    var keepTmp = false;
 
     var args = try std.process.argsWithAllocator(global_arena.allocator());
     defer args.deinit();
 
     assert(args.skip());
 
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--language")) {
-            var filter = args.next().?;
-            skipLanguage = [_]bool{true} ** languages.len;
-            for (languages, 0..) |language, i| {
-                if (std.mem.eql(u8, filter, language.directory)) {
-                    skipLanguage[i] = false;
+    const cli_args = flags.parse_flags(&args, CliArgs);
+
+    if (cli_args.validate != null and cli_args.no_validate) {
+        flags.fatal("--validate: conflicts with --no-validate", .{});
+    }
+
+    if (cli_args.language) |filter| {
+        skip_language = .{true} ** languages.len;
+
+        var parts = std.mem.split(u8, filter, ",");
+        while (parts.next()) |part| {
+            for (languages) |language, i| {
+                if (std.mem.eql(u8, language.directory, part)) {
+                    skip_language[i] = false;
+                    break;
                 }
-            }
-        }
-
-        if (std.mem.eql(u8, arg, "--validate")) {
-            validateOnly = args.next().?;
-        }
-
-        if (std.mem.eql(u8, arg, "--no-validate")) {
-            validate = false;
-        }
-
-        if (std.mem.eql(u8, arg, "--no-generate")) {
-            generate = false;
-        }
-
-        if (std.mem.eql(u8, arg, "--keep-tmp")) {
-            keepTmp = true;
+            } else flags.fatal("--language: unknown language '{s}'", .{part});
         }
     }
 
     for (languages, 0..) |language, i| {
-        if (skipLanguage[i]) {
+        if (skip_language[i]) {
             continue;
         }
 
@@ -849,36 +834,30 @@ pub fn main() !void {
         var mw = MarkdownWriter.init(&buf);
 
         var generator = try Generator.init(&arena, language);
-        if (validate) {
+        if (!cli_args.no_validate) {
             generator.print("Validating");
 
             for (Generator.tests) |t| {
-                var found = false;
-                if (validateOnly.len > 0) {
-                    var parts = std.mem.split(u8, validateOnly, ",");
-                    while (parts.next()) |name| {
-                        if (std.mem.eql(u8, name, t.name)) {
-                            found = true;
-                            break;
-                        }
-                    }
+                if (cli_args.validate) |validate_only| {
+                    var parts = std.mem.split(u8, validate_only, ",");
+
+                    const found = while (parts.next()) |name| {
+                        if (std.mem.eql(u8, name, t.name)) break true;
+                    } else false;
 
                     if (!found) {
-                        generator.printf(
-                            "Skipping test [{s}]",
-                            .{t.name},
-                        );
+                        generator.printf("Skipping test [{s}]", .{t.name});
                         continue;
                     }
                 }
 
                 const root = try git_root(&arena);
                 try std.os.chdir(root);
-                try t.validate(generator, keepTmp);
+                try t.validate(generator, cli_args.keep_tmp);
             }
         }
 
-        if (generate) {
+        if (!cli_args.no_generate) {
             generator.print("Generating main README");
             try generator.generate_main_readme(&mw);
 

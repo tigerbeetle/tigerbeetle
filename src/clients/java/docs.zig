@@ -185,7 +185,7 @@ pub const JavaDocs = Docs{
     \\      <version>0.0.1-3431</version>
     \\    </dependency>
     \\  </dependencies>
-    \\</project> 
+    \\</project>
     ,
 
     .test_file_name = "Main",
@@ -309,7 +309,7 @@ pub const JavaDocs = Docs{
     \\    switch (accountErrors.getResult()) {
     \\        case Exists:
     \\            System.err.printf("Account at %d already exists.\n",
-    \\                accountErrors.getIndex());        
+    \\                accountErrors.getIndex());
     \\            break;
     \\
     \\        default:
@@ -353,7 +353,7 @@ pub const JavaDocs = Docs{
     \\    switch (transferErrors.getResult()) {
     \\        case ExceedsCredits:
     \\            System.err.printf("Transfer at %d exceeds credits.\n",
-    \\                transferErrors.getIndex());        
+    \\                transferErrors.getIndex());
     \\            break;
     \\
     \\        default:

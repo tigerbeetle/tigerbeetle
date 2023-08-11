@@ -2,8 +2,9 @@
 
 *TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
 
-TigerBeetle is not yet production-ready. The production version of
-**TigerBeetle is now under active development**.
+TigerBeetle is not yet production-ready. In particular, the protocol and data file formats may change and [might not be compatible across different commits](https://github.com/tigerbeetle/tigerbeetle/issues/1109), while we fine-tune the format ahead of release.
+
+The production version of **TigerBeetle is now under active development**.
 
 ## Quickstart
 
@@ -12,13 +13,13 @@ First, download a prebuilt copy of TigerBeetle.
 On macOS/Linux:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle; ./tigerbeetle/bootstrap.sh
+git clone https://github.com/tigerbeetle/tigerbeetle; ./tigerbeetle/bootstrap.sh
 ```
 
 On Windows:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle; .\tigerbeetle\bootstrap.ps1
+git clone https://github.com/tigerbeetle/tigerbeetle; .\tigerbeetle\bootstrap.ps1
 ```
 
 Want to build from source locally? Add `-build` as an argument to the bootstrap script.
@@ -28,7 +29,9 @@ Want to build from source locally? Add `-build` as an argument to the bootstrap 
 Then create the TigerBeetle data file.
 
 ```console
-$ ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
+```
+```console
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```
@@ -36,7 +39,9 @@ info(io): allocating 660.140625MiB...
 And start the replica.
 
 ```console
-$ ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+```
+```console
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 127.0.0.1:3000
 ```
@@ -48,17 +53,23 @@ Now let's connect to the replica and do some accounting!
 First install the Node client.
 
 ```console
-$ npm install tigerbeetle-node
+npm install tigerbeetle-node
 ```
 
 Then create a client connection.
 
 ```console
-$ node
+node
+```
+```javascript
 Welcome to Node.js v16.14.0.
 Type ".help" for more information.
-> let { createClient } = require('tigerbeetle-node');
-> let client = createClient({ cluster_id: 0, replica_addresses: ['3000'] });
+```
+```javascript
+let { createClient } = require('tigerbeetle-node');
+let client = createClient({ cluster_id: 0, replica_addresses: ['3000'] });
+```
+```javascript
 info(message_bus): connected to replica 0
 ```
 
@@ -66,7 +77,7 @@ Now create two accounts. (Don't worry about the details, you can
 read about them later.)
 
 ```javascript
-> let errors = await client.createAccounts([
+let errors = await client.createAccounts([
   {
     id: 1n,
     ledger: 1,
@@ -94,14 +105,16 @@ read about them later.)
     timestamp: 0n,
   },
 ]);
-> errors
+errors
+```
+```javascript
 []
 ```
 
 Now create a transfer of `10` (of some amount/currency) between the two accounts.
 
 ```javascript
-> errors = await client.createTransfers([
+errors = await client.createTransfers([
   {
     id: 1n,
     debit_account_id: 1n,
@@ -124,13 +137,15 @@ from account `1`. Let's query TigerBeetle for these two accounts to
 verify!
 
 ```javascript
-> let accounts = await client.lookupAccounts([1n, 2n]);
-> console.log(accounts.map(a => ({
-    id: a.id,
-	debits_posted: a.debits_posted,
-	credits_posted: a.credits_posted,
-	timestamp: a.timestamp,
-  })));
+let accounts = await client.lookupAccounts([1n, 2n]);
+console.log(accounts.map(a => ({
+  id: a.id,
+  debits_posted: a.debits_posted,
+  credits_posted: a.credits_posted,
+  timestamp: a.timestamp,
+})));
+```
+```javascript
 [
   {
     id: 1n,
@@ -211,16 +226,16 @@ Here are a few key pages you might be interested in:
 
 First grab the sources and run the setup script:
 
-```bash
-$ git clone https://github.com/tigerbeetle/tigerbeetle.git
-$ cd tigerbeetle
-$ scripts/install.sh
+```console
+git clone https://github.com/tigerbeetle/tigerbeetle.git
+cd tigerbeetle
+scripts/install.sh
 ```
 
 With TigerBeetle installed, you are ready to benchmark!
 
-```bash
-$ scripts/benchmark.sh
+```console
+scripts/benchmark.sh
 ```
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*

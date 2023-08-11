@@ -42,8 +42,8 @@ const tracer = @import("../tracer.zig");
 const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
-const GridType = @import("grid.zig").GridType;
-const allocate_block = @import("grid.zig").allocate_block;
+const GridType = @import("../vsr/grid.zig").GridType;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
@@ -713,6 +713,7 @@ pub fn CompactionType(
                 table_builder.data_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                 });
                 WriteBlock(.data).write_block(compaction);
             }
@@ -728,6 +729,7 @@ pub fn CompactionType(
                 table_builder.filter_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                 });
                 WriteBlock(.filter).write_block(compaction);
             }
@@ -854,23 +856,19 @@ pub fn CompactionType(
             assert(compaction.state == .tables_writing_done);
             compaction.state = .applied_to_manifest;
 
-            // Each compaction's manifest (log) updates are deferred to the end of the last
-            // half-beat to ensure they are ordered deterministically relative to one
-            // another.
-            // TODO: If compaction is sequential, deferring manifest updates is unnecessary.
+            // Each compaction's manifest updates are deferred to the end of the last
+            // half-beat to ensure:
+            // - manifest log updates are ordered deterministically relative to one another, and
+            // - manifest updates are not visible until after the blocks are all on disk.
             const manifest = &compaction.context.tree.manifest;
             const level_b = compaction.context.level_b;
             const snapshot_max = snapshot_max_for_table_input(compaction.context.op_min);
 
-            // Update snapshot_max only if table in level A has been compacted
-            // with tables from level B. If no compaction is required, i.e.
-            // if a table in level A can simply be moved to level B, we needn't
-            // update snapshot_max.
-            // This update MUST be done before insert_table() and move_table()
-            // since it directly uses pointers to the ManifestLevel tables to
-            // perform updates. Calling insert_table() and move_table() before
-            // this update will cause these pointers to become invalid.
-            if (!compaction.move_table) {
+            if (compaction.move_table) {
+                // If no compaction is required, don't update snapshot_max.
+            } else {
+                // These updates MUST precede insert_table() and move_table() since they use
+                // references to modify the ManifestLevel in-place.
                 switch (compaction.context.table_info_a) {
                     .immutable => {},
                     .disk => |table_info| {
@@ -884,15 +882,8 @@ pub fn CompactionType(
 
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
-                    .insert_to_level_b => manifest.insert_table(
-                        level_b,
-                        &entry.table,
-                    ),
-                    .move_to_level_b => manifest.move_table(
-                        level_b - 1,
-                        level_b,
-                        &entry.table,
-                    ),
+                    .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
+                    .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
                 }
             }
         }
@@ -900,11 +891,11 @@ pub fn CompactionType(
 }
 
 fn snapshot_max_for_table_input(op_min: u64) u64 {
-    assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
-    return op_min + @divExact(constants.lsm_batch_multiple, 2) - 1;
+    return snapshot_min_for_table_output(op_min) - 1;
 }
 
-fn snapshot_min_for_table_output(op_min: u64) u64 {
+pub fn snapshot_min_for_table_output(op_min: u64) u64 {
+    assert(op_min > 0);
     assert(op_min % @divExact(constants.lsm_batch_multiple, 2) == 0);
     return op_min + @divExact(constants.lsm_batch_multiple, 2);
 }

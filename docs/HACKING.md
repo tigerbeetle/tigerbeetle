@@ -6,17 +6,17 @@
 
 First grab the sources and run the setup script:
 
-```bash
-$ git clone https://github.com/tigerbeetle/tigerbeetle.git
-$ cd tigerbeetle
-$ scripts/install.sh
+```console
+git clone https://github.com/tigerbeetle/tigerbeetle.git
+cd tigerbeetle
+scripts/install.sh
 ```
 
 ## Benchmark
 
 With TigerBeetle installed, you are ready to benchmark!
 
-```bash
+```console
 scripts/benchmark.sh
 ```
 
@@ -31,19 +31,19 @@ for exactly what we're benchmarking.
 
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
-```
-$ ./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
-$ ./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
-$ ./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
+```console
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
 
-$ ./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
-$ ./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
-$ ./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
 ```
 
 Run the TigerBeetle binary to see all command line arguments:
 
-```bash
+```console
 ./tigerbeetle --help
 ```
 
@@ -53,19 +53,19 @@ Run the TigerBeetle binary to see all command line arguments:
 
 To run the unit tests:
 
-```bash
+```console
 zig/zig build test
 ```
 
 To run a single test by name:
 
-```bash
+```console
 zig/zig build test:unit -Dtest-filter="name of test"
 ```
 
 To run tests with code coverage (assuming `kcov` is installed on your system):
 
-```bash
+```console
 COV=1 zig/zig build test
 open kcov-output/index.html
 ```
@@ -76,25 +76,25 @@ The [Setup](#setup) step above will install Zig for you to the root of the `tige
 
 To run TigerBeetle's long-running simulation, called *The VOPR*:
 
-```bash
+```console
 zig/zig build vopr
 ```
 
 Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](/src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
 
-```bash
+```console
 zig/zig build vopr -- --send
 ```
 
 Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also include `--build-mode` to run in ReleaseSafe mode.
 
-```bash
+```console
 zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
 ```
 
 To view all the available command line arguments simply use the `--help` flag.
 
-```bash
+```console
 zig/zig build vopr -- --help
 ```
 
@@ -120,8 +120,8 @@ Detailed instructions for each client are in their respective README:
 The `client_integration` target in build.zig helps with running the
 sample programs for each client as an integration test.
 
-```bash
-./zig/zig build client_integration -- --language go --sample basic
+```console
+./zig/zig build client_integration -- --language=go --sample=basic
 ```
 
 See [the src/clients/README.md

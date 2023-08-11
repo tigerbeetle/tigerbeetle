@@ -17,7 +17,7 @@ And if you do not already have NuGet.org as a package
 source, make sure to add it:
 
 ```console
-$ dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
+dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
 ```
 
 ## Setup
@@ -27,8 +27,8 @@ First, create a directory for your project and `cd` into the directory.
 Then, install the TigerBeetle client:
 
 ```console
-$ dotnet new console
-$ dotnet add package tigerbeetle
+dotnet new console
+dotnet add package tigerbeetle
 ```
 
 Now, create `Program.cs` and copy this into it:
@@ -46,7 +46,7 @@ Console.WriteLine("SUCCESS");
 Finally, build and run:
 
 ```console
-$ dotnet run
+dotnet run
 ```
 
 Now that all prerequisites and dependencies are correctly set
@@ -68,9 +68,8 @@ addresses for all replicas in the cluster. The cluster
 ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
-Clients are thread-safe. But for better
-performance, a single instance should be shared between
-multiple concurrent tasks.
+Clients are thread-safe and a single instance should be shared
+between multiple concurrent tasks.
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -120,7 +119,7 @@ var accounts = new[] {
     Ledger = 1,
     Code = 718,
     Flags = AccountFlags.None,
-  },     
+  },
 };
 
 var createAccountsError = client.CreateAccounts(accounts);
@@ -420,15 +419,15 @@ createTransfersError = client.CreateTransfers(batch.ToArray());
 In a POSIX shell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ ./scripts/install_zig.sh
-$ cd src/clients/dotnet
-$ dotnet restore
-$ dotnet clean
-$ dotnet build
-$ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+./scripts/install_zig.sh
+cd src/clients/dotnet
+dotnet restore
+dotnet clean --verbosity minimal
+dotnet build
+if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
 ```
 
 ### On Windows
@@ -436,14 +435,13 @@ $ if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tes
 In PowerShell run:
 
 ```console
-$ git clone https://github.com/tigerbeetle/tigerbeetle
-$ cd tigerbeetle
-$ git submodule update --init --recursive
-$ .\scripts\install_zig.bat
-$ cd src/clients/dotnet
-$ dotnet restore
-$ dotnet clean
-$ dotnet build
-$ if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+.\scripts\install_zig.bat
+cd src/clients/dotnet
+dotnet restore
+dotnet clean --verbosity minimal
+dotnet build
+if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
 ```
-

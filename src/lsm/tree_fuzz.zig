@@ -17,11 +17,12 @@ const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
-const GridType = @import("grid.zig").GridType;
-const allocate_block = @import("grid.zig").allocate_block;
+const GridType = @import("../vsr/grid.zig").GridType;
+const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
+const key_fingerprint = @import("tree.zig").key_fingerprint;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -280,9 +281,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         pub fn get(env: *Environment, key: Key) ?*const Key.Value {
             env.change_state(.fuzzing, .tree_lookup);
-
             env.lookup_value = null;
-            switch (env.tree.lookup_from_memory(snapshot_latest, key)) {
+
+            const fingerprint = key_fingerprint(key);
+            switch (env.tree.lookup_from_memory(snapshot_latest, key, fingerprint)) {
                 .negative => {
                     get_callback(&env.lookup_context, null);
                 },
@@ -293,8 +295,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     env.tree.lookup_from_levels_storage(.{
                         .callback = get_callback,
                         .context = &env.lookup_context,
-                        .snapshot = env.tree.lookup_snapshot_max.?,
+                        .snapshot = snapshot_latest,
                         .key = key,
+                        .fingerprint = fingerprint,
                         .level_min = level_min,
                     });
                 },

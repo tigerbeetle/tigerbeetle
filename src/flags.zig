@@ -70,9 +70,13 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
-    assert(@typeInfo(Commands) == .Union);
+    comptime assert(@typeInfo(Commands) == .Union);
+    comptime assert(std.meta.fields(Commands).len >= 2);
 
-    const first_arg = args.next() orelse fatal("subcommand required", .{});
+    const first_arg = args.next() orelse fatal(
+        "subcommand required, expected {s}",
+        .{comptime fields_to_comma_list(Commands)},
+    );
 
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
@@ -126,10 +130,18 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         } else {
             fields[field_count] = field;
             field_count += 1;
-            if (field.type == bool) {
-                assert(default_value(field) == false); // boolean flags should have explicit default
-            } else {
-                assert_valid_value_type(field.type);
+
+            switch (@typeInfo(field.type)) {
+                .Bool => {
+                    assert(default_value(field).? == false); // boolean flags should have a default
+                },
+                .Optional => |optional| {
+                    assert(default_value(field).? == null); // optional flags should have a default
+                    assert_valid_value_type(optional.child);
+                },
+                else => {
+                    assert_valid_value_type(field.type);
+                },
             }
         }
     };
@@ -214,9 +226,24 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 }
 
 fn assert_valid_value_type(comptime T: type) void {
-    if (T == []const u8 or T == [:0]const u8 or T == ByteSize or @typeInfo(T) == .Int) return;
-    @compileLog("unsupported type", T);
-    comptime unreachable;
+    comptime {
+        if (T == []const u8 or T == [:0]const u8 or T == ByteSize or @typeInfo(T) == .Int) return;
+
+        if (@typeInfo(T) == .Enum) {
+            const info = @typeInfo(T).Enum;
+            assert(info.is_exhaustive);
+            assert(info.fields.len >= 2);
+            for (info.fields) |enum_field| {
+                if (std.mem.indexOfAny(u8, enum_field.name, "-_ ") != null) {
+                    @compileError("ambiguous enum flag");
+                }
+            }
+            return;
+        }
+
+        @compileLog("unsupported type", T);
+        unreachable;
+    }
 }
 
 /// Parse, e.g., `--cluster=123` into `123` integer
@@ -259,28 +286,16 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
     assert(value.len > 0);
 
-    if (T == []const u8 or T == [:0]const u8) return value;
-    if (T == ByteSize) return parse_value_size(flag, value);
-    if (@typeInfo(T) == .Int) return parse_value_int(T, flag, value);
-    comptime unreachable;
-}
-
-/// Parse string value into an integer, providing a nice error message for the user.
-fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
-    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
-
-    return std.fmt.parseInt(T, value, 10) catch |err| {
-        switch (err) {
-            error.Overflow => fatal(
-                "{s}: value exceeds {d}-bit {s} integer: '{s}'",
-                .{ flag, @typeInfo(T).Int.bits, @tagName(@typeInfo(T).Int.signedness), value },
-            ),
-            error.InvalidCharacter => fatal(
-                "{s}: expected an integer value, but found '{s}' (invalid digit)",
-                .{ flag, value },
-            ),
-        }
+    const V = switch (@typeInfo(T)) {
+        .Optional => |optional| optional.child,
+        else => T,
     };
+
+    if (V == []const u8 or V == [:0]const u8) return value;
+    if (V == ByteSize) return parse_value_size(flag, value);
+    if (@typeInfo(V) == .Int) return parse_value_int(V, flag, value);
+    if (@typeInfo(V) == .Enum) return parse_value_enum(V, flag, value);
+    comptime unreachable;
 }
 
 pub const ByteSize = struct { bytes: u64 };
@@ -364,19 +379,65 @@ test parse_value_size {
     }
 }
 
-fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
-    comptime assert(!std.mem.eql(u8, field.name, "positional"));
+/// Parse string value into an integer, providing a nice error message for the user.
+fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
+    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
-    comptime var result: []const u8 = "--";
+    return std.fmt.parseInt(T, value, 10) catch |err| {
+        switch (err) {
+            error.Overflow => fatal(
+                "{s}: value exceeds {d}-bit {s} integer: '{s}'",
+                .{ flag, @typeInfo(T).Int.bits, @tagName(@typeInfo(T).Int.signedness), value },
+            ),
+            error.InvalidCharacter => fatal(
+                "{s}: expected an integer value, but found '{s}' (invalid digit)",
+                .{ flag, value },
+            ),
+        }
+    };
+}
+
+fn parse_value_enum(comptime E: type, flag: []const u8, value: [:0]const u8) E {
+    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
+    comptime assert(@typeInfo(E).Enum.is_exhaustive);
+
+    return std.meta.stringToEnum(E, value) orelse fatal(
+        "{s}: expected one of {s}, but found '{s}'",
+        .{ flag, comptime fields_to_comma_list(E), value },
+    );
+}
+
+fn fields_to_comma_list(comptime E: type) []const u8 {
     comptime {
+        const field_count = std.meta.fields(E).len;
+        assert(field_count >= 2);
+
+        var result: []const u8 = "";
+        for (std.meta.fields(E)) |field, field_index| {
+            const separator = switch (field_index) {
+                0 => "",
+                else => ", ",
+                field_count - 1 => if (field_count == 2) " or " else ", or ",
+            };
+            result = result ++ separator ++ "'" ++ field.name ++ "'";
+        }
+        return result;
+    }
+}
+
+fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+    comptime {
+        assert(!std.mem.eql(u8, field.name, "positional"));
+
+        var result: []const u8 = "--";
         var index = 0;
         while (std.mem.indexOf(u8, field.name[index..], "_")) |i| {
             result = result ++ field.name[index..][0..i] ++ "-";
             index = index + i + 1;
         }
         result = result ++ field.name[index..];
+        return result;
     }
-    return result;
 }
 
 test flag_name {
@@ -427,6 +488,8 @@ pub usingnamespace if (@import("root") != @This()) struct {
             size: ByteSize = .{ .bytes = 0 },
             boolean: bool = false,
             path: []const u8 = "not-set",
+            optional: ?[]const u8 = null,
+            choice: enum { marlowe, shakespeare } = .marlowe,
         },
 
         pub const help =
@@ -470,6 +533,8 @@ pub usingnamespace if (@import("root") != @This()) struct {
                 try out_stream.print("size: {}\n", .{values.size.bytes});
                 try out_stream.print("boolean: {}\n", .{values.boolean});
                 try out_stream.print("path: {s}\n", .{values.path});
+                try out_stream.print("optional: {?s}\n", .{values.optional});
+                try out_stream.print("choice: {?s}\n", .{@tagName(values.choice)});
             },
         }
     }
@@ -593,7 +658,7 @@ test "flags" {
     try t.check(&.{}, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: subcommand required
+        \\error: subcommand required, expected 'empty', 'prefix', 'pos', 'required', or 'values'
         \\
     ));
 
@@ -766,12 +831,22 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--int=92", "--size=1GiB", "--boolean", "--path=/home" }, snap(@src(),
+    try t.check(&.{
+        "values",
+        "--int=92",
+        "--size=1GiB",
+        "--boolean",
+        "--path=/home",
+        "--optional=some",
+        "--choice=shakespeare",
+    }, snap(@src(),
         \\stdout:
         \\int: 92
         \\size: 1073741824
         \\boolean: true
         \\path: /home
+        \\optional: some
+        \\choice: shakespeare
         \\
     ));
 
@@ -781,6 +856,8 @@ test "flags" {
         \\size: 0
         \\boolean: false
         \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
@@ -818,6 +895,8 @@ test "flags" {
         \\size: 0
         \\boolean: false
         \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
@@ -841,6 +920,8 @@ test "flags" {
         \\size: 3145728
         \\boolean: false
         \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
@@ -857,6 +938,8 @@ test "flags" {
         \\size: 100000000000000000
         \\boolean: false
         \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
@@ -871,6 +954,27 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: --size: expected a size, but found '3Mib' (invalid digit or suffix)
+        \\
+    ));
+
+    try t.check(&.{ "values", "--path=" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --path: argument requires a value
+        \\
+    ));
+
+    try t.check(&.{ "values", "--optional=" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --optional: argument requires a value
+        \\
+    ));
+
+    try t.check(&.{ "values", "--choice=molière" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --choice: expected one of 'marlowe' or 'shakespeare', but found 'molière'
         \\
     ));
 }

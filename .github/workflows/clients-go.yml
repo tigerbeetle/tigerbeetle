@@ -80,13 +80,13 @@ jobs:
       - run: ./zig/zig build client_integration
 
       - if: matrix.os != 'windows-latest'
-        run: ./zig-out/bin/client_integration --language go --sample ${{ matrix.sample }}
+        run: ./zig-out/bin/client_integration --language=go --sample=${{ matrix.sample }}
 
       # Set CC='zig.exe cc' for Windows.
       - if: matrix.os == 'windows-latest'
         run: |
           $env:CC = "$(pwd)\zig\zig.exe cc"
-          ./zig-out/bin/client_integration.exe --language go --sample ${{ matrix.sample }}
+          ./zig-out/bin/client_integration.exe --language=go --sample=${{ matrix.sample }}
 
   docs:
     timeout-minutes: 20
@@ -112,14 +112,14 @@ jobs:
           # Specifically for self-hosted M1 runners, OK if this fails on other envs.
           rm -rf /Users/macos/Library/Caches/go-build
 
-          ./zig/zig build client_docs -- --language go
+          ./zig/zig build client_docs -- --language=go
 
       # Set CC='zig.exe cc' for Windows.
       - if: matrix.os == 'windows-latest'
         run: |
           $env:CC = "$(pwd)\zig\zig.exe cc"
           .\zig\zig build client_docs
-          .\zig-out\bin\client_docs --language go
+          .\zig-out\bin\client_docs --language=go
 
       - if: matrix.os == 'ubuntu-latest'
         run: ./.github/ci/fail_on_diff.sh

@@ -7,8 +7,8 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
 const StaticAllocator = @import("../static_allocator.zig");
-const allocate_block = @import("../lsm/grid.zig").allocate_block;
-const GridType = @import("../lsm/grid.zig").GridType;
+const allocate_block = @import("grid.zig").allocate_block;
+const GridType = @import("grid.zig").GridType;
 const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;

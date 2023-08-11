@@ -8,7 +8,7 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Grid = vsr.lsm.grid.GridType(vsr.storage.Storage);
+const Grid = vsr.GridType(vsr.storage.Storage);
 const StateMachine = vsr.state_machine.StateMachineType(
     vsr.storage.Storage,
     constants.state_machine_config,
