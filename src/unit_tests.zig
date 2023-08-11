@@ -37,6 +37,7 @@ test {
     _ = @import("testing/id.zig");
     _ = @import("testing/storage.zig");
     _ = @import("testing/table.zig");
+    _ = @import("testing/tmp_tigerbeetle.zig");
 
     _ = @import("vsr.zig");
     _ = @import("vsr/clock.zig");

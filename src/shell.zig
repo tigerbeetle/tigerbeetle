@@ -18,6 +18,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const Shell = @This();
+
 /// For internal use by the `Shell` itself.
 gpa: std.mem.Allocator,
 
@@ -26,14 +28,29 @@ gpa: std.mem.Allocator,
 /// they don't forget to call `Shell.destroy`.
 arena: std.heap.ArenaAllocator,
 
-const Shell = @This();
+/// Root directory of this repository.
+///
+/// Prefer this to `std.fs.cwd()` if possible.
+///
+/// This is initialized when a shell is created. It would be more flexible to lazily initialize this
+/// on the first access, but, given that we always use `Shell` in the context of our repository,
+/// eager initialization is more ergonomic.
+project_root: std.fs.Dir,
 
 pub fn create(allocator: std.mem.Allocator) !*Shell {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer arena.deinit();
+
+    var project_root = try discover_project_root();
+    errdefer project_root.close();
+
     var result = try allocator.create(Shell);
     result.* = Shell{
         .gpa = allocator,
-        .arena = std.heap.ArenaAllocator.init(allocator),
+        .arena = arena,
+        .project_root = project_root,
     };
+
     return result;
 }
 
@@ -84,7 +101,11 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
 pub fn dir_exists(shell: *Shell, path: []const u8) !bool {
     _ = shell;
 
-    const stat = std.fs.cwd().statFile(path) catch |err| switch (err) {
+    return subdir_exists(std.fs.cwd(), path);
+}
+
+fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
+    const stat = dir.statFile(path) catch |err| switch (err) {
         error.FileNotFound => return false,
         error.IsDir => return true,
         else => return err,
@@ -210,6 +231,56 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     return res.stdout;
 }
 
+/// Spawns the process, piping its stdout and stderr.
+///
+/// The caller must `.kill()` and `.wait()` the child, to minimize the chance of process leak (
+/// sadly, child will still be leaked if the parent process is killed itself, because POSIX doesn't
+/// have nice APIs for structured concurrency).
+pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.ChildProcess {
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try expand_argv(&argv, cmd, cmd_args);
+
+    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+
+    try child.spawn();
+
+    // XXX: child.argv is undefined when we return. This is fine though, as it is only used during
+    // `spawn`.
+    return child;
+}
+
+/// Runs the zig compiler.
+pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+    const zig_exe = try shell.project_root.realpathAlloc(
+        shell.gpa,
+        comptime "zig/zig" ++ builtin.target.exeFileExt(),
+    );
+    defer shell.gpa.free(zig_exe);
+
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try argv.append(zig_exe);
+    try expand_argv(&argv, cmd, cmd_args);
+
+    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+
+    const term = try child.spawnAndWait();
+
+    switch (term) {
+        .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
+        else => return error.CommandFailed,
+    }
+}
+
 /// Returns current git commit hash as an ASCII string.
 pub fn git_commit(shell: *Shell) ![]const u8 {
     const stdout = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
@@ -329,4 +400,29 @@ test "shell: expand_argv" {
             \\["zig","version","--verbose"]
         ),
     );
+}
+
+/// Finds the root of TigerBeetle repo.
+///
+/// Caller is responsible for closing the dir.
+fn discover_project_root() !std.fs.Dir {
+    var current = try std.fs.cwd().openDir(".", .{}); // dup cwd so that the caller can close
+    errdefer current.close();
+
+    var level: u32 = 0;
+    while (level < 16) : (level += 1) {
+        if (current.statFile("build.zig")) |_| {
+            assert(try subdir_exists(current, ".github"));
+            return current;
+        } else |err| switch (err) {
+            error.FileNotFound => {
+                var parent = try current.openDir("..", .{});
+                current.close();
+                current = parent;
+            },
+            else => return err,
+        }
+    }
+
+    return error.DiscoverProjectRootDepthExceeded;
 }
