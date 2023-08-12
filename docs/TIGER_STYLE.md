@@ -169,10 +169,10 @@ Beyond these rules:
   adhere or comply, but it also shares criteria with them with which to evaluate the decision and
   its importance.
 
-* **Explicitly pass options to Zig library functions at the call site, instead of relying on the
-   defaults**. As an example, use `@prefetch(a, .{ .cache = .data, .rw = .read, .locality = 3 });`
-   over `@prefetch(a, .{});`. This is not only good for readability but also avoids latent,
-   potentially catastrophic issues in case the library changes its defaults from under our feet.
+* **Explicitly pass options to library functions at the call site, instead of relying on the
+   defaults**. For example, write `@prefetch(a, .{ .cache = .data, .rw = .read, .locality = 3 });`
+   over `@prefetch(a, .{});`. This improves readability but most of all avoids latent,
+   potentially catastrophic bugs in case the library ever changes its defaults.
 
 
 ## Performance
