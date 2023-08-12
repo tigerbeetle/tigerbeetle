@@ -169,6 +169,12 @@ Beyond these rules:
   adhere or comply, but it also shares criteria with them with which to evaluate the decision and
   its importance.
 
+* **Explicitly pass options to library functions at the call site, instead of relying on the
+   defaults**. For example, write `@prefetch(a, .{ .cache = .data, .rw = .read, .locality = 3 });`
+   over `@prefetch(a, .{});`. This improves readability but most of all avoids latent,
+   potentially catastrophic bugs in case the library ever changes its defaults.
+
+
 ## Performance
 
 > “The lack of back-of-the-envelope performance sketches is the root of all evil.”
