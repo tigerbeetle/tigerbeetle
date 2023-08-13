@@ -60,7 +60,7 @@ namespace TigerBeetle
 
         private static NativeClient CallInit(InitFunction initFunction, uint clusterID, string[] addresses, int concurrencyMax)
         {
-            if (concurrencyMax <= 0) throw new ArgumentException("Concurrency must be positive", nameof(concurrencyMax));
+            if (concurrencyMax <= 0) throw new ArgumentOutOfRangeException(nameof(concurrencyMax), "Concurrency must be positive");
 
             var addresses_byte = GetBytes(addresses);
             unsafe
