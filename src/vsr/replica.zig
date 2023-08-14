@@ -59,6 +59,7 @@ const CommitStage = enum {
     compact_state_machine,
     checkpoint_state_machine,
     checkpoint_client_replies,
+    checkpoint_grid_repair,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -2730,6 +2731,7 @@ pub fn ReplicaType(
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
             if (self.commit_stage == .checkpoint_superblock) return;
+            if (self.commit_stage == .checkpoint_grid_repair) return;
 
             // TODO Test connectivity to cluster to rule out a network partition.
 
@@ -3077,6 +3079,7 @@ pub fn ReplicaType(
                 .checkpoint_client_replies => {
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
+                .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3424,10 +3427,9 @@ pub fn ReplicaType(
                 );
                 if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
-                assert(self.grid.read_queue.empty());
-                assert(self.grid.read_faulty_queue.empty());
-                assert(self.grid.write_queue.empty());
-                assert(self.grid.write_iops.executing() == 0);
+                // TODO(Compaction pacing) Move this out of the conditional once there is no IO
+                // between beats.
+                self.grid.assert_only_repairing();
 
                 self.commit_dispatch(.checkpoint_state_machine);
             } else {
@@ -3441,10 +3443,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid.write_iops.executing() == 0);
+            self.grid.assert_only_repairing();
 
             self.commit_dispatch(.checkpoint_client_replies);
         }
@@ -3453,20 +3452,33 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_stage == .checkpoint_client_replies);
 
+            self.commit_dispatch(.checkpoint_grid_repair);
+        }
+
+        fn commit_op_checkpoint_grid_repair(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
+
+            self.grid.checkpoint(commit_op_checkpoint_grid_repair_callback);
+        }
+
+        fn commit_op_checkpoint_grid_repair_callback(grid: *Grid) void {
+            const self = @fieldParentPtr(Self, "grid", grid);
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
+
             self.commit_dispatch(.checkpoint_superblock);
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
+            assert(self.state_machine_opened);
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid.write_iops.executing() == 0);
             assert(self.op_checkpoint_trigger() == self.op);
             assert(self.op_checkpoint_trigger() <= self.commit_max);
+            self.grid.assert_only_repairing();
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
@@ -3500,6 +3512,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.commit_min - constants.lsm_batch_multiple);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+            self.grid.assert_only_repairing();
 
             log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{
                 self.replica,
@@ -7475,6 +7488,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7618,6 +7632,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => {},
             }
