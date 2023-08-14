@@ -356,6 +356,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 const index_block = tree.grid.read_block_from_cache(
                     table.address,
                     table.checksum,
+                    .{ .coherent = true },
                 ) orelse {
                     // Index block not in cache. We cannot rule out existence without I/O,
                     // and therefore bail out.
@@ -409,7 +410,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             checksum: u128,
             fingerprint: Fingerprint,
         ) enum { negative, possible, block_not_in_cache } {
-            if (tree.grid.read_block_from_cache(address, checksum)) |filter_block| {
+            if (tree.grid.read_block_from_cache(
+                address,
+                checksum,
+                .{ .coherent = true },
+            )) |filter_block| {
                 const filter_schema = schema.TableFilter.from(filter_block);
                 const filter_bytes = filter_schema.block_filter_const(filter_block);
                 if (!bloom_filter.may_contain(fingerprint, filter_bytes)) {
@@ -432,7 +437,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             negative,
             block_not_in_cache,
         } {
-            if (tree.grid.read_block_from_cache(address, checksum)) |data_block| {
+            if (tree.grid.read_block_from_cache(
+                address,
+                checksum,
+                .{ .coherent = true },
+            )) |data_block| {
                 if (Table.data_block_search(data_block, key)) |value| {
                     return .{ .positive = value };
                 } else {
@@ -522,12 +531,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
 
-                context.tree.grid.read_block_from_cache_or_storage(
+                context.tree.grid.read_block_from_cluster(
                     read_index_block_callback,
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
-                    .index,
+                    .{ .cache_check = true, .cache_update = true },
                 );
             }
 
@@ -546,12 +555,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .checksum = blocks.data_block_checksum,
                 };
 
-                context.tree.grid.read_block_from_cache_or_storage(
+                context.tree.grid.read_block_from_cluster(
                     read_filter_block_callback,
                     completion,
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
-                    .filter,
+                    .{ .cache_check = true, .cache_update = true },
                 );
             }
 
@@ -572,12 +581,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         @as(f64, @floatFromInt(context.tree.filter_block_hits)),
                     );
 
-                    context.tree.grid.read_block_from_cache_or_storage(
+                    context.tree.grid.read_block_from_cluster(
                         read_data_block_callback,
                         completion,
                         context.data_block.?.address,
                         context.data_block.?.checksum,
-                        .data,
+                        .{ .cache_check = true, .cache_update = true },
                     );
                 } else {
                     context.tree.filter_block_misses += 1;

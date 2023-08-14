@@ -118,12 +118,12 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
                         .table_info = table_info.*,
                     },
                 };
-                it.context.grid.read_block_from_cache_or_storage(
+                it.context.grid.read_block_from_cluster(
                     on_read,
                     &it.read,
                     table_info.address,
                     table_info.checksum,
-                    .index,
+                    .{ .cache_check = true, .cache_update = true },
                 );
             } else {
                 it.callback = .{ .next_tick = callback };
