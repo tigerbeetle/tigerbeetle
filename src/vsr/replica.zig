@@ -7713,6 +7713,8 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
             assert(self.sync_message_timeout.ticking);
+            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.write_queue.empty());
             maybe(self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
@@ -7739,7 +7741,10 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.write_queue.empty());
             assert(self.syncing == .updating_superblock);
+            assert(!self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
