@@ -22,12 +22,14 @@ tmp_dir: std.testing.TmpDir,
 // Lifetimes are tricky here! The order is:
 // - `kill` the process,
 // - `join` the thread,
-// - `destroy` the read buffer
+// - `destroy` the reader
+// - `wait` the process
 //
-// Killing the process guarantees to unblock the thread.
+// That is, we need to kill the process first so that the thread is unblocked, but we
+// need to wait for it last, so that stderr file descriptor is still good while we use it!
+process: std.ChildProcess,
 stderr_reader: *StderrReader,
 stderr_reader_thread: std.Thread,
-process: std.ChildProcess,
 
 pub fn init(
     gpa: std.mem.Allocator,
@@ -106,34 +108,34 @@ pub fn init(
 }
 
 pub fn deinit(tb: *TmpTigerBeetle, gpa: std.mem.Allocator) void {
-    _ = tb.process.kill() catch unreachable;
+    // Signal to the `stderr_reader_thread` that it can exit
+    // TODO(Zig) https://github.com/ziglang/zig/issues/16820
+    if (builtin.os.tag == .windows) {
+        std.os.windows.TerminateProcess(tb.process.handle, 1) catch {};
+    } else {
+        std.os.kill(tb.process.pid, std.os.SIG.TERM) catch {};
+    }
+
     tb.stderr_reader_thread.join();
     tb.stderr_reader.destroy(gpa);
+    _ = tb.process.wait() catch unreachable;
     tb.tmp_dir.cleanup();
 }
 
 const StderrReader = struct {
-    fd: std.fs.File,
+    fd: std.fs.File, // owned by the caller
     echo: bool = false,
     buf: [4096]u8 = undefined,
 
     fn create(gpa: std.mem.Allocator, fd: std.fs.File) !*StderrReader {
-        // We need to `dup` the file descriptor we will be reading from to avoid a race with
-        // concurrent `.kill` of the process.
-        //
-        // See https://github.com/ziglang/zig/issues/16820
-        const fd_dup = std.fs.File{ .handle = try std.os.dup(fd.handle) };
-        errdefer fd_dup.close();
-
         var reader = try gpa.create(StderrReader);
         errdefer gpa.destroy(reader);
 
-        reader.* = .{ .fd = fd_dup };
+        reader.* = .{ .fd = fd };
         return reader;
     }
 
     fn destroy(reader: *StderrReader, gpa: std.mem.Allocator) void {
-        reader.fd.close();
         gpa.destroy(reader);
     }
 
@@ -167,4 +169,14 @@ test parse_port {
         parse_port("info(main): 0: cluster=1: listening on 127.0.0.1:39047"),
         39047,
     );
+}
+
+pub fn main() !void {
+    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    const gpa = gpa_allocator.allocator();
+
+    var tb = try TmpTigerBeetle.init(gpa, .{});
+    defer tb.deinit(gpa);
+
+    std.debug.print("\n{}\n", .{tb.port});
 }
