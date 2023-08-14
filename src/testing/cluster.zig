@@ -460,6 +460,28 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             _ = result;
         }
 
+        pub fn request_reconfigure(
+            cluster: *Self,
+            client_index: usize,
+            reconfiguration: *const vsr.ReconfigurationRequest,
+            request_message: *Message,
+        ) void {
+            cluster.clients[client_index].request_reconfigure(
+                undefined,
+                request_reconfigure_callback,
+                reconfiguration,
+                request_message,
+            );
+        }
+
+        fn request_reconfigure_callback(
+            user_data: u128,
+            result: vsr.ReconfigurationResult,
+        ) void {
+            _ = user_data;
+            _ = result;
+        }
+
         fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {
             const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), client.on_reply_context.?));
             assert(reply_message.header.cluster == cluster.options.cluster_id);

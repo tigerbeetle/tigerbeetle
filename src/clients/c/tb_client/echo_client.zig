@@ -81,7 +81,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
-                .callback = callback,
+                .callback = .{ .request = callback },
                 .message = message.ref(),
             });
         }
@@ -109,7 +109,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 // callback. This necessitates a `copy_disjoint` above.
                 self.unref(inflight.message);
 
-                inflight.callback.?(
+                inflight.callback.?.request(
                     inflight.user_data,
                     reply_message.header.operation.cast(Self.StateMachine),
                     reply_message.body(),
