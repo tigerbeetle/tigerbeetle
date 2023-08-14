@@ -46,7 +46,9 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    comptime {
+    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
+    return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);
         var iterator = std.mem.tokenize(u8, input, "_");
@@ -60,8 +62,8 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
             len += word.len;
         }
 
-        return output[0 .. min_len orelse len];
-    }
+        break :blk output[0 .. min_len orelse len];
+    };
 }
 
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
@@ -107,7 +109,7 @@ fn emit_enum(
         try buffer.writer().print("\t{s} {s} = {d}\n", .{
             enum_name,
             name,
-            @enumToInt(@field(Type, field.name)),
+            @intFromEnum(@field(Type, field.name)),
         });
     }
 
@@ -161,7 +163,7 @@ fn emit_packed_struct(
         int_type,
     });
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
         try buffer.writer().print("\tif f.{s} {{\n" ++
@@ -186,9 +188,9 @@ fn emit_struct(
     });
 
     const min_len = calculate_min_len(type_info);
-    var flagsField = false;
+    comptime var flagsField = false;
     inline for (type_info.fields) |field| {
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => |array| {
                 try buffer.writer().print("\t{s} [{d}]{s}\n", .{
                     to_pascal_case(field.name, min_len),
@@ -205,7 +207,7 @@ fn emit_struct(
                     "\t{s} {s}\n",
                     .{
                         to_pascal_case(field.name, min_len),
-                        go_type(field.field_type),
+                        go_type(field.type),
                     },
                 );
             },
@@ -214,7 +216,7 @@ fn emit_struct(
 
     try buffer.writer().print("}}\n\n", .{});
 
-    if (comptime flagsField) {
+    if (flagsField) {
         const flagType = if (comptime std.mem.eql(u8, name, "Account")) tb.AccountFlags else tb.TransferFlags;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
         try buffer.writer().print(
@@ -230,7 +232,7 @@ fn emit_struct(
 
         switch (@typeInfo(flagType)) {
             .Struct => |info| switch (info.layout) {
-                .Packed => inline for (info.fields) |field, i| {
+                .Packed => inline for (info.fields, 0..) |field, i| {
                     if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
                     try buffer.writer().print("\tf.{s} = ((o.Flags >> {}) & 0x1) == 1\n", .{

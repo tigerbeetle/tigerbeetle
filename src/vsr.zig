@@ -146,8 +146,8 @@ pub const Command = enum(u8) {
     sync_client_sessions = 26,
 
     comptime {
-        for (std.enums.values(Command)) |result, index| {
-            assert(@enumToInt(result) == index);
+        for (std.enums.values(Command), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
         }
     }
 };
@@ -171,14 +171,14 @@ pub const Operation = enum(u8) {
 
     pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
         check_state_machine_operations(StateMachine.Operation);
-        return @intToEnum(Operation, @enumToInt(op));
+        return @as(Operation, @enumFromInt(@intFromEnum(op)));
     }
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine.Operation);
         assert(self.valid(StateMachine));
         assert(!self.vsr_reserved());
-        return @intToEnum(StateMachine.Operation, @enumToInt(self));
+        return @as(StateMachine.Operation, @enumFromInt(@intFromEnum(self)));
     }
 
     pub fn valid(self: Operation, comptime StateMachine: type) bool {
@@ -187,7 +187,7 @@ pub const Operation = enum(u8) {
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
             const ops = comptime std.enums.values(Enum);
             inline for (ops) |op| {
-                if (@enumToInt(self) == @enumToInt(op)) {
+                if (@intFromEnum(self) == @intFromEnum(op)) {
                     return true;
                 }
             }
@@ -197,7 +197,7 @@ pub const Operation = enum(u8) {
     }
 
     pub fn vsr_reserved(self: Operation) bool {
-        return @enumToInt(self) < constants.vsr_operations_reserved;
+        return @intFromEnum(self) < constants.vsr_operations_reserved;
     }
 
     pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
@@ -205,7 +205,7 @@ pub const Operation = enum(u8) {
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
             inline for (@typeInfo(Enum).Enum.fields) |field| {
                 const op = @field(Enum, field.name);
-                if (@enumToInt(self) == @enumToInt(op)) {
+                if (@intFromEnum(self) == @intFromEnum(op)) {
                     return field.name;
                 }
             }
@@ -219,7 +219,7 @@ pub const Operation = enum(u8) {
             assert(@typeInfo(Op).Enum.tag_type == @typeInfo(Operation).Enum.tag_type);
             for (@typeInfo(Op).Enum.fields) |field| {
                 const op = @field(Op, field.name);
-                if (@enumToInt(op) < constants.vsr_operations_reserved) {
+                if (@intFromEnum(op) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
                 }
             }
@@ -576,7 +576,7 @@ pub const Header = extern struct {
                     if (self.size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)) {
                         return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
                     }
-                } else if (@enumToInt(self.operation) < constants.vsr_operations_reserved) {
+                } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                     return "operation is reserved";
                 }
                 // Thereafter, the client must provide the session number in the context:
@@ -1079,8 +1079,8 @@ pub const ReconfigurationResult = enum(u32) {
     configuration_is_no_op = 16,
 
     comptime {
-        for (std.enums.values(ReconfigurationResult)) |result, index| {
-            assert(@enumToInt(result) == index);
+        for (std.enums.values(ReconfigurationResult), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
         }
     }
 };
@@ -1110,7 +1110,7 @@ test "ReconfigurationRequest" {
 
         fn to_members(m: anytype) Members {
             var result = [_]u128{0} ** constants.members_max;
-            inline for (m) |member, index| result[index] = member;
+            inline for (m, 0..) |member, index| result[index] = member;
             return result;
         }
     };
@@ -1316,23 +1316,23 @@ pub fn exponential_backoff_with_jitter(
 
     // Do not use `@truncate(u6, attempt)` since that only discards the high bits:
     // We want a saturating exponent here instead.
-    const exponent = @intCast(u6, std.math.min(std.math.maxInt(u6), attempt));
+    const exponent = @as(u6, @intCast(@min(std.math.maxInt(u6), attempt)));
 
     // A "1" shifted left gives any power of two:
     // 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8
     const power = std.math.shlExact(u128, 1, exponent) catch unreachable; // Do not truncate.
 
-    // Ensure that `backoff` is calculated correctly when min is 0, taking `std.math.max(1, min)`.
+    // Ensure that `backoff` is calculated correctly when min is 0, taking `@max(1, min)`.
     // Otherwise, the final result will always be 0. This was an actual bug we encountered.
-    const min_non_zero = std.math.max(1, min);
+    const min_non_zero = @max(1, min);
     assert(min_non_zero > 0);
     assert(power > 0);
 
     // Calculate the capped exponential backoff component, `min(range, min * 2 ^ attempt)`:
-    const backoff = std.math.min(range, min_non_zero * power);
+    const backoff = @min(range, min_non_zero * power);
     const jitter = random.uintAtMostBiased(u64, backoff);
 
-    const result = @intCast(u64, min + jitter);
+    const result = @as(u64, @intCast(min + jitter));
     assert(result >= min);
     assert(result <= max);
 
@@ -1480,7 +1480,7 @@ test "parse_addresses" {
         defer std.testing.allocator.free(addresses_actual);
 
         try std.testing.expectEqual(addresses_actual.len, vector.addresses.len);
-        for (vector.addresses) |address_expect, i| {
+        for (vector.addresses, 0..) |address_expect, i| {
             const address_actual = addresses_actual[i];
             try std.testing.expectEqual(address_expect.in.sa.family, address_actual.in.sa.family);
             try std.testing.expectEqual(address_expect.in.sa.port, address_actual.in.sa.port);
@@ -1515,7 +1515,7 @@ pub fn quorums(replica_count: u8) struct {
     assert(constants.quorum_replication_max >= 2);
     // For replica_count=2, set quorum_replication=2 even though =1 would intersect.
     // This improves durability of small clusters.
-    const quorum_replication = if (replica_count == 2) 2 else std.math.min(
+    const quorum_replication = if (replica_count == 2) 2 else @min(
         constants.quorum_replication_max,
         stdx.div_ceil(replica_count, 2),
     );
@@ -1541,7 +1541,7 @@ pub fn quorums(replica_count: u8) struct {
     assert(quorum_nack_prepare + quorum_replication > replica_count);
 
     const quorum_majority =
-        stdx.div_ceil(replica_count, 2) + @boolToInt(@mod(replica_count, 2) == 0);
+        stdx.div_ceil(replica_count, 2) + @intFromBool(@mod(replica_count, 2) == 0);
     assert(quorum_majority > @divFloor(replica_count, 2));
 
     return .{
@@ -1560,8 +1560,8 @@ test "quorums" {
     const expect_nack_prepare = [_]u8{ 1, 1, 2, 3, 3, 4, 5, 6 };
     const expect_majority = [_]u8{ 1, 2, 2, 3, 3, 4, 4, 5 };
 
-    for (expect_replication[0..]) |_, i| {
-        const replicas = @intCast(u8, i) + 1;
+    for (expect_replication[0..], 0..) |_, i| {
+        const replicas = @as(u8, @intCast(i)) + 1;
         const actual = quorums(replicas);
         try std.testing.expectEqual(actual.replication, expect_replication[i]);
         try std.testing.expectEqual(actual.view_change, expect_view_change[i]);
@@ -1614,7 +1614,7 @@ pub fn root_members(cluster: u32) Members {
 ///  - all non-zero elements are different
 ///  - all zero elements are trailing
 pub fn valid_members(members: *const Members) bool {
-    for (members) |replica_i, i| {
+    for (members, 0..) |replica_i, i| {
         for (members[0..i]) |replica_j| {
             if (replica_j == 0 and replica_i != 0) return false;
             if (replica_j != 0 and replica_j == replica_i) return false;
@@ -1624,8 +1624,8 @@ pub fn valid_members(members: *const Members) bool {
 }
 
 fn member_count(members: *const Members) u8 {
-    for (members) |member, index| {
-        if (member == 0) return @intCast(u8, index);
+    for (members, 0..) |member, index| {
+        if (member == 0) return @as(u8, @intCast(index));
     }
     return constants.members_max;
 }
@@ -1699,7 +1699,7 @@ const ViewChangeHeadersSlice = struct {
         }
 
         var child = head;
-        for (headers.slice[1..]) |*header, i| {
+        for (headers.slice[1..], 0..) |*header, i| {
             const index = i + 1;
             assert(header.command == .prepare or header.command == .reserved);
             assert(header.op < child.op);
@@ -1751,7 +1751,7 @@ const ViewChangeHeadersSlice = struct {
         const header_newest = &headers.slice[0];
         const header_oldest = blk: {
             var oldest: ?usize = null;
-            for (headers.slice) |*header, i| {
+            for (headers.slice, 0..) |*header, i| {
                 switch (Headers.dvc_header_type(header)) {
                     .blank => assert(i > 0),
                     .valid => oldest = i,
@@ -1794,7 +1794,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .client = 6,
             .request = 7,
             .command = .prepare,
-            .operation = @intToEnum(Operation, constants.vsr_operations_reserved + 8),
+            .operation = @as(Operation, @enumFromInt(constants.vsr_operations_reserved + 8)),
             .op = 9,
             .view = 10,
             .timestamp = 11,
@@ -1806,7 +1806,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .client = 3,
             .request = 4,
             .command = .prepare,
-            .operation = @intToEnum(Operation, constants.vsr_operations_reserved + 5),
+            .operation = @as(Operation, @enumFromInt(constants.vsr_operations_reserved + 5)),
             .op = 6,
             .view = 7,
             .timestamp = 8,
@@ -1875,7 +1875,7 @@ const ViewChangeHeadersArray = struct {
         assert(headers.array.len >= constants.view_change_headers_suffix_max);
         assert(headers.array.len >= constants.pipeline_prepare_queue_max + 1);
 
-        const commit_max = std.math.max(
+        const commit_max = @max(
             headers.array.get(0).op -| constants.pipeline_prepare_queue_max,
             headers.array.get(0).commit,
         );

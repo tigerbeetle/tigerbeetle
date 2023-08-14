@@ -56,7 +56,7 @@ pub fn binary_search_values_upsert_index(
         offset = next_offsets[
             // For exact matches, takes the first half if `mode == .lower_bound`,
             // or the second half if `mode == .upper_bound`.
-            @boolToInt(switch (config.mode) {
+            @intFromBool(switch (config.mode) {
                 .lower_bound => compare_keys(key_from_value(&values[mid]), key) == .lt,
                 .upper_bound => compare_keys(key_from_value(&values[mid]), key) != .gt,
             })
@@ -73,7 +73,7 @@ pub fn binary_search_values_upsert_index(
             compare_keys(key_from_value(&values[offset + length]), key) != .lt);
     }
 
-    offset += @boolToInt(compare_keys(key_from_value(&values[offset]), key) == .lt);
+    offset += @intFromBool(compare_keys(key_from_value(&values[offset]), key) == .lt);
 
     if (constants.verify) {
         assert(offset == 0 or switch (config.mode) {
@@ -88,7 +88,7 @@ pub fn binary_search_values_upsert_index(
             compare_keys(key_from_value(&values[offset]), key) != .lt);
     }
 
-    return @intCast(u32, offset);
+    return @as(u32, @intCast(offset));
 }
 
 pub inline fn binary_search_keys_upsert_index(
@@ -269,7 +269,7 @@ pub inline fn binary_search_values_range(
         .count = 0,
     };
 
-    const inclusive = @boolToInt(
+    const inclusive = @intFromBool(
         upsert_indexes.end < values.len and
             compare_keys(key_max, key_from_value(&values[upsert_indexes.end])) == .eq,
     );
@@ -320,16 +320,16 @@ const test_binary_search = struct {
         const keys = try gpa.alloc(u32, keys_count);
         defer gpa.free(keys);
 
-        for (keys) |*key, i| key.* = @intCast(u32, 7 * i + 3);
+        for (keys, 0..) |*key, i| key.* = @as(u32, @intCast(7 * i + 3));
 
         var target_key: u32 = 0;
         while (target_key < keys_count + 13) : (target_key += 1) {
             var expect: BinarySearchResult = .{ .index = 0, .exact = false };
-            for (keys) |key, i| {
+            for (keys, 0..) |key, i| {
                 switch (compare_keys(key, target_key)) {
-                    .lt => expect.index = @intCast(u32, i) + 1,
+                    .lt => expect.index = @as(u32, @intCast(i)) + 1,
                     .eq => {
-                        expect.index = @intCast(u32, i);
+                        expect.index = @as(u32, @intCast(i));
                         expect.exact = true;
                         if (mode == .lower_bound) break;
                     },
@@ -366,7 +366,7 @@ const test_binary_search = struct {
     ) !void {
         assert(target_keys.len == expected_results.len);
 
-        for (target_keys) |target_key, i| {
+        for (target_keys, 0..) |target_key, i| {
             if (log) {
                 std.debug.print("keys:", .{});
                 for (keys) |k| std.debug.print("{},", .{k});
@@ -394,7 +394,7 @@ const test_binary_search = struct {
 
         const keys = try allocator.alloc(u32, keys_count);
         for (keys) |*key| key.* = fuzz.random_int_exponential(random, u32, 100);
-        std.sort.sort(u32, keys, {}, less_than_key);
+        std.mem.sort(u32, keys, {}, less_than_key);
 
         return keys;
     }
@@ -406,11 +406,11 @@ const test_binary_search = struct {
         const target_key = fuzz.random_int_exponential(random, u32, 100);
 
         var expect: BinarySearchResult = .{ .index = 0, .exact = false };
-        for (keys) |key, i| {
+        for (keys, 0..) |key, i| {
             switch (compare_keys(key, target_key)) {
-                .lt => expect.index = @intCast(u32, i) + 1,
+                .lt => expect.index = @as(u32, @intCast(i)) + 1,
                 .eq => {
-                    expect.index = @intCast(u32, i);
+                    expect.index = @as(u32, @intCast(i));
                     expect.exact = true;
                     if (mode == .lower_bound) break;
                 },

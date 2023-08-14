@@ -130,8 +130,8 @@ pub const CreateAccountResult = enum(u32) {
     exists = 19,
 
     comptime {
-        for (std.enums.values(CreateAccountResult)) |result, index| {
-            assert(@enumToInt(result) == index);
+        for (std.enums.values(CreateAccountResult), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
         }
     }
 };
@@ -213,8 +213,8 @@ pub const CreateTransferResult = enum(u32) {
     exceeds_debits = 54,
 
     comptime {
-        for (std.enums.values(CreateTransferResult)) |result, index| {
-            assert(@enumToInt(result) == index);
+        for (std.enums.values(CreateTransferResult), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
         }
     }
 };

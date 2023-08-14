@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo "Building TigerBeetle..."
 cd ..\..\..
-.\zig\zig.exe build install -Drelease-safe
+.\zig\zig.exe build install -Doptimize=ReleaseSafe
 cd src\clients\java
 
 set ZIG_FILE=.\0_0.tigerbeetle.examples

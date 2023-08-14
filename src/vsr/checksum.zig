@@ -70,7 +70,7 @@ const Aegis128 = struct {
             mem.copy(u8, src[0 .. source.len % 32], source[i .. i + source.len % 32]);
             absorb(blocks, &src);
         }
-        return @bitCast(u128, mac(blocks, 0, source.len));
+        return @as(u128, @bitCast(mac(blocks, 0, source.len)));
     }
 };
 
@@ -100,7 +100,7 @@ fn std_checksum(cipher: []u8, msg: []const u8) u128 {
 
     var tag: [16]u8 = undefined;
     std.crypto.aead.aegis.Aegis128L.encrypt(cipher, &tag, msg, &ad, nonce, key);
-    return @bitCast(u128, tag);
+    return @as(u128, @bitCast(tag));
 }
 
 test "Aegis test vectors" {

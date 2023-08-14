@@ -34,8 +34,8 @@ pub fn main() !void {
             Word,
             decoded_size,
             encoded_size,
-            @intToFloat(f64, decoded_size) / @intToFloat(f64, encoded_size),
-            @intToFloat(f64, decoded_bits) / @intToFloat(f64, decoded_bits_total),
+            @as(f64, @floatFromInt(decoded_size)) / @as(f64, @floatFromInt(encoded_size)),
+            @as(f64, @floatFromInt(decoded_bits)) / @as(f64, @floatFromInt(decoded_bits_total)),
         });
     }
 }
@@ -59,13 +59,13 @@ fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) voi
 
     // Start off full or empty to save some work.
     const init_empty = bits_set_total < @divExact(bits_total, 2);
-    std.mem.set(u8, data, if (init_empty) @as(u8, 0) else std.math.maxInt(u8));
+    @memset(data, if (init_empty) @as(u8, 0) else std.math.maxInt(u8));
 
     var bits_set = if (init_empty) 0 else bits_total;
     while (bits_set != bits_set_total) {
         const bit = random.uintLessThan(usize, bits_total);
         const word = @divFloor(bit, @bitSizeOf(u8));
-        const mask = @as(u8, 1) << @intCast(std.math.Log2Int(u8), bit % @bitSizeOf(u8));
+        const mask = @as(u8, 1) << @as(std.math.Log2Int(u8), @intCast(bit % @bitSizeOf(u8)));
 
         if (init_empty) {
             if (data[word] & mask != 0) continue;

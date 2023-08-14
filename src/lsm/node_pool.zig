@@ -28,7 +28,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             assert(node_count > 0);
 
             const size = node_size * node_count;
-            const buffer = try allocator.allocAdvanced(u8, node_alignment, size, .exact);
+            const buffer = try allocator.alignedAlloc(u8, node_alignment, size);
             errdefer allocator.free(buffer);
 
             const free = try std.bit_set.DynamicBitSetUnmanaged.initFull(allocator, node_count);
@@ -68,7 +68,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             pool.free.unset(node_index);
 
             const node = pool.buffer[node_index * node_size ..][0..node_size];
-            return @alignCast(node_alignment, node);
+            return @alignCast(node);
         }
 
         pub fn release(pool: *Self, node: Node) void {
@@ -76,10 +76,11 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             comptime assert(meta.Elem(Node) == u8);
             comptime assert(meta.Elem(@TypeOf(pool.buffer)) == u8);
 
-            assert(@ptrToInt(node) >= @ptrToInt(pool.buffer.ptr));
-            assert(@ptrToInt(node) + node_size <= @ptrToInt(pool.buffer.ptr) + pool.buffer.len);
+            assert(@intFromPtr(node) >= @intFromPtr(pool.buffer.ptr));
+            assert(@intFromPtr(node) + node_size <= @intFromPtr(pool.buffer.ptr) + pool.buffer.len);
 
-            const node_index = @divExact(@ptrToInt(node) - @ptrToInt(pool.buffer.ptr), node_size);
+            const node_offset = @intFromPtr(node) - @intFromPtr(pool.buffer.ptr);
+            const node_index = @divExact(node_offset, node_size);
             assert(!pool.free.isSet(node_index));
             pool.free.set(node_index);
         }
@@ -112,7 +113,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
             errdefer node_map.deinit();
 
             const sentinel = random.int(u64);
-            mem.set(u64, mem.bytesAsSlice(u64, node_pool.buffer), sentinel);
+            @memset(mem.bytesAsSlice(u64, node_pool.buffer), sentinel);
 
             return Self{
                 .node_count = node_count,
@@ -169,7 +170,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
 
             // Write unique data into the node so we can test that it doesn't get overwritten.
             const id = context.random.int(u64);
-            mem.set(u64, mem.bytesAsSlice(u64, node), id);
+            @memset(mem.bytesAsSlice(u64, node), id);
             gop.value_ptr.* = id;
 
             context.acquires += 1;
@@ -187,7 +188,7 @@ fn TestContext(comptime node_size: usize, comptime node_alignment: u12) type {
                 try testing.expectEqual(id, word);
             }
 
-            mem.set(u64, mem.bytesAsSlice(u64, node), context.sentinel);
+            @memset(mem.bytesAsSlice(u64, node), context.sentinel);
             context.node_pool.release(node);
             context.node_map.swapRemoveAt(index);
 

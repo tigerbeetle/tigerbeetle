@@ -125,7 +125,7 @@ pub const JavaDocs = Docs{
     .test_source_path = "src/main/java/",
 
     .name = "tigerbeetle-java",
-    .description = 
+    .description =
     \\The TigerBeetle client for Java.
     \\
     \\[![javadoc](https://javadoc.io/badge2/com.tigerbeetle/tigerbeetle-java/javadoc.svg)](https://javadoc.io/doc/com.tigerbeetle/tigerbeetle-java)
@@ -133,13 +133,13 @@ pub const JavaDocs = Docs{
     \\[![maven-central](https://img.shields.io/maven-central/v/com.tigerbeetle/tigerbeetle-java)](https://central.sonatype.com/namespace/com.tigerbeetle)
     ,
 
-    .prerequisites = 
+    .prerequisites =
     \\* Java >= 11
     \\* Maven >= 3.6 (not strictly necessary but it's what our guides assume)
     ,
 
     .project_file_name = "pom.xml",
-    .project_file = 
+    .project_file =
     \\<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     \\         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     \\  <modelVersion>4.0.0</modelVersion>
@@ -190,7 +190,7 @@ pub const JavaDocs = Docs{
 
     .test_file_name = "Main",
 
-    .install_sample_file = 
+    .install_sample_file =
     \\package com.tigerbeetle.samples;
     \\
     \\import com.tigerbeetle.*;
@@ -219,7 +219,7 @@ pub const JavaDocs = Docs{
 
     .examples = "",
 
-    .client_object_example = 
+    .client_object_example =
     \\var tbAddress = System.getenv("TB_ADDRESS");
     \\Client client = new Client(
     \\  0,
@@ -227,7 +227,7 @@ pub const JavaDocs = Docs{
     \\);
     ,
 
-    .client_object_documentation = 
+    .client_object_documentation =
     \\If you create a `Client` like this, don't forget to call
     \\`client.close()` when you are done with it. Otherwise you
     \\can use the
@@ -242,7 +242,7 @@ pub const JavaDocs = Docs{
     \\```
     ,
 
-    .create_accounts_example = 
+    .create_accounts_example =
     \\AccountBatch accounts = new AccountBatch(1);
     \\accounts.add();
     \\accounts.setId(137);
@@ -254,7 +254,7 @@ pub const JavaDocs = Docs{
     \\CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
     ,
 
-    .create_accounts_documentation = 
+    .create_accounts_documentation =
     \\The 128-bit fields like `id` and `user_data` have a few
     \\overrides to make it easier to integrate. You can either
     \\pass in a long, a pair of longs (least and most
@@ -265,7 +265,7 @@ pub const JavaDocs = Docs{
     \\between instances of `long`, `UUID`, `BigInteger` and `byte[]`.
     ,
 
-    .account_flags_documentation = 
+    .account_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
     \\`AccountFlags` object with bitwise-or:
     \\
@@ -274,7 +274,7 @@ pub const JavaDocs = Docs{
     \\* `AccountFlags.CREDITS_MUST_NOT_EXCEED_CREDITS`
     ,
 
-    .account_flags_example = 
+    .account_flags_example =
     \\accounts = new AccountBatch(3);
     \\
     \\// First account
@@ -289,7 +289,7 @@ pub const JavaDocs = Docs{
     \\accountErrors = client.createAccounts(accounts);
     ,
 
-    .create_accounts_errors_example = 
+    .create_accounts_errors_example =
     \\accounts = new AccountBatch(3);
     \\
     \\// First account
@@ -323,14 +323,14 @@ pub const JavaDocs = Docs{
 
     .create_accounts_errors_documentation = "",
 
-    .lookup_accounts_example = 
+    .lookup_accounts_example =
     \\IdBatch ids = new IdBatch(2);
     \\ids.add(137);
     \\ids.add(138);
     \\accounts = client.lookupAccounts(ids);
     ,
 
-    .create_transfers_example = 
+    .create_transfers_example =
     \\TransferBatch transfers = new TransferBatch(1);
     \\transfers.add();
     \\transfers.setId(1);
@@ -348,7 +348,7 @@ pub const JavaDocs = Docs{
 
     .create_transfers_documentation = "",
 
-    .create_transfers_errors_example = 
+    .create_transfers_errors_example =
     \\while (transferErrors.next()) {
     \\    switch (transferErrors.getResult()) {
     \\        case ExceedsCredits:
@@ -367,7 +367,7 @@ pub const JavaDocs = Docs{
 
     .create_transfers_errors_documentation = "",
 
-    .no_batch_example = 
+    .no_batch_example =
     \\var transferIds = new long[]{100, 101, 102};
     \\var debitIds = new long[]{1, 2, 3};
     \\var creditIds = new long[]{4, 5, 6};
@@ -385,7 +385,7 @@ pub const JavaDocs = Docs{
     \\}
     ,
 
-    .batch_example = 
+    .batch_example =
     \\var BATCH_SIZE = 8191;
     \\for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
     \\  TransferBatch batch = new TransferBatch(BATCH_SIZE);
@@ -403,7 +403,7 @@ pub const JavaDocs = Docs{
     \\}
     ,
 
-    .transfer_flags_documentation = 
+    .transfer_flags_documentation =
     \\To toggle behavior for an account, combine enum values stored in the
     \\`TransferFlags` object with bitwise-or:
     \\
@@ -414,7 +414,7 @@ pub const JavaDocs = Docs{
     \\* `TransferFlags.VOID_PENDING_TRANSFER`
     ,
 
-    .transfer_flags_link_example = 
+    .transfer_flags_link_example =
     \\transfers = new TransferBatch(2);
     \\
     \\// First transfer
@@ -428,7 +428,7 @@ pub const JavaDocs = Docs{
     \\transferErrors = client.createTransfers(transfers);
     ,
 
-    .transfer_flags_post_example = 
+    .transfer_flags_post_example =
     \\transfers = new TransferBatch(1);
     \\
     \\// First transfer
@@ -438,7 +438,7 @@ pub const JavaDocs = Docs{
     \\transferErrors = client.createTransfers(transfers);
     ,
 
-    .transfer_flags_void_example = 
+    .transfer_flags_void_example =
     \\transfers = new TransferBatch(1);
     \\
     \\// First transfer
@@ -448,14 +448,14 @@ pub const JavaDocs = Docs{
     \\transferErrors = client.createTransfers(transfers);
     ,
 
-    .lookup_transfers_example = 
+    .lookup_transfers_example =
     \\ids = new IdBatch(2);
     \\ids.add(1);
     \\ids.add(2);
     \\transfers = client.lookupTransfers(ids);
     ,
 
-    .linked_events_example = 
+    .linked_events_example =
     \\transfers = new TransferBatch(10);
     \\
     \\// An individual transfer (successful):
@@ -504,19 +504,19 @@ pub const JavaDocs = Docs{
 
     .developer_setup_documentation = "",
 
-    .developer_setup_sh_commands = 
+    .developer_setup_sh_commands =
     \\cd src/clients/java
     \\./scripts/install.sh
     \\if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi
     ,
 
-    .developer_setup_pwsh_commands = 
+    .developer_setup_pwsh_commands =
     \\cd src/clients/java
     \\.\scripts\install.bat
     \\if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
     ,
 
-    .test_main_prefix = 
+    .test_main_prefix =
     \\package com.tigerbeetle.samples;
     \\
     \\import com.tigerbeetle.*;

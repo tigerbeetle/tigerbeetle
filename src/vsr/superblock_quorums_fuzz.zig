@@ -105,7 +105,7 @@ pub fn fuzz_quorums_working(random: std.rand.Random) !void {
 fn test_quorums_working(
     random: std.rand.Random,
     threshold_count: u8,
-    copies: *[4]CopyTemplate,
+    initial_copies: *const [4]CopyTemplate,
     result: QuorumsType(.{ .superblock_copies = 4 }).Error!u64,
 ) !void {
     const Quorums = QuorumsType(.{ .superblock_copies = 4 });
@@ -116,7 +116,7 @@ fn test_quorums_working(
     // "checksums[i] orelse random.int(u128)", but that currently causes the compiler to segfault
     // during code generation.
     var checksums: [6]u128 = undefined;
-    for (checksums) |*c| c.* = random.int(u128);
+    for (&checksums) |*c| c.* = random.int(u128);
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
@@ -124,11 +124,13 @@ fn test_quorums_working(
     }
 
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
-    std.sort.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
+    var initial_templates = initial_copies.*;
+    const copies = &initial_templates;
+    std.mem.sort(CopyTemplate, copies, {}, CopyTemplate.less_than);
 
-    for (headers) |*header, i| {
+    for (&headers, 0..) |*header, i| {
         header.* = std.mem.zeroInit(SuperBlockHeader, .{
-            .copy = @intCast(u8, i),
+            .copy = @as(u8, @intCast(i)),
             .version = SuperBlockVersion,
             .storage_size_max = superblock.data_file_size_min,
             .sequence = copies[i].sequence,
@@ -269,9 +271,9 @@ pub fn fuzz_quorum_repairs(
 
     const headers_valid = blk: {
         var headers: [superblock_copies]SuperBlockHeader = undefined;
-        for (&headers) |*header, i| {
+        for (&headers, 0..) |*header, i| {
             header.* = std.mem.zeroInit(SuperBlockHeader, .{
-                .copy = @intCast(u8, i),
+                .copy = @as(u8, @intCast(i)),
                 .version = SuperBlockVersion,
                 .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
@@ -303,7 +305,7 @@ pub fn fuzz_quorum_repairs(
     }
 
     var working_headers: [superblock_copies]SuperBlockHeader = undefined;
-    for (&working_headers) |*header, i| {
+    for (&working_headers, 0..) |*header, i| {
         header.* = if (valid.isSet(i)) headers_valid[i] else header_invalid;
     }
     random.shuffle(SuperBlockHeader, &working_headers);

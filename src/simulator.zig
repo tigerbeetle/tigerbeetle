@@ -281,7 +281,7 @@ pub fn main() !void {
     if (simulator.done()) {
         const commits = simulator.cluster.state_checker.commits.items;
         const last_checksum = commits[commits.len - 1].header.checksum;
-        for (simulator.cluster.aofs) |*aof, replica_index| {
+        for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
             if (simulator.core.isSet(replica_index)) {
                 try aof.validate(last_checksum);
             } else {
@@ -368,7 +368,7 @@ pub const Simulator = struct {
 
         var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
-        std.mem.set(usize, replica_stability, 0);
+        @memset(replica_stability, 0);
 
         var reply_sequence = try ReplySequence.init(allocator);
         errdefer reply_sequence.deinit(allocator);
@@ -435,7 +435,7 @@ pub const Simulator = struct {
         while (it.next()) |replica_index| {
             const fault = false;
             if (simulator.cluster.replica_health[replica_index] == .down) {
-                simulator.restart_replica(@intCast(u8, replica_index), fault);
+                simulator.restart_replica(@as(u8, @intCast(replica_index)), fault);
             }
         }
 
@@ -483,7 +483,7 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 core_replicas += 1;
-                core_recovering_head += @boolToInt(replica.status == .recovering_head);
+                core_recovering_head += @intFromBool(replica.status == .recovering_head);
             }
         }
 
@@ -570,7 +570,7 @@ pub const Simulator = struct {
         reply: *Message,
     ) void {
         // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
-        const simulator = @ptrCast(*Simulator, @alignCast(@alignOf(Simulator), cluster.context.?));
+        const simulator = @as(*Simulator, @ptrCast(@alignCast(cluster.context.?)));
         simulator.reply_sequence.insert(reply_client, request, reply);
 
         while (simulator.reply_sequence.peek()) |commit| {
@@ -633,7 +633,7 @@ pub const Simulator = struct {
         for (simulator.cluster.clients) |*c| {
             // Count the number of clients that are still waiting for a `register` to complete,
             // since they may start one at any time.
-            reserved += @boolToInt(c.session == 0);
+            reserved += @intFromBool(c.session == 0);
             // Count the number of requests queued.
             reserved += c.request_queue.count;
         }
@@ -672,8 +672,8 @@ pub const Simulator = struct {
             vsr.quorums(simulator.options.cluster.replica_count).view_change;
 
         var recoverable_count: usize = 0;
-        for (simulator.cluster.replicas) |*replica, i| {
-            recoverable_count += @boolToInt(simulator.cluster.replica_health[i] == .up and
+        for (simulator.cluster.replicas, 0..) |*replica, i| {
+            recoverable_count += @intFromBool(simulator.cluster.replica_health[i] == .up and
                 !replica.standby() and
                 replica.status != .recovering_head and
                 replica.syncing == .idle);
@@ -692,7 +692,7 @@ pub const Simulator = struct {
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
                     if (!chance_f64(simulator.random, crash_probability)) continue;
 
-                    recoverable_count -= @boolToInt(!replica.standby() and
+                    recoverable_count -= @intFromBool(!replica.standby() and
                         replica.status != .recovering_head and
                         replica.syncing == .idle);
 
@@ -732,7 +732,7 @@ pub const Simulator = struct {
             const size = vsr.Zone.wal_headers.size().?;
             const headers_bytes = replica_storage.memory[offset..][0..size];
             const headers = mem.bytesAsSlice(vsr.Header, headers_bytes);
-            for (headers) |*h, slot| {
+            for (headers, 0..) |*h, slot| {
                 if (h.checksum == 0) h.* = replica_storage.wal_prepares()[slot].header;
             }
         }
@@ -762,7 +762,7 @@ pub const Simulator = struct {
 /// Print an error message and then exit with an exit code.
 fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
     output.err(fmt_string, args);
-    std.os.exit(@enumToInt(failure));
+    std.os.exit(@intFromEnum(failure));
 }
 
 /// Returns true, `p` percent of the time, else false.
@@ -781,13 +781,13 @@ fn chance_f64(random: std.rand.Random, p: f64) bool {
 fn random_partition_mode(random: std.rand.Random) PartitionMode {
     const typeInfo = @typeInfo(PartitionMode).Enum;
     var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
-    return @intToEnum(PartitionMode, enumAsInt);
+    return @as(PartitionMode, @enumFromInt(enumAsInt));
 }
 
 fn random_partition_symmetry(random: std.rand.Random) PartitionSymmetry {
     const typeInfo = @typeInfo(PartitionSymmetry).Enum;
     var enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
-    return @intToEnum(PartitionSymmetry, enumAsInt);
+    return @as(PartitionSymmetry, @enumFromInt(enumAsInt));
 }
 
 /// Returns a random fully-connected subgraph which includes at least view change

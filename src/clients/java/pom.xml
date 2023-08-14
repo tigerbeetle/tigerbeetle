@@ -242,7 +242,7 @@
               <arguments>
                 <argument>build</argument>
                 <argument>java_client</argument>
-                <argument>-Drelease-safe</argument>
+                <argument>-Doptimize=ReleaseSafe</argument>
               </arguments>
             </configuration>
           </execution>

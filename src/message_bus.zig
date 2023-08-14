@@ -109,19 +109,19 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             const connections = try allocator.alloc(Connection, constants.connections_max);
             errdefer allocator.free(connections);
-            mem.set(Connection, connections, .{});
+            @memset(connections, .{});
 
             const replicas = try allocator.alloc(?*Connection, options.configuration.len);
             errdefer allocator.free(replicas);
-            mem.set(?*Connection, replicas, null);
+            @memset(replicas, null);
 
             const replicas_connect_attempts = try allocator.alloc(u64, options.configuration.len);
             errdefer allocator.free(replicas_connect_attempts);
-            mem.set(u64, replicas_connect_attempts, 0);
+            @memset(replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_type) {
                 .replica => process.replica,
-                .client => @truncate(u64, process.client),
+                .client => @as(u64, @truncate(process.client)),
             };
 
             var bus: Self = .{
@@ -505,7 +505,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     on_connect_with_exponential_backoff,
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                     &connection.recv_completion,
-                    @intCast(u63, ms * std.time.ns_per_ms),
+                    @as(u63, @intCast(ms * std.time.ns_per_ms)),
                 );
             }
 
@@ -701,10 +701,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return null;
                 }
 
-                const header = @alignCast(
-                    @alignOf(Header),
-                    mem.bytesAsValue(Header, data[0..@sizeOf(Header)]),
-                );
+                const header: *const Header = @alignCast(mem.bytesAsValue(Header, data[0..@sizeOf(Header)]));
 
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {
@@ -801,7 +798,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     if (message.header.size != sector_ceil) {
                         assert(message.header.size < sector_ceil);
                         assert(message.buffer.len == constants.message_size_max);
-                        mem.set(u8, message.buffer[message.header.size..sector_ceil], 0);
+                        @memset(message.buffer[message.header.size..sector_ceil], 0);
                     }
                 }
 

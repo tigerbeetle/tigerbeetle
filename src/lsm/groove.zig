@@ -19,7 +19,7 @@ const key_fingerprint = @import("tree.zig").key_fingerprint;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
 
     return struct {
         inline fn compare_keys(timestamp_a: u64, timestamp_b: u64) std.math.Order {
@@ -164,10 +164,10 @@ pub fn GrooveType(
     @setEvalBranchQuota(64000);
 
     const has_id = @hasField(Object, "id");
-    if (has_id) assert(std.meta.fieldInfo(Object, .id).field_type == u128);
+    if (has_id) assert(std.meta.fieldInfo(Object, .id).type == u128);
 
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).field_type == u64);
+    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
 
     comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
@@ -187,13 +187,13 @@ pub fn GrooveType(
         if (!ignored) {
             const IndexTree = IndexTreeType(
                 Storage,
-                field.field_type,
+                field.type,
                 @field(groove_options.value_count_max, field.name),
             );
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
                 .{
                     .name = field.name,
-                    .field_type = IndexTree,
+                    .type = IndexTree,
                     .default_value = null,
                     .is_comptime = false,
                     .alignment = @alignOf(IndexTree),
@@ -215,9 +215,9 @@ pub fn GrooveType(
         }
 
         // Make sure the function takes in a reference to the Value:
-        const derive_arg = derive_func_info.args[0];
+        const derive_arg = derive_func_info.params[0];
         if (derive_arg.is_generic) @compileError("expected derive fn arg to not be generic");
-        if (derive_arg.arg_type != *const Object) {
+        if (derive_arg.type != *const Object) {
             @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 
@@ -234,7 +234,7 @@ pub fn GrooveType(
         index_fields = index_fields ++ &.{
             .{
                 .name = field.name,
-                .field_type = IndexTree,
+                .type = IndexTree,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(IndexTree),
@@ -244,11 +244,11 @@ pub fn GrooveType(
 
     comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
     for (index_fields) |index_field| {
-        const IndexTree = index_field.field_type;
+        const IndexTree = index_field.type;
         index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = index_field.name,
-                .field_type = IndexTree.Options,
+                .type = IndexTree.Options,
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(IndexTree.Options),
@@ -308,7 +308,7 @@ pub fn GrooveType(
     const indexes_count_expect = std.meta.fields(Object).len -
         groove_options.ignored.len -
         // The id/timestamp fields are implicitly ignored since it's the primary key for ObjectTree:
-        (1 + @boolToInt(has_id)) +
+        (@as(usize, 1) + @intFromBool(has_id)) +
         std.meta.fields(@TypeOf(groove_options.derived)).len;
 
     assert(indexes_count_actual == indexes_count_expect);
@@ -357,7 +357,7 @@ pub fn GrooveType(
                         .timestamp = object.timestamp,
                         .field = switch (@typeInfo(Index)) {
                             .Int => index,
-                            .Enum => @enumToInt(index),
+                            .Enum => @intFromEnum(index),
                             else => @compileError("Unsupported index type for " ++ field_name),
                         },
                     };
@@ -483,7 +483,7 @@ pub fn GrooveType(
             var index_trees: IndexTrees = undefined;
 
             // Make sure to deinit initialized index LSM trees on error.
-            errdefer inline for (std.meta.fields(IndexTrees)) |field, field_index| {
+            errdefer inline for (std.meta.fields(IndexTrees), 0..) |field, field_index| {
                 if (index_trees_initialized >= field_index + 1) {
                     @field(index_trees, field.name).deinit(allocator);
                 }
@@ -494,7 +494,7 @@ pub fn GrooveType(
                 // No value cache for index trees, since they only do range queries.
                 assert(@field(options.tree_options_index, field.name).cache_entries_max == 0);
 
-                @field(index_trees, field.name) = try field.field_type.init(
+                @field(index_trees, field.name) = try field.type.init(
                     allocator,
                     node_pool,
                     grid,
@@ -691,7 +691,7 @@ pub fn GrooveType(
                 // rely on `context` being well-defined for the loop condition.
                 context.workers_busy += 1;
 
-                for (context.workers) |*worker| {
+                for (&context.workers) |*worker| {
                     worker.* = .{ .context = context };
                     context.workers_busy += 1;
                     worker.lookup_start_next();
@@ -727,14 +727,14 @@ pub fn GrooveType(
 
                 pub const Field = std.meta.FieldEnum(LookupContext);
                 pub fn FieldType(comptime field: Field) type {
-                    return std.meta.fieldInfo(LookupContext, field).field_type;
+                    return std.meta.fieldInfo(LookupContext, field).type;
                 }
 
                 pub inline fn parent(
                     comptime field: Field,
                     completion: *FieldType(field),
                 ) *PrefetchWorker {
-                    const lookup = stdx.union_field_parent_ptr(LookupContext, field, completion);
+                    const lookup = @fieldParentPtr(LookupContext, @tagName(field), completion);
                     return @fieldParentPtr(PrefetchWorker, "lookup", lookup);
                 }
 
@@ -955,7 +955,7 @@ pub fn GrooveType(
         }
 
         /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
-        const join_pending_max = 1 + @boolToInt(has_id) + std.meta.fields(IndexTrees).len;
+        const join_pending_max = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
 
         fn JoinType(comptime join_op: JoinOp) type {
             return struct {

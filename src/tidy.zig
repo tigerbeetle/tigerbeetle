@@ -20,7 +20,7 @@ test "tidy: lines are under 100 characters long" {
     defer walker.deinit();
 
     while (try walker.next()) |entry| {
-        if (entry.kind == .File and mem.endsWith(u8, entry.path, ".zig")) {
+        if (entry.kind == .file and mem.endsWith(u8, entry.path, ".zig")) {
             const source_file = try entry.dir.openFile(entry.basename, .{});
             defer source_file.close();
 
@@ -56,7 +56,7 @@ fn is_naughty(path: []const u8) bool {
         // Separator-agnostic path comparison.
         if (naughty_path.len == path.len) {
             var equal_paths = true;
-            for (naughty_path) |c, i| {
+            for (naughty_path, 0..) |c, i| {
                 equal_paths = equal_paths and
                     (path[i] == c or (path[i] == fs.path.sep and c == fs.path.sep_posix));
             }
@@ -124,7 +124,6 @@ const naughty_list = [_][]const u8{
     "constants.zig",
     "ewah_benchmark.zig",
     "ewah.zig",
-    "hash_map.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
     "io/linux.zig",
@@ -156,7 +155,6 @@ const naughty_list = [_][]const u8{
     "state_machine.zig",
     "state_machine/auditor.zig",
     "state_machine/workload.zig",
-    "static_allocator.zig",
     "statsd.zig",
     "storage.zig",
     "test/cluster.zig",

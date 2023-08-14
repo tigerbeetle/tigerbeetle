@@ -89,7 +89,7 @@ pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) C
     inline for (comptime std.meta.fields(Commands)) |field| {
         comptime assert(std.mem.indexOf(u8, field.name, "_") == null);
         if (std.mem.eql(u8, first_arg, field.name)) {
-            return @unionInit(Commands, field.name, parse_flags(args, field.field_type));
+            return @unionInit(Commands, field.name, parse_flags(args, field.type));
         }
     }
     fatal("unknown subcommand: '{s}'", .{first_arg});
@@ -121,17 +121,17 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     comptime for (std.meta.fields(Flags)) |field| {
         if (std.mem.eql(u8, field.name, "positional")) {
-            assert(@typeInfo(field.field_type) == .Struct);
-            positional_fields = std.meta.fields(field.field_type);
+            assert(@typeInfo(field.type) == .Struct);
+            positional_fields = std.meta.fields(field.type);
             for (positional_fields) |positional_field| {
                 assert(default_value(positional_field) == null);
-                assert_valid_value_type(positional_field.field_type);
+                assert_valid_value_type(positional_field.type);
             }
         } else {
             fields[field_count] = field;
             field_count += 1;
 
-            switch (@typeInfo(field.field_type)) {
+            switch (@typeInfo(field.type)) {
                 .Bool => {
                     assert(default_value(field).? == false); // boolean flags should have a default
                 },
@@ -140,7 +140,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                     assert_valid_value_type(optional.child);
                 },
                 else => {
-                    assert_valid_value_type(field.field_type);
+                    assert_valid_value_type(field.type);
                 },
             }
         }
@@ -153,7 +153,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     // not confused for a misspelled `--foo=92`. Using `std.sort` for comptime-only values does not
     // work, so open-code insertion sort, and comptime assert order during the actual parsing.
     comptime {
-        for (fields[0..field_count]) |*field_right, i| {
+        for (fields[0..field_count], 0..) |*field_right, i| {
             for (fields[0..i]) |*field_left| {
                 if (field_left.name.len < field_right.name.len) {
                     std.mem.swap(std.builtin.Type.StructField, field_left, field_right);
@@ -171,7 +171,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             field_len_prev = field.name.len;
             if (std.mem.startsWith(u8, arg, flag)) {
                 @field(counts, field.name) += 1;
-                const flag_value = parse_flag(field.field_type, flag, arg);
+                const flag_value = parse_flag(field.type, flag, arg);
                 @field(result, field.name) = flag_value;
                 continue :next_arg;
             }
@@ -179,7 +179,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
         if (@hasField(Flags, "positional")) {
             counts.positional += 1;
-            inline for (positional_fields) |positional_field, positional_index| {
+            inline for (positional_fields, 0..) |positional_field, positional_index| {
                 const flag = comptime flag_name_positional(positional_field);
 
                 if (arg.len == 0) fatal("{s}: empty argument", .{flag});
@@ -189,7 +189,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 if (arg[0] == '-') fatal("unexpected argument: '{s}'", .{arg});
 
                 @field(result.positional, positional_field.name) =
-                    parse_value(positional_field.field_type, flag, arg);
+                    parse_value(positional_field.type, flag, arg);
                 if (positional_index + 1 == counts.positional) {
                     continue :next_arg;
                 }
@@ -214,7 +214,7 @@ pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     if (@hasField(Flags, "positional")) {
         assert(counts.positional <= positional_fields.len);
-        inline for (positional_fields) |positional_field, positional_index| {
+        inline for (positional_fields, 0..) |positional_field, positional_index| {
             if (counts.positional == positional_index) {
                 const flag = comptime flag_name_positional(positional_field);
                 fatal("{s}: argument is required", .{flag});
@@ -335,12 +335,10 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
         }
     };
 
-    var bytes: u64 = undefined;
-    if (@mulWithOverflow(u64, amount, unit.scale, &bytes)) {
-        fatal("{s}: size in bytes exceeds 64-bit unsigned integer: '{s}'", .{
-            flag, value,
-        });
-    }
+    const bytes = std.math.mul(u64, amount, unit.scale) catch fatal(
+        "{s}: size in bytes exceeds 64-bit unsigned integer: '{s}'",
+        .{ flag, value },
+    );
     return ByteSize{ .bytes = bytes };
 }
 
@@ -415,7 +413,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
         assert(field_count >= 2);
 
         var result: []const u8 = "";
-        for (std.meta.fields(E)) |field, field_index| {
+        for (std.meta.fields(E), 0..) |field, field_index| {
             const separator = switch (field_index) {
                 0 => "",
                 else => ", ",
@@ -428,7 +426,9 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
 }
 
 fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
-    comptime {
+    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+    // Without comptime blk, the compiler thinks the result is a runtime slice returning a UAF.
+    return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 
         var result: []const u8 = "--";
@@ -438,8 +438,8 @@ fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
             index = index + i + 1;
         }
         result = result ++ field.name[index..];
-        return result;
-    }
+        break :blk result;
+    };
 }
 
 test flag_name {
@@ -453,12 +453,9 @@ fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8
 }
 
 /// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
-fn default_value(comptime field: std.builtin.Type.StructField) ?field.field_type {
+fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
     return if (field.default_value) |default_opaque|
-        @ptrCast(
-            *const field.field_type,
-            @alignCast(@alignOf(field.field_type), default_opaque),
-        ).*
+        @as(*const field.type, @ptrCast(@alignCast(default_opaque))).*
     else
         null;
 }
@@ -559,7 +556,14 @@ test "flags" {
         flags_exe: []const u8,
 
         fn init(gpa: std.mem.Allocator) !T {
-            const zig_exe = std.os.getenv("ZIG_EXE") orelse return error.SkipZigTest;
+            // TODO: Avoid std.os.getenv() as it currently causes a linker error on windows.
+            // See: https://github.com/ziglang/zig/issues/8456
+            const zig_exe = std.process.getEnvVarOwned(gpa, "ZIG_EXE") catch |e| switch (e) {
+                error.EnvironmentVariableNotFound => return error.SkipZigTest,
+                error.InvalidUtf8 => unreachable,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            defer gpa.free(zig_exe);
 
             var tmp_dir = std.testing.tmpDir(.{});
             errdefer tmp_dir.cleanup();
@@ -613,7 +617,7 @@ test "flags" {
             defer t.gpa.free(argv);
 
             argv[0] = t.flags_exe;
-            for (argv[1..]) |*arg, i| {
+            for (argv[1..], 0..) |*arg, i| {
                 arg.* = cli[i];
             }
             if (cli.len > 0) {

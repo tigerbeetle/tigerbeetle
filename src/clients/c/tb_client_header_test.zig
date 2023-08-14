@@ -7,25 +7,25 @@ const c = @cImport(@cInclude("tb_client.h"));
 
 fn to_lowercase(comptime input: []const u8) []const u8 {
     comptime var lowercase: [input.len]u8 = undefined;
-    inline for (input) |char, i| {
+    inline for (input, 0..) |char, i| {
         const is_uppercase = (char >= 'A') and (char <= 'Z');
-        lowercase[i] = char + (@as(u8, @boolToInt(is_uppercase)) * 32);
+        lowercase[i] = char + (@as(u8, @intFromBool(is_uppercase)) * 32);
     }
     return &lowercase;
 }
 
 fn to_uppercase(comptime input: []const u8) []const u8 {
     comptime var uppercase: [input.len]u8 = undefined;
-    inline for (input) |char, i| {
+    inline for (input, 0..) |char, i| {
         const is_lowercase = (char >= 'a') and (char <= 'z');
-        uppercase[i] = char - (@as(u8, @boolToInt(is_lowercase)) * 32);
+        uppercase[i] = char - (@as(u8, @intFromBool(is_lowercase)) * 32);
     }
     return &uppercase;
 }
 
 fn to_snakecase(comptime input: []const u8) []const u8 {
     comptime var output: []const u8 = &.{};
-    inline for (input) |char, i| {
+    inline for (input, 0..) |char, i| {
         const is_uppercase = (char >= 'A') and (char <= 'Z');
         if (is_uppercase and i > 0) output = "_" ++ output;
         output = output ++ &[_]u8{char};
@@ -74,7 +74,7 @@ test "valid tb_client.h" {
                     const c_enum_field = comptime to_uppercase(to_snakecase(field.name));
                     const c_value = @field(c, c_enum_prefix ++ c_enum_field);
 
-                    const zig_value = @enumToInt(@field(ty, field.name));
+                    const zig_value = @intFromEnum(@field(ty, field.name));
                     comptime assert(zig_value == c_value);
                 }
             },
@@ -94,7 +94,7 @@ test "valid tb_client.h" {
                             // Compare the bit value to the packed struct's field.
                             comptime var instance = std.mem.zeroes(ty);
                             @field(instance, field.name) = true;
-                            comptime assert(@bitCast(u16, instance) == c_value);
+                            comptime assert(@as(u16, @bitCast(instance)) == c_value);
                         }
                     }
                 },
@@ -105,7 +105,7 @@ test "valid tb_client.h" {
 
                     inline for (std.meta.fields(ty)) |field| {
                         // In C, packed structs and enums are replaced with integers.
-                        comptime var field_type = field.field_type;
+                        comptime var field_type = field.type;
                         switch (@typeInfo(field_type)) {
                             .Struct => |info| {
                                 comptime assert(info.layout == .Packed);

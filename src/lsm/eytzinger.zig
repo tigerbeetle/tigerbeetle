@@ -114,12 +114,12 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // If we did not do this, the level in the tree with 16 great great
             // grand childern would be split across cache lines with one child
             // in the first cache line and the other 15 in the second.
-            mem.set(u8, mem.asBytes(&layout[0]), 0);
+            @memset(mem.asBytes(&layout[0]), 0);
             // 0 8 4 12 2 6 10 14 1 3 5 7 9 11 13 15
             // ^
             // padding element
 
-            for (tree) |values_index, i| {
+            for (tree, 0..) |values_index, i| {
                 if (values_index < values.len) {
                     layout[i + 1] = key_from_value(&values[values_index]);
                 } else {
@@ -190,7 +190,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // The upper_bound is the smallest key that is greater than or equal to the
             // target. This is due to the greater than comparison in the loop above.
             const upper = @as(u64, i + 1) >> ffs(~(i + 1));
-            const upper_bound: ?u32 = if (upper == 0) null else @intCast(u32, upper - 1);
+            const upper_bound: ?u32 = if (upper == 0) null else @as(u32, @intCast(upper - 1));
 
             // Because of the comparison used in the loop above, the lower bound is a < bound
             // not a <= bound. Therefore in the case of an exact match we must use the upper bound.
@@ -199,12 +199,12 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
                     if (compare_keys(key, keys[u]) == .eq) break :blk u;
                 }
                 const lower = @as(u64, i + 1) >> ffs((i + 1));
-                break :blk if (lower == 0) null else @intCast(u32, lower - 1);
+                break :blk if (lower == 0) null else @as(u32, @intCast(lower - 1));
             };
 
             // We want to exclude the bounding keys to avoid re-checking them, except in the case
             // of an exact match. This condition checks for an inexact match.
-            const exclusion = @boolToInt(lower_bound == null or upper_bound == null or
+            const exclusion = @intFromBool(lower_bound == null or upper_bound == null or
                 lower_bound.? != upper_bound.?);
 
             // The exclusion alone may result in an upper bound one less than the lower bound.
@@ -214,7 +214,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             // This must be an exclusive upper bound but upper_bound is inclusive. Thus, add 1.
             const values_upper = if (upper_bound) |u| tree[u] + 1 - exclusion else values.len;
 
-            return values[values_lower..math.min(values.len, values_upper)];
+            return values[values_lower..@min(values.len, values_upper)];
         }
 
         /// Returns an upper bound index into the corresponding values. The returned index is
@@ -323,7 +323,7 @@ const test_eytzinger = struct {
         const e = eytzinger(keys_count, values_max);
 
         var values: [values_max]Value = undefined;
-        for (values) |*v, i| v.* = .{ .key = @intCast(u32, i) };
+        for (&values, 0..) |*v, i| v.* = .{ .key = @as(u32, @intCast(i)) };
 
         var layout: [keys_count + 1]u32 = undefined;
 
@@ -339,7 +339,7 @@ const test_eytzinger = struct {
         var values_full: [values_max]Value = undefined;
         // This 3 * i + 7 ensures that keys don't line up perfectly with indexes
         // which could potentially catch bugs.
-        for (values_full) |*v, i| v.* = .{ .key = @intCast(u32, 3 * i + 7) };
+        for (&values_full, 0..) |*v, i| v.* = .{ .key = @as(u32, @intCast(3 * i + 7)) };
 
         var layout: [keys_count + 1]u32 = undefined;
 
@@ -372,8 +372,8 @@ const test_eytzinger = struct {
                     .lower = null,
                     .upper = null,
                 };
-                for (keys) |key, index| {
-                    const i = @intCast(u32, index);
+                for (keys, 0..) |key, index| {
+                    const i = @as(u32, @intCast(index));
                     if (key == sentinel_key) continue;
                     switch (compare_keys(key, target_key)) {
                         .eq => {
@@ -399,7 +399,7 @@ const test_eytzinger = struct {
                     u32,
                     compare_keys,
                     &layout,
-                    @intCast(u32, values.len),
+                    @as(u32, @intCast(values.len)),
                     target_key,
                 );
                 try std.testing.expectEqual(expect_upper_bound, actual_upper_bound);
@@ -409,17 +409,17 @@ const test_eytzinger = struct {
                     .upper = null,
                 };
                 var target_key_found = false;
-                for (values) |value, i| {
+                for (values, 0..) |value, i| {
                     if (compare_keys(value.to_key(), target_key) == .eq) target_key_found = true;
 
                     if (expect_keys.lower) |l| {
                         if (compare_keys(value.to_key(), keys[l]) == .eq) {
-                            expect_values.lower = @intCast(u32, i);
+                            expect_values.lower = @as(u32, @intCast(i));
                         }
                     }
                     if (expect_keys.upper) |u| {
                         if (compare_keys(value.to_key(), keys[u]) == .eq) {
-                            expect_values.upper = @intCast(u32, i);
+                            expect_values.upper = @as(u32, @intCast(i));
                         }
                     }
                 }

@@ -159,11 +159,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             tree_id: u128,
         ) !Manifest {
             var levels: [constants.lsm_levels]Level = undefined;
-            for (levels) |*level, i| {
+            for (&levels, 0..) |*level, i| {
                 errdefer for (levels[0..i]) |*l| l.deinit(allocator, node_pool);
                 level.* = try Level.init(allocator);
             }
-            errdefer for (levels) |*level| level.deinit(allocator, node_pool);
+            errdefer for (&levels) |*level| level.deinit(allocator, node_pool);
 
             var manifest_log = try ManifestLog.init(allocator, grid, tree_id);
             errdefer manifest_log.deinit(allocator);
@@ -176,13 +176,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         }
 
         pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-            for (manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
+            for (&manifest.levels) |*level| level.deinit(allocator, manifest.node_pool);
 
             manifest.manifest_log.deinit(allocator);
         }
 
         pub fn reset(manifest: *Manifest) void {
-            for (manifest.levels) |*level| level.reset();
+            for (&manifest.levels) |*level| level.reset();
 
             manifest.manifest_log.reset();
 
@@ -234,7 +234,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level.insert_table(manifest.node_pool, table);
 
             // Append insert changes to the manifest log.
-            const log_level = @intCast(u7, level);
+            const log_level = @as(u7, @intCast(level));
             manifest.manifest_log.insert(log_level, table);
 
             if (constants.verify) {
@@ -260,7 +260,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
-            const log_level = @intCast(u7, level);
+            const log_level = @as(u7, @intCast(level));
             manifest.manifest_log.insert(log_level, table);
         }
 
@@ -291,7 +291,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // LIFO order and duplicates are ignored. This means the table will only be replayed in
             // level B instead of the old one in level A.
             manifest_level_b.insert_table(manifest.node_pool, table);
-            manifest.manifest_log.insert(@intCast(u7, level_b), table);
+            manifest.manifest_log.insert(@as(u7, @intCast(level_b)), table);
 
             if (constants.verify) {
                 assert(!manifest_level_a.contains(table));
@@ -304,7 +304,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest.manifest_log.opened);
 
             var manifest_range: ?KeyRange = null;
-            for (manifest.levels) |*level| {
+            for (&manifest.levels) |*level| {
                 if (level.key_range.key_range) |level_range| {
                     if (manifest_range) |*range| {
                         if (compare_keys(level_range.key_min, range.key_min) == .lt) {
@@ -350,7 +350,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(compare_keys(key_max, table.key_min) != .lt);
 
                 // Append remove changes to the manifest log and purge from memory (ManifestLevel):
-                manifest.manifest_log.remove(@intCast(u7, level), table);
+                manifest.manifest_log.remove(@as(u7, @intCast(level)), table);
                 manifest_level.remove_table_invisible(manifest.node_pool, &snapshots, table);
             }
 
@@ -404,16 +404,16 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         };
 
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
-            for (manifest.levels) |*manifest_level, index| {
-                const level = @intCast(u8, index);
+            for (&manifest.levels, 0..) |*manifest_level, index| {
+                const level = @as(u8, @intCast(index));
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);
             }
         }
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
-            for (manifest.levels) |_, level| {
-                manifest.assert_no_invisible_tables_at_level(@intCast(u8, level), snapshot);
+            for (manifest.levels, 0..) |_, level| {
+                manifest.assert_no_invisible_tables_at_level(@as(u8, @intCast(level)), snapshot);
             }
         }
 

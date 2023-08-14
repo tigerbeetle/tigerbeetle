@@ -347,7 +347,7 @@ const Environment = struct {
             .client = 1,
             .request = 1,
             .command = .prepare,
-            .operation = @intToEnum(vsr.Operation, constants.vsr_operations_reserved + 1),
+            .operation = @as(vsr.Operation, @enumFromInt(constants.vsr_operations_reserved + 1)),
             .op = env.superblock.staging.vsr_state.commit_min + 1,
             .timestamp = 1,
         });

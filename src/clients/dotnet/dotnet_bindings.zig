@@ -134,7 +134,9 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []const u8 {
-    comptime {
+    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
+    return comptime blk: {
         var len: usize = 0;
         var output: [input.len]u8 = undefined;
         var iterator = std.mem.tokenize(u8, input, "_");
@@ -149,8 +151,8 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
             .pascal => std.ascii.toUpper(output[0]),
         };
 
-        return output[0..len];
-    }
+        break :blk output[0..len];
+    };
 }
 
 fn emit_enum(
@@ -186,7 +188,7 @@ fn emit_enum(
         , .{});
     }
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         try emit_docs(buffer, mapping, field.name);
@@ -196,7 +198,7 @@ fn emit_enum(
         ++ value_fmt ++ ",\n\n", .{
             to_case(field.name, .pascal),
             if (@typeInfo(Type) == .Enum)
-                @enumToInt(@field(Type, field.name))
+                @intFromEnum(@field(Type, field.name))
             else
                 i, // packed struct field.
         });
@@ -233,7 +235,7 @@ fn emit_struct(
     // It's more efficient than exposing heap-allocated arrays using
     // [MarshalAs(UnmanagedType.ByValArray)] attribute.
     inline for (type_info.fields) |field| {
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => |array| {
                 try buffer.writer().print(
                     \\        [StructLayout(LayoutKind.Sequential, Size = SIZE)]
@@ -275,7 +277,7 @@ fn emit_struct(
 
     // Fields
     inline for (type_info.fields) |field| {
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => try buffer.writer().print(
                 \\        {s} {s}Data {s};
                 \\
@@ -294,7 +296,7 @@ fn emit_struct(
             ,
                 .{
                     if (mapping.visibility == .internal) "public" else "private",
-                    dotnet_type(field.field_type),
+                    dotnet_type(field.type),
                     to_case(field.name, .camel),
                 },
             ),
@@ -310,7 +312,7 @@ fn emit_struct(
             const is_private = comptime mapping.is_private(field.name);
             const is_read_only = comptime mapping.is_read_only(field.name);
 
-            switch (@typeInfo(field.field_type)) {
+            switch (@typeInfo(field.type)) {
                 .Array => try buffer.writer().print(
                     \\        {s} byte[] {s} {{ get => {s}.GetData(); {s}set => {s}.SetData(value); }}
                     \\
@@ -328,7 +330,7 @@ fn emit_struct(
                     \\
                 , .{
                     if (is_private) "internal" else "public",
-                    dotnet_type(field.field_type),
+                    dotnet_type(field.type),
                     to_case(field.name, .pascal),
                     to_case(field.name, .camel),
                     if (is_read_only and !is_private) "internal " else "",

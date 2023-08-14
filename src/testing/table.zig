@@ -5,12 +5,12 @@ const assert = std.debug.assert;
 /// See test cases for example usage.
 pub fn parse(comptime Row: type, table_string: []const u8) std.BoundedArray(Row, 128) {
     var rows = std.BoundedArray(Row, 128){ .buffer = undefined };
-    var row_strings = std.mem.tokenize(u8, table_string, "\n");
+    var row_strings = std.mem.tokenizeAny(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
         if (row_string.len == 0) continue;
 
-        var columns = std.mem.tokenize(u8, row_string, " ");
+        var columns = std.mem.tokenizeAny(u8, row_string, " ");
         const row = parse_data(Row, &columns);
         rows.appendAssumeCapacity(row);
 
@@ -20,7 +20,7 @@ pub fn parse(comptime Row: type, table_string: []const u8) std.BoundedArray(Row,
     return rows;
 }
 
-fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
+fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Data {
     return switch (@typeInfo(Data)) {
         .Optional => |info| parse_data(info.child, tokens),
         .Enum => field(Data, tokens.next().?),
@@ -40,7 +40,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
             const token = tokens.next().?;
             // If the first character is a letter ("a-zA-Z"), ignore it. (For example, "A1" → 1).
             // This serves as a comment, to help visually disambiguate sequential integer columns.
-            const offset: usize = if (std.ascii.isAlpha(token[0])) 1 else 0;
+            const offset: usize = if (std.ascii.isAlphabetic(token[0])) 1 else 0;
             // Negative unsigned values are computed relative to the maxInt.
             if (info.signedness == .unsigned and token[offset] == '-') {
                 return max - (std.fmt.parseInt(Data, token[offset + 1 ..], 10) catch unreachable);
@@ -52,10 +52,10 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
             inline for (std.meta.fields(Data)) |value_field| {
                 // The repeated else branch seems to be necessary to keep Zig from complaining:
                 //   control flow attempts to use compile-time variable at runtime
-                const Field = value_field.field_type;
+                const Field = value_field.type;
                 if (value_field.default_value) |ptr| {
                     if (eat(tokens, "_")) {
-                        const value_ptr = @ptrCast(*const Field, @alignCast(@alignOf(Field), ptr));
+                        const value_ptr = @as(*const Field, @ptrCast(@alignCast(ptr)));
                         @field(data, value_field.name) = value_ptr.*;
                     } else {
                         @field(data, value_field.name) = parse_data(Field, tokens);
@@ -80,7 +80,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
                     return @unionInit(
                         Data,
                         variant_field.name,
-                        parse_data(variant_field.field_type, tokens),
+                        parse_data(variant_field.type, tokens),
                     );
                 }
             }
@@ -90,7 +90,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8)) Data {
     };
 }
 
-fn eat(tokens: *std.mem.TokenIterator(u8), token: []const u8) bool {
+fn eat(tokens: *std.mem.TokenIterator(u8, .any), token: []const u8) bool {
     var index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
     tokens.index = index_before;
@@ -117,7 +117,7 @@ fn test_parse(
     const rows_actual = parse(Row, string).constSlice();
     try std.testing.expectEqual(rows_expect.len, rows_actual.len);
 
-    for (rows_expect) |row, i| {
+    for (rows_expect, 0..) |row, i| {
         try std.testing.expectEqual(row, rows_actual[i]);
     }
 }

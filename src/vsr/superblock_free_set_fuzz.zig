@@ -136,7 +136,7 @@ fn generate_events(
         .checkpoint = random.floatExp(f64) * 10,
     };
 
-    const events = try allocator.alloc(FreeSetEvent, std.math.min(
+    const events = try allocator.alloc(FreeSetEvent, @min(
         @as(usize, 2_000_000),
         fuzz.random_int_exponential(random, usize, blocks_count * 100),
     ));

@@ -2,7 +2,7 @@
 set -eEuo pipefail
 
 echo "Building TigerBeetle..."
-(cd ../../../ && ./zig/zig build install -Drelease-safe)
+(cd ../../../ && ./zig/zig build install -Doptimize=ReleaseSafe)
 
 echo "Formatting replica ..."
 

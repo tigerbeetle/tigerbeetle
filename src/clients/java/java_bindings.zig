@@ -131,10 +131,12 @@ fn to_case(
     comptime input: []const u8,
     comptime case: enum { camel, pascal, upper },
 ) []const u8 {
-    comptime {
+    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
+    return comptime blk: {
         var output: [input.len]u8 = undefined;
         if (case == .upper) {
-            return std.ascii.upperString(output[0..], input);
+            break :blk std.ascii.upperString(output[0..], input);
         } else {
             var len: usize = 0;
             var iterator = std.mem.tokenize(u8, input, "_");
@@ -150,9 +152,9 @@ fn to_case(
                 .upper => unreachable,
             };
 
-            return output[0..len];
+            break :blk output[0..len];
         }
-    }
+    };
 }
 
 fn emit_enum(
@@ -174,7 +176,7 @@ fn emit_enum(
     });
 
     const type_info = @typeInfo(Type).Enum;
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         if (mapping.docs_link) |docs_link| {
@@ -196,7 +198,7 @@ fn emit_enum(
         , .{
             .enum_name = to_case(field.name, .pascal),
             .int_type = int_type,
-            .value = @enumToInt(@field(Type, field.name)),
+            .value = @intFromEnum(@field(Type, field.name)),
             .separator = if (i == type_info.fields.len - 1) ';' else ',',
         });
     }
@@ -246,7 +248,7 @@ fn emit_packed_enum(
         .int_type = int_type,
     });
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
 
         if (mapping.docs_link) |docs_link| {
@@ -354,7 +356,7 @@ fn emit_batch(
             .offset = offset,
         });
 
-        offset += @sizeOf(field.field_type);
+        offset += @sizeOf(field.type);
     }
 
     // Constructors:
@@ -387,7 +389,7 @@ fn emit_batch(
 
     // Properties:
     inline for (type_info.fields) |field| {
-        if (field.field_type == u128) {
+        if (field.type == u128) {
             try emit_u128_batch_accessors(buffer, mapping, field);
         } else {
             try emit_batch_accessors(buffer, mapping, field);
@@ -406,7 +408,7 @@ fn emit_batch_accessors(
     comptime mapping: TypeMapping,
     comptime field: anytype,
 ) !void {
-    comptime assert(field.field_type != u128);
+    comptime assert(field.type != u128);
     const is_private = comptime mapping.is_private(field.name);
     const is_read_only = comptime mapping.is_read_only(field.name);
 
@@ -433,7 +435,7 @@ fn emit_batch_accessors(
         , .{});
     }
 
-    if (comptime trait.is(.Array)(field.field_type)) {
+    if (comptime trait.is(.Array)(field.type)) {
         try buffer.writer().print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getArray(at(Struct.{[property]s}), {[array_len]d});
@@ -443,7 +445,7 @@ fn emit_batch_accessors(
         , .{
             .visibility = if (is_private) @as([]const u8, "") else "public ",
             .property = to_case(field.name, .pascal),
-            .array_len = @typeInfo(field.field_type).Array.len,
+            .array_len = @typeInfo(field.type).Array.len,
         });
     } else {
         try buffer.writer().print(
@@ -455,11 +457,11 @@ fn emit_batch_accessors(
             \\
         , .{
             .visibility = if (is_private) @as([]const u8, "") else "public ",
-            .java_type = java_type(field.field_type),
+            .java_type = java_type(field.type),
             .property = to_case(field.name, .pascal),
-            .batch_type = batch_type(field.field_type),
-            .return_expression = comptime if (trait.is(.Enum)(field.field_type))
-                @as([]const u8, get_mapped_type_name(field.field_type).? ++ ".fromValue(value)")
+            .batch_type = batch_type(field.type),
+            .return_expression = comptime if (trait.is(.Enum)(field.type))
+                @as([]const u8, get_mapped_type_name(field.type).? ++ ".fromValue(value)")
             else
                 "value",
         });
@@ -492,7 +494,7 @@ fn emit_batch_accessors(
         , .{});
     }
 
-    if (comptime trait.is(.Array)(field.field_type)) {
+    if (comptime trait.is(.Array)(field.type)) {
         try buffer.writer().print(
             \\    {[visibility]s}void set{[property]s}(byte[] {[param_name]s}) {{
             \\        if ({[param_name]s} == null)
@@ -507,7 +509,7 @@ fn emit_batch_accessors(
             .property = to_case(field.name, .pascal),
             .param_name = to_case(field.name, .camel),
             .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
-            .array_len = @typeInfo(field.field_type).Array.len,
+            .array_len = @typeInfo(field.type).Array.len,
         });
     } else {
         try buffer.writer().print(
@@ -520,9 +522,9 @@ fn emit_batch_accessors(
             .property = to_case(field.name, .pascal),
             .param_name = to_case(field.name, .camel),
             .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
-            .batch_type = batch_type(field.field_type),
-            .java_type = java_type(field.field_type),
-            .value_expression = if (comptime trait.is(.Enum)(field.field_type))
+            .batch_type = batch_type(field.type),
+            .java_type = java_type(field.type),
+            .value_expression = if (comptime trait.is(.Enum)(field.type))
                 @as([]const u8, ".value")
             else
                 "",
@@ -538,7 +540,7 @@ fn emit_u128_batch_accessors(
     comptime mapping: TypeMapping,
     comptime field: anytype,
 ) !void {
-    comptime assert(field.field_type == u128);
+    comptime assert(field.type == u128);
     const is_private = comptime mapping.is_private(field.name);
     const is_read_only = comptime mapping.is_read_only(field.name);
 

@@ -43,7 +43,7 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
         defer offset += write_size;
 
         const write_headers = std.mem.bytesAsSlice(vsr.Header, write[0..write_size]);
-        for (write_headers) |header, i| {
+        for (write_headers, 0..) |header, i| {
             const slot = @divExact(offset, @sizeOf(vsr.Header)) + i;
             try verify_slot_header(slot, header);
         }
@@ -67,6 +67,7 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
         var offset_checked: usize = 0;
         while (offset_checked < write_size) {
             const offset_header_next = std.mem.alignForward(
+                usize,
                 offset + offset_checked,
                 constants.message_size_max,
             ) - offset;
@@ -81,7 +82,7 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
                 offset_checked += @sizeOf(vsr.Header);
             } else {
                 // Message body.
-                const offset_message_end = std.math.min(offset_header_next, write_size);
+                const offset_message_end = @min(offset_header_next, write_size);
                 const message_body_bytes = write[offset_checked..offset_message_end];
                 var byte: usize = 0;
                 for (std.mem.bytesAsSlice(usize, message_body_bytes)) |b| byte |= b;

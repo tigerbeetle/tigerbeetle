@@ -75,9 +75,9 @@ pub const Manifest = struct {
         try compaction_set.ensureTotalCapacity(allocator, manifest_block_count_max);
         errdefer compaction_set.deinit(allocator);
 
-        mem.set(u128, trees, 0);
-        mem.set(u128, checksums, 0);
-        mem.set(u64, addresses, 0);
+        @memset(trees, 0);
+        @memset(checksums, 0);
+        @memset(addresses, 0);
 
         return Manifest{
             .trees = trees,
@@ -101,9 +101,9 @@ pub const Manifest = struct {
     }
 
     pub fn reset(manifest: *Manifest) void {
-        mem.set(u128, manifest.trees, 0);
-        mem.set(u128, manifest.checksums, 0);
-        mem.set(u64, manifest.addresses, 0);
+        @memset(manifest.trees, 0);
+        @memset(manifest.checksums, 0);
+        @memset(manifest.addresses, 0);
 
         manifest.count = 0;
         manifest.tables.clearRetainingCapacity();
@@ -122,7 +122,7 @@ pub const Manifest = struct {
         stdx.copy_disjoint(
             .exact,
             u128,
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, trees)),
+            @as([]u128, @alignCast(mem.bytesAsSlice(u128, trees))),
             manifest.trees[0..manifest.count],
         );
         size += trees.len;
@@ -131,7 +131,7 @@ pub const Manifest = struct {
         stdx.copy_disjoint(
             .exact,
             u128,
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, checksums)),
+            @as([]u128, @alignCast(mem.bytesAsSlice(u128, checksums))),
             manifest.checksums[0..manifest.count],
         );
         size += checksums.len;
@@ -140,12 +140,12 @@ pub const Manifest = struct {
         stdx.copy_disjoint(
             .exact,
             u64,
-            @alignCast(@alignOf(u64), mem.bytesAsSlice(u64, addresses)),
+            @as([]u64, @alignCast(mem.bytesAsSlice(u64, addresses))),
             manifest.addresses[0..manifest.count],
         );
         size += addresses.len;
 
-        mem.set(u8, target[size..], 0);
+        @memset(target[size..], 0);
 
         assert(@divExact(size, BlockReferenceSize) == manifest.count);
 
@@ -157,7 +157,7 @@ pub const Manifest = struct {
         assert(manifest.tables.count() == 0);
         assert(manifest.compaction_set.count() == 0);
 
-        manifest.count = @intCast(u32, @divExact(source.len, BlockReferenceSize));
+        manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReferenceSize)));
         assert(manifest.count <= manifest.count_max);
 
         var size: u64 = 0;
@@ -167,7 +167,7 @@ pub const Manifest = struct {
             .exact,
             u128,
             manifest.trees[0..manifest.count],
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, trees)),
+            @as([]const u128, @alignCast(mem.bytesAsSlice(u128, trees))),
         );
         size += trees.len;
 
@@ -176,7 +176,7 @@ pub const Manifest = struct {
             .exact,
             u128,
             manifest.checksums[0..manifest.count],
-            @alignCast(@alignOf(u128), mem.bytesAsSlice(u128, checksums)),
+            @as([]const u128, @alignCast(mem.bytesAsSlice(u128, checksums))),
         );
         size += checksums.len;
 
@@ -185,16 +185,16 @@ pub const Manifest = struct {
             .exact,
             u64,
             manifest.addresses[0..manifest.count],
-            @alignCast(@alignOf(u64), mem.bytesAsSlice(u64, addresses)),
+            @as([]const u64, @alignCast(mem.bytesAsSlice(u64, addresses))),
         );
         size += addresses.len;
 
         assert(size == source.len);
         assert(@divExact(size, BlockReferenceSize) == manifest.count);
 
-        mem.set(u128, manifest.trees[manifest.count..], 0);
-        mem.set(u128, manifest.checksums[manifest.count..], 0);
-        mem.set(u64, manifest.addresses[manifest.count..], 0);
+        @memset(manifest.trees[manifest.count..], 0);
+        @memset(manifest.checksums[manifest.count..], 0);
+        @memset(manifest.addresses[manifest.count..], 0);
 
         if (constants.verify) manifest.verify();
     }

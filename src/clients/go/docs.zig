@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const Docs = @import("../docs_types.zig").Docs;
 const run = @import("../shutil.zig").run;
@@ -11,11 +12,20 @@ fn go_current_commit_pre_install_hook(
     _: []const u8,
 ) !void {
     for (&[_][]const u8{ "go.mod", "go.sum" }) |file| {
-        std.os.unlink(try std.fmt.allocPrint(
+        const path = try std.fmt.allocPrint(
             arena.allocator(),
             "{s}/{s}",
             .{ sample_dir, file },
-        )) catch {
+        );
+        // TODO(Zig): Mismatching internal std.os.unlink() error in Zig 0.11.0
+        const unlink_result = switch (builtin.os.tag) {
+            .windows => blk: {
+                const path_w = try std.os.windows.sliceToPrefixedFileW(path);
+                break :blk std.os.windows.DeleteFile(path_w.span(), .{ .dir = std.fs.cwd().fd });
+            },
+            else => std.os.unlink(path),
+        };
+        unlink_result catch {
             // Delete only if they exist.
         };
     }
@@ -83,7 +93,7 @@ pub const GoDocs = Docs{
     .test_source_path = "",
 
     .name = "tigerbeetle-go",
-    .description = 
+    .description =
     \\The TigerBeetle client for Go.
     \\
     \\[![Go Reference](https://pkg.go.dev/badge/github.com/tigerbeetle/tigerbeetle-go.svg)](https://pkg.go.dev/github.com/tigerbeetle/tigerbeetle-go)
@@ -92,7 +102,7 @@ pub const GoDocs = Docs{
     \\this repo and subdirectory.
     ,
 
-    .prerequisites = 
+    .prerequisites =
     \\* Go >= 1.17
     \\
     \\**Additionally on Windows**: you must install [Zig
@@ -106,7 +116,7 @@ pub const GoDocs = Docs{
 
     .test_file_name = "",
 
-    .install_sample_file = 
+    .install_sample_file =
     \\package main
     \\
     \\import _ "github.com/tigerbeetle/tigerbeetle-go"
@@ -119,11 +129,11 @@ pub const GoDocs = Docs{
 
     .install_prereqs = "",
 
-    .install_commands = 
+    .install_commands =
     \\go mod init tbtest
     \\go get github.com/tigerbeetle/tigerbeetle-go
     ,
-    .build_commands = 
+    .build_commands =
     \\go mod tidy
     \\go build main.go
     ,
@@ -135,7 +145,7 @@ pub const GoDocs = Docs{
 
     .install_documentation = "",
 
-    .examples = 
+    .examples =
     \\### Sidenote: `uint128`
     \\
     \\Throughout this README there will be a reference to a
@@ -154,7 +164,7 @@ pub const GoDocs = Docs{
     \\```
     ,
 
-    .client_object_example = 
+    .client_object_example =
     \\tbAddress := os.Getenv("TB_ADDRESS")
     \\if len(tbAddress) == 0 {
     \\  tbAddress = "3000"
@@ -167,13 +177,13 @@ pub const GoDocs = Docs{
     \\defer client.Close()
     ,
 
-    .client_object_documentation = 
+    .client_object_documentation =
     \\The third argument to `NewClient` is a `uint` max concurrency
     \\setting. `32` is a good default and can increase to `4096`
     \\as you need increased throughput.
     ,
 
-    .create_accounts_example = 
+    .create_accounts_example =
     \\accountsRes, err := client.CreateAccounts([]tb_types.Account{
     \\	{
     \\		ID:     	uint128("137"),
@@ -200,11 +210,11 @@ pub const GoDocs = Docs{
     \\}
     ,
 
-    .create_accounts_documentation = 
+    .create_accounts_documentation =
     \\The `tb_types` package can be imported from `"github.com/tigerbeetle/tigerbeetle-go/pkg/types"`.
     ,
 
-    .account_flags_documentation = 
+    .account_flags_documentation =
     \\To toggle behavior for an account, use the `tb_types.AccountFlags` struct
     \\to combine enum values and generate a `uint16`. Here are a
     \\few examples:
@@ -213,7 +223,7 @@ pub const GoDocs = Docs{
     \\* `tb_types.AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
     \\* `tb_types.AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
     ,
-    .account_flags_example = 
+    .account_flags_example =
     \\account0 := tb_types.Account{ /* ... account values ... */ }
     \\account1 := tb_types.Account{ /* ... account values ... */ }
     \\account0.Flags = tb_types.AccountFlags{Linked: true}.ToUint16()
@@ -225,7 +235,7 @@ pub const GoDocs = Docs{
     \\}
     ,
 
-    .create_accounts_errors_example = 
+    .create_accounts_errors_example =
     \\account2 := tb_types.Account{ /* ... account values ... */ }
     \\account3 := tb_types.Account{ /* ... account values ... */ }
     \\account4 := tb_types.Account{ /* ... account values ... */ }
@@ -241,13 +251,13 @@ pub const GoDocs = Docs{
     \\}
     ,
 
-    .create_accounts_errors_documentation = 
+    .create_accounts_errors_documentation =
     \\To handle errors you can either 1) exactly match error codes returned
     \\from `client.createAccounts` with enum values in the
     \\`CreateAccountError` object, or you can 2) look up the error code in
     \\the `CreateAccountError` object for a human-readable string.
     ,
-    .lookup_accounts_example = 
+    .lookup_accounts_example =
     \\accounts, err := client.LookupAccounts([]tb_types.Uint128{uint128("137"), uint128("138")})
     \\if err != nil {
     \\	log.Printf("Could not fetch accounts: %s", err)
@@ -256,7 +266,7 @@ pub const GoDocs = Docs{
     \\log.Println(accounts)
     ,
 
-    .create_transfers_example = 
+    .create_transfers_example =
     \\transfer := tb_types.Transfer{
     \\	ID:			uint128("1"),
     \\	PendingID:		tb_types.Uint128{},
@@ -279,7 +289,7 @@ pub const GoDocs = Docs{
     \\}
     ,
     .create_transfers_documentation = "",
-    .create_transfers_errors_example = 
+    .create_transfers_errors_example =
     \\for _, err := range transfersRes {
     \\	log.Printf("Batch transfer at %d failed to create: %s", err.Index, err.Result)
     \\	return
@@ -287,14 +297,14 @@ pub const GoDocs = Docs{
     ,
     .create_transfers_errors_documentation = "",
 
-    .no_batch_example = 
+    .no_batch_example =
     \\for i := 0; i < len(transfers); i++ {
     \\	transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfers[i]})
     \\	// error handling omitted
     \\}
     ,
 
-    .batch_example = 
+    .batch_example =
     \\BATCH_SIZE := 8191
     \\for i := 0; i < len(transfers); i += BATCH_SIZE {
     \\	batch := BATCH_SIZE
@@ -306,7 +316,7 @@ pub const GoDocs = Docs{
     \\}
     ,
 
-    .transfer_flags_documentation = 
+    .transfer_flags_documentation =
     \\To toggle behavior for an account, use the `tb_types.TransferFlags` struct
     \\to combine enum values and generate a `uint16`. Here are a
     \\few examples:
@@ -317,14 +327,14 @@ pub const GoDocs = Docs{
     \\* `tb_types.TransferFlags{VoidPendingTransfer: true}.ToUint16()`
     ,
 
-    .transfer_flags_link_example = 
+    .transfer_flags_link_example =
     \\transfer0 := tb_types.Transfer{ /* ... account values ... */ }
     \\transfer1 := tb_types.Transfer{ /* ... account values ... */ }
     \\transfer0.Flags = tb_types.TransferFlags{Linked: true}.ToUint16()
     \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer0, transfer1})
     \\// error handling omitted
     ,
-    .transfer_flags_post_example = 
+    .transfer_flags_post_example =
     \\transfer = tb_types.Transfer{
     \\	ID:		uint128("2"),
     \\	PendingID:	uint128("1"),
@@ -334,7 +344,7 @@ pub const GoDocs = Docs{
     \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
     \\// error handling omitted
     ,
-    .transfer_flags_void_example = 
+    .transfer_flags_void_example =
     \\transfer = tb_types.Transfer{
     \\	ID:		uint128("2"),
     \\	PendingID:	uint128("1"),
@@ -345,7 +355,7 @@ pub const GoDocs = Docs{
     \\// error handling omitted
     ,
 
-    .lookup_transfers_example = 
+    .lookup_transfers_example =
     \\transfers, err := client.LookupTransfers([]tb_types.Uint128{uint128("1"), uint128("2")})
     \\if err != nil {
     \\	log.Printf("Could not fetch transfers: %s", err)
@@ -354,7 +364,7 @@ pub const GoDocs = Docs{
     \\log.Println(transfers)
     ,
 
-    .linked_events_example = 
+    .linked_events_example =
     \\batch := []tb_types.Transfer{}
     \\linkedFlag := tb_types.TransferFlags{Linked: true}.ToUint16()
     \\
@@ -386,8 +396,8 @@ pub const GoDocs = Docs{
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_sh_commands = 
-    \\./zig/zig build go_client -Drelease-safe
+    .developer_setup_sh_commands =
+    \\./zig/zig build go_client -Doptimize=ReleaseSafe
     \\cd src/clients/go
     \\if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
     ,
@@ -397,13 +407,13 @@ pub const GoDocs = Docs{
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_pwsh_commands = 
-    \\.\zig\zig build go_client -Drelease-safe
+    .developer_setup_pwsh_commands =
+    \\.\zig\zig build go_client -Doptimize=ReleaseSafe
     \\cd src\clients\go
     \\if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
     ,
 
-    .test_main_prefix = 
+    .test_main_prefix =
     \\package main
     \\
     \\import "log"

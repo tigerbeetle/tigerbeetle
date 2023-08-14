@@ -25,7 +25,7 @@ exit /b
 
 echo "Building TigerBeetle..."
 cd ..\..\..
-.\zig\zig.exe build install -Drelease-safe
+.\zig\zig.exe build install -Doptimize=ReleaseSafe
 cd src/clients/dotnet
 
 for /l %%i in (0, 1, 0) do (

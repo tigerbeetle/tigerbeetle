@@ -155,7 +155,7 @@ pub fn RingBuffer(
             if (self.count + items.len > self.buffer.len) return error.NoSpaceLeft;
 
             const pre_wrap_start = (self.index + self.count) % self.buffer.len;
-            const pre_wrap_count = math.min(items.len, self.buffer.len - pre_wrap_start);
+            const pre_wrap_count = @min(items.len, self.buffer.len - pre_wrap_start);
             const post_wrap_count = items.len - pre_wrap_count;
 
             stdx.copy_disjoint(.inexact, T, self.buffer[pre_wrap_start..], items[0..pre_wrap_count]);

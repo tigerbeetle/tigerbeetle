@@ -55,7 +55,7 @@ pub fn ewah(comptime Word: type) type {
         }
 
         inline fn marker_word(mark: Marker) Word {
-            return @bitCast(Word, mark);
+            return @as(Word, @bitCast(mark));
         }
 
         /// Decodes the compressed bitset in `source` into `target_words`.
@@ -70,10 +70,9 @@ pub fn ewah(comptime Word: type) type {
             var source_index: usize = 0;
             var target_index: usize = 0;
             while (source_index < source_words.len) {
-                const marker = @ptrCast(*const Marker, &source_words[source_index]);
+                const marker = @as(*const Marker, @ptrCast(&source_words[source_index]));
                 source_index += 1;
-                std.mem.set(
-                    Word,
+                @memset(
                     target_words[target_index..][0..marker.uniform_word_count],
                     if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
                 );
@@ -98,7 +97,7 @@ pub fn ewah(comptime Word: type) type {
             assert(disjoint_slices(Word, u8, source_words, target));
 
             const target_words = mem.bytesAsSlice(Word, target);
-            std.mem.set(Word, target_words, 0);
+            @memset(target_words, 0);
 
             var target_index: usize = 0;
             var source_index: usize = 0;
@@ -108,25 +107,25 @@ pub fn ewah(comptime Word: type) type {
                 const uniform_word_count = count: {
                     if (is_literal(word)) break :count 0;
                     // Measure run length.
-                    const uniform_max = math.min(source_words.len - source_index, marker_uniform_word_count_max);
+                    const uniform_max = @min(source_words.len - source_index, marker_uniform_word_count_max);
                     var uniform: usize = 1;
                     while (uniform < uniform_max and source_words[source_index + uniform] == word) uniform += 1;
                     break :count uniform;
                 };
                 source_index += uniform_word_count;
                 // For consistent encoding, set the run/uniform bit to 0 when there is no run.
-                const uniform_bit = if (uniform_word_count == 0) 0 else @intCast(u1, word & 1);
+                const uniform_bit = if (uniform_word_count == 0) 0 else @as(u1, @intCast(word & 1));
 
                 // Count sequential literals that immediately follow the run.
-                const literals_max = math.min(source_words.len - source_index, marker_literal_word_count_max);
-                const literal_word_count = for (source_words[source_index..][0..literals_max]) |w, i| {
+                const literals_max = @min(source_words.len - source_index, marker_literal_word_count_max);
+                const literal_word_count = for (source_words[source_index..][0..literals_max], 0..) |w, i| {
                     if (!is_literal(w)) break i;
                 } else literals_max;
 
                 target_words[target_index] = marker_word(.{
                     .uniform_bit = uniform_bit,
-                    .uniform_word_count = @intCast(MarkerUniformCount, uniform_word_count),
-                    .literal_word_count = @intCast(MarkerLiteralCount, literal_word_count),
+                    .uniform_word_count = @as(MarkerUniformCount, @intCast(uniform_word_count)),
+                    .literal_word_count = @as(MarkerLiteralCount, @intCast(literal_word_count)),
                 });
                 target_index += 1;
                 stdx.copy_disjoint(
@@ -163,10 +162,10 @@ test "ewah encode→decode cycle" {
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
         var decoded: [4096]Word = undefined;
 
-        std.mem.set(Word, &decoded, 0);
+        @memset(&decoded, 0);
         try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
 
-        std.mem.set(Word, &decoded, std.math.maxInt(Word));
+        @memset(&decoded, std.math.maxInt(Word));
         try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
 
         prng.random().bytes(std.mem.asBytes(&decoded));
@@ -183,7 +182,7 @@ test "ewah Word=u8" {
         try test_decode(u8, &.{
             codec.marker_word(.{
                 .uniform_bit = 0,
-                .uniform_word_count = @intCast(codec.MarkerUniformCount, uniform_word_count),
+                .uniform_word_count = @as(codec.MarkerUniformCount, @intCast(uniform_word_count)),
                 .literal_word_count = 3,
             }),
             12,

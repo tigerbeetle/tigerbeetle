@@ -54,7 +54,7 @@ pub fn ClockType(comptime Time: type) type {
             }
 
             fn reset(epoch: *Epoch, clock: *Self) void {
-                std.mem.set(?Sample, epoch.sources, null);
+                @memset(epoch.sources, null);
                 // A replica always has zero clock offset and network delay to its own system time reading:
                 epoch.sources[clock.replica] = Sample{
                     .clock_offset = 0,
@@ -193,8 +193,8 @@ pub fn ClockType(comptime Time: type) type {
 
             const round_trip_time: u64 = m2 - m0;
             const one_way_delay: u64 = round_trip_time / 2;
-            const t2: i64 = self.window.realtime + @intCast(i64, elapsed);
-            const clock_offset: i64 = t1 + @intCast(i64, one_way_delay) - t2;
+            const t2: i64 = self.window.realtime + @as(i64, @intCast(elapsed));
+            const clock_offset: i64 = t1 + @as(i64, @intCast(one_way_delay)) - t2;
             const asymmetric_delay = self.estimate_asymmetric_delay(
                 replica,
                 one_way_delay,
@@ -254,7 +254,7 @@ pub fn ClockType(comptime Time: type) type {
             if (self.synchronization_disabled) {
                 return self.realtime();
             } else if (self.epoch.synchronized) |interval| {
-                const elapsed = @intCast(i64, self.epoch.elapsed(self));
+                const elapsed = @as(i64, @intCast(self.epoch.elapsed(self)));
                 return std.math.clamp(
                     self.realtime(),
                     self.epoch.realtime + elapsed + interval.lower_bound,
@@ -298,10 +298,10 @@ pub fn ClockType(comptime Time: type) type {
                     return 0;
                 } else if (clock_offset > epoch.clock_offset + error_margin) {
                     // The asymmetric error is on the forward network path.
-                    return 0 - @intCast(i64, one_way_delay - epoch.one_way_delay);
+                    return 0 - @as(i64, @intCast(one_way_delay - epoch.one_way_delay));
                 } else if (clock_offset < epoch.clock_offset - error_margin) {
                     // The asymmetric error is on the reverse network path.
-                    return 0 + @intCast(i64, one_way_delay - epoch.one_way_delay);
+                    return 0 + @as(i64, @intCast(one_way_delay - epoch.one_way_delay));
                 } else {
                     return 0;
                 }
@@ -382,7 +382,7 @@ pub fn ClockType(comptime Time: type) type {
                 fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
             });
 
-            const elapsed = @intCast(i64, self.epoch.elapsed(self));
+            const elapsed = @as(i64, @intCast(self.epoch.elapsed(self)));
             const system = self.realtime();
             const lower = self.epoch.realtime + elapsed + new_interval.lower_bound;
             const upper = self.epoch.realtime + elapsed + new_interval.upper_bound;
@@ -421,17 +421,17 @@ pub fn ClockType(comptime Time: type) type {
             assert(self.window.sources[self.replica].?.clock_offset == 0);
             assert(self.window.sources[self.replica].?.one_way_delay == 0);
             var count: usize = 0;
-            for (self.window.sources) |sampled, source| {
+            for (self.window.sources, 0..) |sampled, source| {
                 if (sampled) |sample| {
                     self.marzullo_tuples[count] = Marzullo.Tuple{
-                        .source = @intCast(u8, source),
-                        .offset = sample.clock_offset - @intCast(i64, sample.one_way_delay + tolerance),
+                        .source = @as(u8, @intCast(source)),
+                        .offset = sample.clock_offset - @as(i64, @intCast(sample.one_way_delay + tolerance)),
                         .bound = .lower,
                     };
                     count += 1;
                     self.marzullo_tuples[count] = Marzullo.Tuple{
-                        .source = @intCast(u8, source),
-                        .offset = sample.clock_offset + @intCast(i64, sample.one_way_delay + tolerance),
+                        .source = @as(u8, @intCast(source)),
+                        .offset = sample.clock_offset + @as(i64, @intCast(sample.one_way_delay + tolerance)),
                         .bound = .upper,
                     };
                     count += 1;
@@ -489,7 +489,7 @@ const ClockUnitTestContainer = struct {
             if (@mod(self.clock.time.ticks, self.learn_interval) == 0) {
                 const on_pong_time = self.clock.monotonic();
                 const m0 = on_pong_time - self.rtt;
-                const t1 = @intCast(i64, on_pong_time - self.owd);
+                const t1 = @as(i64, @intCast(on_pong_time - self.owd));
 
                 self.clock.learn(1, m0, t1, on_pong_time);
                 self.clock.learn(2, m0, t1, on_pong_time);
@@ -514,46 +514,46 @@ const ClockUnitTestContainer = struct {
                 // Beyond this, the offset > OWD and the Marzullo interval will be from replica 1 and
                 // replica 2. The `clock.realtime_synchronized` will be clamped to the lower bound.
                 // Therefore the `clock.realtime_synchronized` will be offset by the OWD.
-                var threshold = self.owd / @intCast(u64, self.clock.time.offset_coefficient_A);
+                var threshold = self.owd / @as(u64, @intCast(self.clock.time.offset_coefficient_A));
                 ret[0] = .{
                     .tick = threshold,
                     .expected_offset = self.clock.time.offset(threshold - self.learn_interval),
                 };
                 ret[1] = .{
                     .tick = threshold + 100,
-                    .expected_offset = @intCast(i64, self.owd),
+                    .expected_offset = @as(i64, @intCast(self.owd)),
                 };
                 ret[2] = .{
                     .tick = threshold + 200,
-                    .expected_offset = @intCast(i64, self.owd),
+                    .expected_offset = @as(i64, @intCast(self.owd)),
                 };
             },
             .periodic => {
                 ret[0] = .{
-                    .tick = @intCast(u64, @divTrunc(self.clock.time.offset_coefficient_B, 4)),
-                    .expected_offset = @intCast(i64, self.owd),
+                    .tick = @as(u64, @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 4))),
+                    .expected_offset = @as(i64, @intCast(self.owd)),
                 };
                 ret[1] = .{
-                    .tick = @intCast(u64, @divTrunc(self.clock.time.offset_coefficient_B, 2)),
+                    .tick = @as(u64, @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 2))),
                     .expected_offset = 0,
                 };
                 ret[2] = .{
-                    .tick = @intCast(u64, @divTrunc(self.clock.time.offset_coefficient_B * 3, 4)),
-                    .expected_offset = -@intCast(i64, self.owd),
+                    .tick = @as(u64, @intCast(@divTrunc(self.clock.time.offset_coefficient_B * 3, 4))),
+                    .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
             },
             .step => {
                 ret[0] = .{
-                    .tick = @intCast(u64, self.clock.time.offset_coefficient_B - 10),
+                    .tick = @as(u64, @intCast(self.clock.time.offset_coefficient_B - 10)),
                     .expected_offset = 0,
                 };
                 ret[1] = .{
-                    .tick = @intCast(u64, self.clock.time.offset_coefficient_B + 10),
-                    .expected_offset = -@intCast(i64, self.owd),
+                    .tick = @as(u64, @intCast(self.clock.time.offset_coefficient_B + 10)),
+                    .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
                 ret[2] = .{
-                    .tick = @intCast(u64, self.clock.time.offset_coefficient_B + 10),
-                    .expected_offset = -@intCast(i64, self.owd),
+                    .tick = @as(u64, @intCast(self.clock.time.offset_coefficient_B + 10)),
+                    .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
             },
             .non_ideal => unreachable, // use ideal clocks for the unit tests
@@ -585,7 +585,7 @@ test "ideal clocks get clamped to cluster time" {
         ideal_constant_drift_clock.run_till_tick(point.tick);
         try testing.expectEqual(
             point.expected_offset,
-            @intCast(i64, ideal_constant_drift_clock.clock.monotonic()) -
+            @as(i64, @intCast(ideal_constant_drift_clock.clock.monotonic())) -
                 ideal_constant_drift_clock.clock.realtime_synchronized().?,
         );
     }
@@ -603,7 +603,7 @@ test "ideal clocks get clamped to cluster time" {
         ideal_periodic_drift_clock.run_till_tick(point.tick);
         try testing.expectEqual(
             point.expected_offset,
-            @intCast(i64, ideal_periodic_drift_clock.clock.monotonic()) -
+            @as(i64, @intCast(ideal_periodic_drift_clock.clock.monotonic())) -
                 ideal_periodic_drift_clock.clock.realtime_synchronized().?,
         );
     }
@@ -620,7 +620,7 @@ test "ideal clocks get clamped to cluster time" {
         ideal_jumping_clock.run_till_tick(point.tick);
         try testing.expectEqual(
             point.expected_offset,
-            @intCast(i64, ideal_jumping_clock.clock.monotonic()) -
+            @as(i64, @intCast(ideal_jumping_clock.clock.monotonic())) -
                 ideal_jumping_clock.clock.realtime_synchronized().?,
         );
     }
@@ -676,12 +676,12 @@ const ClockSimulator = struct {
 
         var prng = std.rand.DefaultPrng.init(options.network_options.seed);
 
-        for (clocks) |*clock, replica| {
+        for (clocks, 0..) |*clock, replica| {
             errdefer for (clocks[0..replica]) |*c| c.deinit(allocator);
 
             const amplitude = prng.random().intRangeAtMost(i64, -10, 10) * std.time.ns_per_s;
             const phase = prng.random().intRangeAtMost(i64, 100, 1000) +
-                @floatToInt(i64, prng.random().floatNorm(f64) * 50);
+                @as(i64, @intFromFloat(prng.random().floatNorm(f64) * 50));
             times[replica] = .{
                 .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
                 .offset_type = OffsetType.non_ideal,
@@ -693,7 +693,7 @@ const ClockSimulator = struct {
             clock.* = try DeterministicClock.init(
                 allocator,
                 options.clock_count,
-                @intCast(u8, replica),
+                @as(u8, @intCast(replica)),
                 &times[replica],
             );
             errdefer clock.deinit(allocator);
@@ -727,7 +727,7 @@ const ClockSimulator = struct {
         for (self.clocks) |*clock| {
             if (clock.time.ticks % self.options.ping_timeout == 0) {
                 const m0 = clock.monotonic();
-                for (self.clocks) |_, target| {
+                for (self.clocks, 0..) |_, target| {
                     if (target != clock.replica) {
                         self.network.submit_packet(
                             .{
@@ -738,7 +738,7 @@ const ClockSimulator = struct {
                             ClockSimulator.handle_packet,
                             .{
                                 .source = clock.replica,
-                                .target = @intCast(u8, target),
+                                .target = @as(u8, @intCast(target)),
                             },
                         );
                     }
@@ -791,7 +791,7 @@ test "clock: fuzz test" {
         .offset_coefficient_A = 0,
         .offset_coefficient_B = 0,
     };
-    var seed = @intCast(u64, system_time.realtime());
+    var seed = @as(u64, @intCast(system_time.realtime()));
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;
@@ -825,9 +825,9 @@ test "clock: fuzz test" {
     while (simulator.ticks < ticks_max) {
         simulator.tick();
 
-        for (simulator.clocks) |*clock, index| {
+        for (simulator.clocks, 0..) |*clock, index| {
             var offset = clock.time.offset(simulator.ticks);
-            var abs_offset = if (offset >= 0) @intCast(u64, offset) else @intCast(u64, -offset);
+            var abs_offset = if (offset >= 0) @as(u64, @intCast(offset)) else @as(u64, @intCast(-offset));
             max_clock_offset = if (abs_offset > max_clock_offset) abs_offset else max_clock_offset;
             min_clock_offset = if (abs_offset < min_clock_offset) abs_offset else min_clock_offset;
 
@@ -836,13 +836,13 @@ test "clock: fuzz test" {
                 continue;
             };
 
-            for (simulator.clocks) |*other_clock, other_clock_index| {
+            for (simulator.clocks, 0..) |*other_clock, other_clock_index| {
                 if (index == other_clock_index) continue;
                 var other_clock_sync_time = other_clock.realtime_synchronized() orelse {
                     continue;
                 };
                 var err: i64 = synced_time - other_clock_sync_time;
-                var abs_err: u64 = if (err >= 0) @intCast(u64, err) else @intCast(u64, -err);
+                var abs_err: u64 = if (err >= 0) @as(u64, @intCast(err)) else @as(u64, @intCast(-err));
                 max_sync_error = if (abs_err > max_sync_error) abs_err else max_sync_error;
                 min_sync_error = if (abs_err < min_sync_error) abs_err else min_sync_error;
             }
@@ -855,11 +855,11 @@ test "clock: fuzz test" {
         clock_count,
     });
     log.info("absolute clock offsets with respect to test time:\n", .{});
-    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_clock_offset))});
-    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_clock_offset))});
+    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(max_clock_offset)))});
+    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(min_clock_offset)))});
     log.info("\nabsolute synchronization errors between clocks:\n", .{});
-    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, max_sync_error))});
-    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@intCast(i64, min_sync_error))});
+    log.info("maximum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(max_sync_error)))});
+    log.info("minimum={}\n", .{fmt.fmtDurationSigned(@as(i64, @intCast(min_sync_error)))});
     log.info("clock ticks without synchronization={d}\n", .{
         clock_ticks_without_synchronization,
     });

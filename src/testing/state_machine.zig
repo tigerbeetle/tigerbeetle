@@ -169,7 +169,7 @@ pub fn StateMachineType(
                     state_machine.forest.grooves.things.put(&.{
                         .timestamp = timestamp,
                         .id = op,
-                        .value = @truncate(u64, vsr.checksum(input)),
+                        .value = @as(u64, @truncate(vsr.checksum(input))),
                     });
 
                     stdx.copy_disjoint(.inexact, u8, output, input);

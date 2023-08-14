@@ -73,7 +73,7 @@ const NativeClient = struct {
             cluster_id,
             addresses,
             max_concurrency,
-            @ptrToInt(context),
+            @intFromPtr(context),
             on_completion,
         ) catch |err| {
             const status = tb.init_error_to_status(err);
@@ -123,7 +123,7 @@ const NativeClient = struct {
             packet.operation = operation;
             packet.user_data = global_ref;
             packet.data = send_buffer.ptr;
-            packet.data_size = @intCast(u32, send_buffer.len);
+            packet.data_size = @as(u32, @intCast(send_buffer.len));
             packet.next = null;
             packet.status = .ok;
             tb.submit(context.client, packet);
@@ -143,12 +143,12 @@ const NativeClient = struct {
         result_len: u32,
     ) callconv(.C) void {
         _ = client;
-        var context = @intToPtr(*Context, context_ptr);
+        var context = @as(*Context, @ptrFromInt(context_ptr));
         var env = JNIHelper.attach_current_thread(context.jvm);
 
         // Retrieves the request instance, and drops the GC reference.
         assert(packet.user_data != null);
-        var request_obj = @ptrCast(jni.JObject, packet.user_data);
+        var request_obj = @as(jni.JObject, @ptrCast(packet.user_data));
         defer env.delete_global_ref(request_obj);
 
         const packet_operation = packet.operation;
@@ -160,7 +160,7 @@ const NativeClient = struct {
                     ReflectionHelper.set_reply_buffer(
                         env,
                         request_obj,
-                        ptr[0..@intCast(usize, result_len)],
+                        ptr[0..@as(usize, @intCast(result_len))],
                     );
                 },
                 else => {},
@@ -202,11 +202,11 @@ comptime {
             var context = NativeClient.client_init(
                 false,
                 env,
-                @bitCast(u32, cluster_id),
+                @as(u32, @bitCast(cluster_id)),
                 addresses,
-                @bitCast(u32, max_concurrency),
+                @as(u32, @bitCast(max_concurrency)),
             );
-            return @bitCast(jni.JLong, @ptrToInt(context));
+            return @as(jni.JLong, @bitCast(@intFromPtr(context)));
         }
 
         fn client_init_echo(
@@ -220,11 +220,11 @@ comptime {
             var context = NativeClient.client_init(
                 true,
                 env,
-                @bitCast(u32, cluster_id),
+                @as(u32, @bitCast(cluster_id)),
                 addresses,
-                @bitCast(u32, max_concurrency),
+                @as(u32, @bitCast(max_concurrency)),
             );
-            return @bitCast(jni.JLong, @ptrToInt(context));
+            return @as(jni.JLong, @bitCast(@intFromPtr(context)));
         }
 
         fn client_deinit(
@@ -234,7 +234,7 @@ comptime {
         ) callconv(jni.JNICALL) void {
             _ = env;
             _ = class;
-            NativeClient.client_deinit(@intToPtr(*Context, @bitCast(usize, context_handle)));
+            NativeClient.client_deinit(@as(*Context, @ptrFromInt(@as(usize, @bitCast(context_handle)))));
         }
 
         fn submit(
@@ -247,11 +247,11 @@ comptime {
             assert(context_handle != 0);
             const packet_acquire_status = NativeClient.submit(
                 env,
-                @intToPtr(*Context, @bitCast(usize, context_handle)),
+                @as(*Context, @ptrFromInt(@as(usize, @bitCast(context_handle)))),
                 request_obj,
             );
 
-            return @intCast(jni.JInt, @enumToInt(packet_acquire_status));
+            return @as(jni.JInt, @intCast(@intFromEnum(packet_acquire_status)));
         }
     };
 
@@ -375,7 +375,7 @@ const ReflectionHelper = struct {
         var exception = env.new_object(
             initialization_exception_class,
             initialization_exception_ctor_id,
-            &[_]jni.JValue{jni.JValue.to_jvalue(@bitCast(jni.JInt, @enumToInt(status)))},
+            &[_]jni.JValue{jni.JValue.to_jvalue(@as(jni.JInt, @bitCast(@intFromEnum(status))))},
         ) orelse {
             // It's unexpected here: we did not initialize correctly or the JVM is out of memory.
             JNIHelper.vm_panic(env, "Unexpected error creating a new InitializationException.", .{});
@@ -422,7 +422,7 @@ const ReflectionHelper = struct {
         if (buffer_len < 0 or buffer_len > direct_buffer.len)
             return null;
 
-        return direct_buffer[0..@intCast(usize, buffer_len)];
+        return direct_buffer[0..@as(usize, @intCast(buffer_len))];
     }
 
     pub fn set_reply_buffer(env: *jni.JNIEnv, this_obj: jni.JObject, reply: []const u8) void {
@@ -431,7 +431,7 @@ const ReflectionHelper = struct {
         assert(reply.len > 0);
 
         var reply_buffer_obj = env.new_byte_array(
-            @intCast(jni.JInt, reply.len),
+            @as(jni.JInt, @intCast(reply.len)),
         ) orelse {
             // Cannot allocate an array, it's likely the JVM has run out of resources.
             // Printing the buffer size here just to help diagnosing how much memory was required.
@@ -446,8 +446,8 @@ const ReflectionHelper = struct {
         env.set_byte_array_region(
             reply_buffer_obj,
             0,
-            @intCast(jni.JInt, reply.len),
-            @ptrCast([*]const jni.JByte, reply.ptr),
+            @as(jni.JInt, @intCast(reply.len)),
+            @as([*]const jni.JByte, @ptrCast(reply.ptr)),
         );
 
         if (env.exception_check() == .jni_true) {
@@ -487,7 +487,7 @@ const ReflectionHelper = struct {
                 .{},
             );
         }
-        return @bitCast(u8, value);
+        return @as(u8, @bitCast(value));
     }
 
     pub fn end_request(
@@ -505,8 +505,8 @@ const ReflectionHelper = struct {
             request_class,
             request_end_request_method_id,
             &[_]jni.JValue{
-                jni.JValue.to_jvalue(@bitCast(jni.JByte, packet_operation)),
-                jni.JValue.to_jvalue(@bitCast(jni.JByte, @enumToInt(packet_status))),
+                jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(packet_operation))),
+                jni.JValue.to_jvalue(@as(jni.JByte, @bitCast(@intFromEnum(packet_status)))),
             },
         );
 
@@ -531,7 +531,7 @@ const JNIHelper = struct {
             const message = "Unexpected result calling JavaVM.GetEnv";
             log.err(
                 message ++ "; Error = {} ({s})",
-                .{ @enumToInt(jni_result), @tagName(jni_result) },
+                .{ @intFromEnum(jni_result), @tagName(jni_result) },
             );
             @panic("JNI: " ++ message);
         }
@@ -546,7 +546,7 @@ const JNIHelper = struct {
             const message = "Unexpected result calling JavaVM.AttachCurrentThreadAsDaemon";
             log.err(
                 message ++ "; Error = {} ({s})",
-                .{ @enumToInt(jni_result), @tagName(jni_result) },
+                .{ @intFromEnum(jni_result), @tagName(jni_result) },
             );
             @panic("JNI: " ++ message);
         }
@@ -579,7 +579,7 @@ const JNIHelper = struct {
         const message = std.fmt.bufPrintZ(&buf, fmt, args) catch |err| switch (err) {
             error.NoSpaceLeft => blk: {
                 buf[255] = 0;
-                break :blk std.meta.assumeSentinel(buf[0..255], 0);
+                break :blk @as([:0]const u8, @ptrCast(buf[0..255]));
             },
         };
 
@@ -596,7 +596,7 @@ const JNIHelper = struct {
             vm_panic(
                 env,
                 fmt ++ "; Error = {} ({s})",
-                args ++ .{ @enumToInt(jni_result), @tagName(jni_result) },
+                args ++ .{ @intFromEnum(jni_result), @tagName(jni_result) },
             );
         }
     }
@@ -656,7 +656,7 @@ const JNIHelper = struct {
         if (buffer_capacity < 0) return null;
 
         var buffer_address = env.get_direct_buffer_address(buffer_obj) orelse return null;
-        return buffer_address[0..@intCast(u32, buffer_capacity)];
+        return buffer_address[0..@as(u32, @intCast(buffer_capacity))];
     }
 
     pub inline fn new_global_reference(env: *jni.JNIEnv, obj: jni.JObject) jni.JObject {
@@ -673,9 +673,6 @@ const JNIHelper = struct {
         const length = env.get_string_utf_length(string);
         if (length < 0) return null;
 
-        return std.meta.assumeSentinel(
-            address[0..@intCast(usize, length)],
-            0,
-        );
+        return @ptrCast(address[0..@as(usize, @intCast(length))]);
     }
 };

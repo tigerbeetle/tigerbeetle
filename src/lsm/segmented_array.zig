@@ -132,7 +132,7 @@ fn SegmentedArrayType(
             const indexes = try allocator.create([node_count_max + 1]u32);
             errdefer allocator.destroy(indexes);
 
-            mem.set(?*[node_capacity]T, nodes, null);
+            @memset(nodes, null);
             indexes[0] = 0;
 
             const array = Self{
@@ -150,7 +150,7 @@ fn SegmentedArrayType(
 
             for (array.nodes[0..array.node_count]) |node| {
                 node_pool.?.release(
-                    @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, node.?)),
+                    @as(NodePool.Node, @ptrCast(@alignCast(node.?))),
                 );
             }
             allocator.free(array.nodes);
@@ -158,7 +158,7 @@ fn SegmentedArrayType(
         }
 
         pub fn reset(array: *Self) void {
-            mem.set(?*[node_capacity]T, array.nodes, null);
+            @memset(array.nodes, null);
             array.indexes[0] = 0;
 
             array.* = .{
@@ -171,7 +171,7 @@ fn SegmentedArrayType(
 
         pub fn verify(array: Self) void {
             assert(array.node_count <= node_count_max);
-            for (array.nodes) |node, node_index| {
+            for (array.nodes, 0..) |node, node_index| {
                 if (node_index < array.node_count) {
                     // The first node_count pointers are non-null.
                     assert(node != null);
@@ -180,8 +180,8 @@ fn SegmentedArrayType(
                     assert(node == null);
                 }
             }
-            for (array.nodes[0..array.node_count]) |_, node_index| {
-                const c = array.count(@intCast(u32, node_index));
+            for (array.nodes[0..array.node_count], 0..) |_, node_index| {
+                const c = array.count(@as(u32, @intCast(node_index)));
                 // Every node is at most full.
                 assert(c <= node_capacity);
                 // Every node is at least half-full, except the last.
@@ -192,8 +192,8 @@ fn SegmentedArrayType(
             if (Key) |K| {
                 // If Key is not null then the elements must be sorted by key_from_value (but not necessarily unique).
                 var key_prior_or_null: ?K = null;
-                for (array.nodes[0..array.node_count]) |_, node_index| {
-                    for (array.node_elements(@intCast(u32, node_index))) |*value| {
+                for (array.nodes[0..array.node_count], 0..) |_, node_index| {
+                    for (array.node_elements(@as(u32, @intCast(node_index)))) |*value| {
                         const key = key_from_value(value);
                         if (key_prior_or_null) |key_prior| {
                             assert(compare_keys(key_prior, key) != .gt);
@@ -251,7 +251,7 @@ fn SegmentedArrayType(
 
             var i: u32 = 0;
             while (i < elements.len) {
-                const batch = math.min(node_capacity, elements.len - i);
+                const batch = @min(node_capacity, elements.len - i);
                 array.insert_elements_batch(
                     node_pool,
                     absolute_index + i,
@@ -290,7 +290,7 @@ fn SegmentedArrayType(
             const a_pointer = array.nodes[a].?;
             assert(cursor.relative_index <= array.count(a));
 
-            const total = array.count(a) + @intCast(u32, elements.len);
+            const total = array.count(a) + @as(u32, @intCast(elements.len));
             if (total <= node_capacity) {
                 stdx.copy_right(
                     .inexact,
@@ -300,7 +300,7 @@ fn SegmentedArrayType(
                 );
                 stdx.copy_disjoint(.inexact, T, a_pointer[cursor.relative_index..], elements);
 
-                array.increment_indexes_after(a, @intCast(u32, elements.len));
+                array.increment_indexes_after(a, @as(u32, @intCast(elements.len)));
                 return;
             }
 
@@ -377,7 +377,7 @@ fn SegmentedArrayType(
             );
 
             array.indexes[b] = array.indexes[a] + a_half;
-            array.increment_indexes_after(b, @intCast(u32, elements.len));
+            array.increment_indexes_after(b, @as(u32, @intCast(elements.len)));
         }
 
         /// Behaves like mem.copyBackwards, but as if `a` and `b` were a single contiguous slice.
@@ -427,7 +427,7 @@ fn SegmentedArrayType(
                 assert(std.meta.alignment(@TypeOf(node_pointer)) >= @alignOf(T));
                 assert(@sizeOf(@TypeOf(node_pointer.*)) >= @sizeOf([node_capacity]T));
             }
-            array.nodes[node] = @ptrCast(*[node_capacity]T, node_pointer);
+            array.nodes[node] = @as(*[node_capacity]T, @ptrCast(node_pointer));
             assert(array.indexes[node] == array.indexes[node + 1]);
         }
 
@@ -448,7 +448,7 @@ fn SegmentedArrayType(
 
             var i: u32 = remove_count;
             while (i > 0) {
-                const batch = math.min(half, i);
+                const batch = @min(half, i);
                 array.remove_elements_batch(node_pool, absolute_index, batch);
                 i -= batch;
             }
@@ -502,7 +502,7 @@ fn SegmentedArrayType(
             const b_remaining = b_pointer[remove_count -
                 (array.count(a) - a_remaining) .. array.count(b)];
 
-            assert(@ptrToInt(b_remaining.ptr) > @ptrToInt(b_pointer));
+            assert(@intFromPtr(b_remaining.ptr) > @intFromPtr(b_pointer));
 
             // Only one of these nodes may become empty, as we limit batch size to
             // half node capacity.
@@ -528,7 +528,7 @@ fn SegmentedArrayType(
 
                 stdx.copy_disjoint(.inexact, T, a_pointer[a_remaining..], b_remaining);
 
-                array.indexes[b] = array.indexes[a] + a_remaining + @intCast(u32, b_remaining.len);
+                array.indexes[b] = array.indexes[a] + a_remaining + @as(u32, @intCast(b_remaining.len));
                 array.decrement_indexes_after(b, remove_count);
 
                 array.remove_empty_node_at(node_pool, b);
@@ -579,14 +579,14 @@ fn SegmentedArrayType(
             assert(b_elements.len > 0);
             assert(b_elements.len >= half or b == array.node_count - 1);
             assert(b_elements.len <= node_capacity);
-            assert(@ptrToInt(b_elements.ptr) >= @ptrToInt(b_pointer));
+            assert(@intFromPtr(b_elements.ptr) >= @intFromPtr(b_pointer));
 
             // Our function would still be correct if this assert fails, but we would
             // unnecessarily copy all elements of b to node a and then delete b
             // instead of simply deleting a.
             assert(!(array.count(a) == 0 and b_pointer == b_elements.ptr));
 
-            const total = array.count(a) + @intCast(u32, b_elements.len);
+            const total = array.count(a) + @as(u32, @intCast(b_elements.len));
             if (total <= node_capacity) {
                 stdx.copy_disjoint(.inexact, T, a_pointer[array.count(a)..], b_elements);
 
@@ -625,7 +625,7 @@ fn SegmentedArrayType(
             assert(array.count(node) == 0);
 
             node_pool.release(
-                @ptrCast(NodePool.Node, @alignCast(NodePool.node_alignment, array.nodes[node].?)),
+                @as(NodePool.Node, @ptrCast(@alignCast(array.nodes[node].?))),
             );
 
             stdx.copy_left(
@@ -892,7 +892,7 @@ fn SegmentedArrayType(
                     // This trick seems to be what's needed to get llvm to emit branchless code for this,
                     // a ternary-style if expression was generated as a jump here for whatever reason.
                     const next_offsets = [_]usize{ offset, mid };
-                    offset = next_offsets[@boolToInt(compare_keys(key_from_value(node), key) == .lt)];
+                    offset = next_offsets[@intFromBool(compare_keys(key_from_value(node), key) == .lt)];
 
                     length -= half;
                 }
@@ -903,7 +903,7 @@ fn SegmentedArrayType(
                 //
                 // (If there are two adjacent nodes starting with keys A and C, and we search B,
                 // we want to pick the A node.)
-                const node = @intCast(u32, offset);
+                const node = @as(u32, @intCast(offset));
                 assert(node < array.node_count);
 
                 const relative_index = binary_search_values_upsert_index(
@@ -1046,7 +1046,7 @@ fn TestContext(
         }
 
         fn insert(context: *Self) !void {
-            const reference_len = @intCast(u32, context.reference.items.len);
+            const reference_len = @as(u32, @intCast(context.reference.items.len));
             const count_free = element_count_max - reference_len;
 
             if (count_free == 0) return;
@@ -1081,7 +1081,7 @@ fn TestContext(
         }
 
         fn remove(context: *Self) !void {
-            const reference_len = @intCast(u32, context.reference.items.len);
+            const reference_len = @as(u32, @intCast(context.reference.items.len));
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, TestArray.node_capacity * 3);
@@ -1170,7 +1170,7 @@ fn TestContext(
 
             {
                 var it = context.array.iterator_from_index(
-                    @intCast(u32, context.reference.items.len) -| 1,
+                    @as(u32, @intCast(context.reference.items.len)) -| 1,
                     .descending,
                 );
 
@@ -1186,18 +1186,18 @@ fn TestContext(
             }
 
             {
-                for (context.reference.items) |_, i| {
+                for (context.reference.items, 0..) |_, i| {
                     try testing.expect(std.meta.eql(
                         i,
                         context.array.absolute_index_for_cursor(
-                            context.array.cursor_for_absolute_index(@intCast(u32, i)),
+                            context.array.cursor_for_absolute_index(@as(u32, @intCast(i))),
                         ),
                     ));
                 }
             }
 
             if (element_order == .sorted) {
-                for (context.reference.items) |*expect, i| {
+                for (context.reference.items, 0..) |*expect, i| {
                     if (i == 0) continue;
                     try testing.expect(compare_keys(
                         key_from_value(&context.reference.items[i - 1]),

@@ -52,7 +52,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             errdefer commits.deinit();
 
             var commit_replicas = ReplicaSet.initEmpty();
-            for (options.replicas) |_, i| commit_replicas.set(i);
+            for (options.replicas, 0..) |_, i| commit_replicas.set(i);
             try commits.append(.{
                 .header = root_prepare,
                 .replicas = commit_replicas,
@@ -63,7 +63,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
             return Self{
-                .node_count = @intCast(u8, options.replicas.len),
+                .node_count = @as(u8, @intCast(options.replicas.len)),
                 .replica_count = options.replica_count,
                 .commits = commits,
                 .replicas = options.replicas,
@@ -192,7 +192,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         pub fn assert_cluster_convergence(state_checker: *Self) void {
-            for (state_checker.commits.items) |commit, i| {
+            for (state_checker.commits.items, 0..) |commit, i| {
                 assert(commit.replicas.count() > 0);
                 assert(commit.header.command == .prepare);
                 assert(commit.header.op == i);

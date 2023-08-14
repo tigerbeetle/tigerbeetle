@@ -23,7 +23,7 @@ pub fn allocate_block(
     allocator: mem.Allocator,
 ) error{OutOfMemory}!*align(constants.sector_size) [constants.block_size]u8 {
     const block = try allocator.alignedAlloc(u8, constants.sector_size, constants.block_size);
-    mem.set(u8, block, 0);
+    @memset(block, 0);
     return block[0..constants.block_size];
 }
 
@@ -181,7 +181,7 @@ pub fn GridType(comptime Storage: type) type {
                 try std.DynamicBitSetUnmanaged.initEmpty(allocator, options.cache_blocks_count);
             errdefer cache_coherent.deinit(allocator);
 
-            for (cache_blocks) |*cache_block, i| {
+            for (cache_blocks, 0..) |*cache_block, i| {
                 errdefer for (cache_blocks[0..i]) |block| allocator.free(block);
                 cache_block.* = try allocate_block(allocator);
             }
@@ -192,7 +192,7 @@ pub fn GridType(comptime Storage: type) type {
 
             var read_iop_blocks: [read_iops_max]BlockPtr = undefined;
 
-            for (&read_iop_blocks) |*read_iop_block, i| {
+            for (&read_iop_blocks, 0..) |*read_iop_block, i| {
                 errdefer for (read_iop_blocks[0..i]) |block| allocator.free(block);
                 read_iop_block.* = try allocate_block(allocator);
             }
@@ -503,7 +503,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&completed_write.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
-            std.mem.set(u8, completed_write.block.*, 0);
+            @memset(completed_write.block.*, 0);
             grid.cache_coherent.set(cache_index);
 
             const write_iop_index = grid.write_iops.index(iop);
@@ -745,7 +745,7 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.insert_index(&read.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, iop_block, cache_block);
-            std.mem.set(u8, iop_block.*, 0);
+            @memset(iop_block.*, 0);
             grid.cache_coherent.set(cache_index);
 
             const read_iop_index = grid.read_iops.index(iop);
@@ -821,7 +821,7 @@ pub fn GridType(comptime Storage: type) type {
                         block_type,
                         header.op,
                         header.checksum,
-                        @enumToInt(header.operation),
+                        @intFromEnum(header.operation),
                     },
                 );
                 return false;
@@ -921,7 +921,7 @@ pub fn GridType(comptime Storage: type) type {
                 } else {
                     // Signal to read_block_repair_tick_callback() that we found a block,
                     // but not the one we wanted.
-                    std.mem.set(u8, read.block[0..header.size], 0);
+                    @memset(read.block[0..header.size], 0);
                 }
 
                 if (header.checksum == read.checksum or

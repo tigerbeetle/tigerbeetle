@@ -161,7 +161,7 @@ const Command = struct {
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
-            .node_count = @intCast(u8, args.addresses.len),
+            .node_count = @as(u8, @intCast(args.addresses.len)),
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
@@ -193,7 +193,7 @@ const Command = struct {
             var node_maybe = arena.state.buffer_list.first;
             while (node_maybe) |node| {
                 allocation_count += 1;
-                allocation_size += node.data.len;
+                allocation_size += node.data;
                 node_maybe = node.next;
             }
         }
