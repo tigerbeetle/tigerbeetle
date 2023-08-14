@@ -652,16 +652,16 @@ fn go_client(
             lib.bundle_compiler_rt = true;
             lib.stack_protector = false;
 
-            // NB: New way to do lib.setOutputDir()
-            const lib_install = b_isolated.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{ .custom = "src/clients/go/pkg/native/" ++ name };
-
             lib.addOptions("vsr_options", options);
             link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
             lib.step.dependOn(&install_header.step);
             lib.step.dependOn(&bindings_step.step);
-            build_step.dependOn(&lib.step);
+
+            // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
+            const lib_install = b.addInstallArtifact(lib, .{});
+            lib_install.dest_dir = .{ .custom = "../src/clients/go/pkg/native/" ++ name };
+            build_step.dependOn(&lib_install.step);
         }
     }
 }
@@ -703,10 +703,6 @@ fn java_client(
         });
         lib.linkLibC();
 
-        // NB: New way to do lib.setOutputDir()
-        const lib_install = b_isolated.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "src/clients/java/src/main/resources/lib/" ++ platform[0] };
-
         if (cross_target.os_tag.? == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
@@ -716,7 +712,11 @@ fn java_client(
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
-        build_step.dependOn(&lib.step);
+
+        // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
+        const lib_install = b.addInstallArtifact(lib, .{});
+        lib_install.dest_dir = .{ .custom = "../src/clients/java/src/main/resources/lib/" ++ platform[0] };
+        build_step.dependOn(&lib_install.step);
     }
 }
 
@@ -757,10 +757,6 @@ fn dotnet_client(
         });
         lib.linkLibC();
 
-        // NB: New way to do lib.setOutputDir()
-        const lib_install = b_isolated.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native" };
-
         if (cross_target.os_tag.? == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
@@ -770,7 +766,11 @@ fn dotnet_client(
         link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
         lib.step.dependOn(&bindings_step.step);
-        build_step.dependOn(&lib.step);
+
+        // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
+        const lib_install = b.addInstallArtifact(lib, .{});
+        lib_install.dest_dir = .{ .custom = "../src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native" };
+        build_step.dependOn(&lib_install.step);
     }
 }
 
@@ -813,10 +813,6 @@ fn node_client(
             });
             lib.linkLibC();
 
-            // NB: New way to do lib.setOutputDir()
-            const lib_install = b_isolated.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{ .custom = "src/clients/node/dist/bin/" ++ platform[0] };
-
             // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
             // if you're running zig build node_client manually.
             lib.addSystemIncludePath(.{ .path = "src/clients/node/node_modules/node-api-headers/include" });
@@ -831,7 +827,11 @@ fn node_client(
             link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
             lib.step.dependOn(&bindings_step.step);
-            build_step.dependOn(&lib.step);
+
+            // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
+            const lib_install = b.addInstallArtifact(lib, .{});
+            lib_install.dest_dir = .{ .custom = "../src/clients/node/dist/bin/" ++ platform[0] };
+            build_step.dependOn(&lib_install.step);
         }
     }
 }
@@ -883,10 +883,6 @@ fn c_client(
         for ([_]*std.Build.Step.Compile{ shared_lib, static_lib }) |lib| {
             lib.linkLibC();
 
-            // NB: New way to do lib.setOutputDir()
-            const lib_install = b_isolated.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{ .custom = "src/clients/node/dist/bin/" ++ platform[0] };
-
             if (cross_target.os_tag.? == .windows) {
                 lib.linkSystemLibrary("ws2_32");
                 lib.linkSystemLibrary("advapi32");
@@ -895,7 +891,10 @@ fn c_client(
             lib.addOptions("vsr_options", options);
             link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
-            build_step.dependOn(&lib.step);
+            // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
+            const lib_install = b.addInstallArtifact(lib, .{});
+            lib_install.dest_dir = .{ .custom = "../src/clients/c/lib/" ++ platform[0] };
+            build_step.dependOn(&lib_install.step);
         }
     }
 }
