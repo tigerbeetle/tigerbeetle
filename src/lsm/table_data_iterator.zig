@@ -100,12 +100,12 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 };
 
                 it.callback = .{ .read = callback };
-                it.context.grid.read_block_from_cache_or_storage(
+                it.context.grid.read_block_from_cluster(
                     on_read,
                     &it.read,
                     it.context.addresses[index],
                     it.context.checksums[index],
-                    .data,
+                    .{ .cache_check = true, .cache_update = true },
                 );
             } else {
                 it.callback = .{ .next_tick = callback };
