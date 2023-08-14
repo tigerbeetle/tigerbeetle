@@ -13,13 +13,13 @@ First, download a prebuilt copy of TigerBeetle.
 On macOS/Linux:
 
 ```console
-git clone https://github.com/tigerbeetle/tigerbeetle; ./tigerbeetle/bootstrap.sh
+git clone https://github.com/tigerbeetle/tigerbeetle; cd tigerbeetle; ./bootstrap.sh
 ```
 
 On Windows:
 
 ```console
-git clone https://github.com/tigerbeetle/tigerbeetle; .\tigerbeetle\bootstrap.ps1
+git clone https://github.com/tigerbeetle/tigerbeetle; cd tigerbeetle; .\bootstrap.ps1
 ```
 
 Want to build from source locally? Add `-build` as an argument to the bootstrap script.
