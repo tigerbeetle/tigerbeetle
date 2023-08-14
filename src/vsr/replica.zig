@@ -2243,11 +2243,7 @@ pub fn ReplicaType(
                     &read.read,
                     request.block_address,
                     request.block_checksum,
-                    .{
-                        .coherent = false,
-                        .cache_check = true,
-                        .cache_update = false,
-                    },
+                    .{ .cache_check = true, .cache_update = false },
                 );
             }
         }

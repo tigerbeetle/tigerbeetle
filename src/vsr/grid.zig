@@ -681,13 +681,12 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
             options: struct {
-                coherent: bool,
                 cache_check: bool,
                 cache_update: bool,
             },
         ) void {
             grid.read_block(.{ .local = callback }, read, address, checksum, .{
-                .coherent = options.coherent,
+                .coherent = false,
                 .cache_check = options.cache_check,
                 .cache_update = options.cache_update,
             });
@@ -731,6 +730,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(grid.checkpointing == null);
                 assert(!grid.superblock.free_set.is_free(address));
                 assert(grid.writing(address, null) != .create);
+                assert(callback == .remote);
             } else {
                 maybe(grid.checkpointing == null);
                 // We try to read the block even when it is free — if we recently released it,
