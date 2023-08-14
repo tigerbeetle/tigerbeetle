@@ -44,7 +44,7 @@
 	./scripts/install.sh
     fi
 
-    echo "Successfully set up $(./tigerbeetle version).
+    echo "Successfully set up $(./tigerbeetle version) at ./tigerbeetle.
 
 To get started running TigerBeetle and interacting with it, see:
 
