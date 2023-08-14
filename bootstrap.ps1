@@ -24,7 +24,7 @@ if ($build) {
 }
 
 echo @"
-Successfully set up $(./tigerbeetle version).
+Successfully set up $(./tigerbeetle version) at $(pwd)\tigerbeetle.exe.
 
 To get started running TigerBeetle and interacting with it, see:
 
