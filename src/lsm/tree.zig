@@ -207,7 +207,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             var manifest = try Manifest.init(allocator, node_pool, grid, config.id);
             errdefer manifest.deinit(allocator);
 
-            var compaction_table_immutable = try Compaction.init(allocator, config.name);
+            var compaction_table_immutable = try Compaction.init(allocator, config);
             errdefer compaction_table_immutable.deinit(allocator);
 
             var compaction_table: [@divFloor(constants.lsm_levels, 2)]Compaction = undefined;
@@ -215,7 +215,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 comptime var i: usize = 0;
                 inline while (i < compaction_table.len) : (i += 1) {
                     errdefer for (compaction_table[0..i]) |*c| c.deinit(allocator);
-                    compaction_table[i] = try Compaction.init(allocator, config.name);
+                    compaction_table[i] = try Compaction.init(allocator, config);
                 }
             }
             errdefer for (compaction_table) |*c| c.deinit(allocator);
@@ -537,6 +537,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
+                assert(schema.TableIndex.tree_id(index_block) == context.tree.config.id);
 
                 const blocks = Table.index_blocks_for_key(index_block, context.key);
 
@@ -560,6 +561,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
+                assert(schema.TableFilter.tree_id(filter_block) == context.tree.config.id);
 
                 const filter_schema = schema.TableFilter.from(filter_block);
                 const filter_bytes = filter_schema.block_filter_const(filter_block);
@@ -595,6 +597,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
+                assert(schema.TableData.tree_id(data_block) == context.tree.config.id);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
                     context.callback(context, unwrap_tombstone(value));

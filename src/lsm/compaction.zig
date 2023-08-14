@@ -104,7 +104,7 @@ pub fn CompactionType(
         };
 
         // Passed by `init`.
-        tree_name: []const u8,
+        tree_config: Tree.Config,
 
         // Allocated during `init`.
         iterator_a: TableDataIterator,
@@ -169,7 +169,7 @@ pub fn CompactionType(
         tracer_slot: ?tracer.SpanStart,
         iterator_tracer_slot: ?tracer.SpanStart,
 
-        pub fn init(allocator: Allocator, tree_name: []const u8) !Compaction {
+        pub fn init(allocator: Allocator, tree_config: Tree.Config) !Compaction {
             var iterator_a = TableDataIterator.init();
             errdefer iterator_a.deinit();
 
@@ -194,7 +194,7 @@ pub fn CompactionType(
             errdefer table_builder.deinit(allocator);
 
             return Compaction{
-                .tree_name = tree_name,
+                .tree_config = tree_config,
 
                 .iterator_a = iterator_a,
                 .iterator_b = iterator_b,
@@ -228,7 +228,7 @@ pub fn CompactionType(
 
         pub fn reset(compaction: *Compaction) void {
             compaction.* = .{
-                .tree_name = compaction.tree_name,
+                .tree_config = compaction.tree_config,
 
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
@@ -288,7 +288,7 @@ pub fn CompactionType(
             tracer.start(
                 &compaction.tracer_slot,
                 .{ .tree_compaction = .{
-                    .tree_name = compaction.tree_name,
+                    .tree_name = compaction.tree_config.name,
                     .level_b = context.level_b,
                 } },
                 @src(),
@@ -327,7 +327,7 @@ pub fn CompactionType(
             assert(drop_tombstones or context.level_b < constants.lsm_levels - 1);
 
             compaction.* = .{
-                .tree_name = compaction.tree_name,
+                .tree_config = compaction.tree_config,
 
                 .iterator_a = compaction.iterator_a,
                 .iterator_b = compaction.iterator_b,
@@ -355,7 +355,7 @@ pub fn CompactionType(
 
                 log.debug(
                     "{s}: Moving table: level_b={}",
-                    .{ compaction.tree_name, context.level_b },
+                    .{ compaction.tree_config.name, context.level_b },
                 );
 
                 const snapshot_max = snapshot_max_for_table_input(context.op_min);
@@ -374,7 +374,7 @@ pub fn CompactionType(
 
                 log.debug(
                     "{s}: Merging table: level_b={}",
-                    .{ compaction.tree_name, context.level_b },
+                    .{ compaction.tree_config.name, context.level_b },
                 );
 
                 compaction.iterator_b.start(.{
@@ -408,6 +408,7 @@ pub fn CompactionType(
         fn on_iterator_init_a(read: *Grid.Read, index_block: BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "read", read);
             assert(compaction.state == .iterator_init_a);
+            assert(compaction.tree_config.id == schema.TableIndex.tree_id(index_block));
 
             // `index_block` is only valid for this callback, so copy its contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
@@ -431,7 +432,7 @@ pub fn CompactionType(
             tracer.start(
                 &compaction.iterator_tracer_slot,
                 .{ .tree_compaction_iter = .{
-                    .tree_name = compaction.tree_name,
+                    .tree_name = compaction.tree_config.name,
                     .level_b = compaction.context.level_b,
                 } },
                 @src(),
@@ -545,7 +546,7 @@ pub fn CompactionType(
             tracer.start(
                 &tracer_slot,
                 .{ .tree_compaction_merge = .{
-                    .tree_name = compaction.tree_name,
+                    .tree_name = compaction.tree_config.name,
                     .level_b = compaction.context.level_b,
                 } },
                 @src(),
@@ -568,7 +569,7 @@ pub fn CompactionType(
             tracer.end(
                 &tracer_slot,
                 .{ .tree_compaction_merge = .{
-                    .tree_name = compaction.tree_name,
+                    .tree_name = compaction.tree_config.name,
                     .level_b = compaction.context.level_b,
                 } },
             );
@@ -714,6 +715,7 @@ pub fn CompactionType(
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    .tree_id = compaction.tree_config.id,
                 });
                 WriteBlock(.data).write_block(compaction);
             }
@@ -730,6 +732,7 @@ pub fn CompactionType(
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    .tree_id = compaction.tree_config.id,
                 });
                 WriteBlock(.filter).write_block(compaction);
             }
@@ -743,6 +746,7 @@ pub fn CompactionType(
                     .cluster = compaction.context.grid.superblock.working.cluster,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
+                    .tree_id = compaction.tree_config.id,
                 });
                 // Make this table visible at the end of this half-bar.
                 compaction.manifest_entries.appendAssumeCapacity(.{
@@ -808,7 +812,7 @@ pub fn CompactionType(
             tracer.end(
                 &compaction.iterator_tracer_slot,
                 .{ .tree_compaction_iter = .{
-                    .tree_name = compaction.tree_name,
+                    .tree_name = compaction.tree_config.name,
                     .level_b = compaction.context.level_b,
                 } },
             );
@@ -843,7 +847,7 @@ pub fn CompactionType(
             tracer.end(
                 &compaction.tracer_slot,
                 .{ .tree_compaction = .{
-                    .tree_name = compaction.tree_name,
+                    .tree_name = compaction.tree_config.name,
                     .level_b = compaction.context.level_b,
                 } },
             );

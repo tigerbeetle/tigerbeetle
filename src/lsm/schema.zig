@@ -14,7 +14,8 @@
 //!
 //! Index block schema:
 //! │ vsr.Header                   │ operation=BlockType.index,
-//! │                              │ context=schema.TableIndex.Context,
+//! │                              │ context: schema.TableIndex.Context,
+//! │                              │ parent: schema.TableIndex.Parent,
 //! │                              │ request=@sizeOf(Key)
 //! │                              │ timestamp=snapshot_min
 //! │ [filter_block_count_max]u128 │ checksums of filter blocks
@@ -26,14 +27,16 @@
 //!
 //! Filter block schema:
 //! │ vsr.Header │ operation=BlockType.filter,
-//! │            │ context=schema.TableFilter.context
+//! │            │ context: schema.TableFilter.Context
+//! │            │ parent: schema.TableFilter.Parent,
 //! │            │ timestamp=snapshot_min
 //! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 //! │            │   `filter_data_block_count_max` data blocks.
 //!
 //! Data block schema:
 //! │ vsr.Header               │ operation=BlockType.data,
-//! │                          │ context=schema.TableData.context,
+//! │                          │ context: schema.TableData.Context,
+//! │                          │ parent: schema.TableData.Parent,
 //! │                          │ request=values_count
 //! │                          │ timestamp=snapshot_min
 //! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
@@ -117,6 +120,16 @@ pub const TableIndex = struct {
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
             assert(stdx.no_padding(Context));
+        }
+    };
+
+    pub const Parent = extern struct {
+        // TODO u16 + padding.
+        tree_id: u128,
+
+        comptime {
+            assert(@sizeOf(Parent) == @sizeOf(u128));
+            assert(stdx.no_padding(Parent));
         }
     };
 
@@ -206,6 +219,13 @@ pub const TableIndex = struct {
             .filter_block_count_max = context.filter_block_count_max,
             .data_block_count_max = context.data_block_count_max,
         });
+    }
+
+    pub fn tree_id(index_block: BlockPtrConst) u128 {
+        const header = header_from_block(index_block);
+        assert(BlockType.from(header.operation) == .index);
+
+        return @bitCast(Parent, header.parent).tree_id;
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
@@ -316,6 +336,16 @@ pub const TableFilter = struct {
         }
     };
 
+    pub const Parent = extern struct {
+        // TODO u16 + padding.
+        tree_id: u128,
+
+        comptime {
+            assert(@sizeOf(Parent) == @sizeOf(u128));
+            assert(stdx.no_padding(Parent));
+        }
+    };
+
     /// The number of data blocks summarized by a single filter block.
     data_block_count_max: u32,
 
@@ -355,6 +385,13 @@ pub const TableFilter = struct {
         return TableFilter.init(@bitCast(Context, header.context));
     }
 
+    pub fn tree_id(filter_block: BlockPtrConst) u128 {
+        const header = header_from_block(filter_block);
+        assert(BlockType.from(header.operation) == .filter);
+
+        return @bitCast(Parent, header.parent).tree_id;
+    }
+
     pub inline fn block_filter(
         filter: *const TableFilter,
         filter_block: BlockPtr,
@@ -381,6 +418,16 @@ pub const TableData = struct {
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
             assert(stdx.no_padding(Context));
+        }
+    };
+
+    pub const Parent = extern struct {
+        // TODO u16 + padding.
+        tree_id: u128,
+
+        comptime {
+            assert(@sizeOf(Parent) == @sizeOf(u128));
+            assert(stdx.no_padding(Parent));
         }
     };
 
@@ -439,6 +486,13 @@ pub const TableData = struct {
         assert(header.timestamp > 0);
 
         return TableData.init(@bitCast(Context, header.context));
+    }
+
+    pub fn tree_id(data_block: BlockPtrConst) u128 {
+        const header = header_from_block(data_block);
+        assert(BlockType.from(header.operation) == .data);
+
+        return @bitCast(Parent, header.parent).tree_id;
     }
 
     pub inline fn block_values_bytes(
