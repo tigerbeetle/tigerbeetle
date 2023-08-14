@@ -79,7 +79,8 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
             assert(@intFromPtr(node) >= @intFromPtr(pool.buffer.ptr));
             assert(@intFromPtr(node) + node_size <= @intFromPtr(pool.buffer.ptr) + pool.buffer.len);
 
-            const node_index = @divExact(@intFromPtr(node) - @intFromPtr(pool.buffer.ptr), node_size);
+            const node_offset = @intFromPtr(node) - @intFromPtr(pool.buffer.ptr);
+            const node_index = @divExact(node_offset, node_size);
             assert(!pool.free.isSet(node_index));
             pool.free.set(node_index);
         }
