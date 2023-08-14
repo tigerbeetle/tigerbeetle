@@ -1130,7 +1130,7 @@ const JniTestStep = struct {
                 // On Linux, detects the abi by calling `ldd` to check if
                 // the libjvm.so is linked against libc or musl.
                 // It's reasonable to assume that ldd will be present.
-                const ldd_result = try builder.exec(&.{
+                const ldd_result = builder.exec(&.{
                     "ldd",
                     builder.pathJoin(&.{ libjvm_path, "libjvm.so" }),
                 });
