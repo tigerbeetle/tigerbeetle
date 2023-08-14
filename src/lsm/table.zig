@@ -453,6 +453,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -515,12 +516,13 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .context = @as(u128, @bitCast(schema.TableData.Context{
+                    .parent = @bitCast(schema.TableData.Parent{ .tree_id = options.tree_id }),
+                    .context = @bitCast(schema.TableData.Context{
                         .key_count = data.key_count,
                         .key_layout_size = data.key_layout_size,
                         .value_count_max = data.value_count_max,
                         .value_size = value_size,
-                    })),
+                    }),
                     .op = options.address,
                     .timestamp = options.snapshot_min,
                     .request = builder.value_count,
@@ -571,6 +573,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -581,9 +584,12 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, builder.filter_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .context = @as(u128, @bitCast(schema.TableFilter.Context{
+                    .parent = @bitCast(schema.TableFilter.Parent{
+                        .tree_id = options.tree_id,
+                    }),
+                    .context = @bitCast(schema.TableFilter.Context{
                         .data_block_count_max = data_block_count_max,
-                    })),
+                    }),
                     .op = options.address,
                     .timestamp = options.snapshot_min,
                     .size = block_size - filter.padding_size,
@@ -617,6 +623,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
@@ -635,12 +642,15 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
-                    .context = @as(u128, @bitCast(schema.TableIndex.Context{
+                    .parent = @bitCast(schema.TableIndex.Parent{
+                        .tree_id = options.tree_id,
+                    }),
+                    .context = @bitCast(schema.TableIndex.Context{
                         .filter_block_count = builder.filter_block_count,
                         .filter_block_count_max = index.filter_block_count_max,
                         .data_block_count = builder.data_block_count,
                         .data_block_count_max = index.data_block_count_max,
-                    })),
+                    }),
                     .request = index.key_size,
                     .op = options.address,
                     .timestamp = options.snapshot_min,

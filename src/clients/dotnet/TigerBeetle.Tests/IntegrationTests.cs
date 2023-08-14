@@ -100,14 +100,14 @@ namespace TigerBeetle.Tests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentException))]
+        [ExpectedException(typeof(ArgumentOutOfRangeException))]
         public void ConstructorWithZeroConcurrencyMax()
         {
             _ = new Client(0, new string[] { "3000" }, 0);
         }
 
         [TestMethod]
-        [ExpectedException(typeof(ArgumentException))]
+        [ExpectedException(typeof(ArgumentOutOfRangeException))]
         public void ConstructorWithNegativeConcurrencyMax()
         {
             _ = new Client(0, new string[] { "3000" }, -1);
