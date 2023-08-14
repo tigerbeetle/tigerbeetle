@@ -14,8 +14,8 @@
 //!
 //! Index block schema:
 //! │ vsr.Header                   │ operation=BlockType.index,
-//! │                              │ context=schema.TableIndex.Context,
-//! │                              │ parent=schema.TableIndex.Parent,
+//! │                              │ context: schema.TableIndex.Context,
+//! │                              │ parent: schema.TableIndex.Parent,
 //! │                              │ request=@sizeOf(Key)
 //! │                              │ timestamp=snapshot_min
 //! │ [filter_block_count_max]u128 │ checksums of filter blocks
@@ -27,16 +27,16 @@
 //!
 //! Filter block schema:
 //! │ vsr.Header │ operation=BlockType.filter,
-//! │            │ context=schema.TableFilter.context
-//! │            │ parent=schema.TableFilter.Parent,
+//! │            │ context: schema.TableFilter.Context
+//! │            │ parent: schema.TableFilter.Parent,
 //! │            │ timestamp=snapshot_min
 //! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
 //! │            │   `filter_data_block_count_max` data blocks.
 //!
 //! Data block schema:
 //! │ vsr.Header               │ operation=BlockType.data,
-//! │                          │ context=schema.TableData.context,
-//! │                          │ parent=schema.TableData.Parent,
+//! │                          │ context: schema.TableData.Context,
+//! │                          │ parent: schema.TableData.Parent,
 //! │                          │ request=values_count
 //! │                          │ timestamp=snapshot_min
 //! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
