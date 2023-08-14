@@ -168,6 +168,9 @@ const ConfigCluster = struct {
     /// It is used to assert that all cluster members share the same config.
     pub fn checksum(comptime config: ConfigCluster) u128 {
         @setEvalBranchQuota(10_000);
+        // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+        // Blake3 in the stdlib has a compile error so currently using Blake2 as a workaround.
+        // We should eventually switch this to vsr.checksum() once that works at comptime.
         var hasher = std.crypto.hash.blake2.Blake2s256.init(.{});
         inline for (std.meta.fields(ConfigCluster)) |field| {
             const value = @field(config, field.name);

@@ -131,6 +131,8 @@ fn to_case(
     comptime input: []const u8,
     comptime case: enum { camel, pascal, upper },
 ) []const u8 {
+    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
     return comptime blk: {
         var output: [input.len]u8 = undefined;
         if (case == .upper) {

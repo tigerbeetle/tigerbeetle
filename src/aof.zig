@@ -59,13 +59,13 @@ pub const AOFEntry = extern struct {
     }
 
     pub fn header(self: *AOFEntry) *Header {
-        return @as(*Header, @ptrCast(&self.message));
+        return @ptrCast(&self.message);
     }
 
     /// Turn an AOFEntry back into a Message.
     pub fn to_message(self: *AOFEntry, target: *Message) void {
         stdx.copy_disjoint(.inexact, u8, target.buffer, self.message[0..self.header().size]);
-        target.header = @as(*Header, @ptrCast(target.buffer));
+        target.header = @ptrCast(target.buffer);
     }
 
     pub fn from_message(

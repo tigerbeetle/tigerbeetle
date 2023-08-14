@@ -118,6 +118,7 @@ pub fn build(b: *std.Build) void {
             .optimize = mode,
         });
         benchmark.addModule("vsr", vsr_module);
+        benchmark.addModule("vsr_options", vsr_options_module);
         link_tracer_backend(benchmark, git_clone_tracy, tracer_backend, target);
 
         const run_cmd = b.addRunArtifact(benchmark);
@@ -267,6 +268,7 @@ pub fn build(b: *std.Build) void {
                     .target = target,
                 });
                 demo_exe.addModule("vsr", vsr_module);
+                demo_exe.addModule("vsr_options", vsr_options_module);
                 test_step.dependOn(&demo_exe.step);
             }
         }
