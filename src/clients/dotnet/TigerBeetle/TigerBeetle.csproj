@@ -14,10 +14,10 @@
     <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
   </PropertyGroup>
   <Target Name="BuildZig" BeforeTargets="DispatchToInnerBuilds">
-    <Exec Command=".\zig\zig build dotnet_client -Drelease-safe"
+    <Exec Command=".\zig\zig build dotnet_client -Doptimize=ReleaseSafe"
           WorkingDirectory="$(MSBuildProjectDirectory)\..\..\..\.."
           Condition="'$(OS)'=='Windows'"/>
-    <Exec Command="./zig/zig build dotnet_client -Drelease-safe"
+    <Exec Command="./zig/zig build dotnet_client -Doptimize=ReleaseSafe"
           WorkingDirectory="$(MSBuildProjectDirectory)/../../../.."
           Condition="'$(OS)'!='Windows'"/>
   </Target>

@@ -32,7 +32,7 @@ else
 fi
 
 # shellcheck disable=SC2086
-zig/zig build install -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET
+zig/zig build install -Doptimize=ReleaseSafe -Dconfig=production $cpu $ZIG_TARGET
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -75,7 +75,7 @@ done
 echo ""
 echo "Benchmarking..."
 # shellcheck disable=SC2086
-zig/zig build benchmark -Drelease-safe -Dconfig=production $cpu $ZIG_TARGET -- --addresses="${PORT}" "$@"
+zig/zig build benchmark -Doptimize=ReleaseSafe -Dconfig=production $cpu $ZIG_TARGET -- --addresses="${PORT}" "$@"
 echo ""
 
 for I in $REPLICAS
