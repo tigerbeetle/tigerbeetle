@@ -453,6 +453,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -518,6 +519,7 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
+                    .parent = @bitCast(u128, schema.TableData.Parent{ .tree_id = options.tree_id }),
                     .context = @bitCast(u128, schema.TableData.Context{
                         .key_count = data.key_count,
                         .key_layout_size = data.key_layout_size,
@@ -574,6 +576,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -584,6 +587,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, builder.filter_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
+                    .parent = @bitCast(u128, schema.TableFilter.Parent{
+                        .tree_id = options.tree_id,
+                    }),
                     .context = @bitCast(u128, schema.TableFilter.Context{
                         .data_block_count_max = data_block_count_max,
                     }),
@@ -620,6 +626,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
+                tree_id: u128,
             };
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
@@ -638,6 +645,9 @@ pub fn TableType(
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
+                    .parent = @bitCast(u128, schema.TableIndex.Parent{
+                        .tree_id = options.tree_id,
+                    }),
                     .context = @bitCast(u128, schema.TableIndex.Context{
                         .filter_block_count = builder.filter_block_count,
                         .filter_block_count_max = index.filter_block_count_max,
