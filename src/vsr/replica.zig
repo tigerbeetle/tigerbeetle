@@ -1449,7 +1449,7 @@ pub fn ReplicaType(
                 message.header.request,
             });
 
-            self.client_replies.write_reply(slot, message);
+            self.client_replies.write_reply(slot, message, .repair);
         }
 
         /// Known issue:
@@ -3734,9 +3734,7 @@ pub fn ReplicaType(
             assert(clients <= constants.clients_max);
             if (clients == constants.clients_max) {
                 const evictee = self.client_sessions().evictee();
-                const slot = self.client_sessions().get_slot_for_client(evictee).?;
                 self.client_sessions().remove(evictee);
-                self.client_replies.remove_reply(slot);
 
                 assert(self.client_sessions().count() == constants.clients_max - 1);
 
@@ -3760,8 +3758,10 @@ pub fn ReplicaType(
             const reply_slot = self.client_sessions().put(session, reply.header);
             assert(self.client_sessions().count() <= constants.clients_max);
 
-            if (reply.header.size != @sizeOf(Header)) {
-                self.client_replies.write_reply(reply_slot, reply);
+            if (reply.header.size == @sizeOf(Header)) {
+                self.client_replies.remove_reply(reply_slot);
+            } else {
+                self.client_replies.write_reply(reply_slot, reply, .create);
             }
         }
 
@@ -3794,11 +3794,12 @@ pub fn ReplicaType(
                 });
 
                 entry.header = reply.header.*;
-                if (entry.header.size != @sizeOf(Header)) {
-                    self.client_replies.write_reply(
-                        self.client_sessions().get_slot_for_header(reply.header).?,
-                        reply,
-                    );
+
+                const reply_slot = self.client_sessions().get_slot_for_header(reply.header).?;
+                if (entry.header.size == @sizeOf(Header)) {
+                    self.client_replies.remove_reply(reply_slot);
+                } else {
+                    self.client_replies.write_reply(reply_slot, reply, .create);
                 }
             } else {
                 // If no entry exists, then the session must have been evicted while being prepared.
@@ -4444,6 +4445,7 @@ pub fn ReplicaType(
             destination_replica: ?u8,
         ) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(reply_header.size > @sizeOf(Header));
             assert(destination_replica == null);
 
             const reply = reply_ orelse {
@@ -4456,6 +4458,7 @@ pub fn ReplicaType(
                 return;
             };
             assert(reply.header.checksum == reply_header.checksum);
+            assert(reply.header.size > @sizeOf(Header));
 
             log.debug("{}: on_request: repeat reply (client={} request={})", .{
                 self.replica,
@@ -5308,8 +5311,9 @@ pub fn ReplicaType(
             } else if (self.client_replies.faulty.findFirstSet()) |slot| {
                 // After we have all prepares, repair replies.
                 const entry = &self.client_sessions().entries[slot];
-                assert(entry.session != 0);
                 assert(!self.client_sessions().entries_free.isSet(slot));
+                assert(entry.session != 0);
+                assert(entry.header.size > @sizeOf(Header));
 
                 self.send_header_to_replica(self.choose_any_other_replica(), .{
                     .command = .request_reply,
