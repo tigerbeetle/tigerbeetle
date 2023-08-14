@@ -138,8 +138,8 @@ fn build_simulator(
     mode: std.builtin.Mode,
 ) void {
     const mode_str = switch (mode) {
-        .Debug => "-Drelease-safe=false",
-        .ReleaseSafe => "-Drelease-safe=true",
+        .Debug => "-Doptimize=ReleaseSafe=false",
+        .ReleaseSafe => "-Doptimize=ReleaseSafe",
         else => unreachable,
     };
 

@@ -37,5 +37,5 @@ if [ "$debug" = "true" ]; then
     zig/zig build install $cpu $target
 else
     echo "Building TigerBeetle..."
-    zig/zig build install -Drelease-safe $cpu $target
+    zig/zig build install -Doptimize=ReleaseSafe $cpu $target
 fi
