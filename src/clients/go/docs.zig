@@ -17,7 +17,7 @@ fn go_current_commit_pre_install_hook(
             "{s}/{s}",
             .{ sample_dir, file },
         );
-        // TODO: Mismatching internal std.os.unlink() error in Zig 0.11.0
+        // TODO(Zig): Mismatching internal std.os.unlink() error in Zig 0.11.0
         const unlink_result = switch (builtin.os.tag) {
             .windows => blk: {
                 const path_w = try std.os.windows.sliceToPrefixedFileW(path);
