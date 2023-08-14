@@ -123,15 +123,15 @@ pub const AccountingAuditor = struct {
 
         const accounts = try allocator.alloc(tb.Account, options.accounts_max);
         errdefer allocator.free(accounts);
-        std.mem.set(tb.Account, accounts, undefined);
+        @memset(accounts, undefined);
 
         const accounts_created = try allocator.alloc(bool, options.accounts_max);
         errdefer allocator.free(accounts_created);
-        std.mem.set(bool, accounts_created, false);
+        @memset(accounts_created, false);
 
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
         errdefer pending_transfers.deinit(allocator);
-        try pending_transfers.ensureTotalCapacity(allocator, @intCast(u32, options.transfers_pending_max));
+        try pending_transfers.ensureTotalCapacity(allocator, @as(u32, @intCast(options.transfers_pending_max)));
 
         var pending_expiries = PendingExpiryQueue.init(allocator, {});
         errdefer pending_expiries.deinit();
@@ -139,15 +139,15 @@ pub const AccountingAuditor = struct {
 
         var in_flight = InFlightQueue{};
         errdefer in_flight.deinit(allocator);
-        try in_flight.ensureTotalCapacity(allocator, @intCast(u32, options.in_flight_max));
+        try in_flight.ensureTotalCapacity(allocator, @as(u32, @intCast(options.in_flight_max)));
 
         var creates_sent = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_sent);
-        std.mem.set(usize, creates_sent, 0);
+        @memset(creates_sent, 0);
 
         var creates_delivered = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_delivered);
-        std.mem.set(usize, creates_delivered, 0);
+        @memset(creates_delivered, 0);
 
         return Self{
             .random = random,
@@ -175,7 +175,7 @@ pub const AccountingAuditor = struct {
     pub fn done(self: *const Self) bool {
         if (self.in_flight.count() != 0) return false;
 
-        for (self.creates_sent) |sent, client_index| {
+        for (self.creates_sent, 0..) |sent, client_index| {
             if (sent != self.creates_delivered[client_index]) return false;
         }
         // Don't check pending_transfers; the workload might not have posted/voided every transfer.
@@ -253,7 +253,7 @@ pub const AccountingAuditor = struct {
         var results_iterator = IteratorForCreate(tb.CreateAccountsResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
-        for (accounts) |*account, i| {
+        for (accounts, 0..) |*account, i| {
             const account_timestamp = timestamp - accounts.len + i + 1;
             // TODO Should this be at the end of the loop? (If a timeout & post land on the same
             // timestamp, which wins?)
@@ -302,7 +302,7 @@ pub const AccountingAuditor = struct {
         var results_iterator = IteratorForCreate(tb.CreateTransfersResult).init(results);
         defer assert(results_iterator.results.len == 0);
 
-        for (transfers) |*transfer, i| {
+        for (transfers, 0..) |*transfer, i| {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
             // TODO Should this be deferrred to the end of the loop? (If a timeout & post land on
             // the same timestamp, which wins?)
@@ -505,7 +505,7 @@ pub const AccountingAuditor = struct {
 
     pub fn account_id_to_index(self: *const Self, id: u128) usize {
         // -1 because id=0 is not valid, so index=0→id=1.
-        return @intCast(usize, self.options.account_id_permutation.decode(id)) - 1;
+        return @as(usize, @intCast(self.options.account_id_permutation.decode(id))) - 1;
     }
 
     pub fn account_index_to_id(self: *const Self, index: usize) u128 {
@@ -538,7 +538,7 @@ pub fn IteratorForCreate(comptime Result: type) type {
             return .{ .results = results };
         }
 
-        pub fn take(self: *Self, event_index: usize) ?std.meta.fieldInfo(Result, .result).field_type {
+        pub fn take(self: *Self, event_index: usize) ?std.meta.fieldInfo(Result, .result).type {
             if (self.results.len > 0 and self.results[0].index == event_index) {
                 defer self.results = self.results[1..];
                 return self.results[0].result;

@@ -42,7 +42,7 @@ pub const AOF = struct {
     validation_checksums: std.AutoHashMap(u128, void) = undefined,
 
     pub fn init(allocator: std.mem.Allocator) !AOF {
-        const memory = try allocator.allocAdvanced(u8, constants.sector_size, backing_size, .exact);
+        const memory = try allocator.alignedAlloc(u8, constants.sector_size, backing_size);
         errdefer allocator.free(memory);
 
         const target = try allocator.create(AOFEntry);

@@ -153,7 +153,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
             var blocks: [blocks_count_max]BlockPtr = undefined;
-            for (blocks) |*block, i| {
+            for (&blocks, 0..) |*block, i| {
                 errdefer for (blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }
@@ -172,7 +172,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         }
 
         pub fn reset(manifest_log: *ManifestLog) void {
-            for (manifest_log.blocks.buffer) |block| std.mem.set(u8, block, 0);
+            for (manifest_log.blocks.buffer) |block| @memset(block, 0);
 
             manifest_log.* = .{
                 .superblock = manifest_log.superblock,
@@ -721,10 +721,10 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
             header.size = Block.size(entry_count);
 
             // Zero unused labels:
-            mem.set(u8, mem.sliceAsBytes(Block.labels(block)[entry_count..]), 0);
+            @memset(mem.sliceAsBytes(Block.labels(block)[entry_count..]), 0);
 
             // Zero unused tables, and padding:
-            mem.set(u8, block[header.size..], 0);
+            @memset(block[header.size..], 0);
 
             header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
             header.set_checksum();
@@ -815,7 +815,7 @@ fn ManifestLogBlockType(comptime Storage: type, comptime TableInfo: type) type {
             const labels_size = entry_count_max * @sizeOf(Label);
             const tables_size = header.size - @sizeOf(vsr.Header) - labels_size;
 
-            const entry_count_ = @intCast(u32, @divExact(tables_size, @sizeOf(TableInfo)));
+            const entry_count_ = @as(u32, @intCast(@divExact(tables_size, @sizeOf(TableInfo))));
             assert(entry_count_ > 0);
             assert(entry_count_ <= entry_count_max);
             return entry_count_;

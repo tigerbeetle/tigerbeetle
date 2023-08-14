@@ -73,7 +73,7 @@ pub fn ContextType(
             };
 
             inline for (allowed_operations) |operation| {
-                if (op == @enumToInt(operation)) {
+                if (op == @intFromEnum(operation)) {
                     return @sizeOf(Client.StateMachine.Event(operation));
                 }
             }
@@ -169,7 +169,7 @@ pub fn ContextType(
                 allocator,
                 context.client_id,
                 cluster_id,
-                @intCast(u8, context.addresses.len),
+                @as(u8, @intCast(context.addresses.len)),
                 &context.message_pool,
                 .{
                     .configuration = context.addresses,
@@ -251,7 +251,7 @@ pub fn ContextType(
             };
 
             // Make sure the packet.data size is correct:
-            const readable = @ptrCast([*]const u8, packet.data)[0..packet.data_size];
+            const readable = @as([*]const u8, @ptrCast(packet.data))[0..packet.data_size];
             if (readable.len == 0 or readable.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
@@ -268,12 +268,12 @@ pub fn ContextType(
 
             // Submit the message for processing:
             self.client.request(
-                @bitCast(u128, UserData{
+                @as(u128, @bitCast(UserData{
                     .self = self,
                     .packet = packet,
-                }),
+                })),
                 Context.on_result,
-                @intToEnum(Client.StateMachine.Operation, packet.operation),
+                @as(Client.StateMachine.Operation, @enumFromInt(packet.operation)),
                 message,
                 wrote,
             );
@@ -284,11 +284,11 @@ pub fn ContextType(
             op: Client.StateMachine.Operation,
             results: []const u8,
         ) void {
-            const user_data = @bitCast(UserData, raw_user_data);
+            const user_data = @as(UserData, @bitCast(raw_user_data));
             const self = user_data.self;
             const packet = user_data.packet;
 
-            assert(packet.operation == @enumToInt(op));
+            assert(packet.operation == @intFromEnum(op));
             self.on_complete(packet, results);
         }
 
@@ -314,7 +314,7 @@ pub fn ContextType(
 
             // The packet completed normally.
             packet.status = .ok;
-            (self.on_completion_fn)(self.on_completion_ctx, tb_client, packet, bytes.ptr, @intCast(u32, bytes.len));
+            (self.on_completion_fn)(self.on_completion_ctx, tb_client, packet, bytes.ptr, @as(u32, @intCast(bytes.len)));
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {

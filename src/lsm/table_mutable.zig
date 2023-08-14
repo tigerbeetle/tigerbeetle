@@ -166,7 +166,7 @@ pub fn TableMutableType(comptime Table: type) type {
         }
 
         pub fn count(table: *const TableMutable) u32 {
-            const value = @intCast(u32, table.values.count());
+            const value = @as(u32, @intCast(table.values.count()));
             assert(value <= value_count_max);
             return value;
         }
@@ -197,7 +197,7 @@ pub fn TableMutableType(comptime Table: type) type {
 
             const values = values_max[0..i];
             assert(values.len == table.count());
-            std.sort.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
+            std.mem.sort(Value, values, {}, sort_values_by_key_in_ascending_order);
 
             table.clear();
             assert(table.count() == 0);

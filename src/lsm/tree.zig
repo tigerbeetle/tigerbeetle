@@ -236,7 +236,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn deinit(tree: *Tree, allocator: mem.Allocator) void {
             assert(tree.tracer_slot == null);
 
-            for (tree.compaction_table) |*compaction| compaction.deinit(allocator);
+            for (&tree.compaction_table) |*compaction| compaction.deinit(allocator);
             tree.compaction_table_immutable.deinit(allocator);
 
             // TODO Consider whether we should release blocks acquired from Grid.block_free_set.
@@ -256,7 +256,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.reset();
 
             tree.compaction_table_immutable.reset();
-            for (tree.compaction_table) |*compaction| compaction.reset();
+            for (&tree.compaction_table) |*compaction| compaction.reset();
 
             if (tree.values_cache) |cache| cache.reset();
 
@@ -569,7 +569,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     context.tree.filter_block_hits += 1;
                     tracer.plot(
                         .{ .filter_block_hits = .{ .tree_name = context.tree.config.name } },
-                        @intToFloat(f64, context.tree.filter_block_hits),
+                        @as(f64, @floatFromInt(context.tree.filter_block_hits)),
                     );
 
                     context.tree.grid.read_block_from_cache_or_storage(
@@ -583,7 +583,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     context.tree.filter_block_misses += 1;
                     tracer.plot(
                         .{ .filter_block_misses = .{ .tree_name = context.tree.config.name } },
-                        @intToFloat(f64, context.tree.filter_block_misses),
+                        @as(f64, @floatFromInt(context.tree.filter_block_misses)),
                     );
 
                     // The key is not present in this table, check the next level.
@@ -668,7 +668,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             fn next(it: *CompactionTableIterator) ?CompactionTableContext {
                 const compaction_beat = it.tree.compaction_op.? % constants.lsm_batch_multiple;
                 const even_levels = compaction_beat < half_bar_beat_count;
-                const level_a = (it.index * 2) + @boolToInt(!even_levels);
+                const level_a = (it.index * 2) + @intFromBool(!even_levels);
                 const level_b = level_a + 1;
 
                 if (level_a >= constants.lsm_levels - 1) return null;
@@ -1094,7 +1094,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             // Assert no outstanding compactions.
             assert(tree.compaction_table_immutable.state == .idle);
-            for (tree.compaction_table) |*compaction| {
+            for (&tree.compaction_table) |*compaction| {
                 assert(compaction.state == .idle);
             }
 
@@ -1266,7 +1266,7 @@ fn is_composite_key(comptime Key: type) bool {
         @hasField(Key, "field") and
         @hasField(Key, "timestamp"))
     {
-        const Field = std.meta.fieldInfo(Key, .field).field_type;
+        const Field = std.meta.fieldInfo(Key, .field).type;
         return Key == CompositeKey(Field);
     }
 

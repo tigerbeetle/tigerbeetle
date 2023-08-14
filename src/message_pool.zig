@@ -100,11 +100,10 @@ pub const MessagePool = struct {
         {
             var i: usize = 0;
             while (i < messages_max) : (i += 1) {
-                const buffer = try allocator.allocAdvanced(
+                const buffer = try allocator.alignedAlloc(
                     u8,
                     constants.sector_size,
                     constants.message_size_max,
-                    .exact,
                 );
                 const message = try allocator.create(Message);
                 message.* = .{
@@ -152,7 +151,7 @@ pub const MessagePool = struct {
         if (message.references == 0) {
             message.header = undefined;
             if (constants.verify) {
-                @memset(message.buffer, undefined, message.buffer.len);
+                @memset(message.buffer, undefined);
             }
             message.next = pool.free_list;
             pool.free_list = message;

@@ -76,7 +76,7 @@ pub fn FIFO(comptime T: type) type {
             if (self.name) |name| {
                 tracer.plot(
                     .{ .queue_count = .{ .queue_name = name } },
-                    @intToFloat(f64, self.count),
+                    @as(f64, @floatFromInt(self.count)),
                 );
             }
         }

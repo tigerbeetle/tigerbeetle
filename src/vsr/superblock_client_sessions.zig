@@ -51,12 +51,12 @@ pub const ClientSessions = struct {
         var entries_by_client: EntriesByClient = .{};
         errdefer entries_by_client.deinit(allocator);
 
-        try entries_by_client.ensureTotalCapacity(allocator, @intCast(u32, constants.clients_max));
+        try entries_by_client.ensureTotalCapacity(allocator, @as(u32, @intCast(constants.clients_max)));
         assert(entries_by_client.capacity() >= constants.clients_max);
 
         var entries = try allocator.alloc(Entry, constants.clients_max);
         errdefer allocator.free(entries);
-        std.mem.set(Entry, entries, std.mem.zeroes(Entry));
+        @memset(entries, std.mem.zeroes(Entry));
 
         return ClientSessions{
             .entries_by_client = entries_by_client,
@@ -70,7 +70,7 @@ pub const ClientSessions = struct {
     }
 
     pub fn reset(client_sessions: *ClientSessions) void {
-        std.mem.set(Entry, client_sessions.entries, std.mem.zeroes(Entry));
+        @memset(client_sessions.entries, std.mem.zeroes(Entry));
         client_sessions.entries_by_client.clearRetainingCapacity();
         client_sessions.entries_free = EntriesFree.initFull();
     }
@@ -83,12 +83,12 @@ pub const ClientSessions = struct {
         // First goes the vsr headers for the entries.
         // This takes advantage of the buffer alignment to avoid adding padding for the headers.
         assert(@alignOf(vsr.Header) == 16);
-        size_max = std.mem.alignForward(size_max, 16);
+        size_max = std.mem.alignForward(usize, size_max, 16);
         size_max += @sizeOf(vsr.Header) * constants.clients_max;
 
         // Then follows the session values for the entries.
         assert(@alignOf(u64) == 8);
-        size_max = std.mem.alignForward(size_max, 8);
+        size_max = std.mem.alignForward(usize, size_max, 8);
         size_max += @sizeOf(u64) * constants.clients_max;
 
         break :blk size_max;
@@ -101,8 +101,8 @@ pub const ClientSessions = struct {
 
         // Write all headers:
         assert(@alignOf(vsr.Header) == 16);
-        var new_size = std.mem.alignForward(size, 16);
-        std.mem.set(u8, target[size..new_size], 0);
+        var new_size = std.mem.alignForward(usize, size, 16);
+        @memset(target[size..new_size], 0);
         size = new_size;
 
         for (client_sessions.entries) |*entry| {
@@ -112,8 +112,8 @@ pub const ClientSessions = struct {
 
         // Write all sessions:
         assert(@alignOf(u64) == 8);
-        new_size = std.mem.alignForward(size, 8);
-        std.mem.set(u8, target[size..new_size], 0);
+        new_size = std.mem.alignForward(usize, size, 8);
+        @memset(target[size..new_size], 0);
         size = new_size;
 
         for (client_sessions.entries) |*entry| {
@@ -138,15 +138,15 @@ pub const ClientSessions = struct {
         assert(source.len <= encode_size_max);
 
         assert(@alignOf(vsr.Header) == 16);
-        size = std.mem.alignForward(size, 16);
-        const headers = @alignCast(@alignOf(vsr.Header), mem.bytesAsSlice(
+        size = std.mem.alignForward(usize, size, 16);
+        const headers: []const vsr.Header = @alignCast(mem.bytesAsSlice(
             vsr.Header,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
         ));
         size += mem.sliceAsBytes(headers).len;
 
         assert(@alignOf(u64) == 8);
-        size = std.mem.alignForward(size, 8);
+        size = std.mem.alignForward(usize, size, 8);
         const sessions = mem.bytesAsSlice(
             u64,
             source[size..][0 .. constants.clients_max * @sizeOf(u64)],
@@ -155,7 +155,7 @@ pub const ClientSessions = struct {
 
         assert(size == encode_size_max);
 
-        for (headers) |*header, i| {
+        for (headers, 0..) |*header, i| {
             const session = sessions[i];
             if (session == 0) {
                 assert(std.meta.eql(header.*, std.mem.zeroes(vsr.Header)));

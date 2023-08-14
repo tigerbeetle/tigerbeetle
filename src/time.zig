@@ -40,7 +40,7 @@ pub const Time = struct {
 
                 // Convert qpc to nanos using fixed point to avoid expensive extra divs and overflow.
                 const scale = (std.time.ns_per_s << 32) / qpf;
-                break :blk @truncate(u64, (@as(u96, qpc) * scale) >> 32);
+                break :blk @as(u64, @truncate((@as(u96, qpc) * scale) >> 32));
             }
 
             // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
@@ -69,7 +69,7 @@ pub const Time = struct {
             // see https://github.com/ziglang/zig/pull/933#discussion_r656021295.
             var ts: os.timespec = undefined;
             os.clock_gettime(os.CLOCK.BOOTTIME, &ts) catch @panic("CLOCK_BOOTTIME required");
-            break :blk @intCast(u64, ts.tv_sec) * std.time.ns_per_s + @intCast(u64, ts.tv_nsec);
+            break :blk @as(u64, @intCast(ts.tv_sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.tv_nsec));
         };
 
         // "Oops!...I Did It Again"
@@ -95,7 +95,7 @@ pub const Time = struct {
             // FileTime is in units of 100 nanoseconds
             // and uses the NTFS/Windows epoch of 1601-01-01 instead of Unix Epoch 1970-01-01.
             const epoch_adjust = std.time.epoch.windows * (std.time.ns_per_s / 100);
-            return (@bitCast(i64, ft64) + epoch_adjust) * 100;
+            return (@as(i64, @bitCast(ft64)) + epoch_adjust) * 100;
         }
 
         if (is_darwin) {

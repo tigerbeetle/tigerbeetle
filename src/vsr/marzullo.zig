@@ -41,7 +41,7 @@ pub const Marzullo = struct {
     /// Returns the smallest interval consistent with the largest number of sources.
     pub fn smallest_interval(tuples: []Tuple) Interval {
         // There are two bounds (lower and upper) per source clock offset sample.
-        const sources = @intCast(u8, @divExact(tuples.len, 2));
+        const sources = @as(u8, @intCast(@divExact(tuples.len, 2)));
 
         if (sources == 0) {
             return Interval{
@@ -52,8 +52,8 @@ pub const Marzullo = struct {
             };
         }
 
-        // Use a simpler sort implementation than the complexity of `std.sort.sort()` for safety:
-        std.sort.insertionSort(Tuple, tuples, {}, less_than);
+        // Use a simpler sort implementation than the complexity of `std.mem.sort()` for safety:
+        std.sort.insertion(Tuple, tuples, {}, less_than);
 
         // Here is a description of the algorithm:
         // https://en.wikipedia.org/wiki/Marzullo%27s_algorithm#Method
@@ -62,7 +62,7 @@ pub const Marzullo = struct {
         var previous: ?Tuple = null;
         var interval: Interval = undefined;
 
-        for (tuples) |tuple, i| {
+        for (tuples, 0..) |tuple, i| {
             // Verify that our sort implementation is correct:
             if (previous) |p| {
                 assert(p.offset <= tuple.offset);
@@ -102,8 +102,8 @@ pub const Marzullo = struct {
         // The number of false sources (ones which do not overlap the optimal interval) is the
         // number of sources minus the value of `best`:
         assert(best <= sources);
-        interval.sources_true = @intCast(u8, best);
-        interval.sources_false = @intCast(u8, sources - @intCast(u8, best));
+        interval.sources_true = @as(u8, @intCast(best));
+        interval.sources_false = @as(u8, @intCast(sources - @as(u8, @intCast(best))));
         assert(interval.sources_true + interval.sources_false == sources);
 
         return interval;
@@ -137,9 +137,9 @@ fn test_smallest_interval(bounds: []const i64, smallest_interval: Marzullo.Inter
     const allocator = arena.allocator();
 
     var tuples = try allocator.alloc(Marzullo.Tuple, bounds.len);
-    for (bounds) |bound, i| {
+    for (bounds, 0..) |bound, i| {
         tuples[i] = .{
-            .source = @intCast(u8, @divTrunc(i, 2)),
+            .source = @as(u8, @intCast(@divTrunc(i, 2))),
             .offset = bound,
             .bound = if (i % 2 == 0) .lower else .upper,
         };

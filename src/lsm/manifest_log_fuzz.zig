@@ -31,7 +31,7 @@ pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 const entries_max_block = ManifestLog.Block.entry_count_max;
 const entries_max_buffered = entries_max_block *
-    std.meta.fieldInfo(ManifestLog, .blocks).field_type.count_max;
+    std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
 
 pub fn main() !void {
     const allocator = fuzz.allocator;
@@ -39,7 +39,7 @@ pub fn main() !void {
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 
-    const events_count = std.math.min(
+    const events_count = @min(
         args.events_max orelse @as(usize, 2e5),
         fuzz.random_int_exponential(prng.random(), usize, 1e4),
     );
@@ -151,17 +151,17 @@ fn generate_events(
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
     // Don't remove too often, so that there are plenty of tables accumulating.
-    event_distribution.remove /= @intToFloat(f64, constants.lsm_levels);
+    event_distribution.remove /= @as(f64, @floatFromInt(constants.lsm_levels));
     // Don't compact or checkpoint too often, to approximate a real workload.
     // Additionally, checkpoint is slow because of the verification, so run it less
     // frequently.
-    event_distribution.compact /= @intToFloat(
+    event_distribution.compact /= @as(
         f64,
-        constants.lsm_levels * constants.lsm_batch_multiple,
+        @floatFromInt(constants.lsm_levels * constants.lsm_batch_multiple),
     );
-    event_distribution.checkpoint /= @intToFloat(
+    event_distribution.checkpoint /= @as(
         f64,
-        constants.lsm_levels * constants.journal_slot_count,
+        @floatFromInt(constants.lsm_levels * constants.journal_slot_count),
     );
 
     log.info("event_distribution = {:.2}", .{event_distribution});
@@ -175,7 +175,7 @@ fn generate_events(
 
     // The number of appends since the last flush (compact or checkpoint).
     var append_count: usize = 0;
-    for (events) |*event, i| {
+    for (events, 0..) |*event, i| {
         const event_type = blk: {
             if (append_count == ManifestLog.compaction_appends_max) {
                 // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
@@ -655,7 +655,7 @@ fn verify_manifest_compaction_set(
 
         const entry_count = ManifestLog.Block.entry_count(block);
         var compact_soon: bool = entry_count < ManifestLog.Block.entry_count_max;
-        for (ManifestLog.Block.labels_const(block)[0..entry_count]) |label, i| {
+        for (ManifestLog.Block.labels_const(block)[0..entry_count], 0..) |label, i| {
             const table = &ManifestLog.Block.tables_const(block)[i];
             compact_soon = compact_soon or switch (label.event) {
                 .remove => true,
@@ -672,7 +672,7 @@ fn verify_manifest_compaction_set(
             compact_soon,
             superblock.manifest.compaction_set.contains(block_address),
         );
-        compact_blocks_checked += @boolToInt(compact_soon);
+        compact_blocks_checked += @intFromBool(compact_soon);
     }
 
     // There are no blocks queued for compaction which were not allocated in the FreeSet.

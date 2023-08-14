@@ -33,7 +33,7 @@ const build_options: BuildOptions = blk: {
         var result: BuildOptions = undefined;
         for (std.meta.fields(BuildOptions)) |field| {
             @field(result, field.name) = launder_type(
-                field.field_type,
+                field.type,
                 @field(vsr_options, field.name),
             );
         }
@@ -154,9 +154,10 @@ const ConfigCluster = struct {
     /// The smallest possible message_size_max (for use in the simulator to improve performance).
     /// The message body must have room for pipeline_prepare_queue_max headers in the DVC.
     pub fn message_size_max_min(clients_max: usize) usize {
-        return std.math.max(
+        return @max(
             sector_size,
             std.mem.alignForward(
+                usize,
                 @sizeOf(vsr.Header) + clients_max * @sizeOf(vsr.Header),
                 sector_size,
             ),
@@ -167,7 +168,10 @@ const ConfigCluster = struct {
     /// It is used to assert that all cluster members share the same config.
     pub fn checksum(comptime config: ConfigCluster) u128 {
         @setEvalBranchQuota(10_000);
-        var hasher = std.crypto.hash.Blake3.init(.{});
+        // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
+        // Blake3 in the stdlib has a compile error so currently using Blake2 as a workaround.
+        // We should eventually switch this to vsr.checksum() once that works at comptime.
+        var hasher = std.crypto.hash.blake2.Blake2s256.init(.{});
         inline for (std.meta.fields(ConfigCluster)) |field| {
             const value = @field(config, field.name);
             const value_64 = @as(u64, value);
@@ -175,7 +179,7 @@ const ConfigCluster = struct {
         }
         var target: [32]u8 = undefined;
         hasher.final(&target);
-        return @bitCast(u128, target[0..@sizeOf(u128)].*);
+        return @as(u128, @bitCast(target[0..@sizeOf(u128)].*));
     }
 };
 

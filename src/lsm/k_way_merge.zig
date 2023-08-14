@@ -269,20 +269,20 @@ fn TestContext(comptime k_max: u32) type {
 
             var streams: [k_max][]Value = undefined;
 
-            for (streams_keys) |stream_keys, i| {
+            for (streams_keys, 0..) |stream_keys, i| {
                 errdefer for (streams[0..i]) |s| testing.allocator.free(s);
                 streams[i] = try testing.allocator.alloc(Value, stream_keys.len);
-                for (stream_keys) |key, j| {
+                for (stream_keys, 0..) |key, j| {
                     streams[i][j] = .{
                         .key = key,
-                        .version = @intCast(u32, i),
+                        .version = @as(u32, @intCast(i)),
                     };
                 }
             }
             defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
             var context: Self = .{ .streams = streams };
-            var kway = KWay.init(&context, @intCast(u32, streams_keys.len), direction);
+            var kway = KWay.init(&context, @as(u32, @intCast(streams_keys.len)), direction);
 
             while (try kway.pop()) |value| {
                 try actual.append(value);
@@ -322,17 +322,17 @@ fn TestContext(comptime k_max: u32) type {
                 }
 
                 var expect_buffer_len: usize = 0;
-                for (streams[0..k]) |stream, version| {
+                for (streams[0..k], 0..) |stream, version| {
                     for (stream) |key| {
                         expect_buffer[expect_buffer_len] = .{
                             .key = key,
-                            .version = @intCast(u32, version),
+                            .version = @as(u32, @intCast(version)),
                         };
                         expect_buffer_len += 1;
                     }
                 }
                 const expect_with_duplicates = expect_buffer[0..expect_buffer_len];
-                std.sort.sort(Value, expect_with_duplicates, {}, value_less_than);
+                std.mem.sort(Value, expect_with_duplicates, {}, value_less_than);
 
                 var target: usize = 0;
                 var previous_key: ?u32 = null;
@@ -375,14 +375,14 @@ fn TestContext(comptime k_max: u32) type {
             const key_max = random.intRangeLessThanBiased(u32, 512, 1024);
             switch (random.uintLessThanBiased(u8, 100)) {
                 0...4 => {
-                    mem.set(u32, stream, random.int(u32));
+                    @memset(stream, random.int(u32));
                 },
                 else => {
                     random.bytes(mem.sliceAsBytes(stream));
                 },
             }
             for (stream) |*key| key.* = key.* % key_max;
-            std.sort.sort(u32, stream, {}, key_less_than);
+            std.mem.sort(u32, stream, {}, key_less_than);
         }
 
         fn key_less_than(_: void, a: u32, b: u32) bool {

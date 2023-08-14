@@ -57,7 +57,7 @@ pub const Storage = struct {
                 max -= partial_sector_read;
             }
 
-            return read.buffer[0..std.math.min(read.buffer.len, max)];
+            return read.buffer[0..@min(read.buffer.len, max)];
         }
     };
 
@@ -257,7 +257,7 @@ pub const Storage = struct {
                     // TODO This could be an interesting avenue to explore further, whether
                     // temporary or permanent EIO errors should be conflated with checksum failures.
                     assert(target.len > 0);
-                    std.mem.set(u8, target, 0);
+                    @memset(target, 0);
 
                     // We could set `read.target_max` to `vsr.sector_ceil(read.buffer.len)` here
                     // in order to restart our pseudo-binary search on the rest of the sectors to be
@@ -395,7 +395,7 @@ pub const Storage = struct {
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
     fn assert_alignment(buffer: []const u8, offset: u64) void {
-        assert(@ptrToInt(buffer.ptr) % constants.sector_size == 0);
+        assert(@intFromPtr(buffer.ptr) % constants.sector_size == 0);
         assert(buffer.len % constants.sector_size == 0);
         assert(offset % constants.sector_size == 0);
     }

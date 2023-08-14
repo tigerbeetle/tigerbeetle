@@ -209,7 +209,7 @@ pub const FreeSet = struct {
         ) orelse return null;
 
         // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
-        var block = std.math.max(shard_start * shard_bits, set.reservation_blocks);
+        var block = @max(shard_start * shard_bits, set.reservation_blocks);
         var reserved: usize = 0;
         while (reserved < reserve_count) : (reserved += 1) {
             block = 1 + (find_bit(
@@ -272,7 +272,7 @@ pub const FreeSet = struct {
         ) orelse return null;
         assert(!set.index.isSet(shard));
 
-        const reservation_start = std.math.max(
+        const reservation_start = @max(
             shard * shard_bits,
             reservation.block_base,
         );
@@ -790,7 +790,7 @@ fn expect_bit_set_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !v
     try std.testing.expectEqual(a.bit_length, b.bit_length);
     const a_masks = bit_set_masks(a);
     const b_masks = bit_set_masks(b);
-    for (a_masks) |aw, i| try std.testing.expectEqual(aw, b_masks[i]);
+    for (a_masks, 0..) |aw, i| try std.testing.expectEqual(aw, b_masks[i]);
 }
 
 test "FreeSet decode small bitset into large bitset" {

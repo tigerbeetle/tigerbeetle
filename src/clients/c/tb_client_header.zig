@@ -20,7 +20,7 @@ const type_mappings = .{
 };
 
 fn resolve_c_type(comptime Type: type) []const u8 {
-    comptime switch (@typeInfo(Type)) {
+    switch (@typeInfo(Type)) {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
         .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
@@ -53,18 +53,18 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                 }
             }
 
-            return resolve_c_type(info.child) ++ "*";
+            return comptime resolve_c_type(info.child) ++ "*";
         },
         .Void, .Opaque => return "void",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
-    };
+    }
 }
 
 fn to_uppercase(comptime input: []const u8) []const u8 {
     comptime var output: [input.len]u8 = undefined;
-    inline for (output) |*char, i| {
+    inline for (&output, 0..) |*char, i| {
         char.* = input[i];
-        char.* -= 32 * @as(u8, @boolToInt(char.* >= 'a' and char.* <= 'z'));
+        char.* -= 32 * @as(u8, @intFromBool(char.* >= 'a' and char.* <= 'z'));
     }
     return &output;
 }
@@ -82,7 +82,7 @@ fn emit_enum(
 
     try buffer.writer().print("typedef enum {s} {{\n", .{c_name});
 
-    inline for (type_info.fields) |field, i| {
+    inline for (type_info.fields, 0..) |field, i| {
         comptime var skip = false;
         inline for (skip_fields) |sf| {
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
@@ -93,7 +93,7 @@ fn emit_enum(
                 c_name[0..suffix_pos],
                 to_uppercase(field.name),
                 if (@typeInfo(Type) == .Enum)
-                    @enumToInt(@field(Type, field.name))
+                    @intFromEnum(@field(Type, field.name))
                 else
                     i, // packed struct field.
             });
@@ -112,11 +112,11 @@ fn emit_struct(
 
     inline for (type_info.fields) |field| {
         try buffer.writer().print("    {s} {s}", .{
-            resolve_c_type(field.field_type),
+            resolve_c_type(field.type),
             field.name,
         });
 
-        switch (@typeInfo(field.field_type)) {
+        switch (@typeInfo(field.type)) {
             .Array => |array| try buffer.writer().print("[{d}]", .{array.len}),
             else => {},
         }

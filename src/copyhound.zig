@@ -4,7 +4,7 @@
 //!
 //! To get a file with IR, use `-femit-llvm-ir` cli argument for `zig build-exe` or
 //!
-//!     $ zig build -Drelease-safe -Demit-llvm-ir
+//!     $ zig build -Doptimize=ReleaseSafe -Demit-llvm-ir
 //!
 //! Pass the resulting .ll file to copyhound on stdin.
 //!
@@ -12,7 +12,7 @@
 //!
 //! Run:
 //!
-//!     $ zig run -Drelease-safe src/copyhound.zig -- memcpy --bytes 128 < tigerbeetle.ll \
+//!     $ zig run -OReleaseSafe src/copyhound.zig -- memcpy --bytes 128 < tigerbeetle.ll \
 //!        | sort -n -k 2
 //!
 //! This only detects memory copies with comptime-know size (eg, when you copy a `T`, rather than a
@@ -22,7 +22,7 @@
 //!
 //! Run:
 //!
-//!     $ zig run -Drelease-safe src/copyhound.zig -- funcsize < tigerbeetle.ll \
+//!     $ zig run -OReleaseSafe src/copyhound.zig -- funcsize < tigerbeetle.ll \
 //!        | awk '{a[$1] += $2; b[$1] += 1} END {for (i in a) print i, b[i], a[i]}' \
 //!        | sort -n -k 3
 //!
@@ -142,7 +142,7 @@ fn extract_memcpy_size(memcpy_call: []const u8) ?u32 {
     var level: u32 = 0;
     var arg_count: u32 = 0;
 
-    const args_after_size = for (call_args) |c, i| {
+    const args_after_size = for (call_args, 0..) |c, i| {
         switch (c) {
             '(' => level += 1,
             ')' => level -= 1,

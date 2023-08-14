@@ -262,7 +262,7 @@ comptime {
 }
 
 /// The maximum number of headers to include with a response to a command=request_headers message.
-pub const request_headers_max = std.math.min(
+pub const request_headers_max = @min(
     @divFloor(message_body_size_max, @sizeOf(vsr.Header)),
     64,
 );
@@ -298,7 +298,7 @@ pub const connection_delay_min_ms = config.process.connection_delay_min_ms;
 pub const connection_delay_max_ms = config.process.connection_delay_max_ms;
 
 /// The maximum number of outgoing messages that may be queued on a replica connection.
-pub const connection_send_queue_max_replica = std.math.max(std.math.min(clients_max, 4), 2);
+pub const connection_send_queue_max_replica = @max(@min(clients_max, 4), 2);
 
 /// The maximum number of outgoing messages that may be queued on a client connection.
 /// The client has one in-flight request, and occasionally a ping.

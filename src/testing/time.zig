@@ -42,36 +42,36 @@ pub const Time = struct {
     }
 
     pub fn realtime(self: *Self) i64 {
-        return self.epoch + @intCast(i64, self.monotonic()) - self.offset(self.ticks);
+        return self.epoch + @as(i64, @intCast(self.monotonic())) - self.offset(self.ticks);
     }
 
     pub fn offset(self: *Self, ticks: u64) i64 {
         switch (self.offset_type) {
             .linear => {
                 const drift_per_tick = self.offset_coefficient_A;
-                return @intCast(i64, ticks) * drift_per_tick + @intCast(
+                return @as(i64, @intCast(ticks)) * drift_per_tick + @as(
                     i64,
-                    self.offset_coefficient_B,
+                    @intCast(self.offset_coefficient_B),
                 );
             },
             .periodic => {
-                const unscaled = std.math.sin(@intToFloat(f64, ticks) * 2 * std.math.pi /
-                    @intToFloat(f64, self.offset_coefficient_B));
-                const scaled = @intToFloat(f64, self.offset_coefficient_A) * unscaled;
-                return @floatToInt(i64, std.math.floor(scaled));
+                const unscaled = std.math.sin(@as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
+                    @as(f64, @floatFromInt(self.offset_coefficient_B)));
+                const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
+                return @as(i64, @intFromFloat(std.math.floor(scaled)));
             },
             .step => {
                 return if (ticks > self.offset_coefficient_B) self.offset_coefficient_A else 0;
             },
             .non_ideal => {
-                const phase: f64 = @intToFloat(f64, ticks) * 2 * std.math.pi /
-                    (@intToFloat(f64, self.offset_coefficient_B) + self.prng.random().floatNorm(f64) * 10);
+                const phase: f64 = @as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
+                    (@as(f64, @floatFromInt(self.offset_coefficient_B)) + self.prng.random().floatNorm(f64) * 10);
                 const unscaled = std.math.sin(phase);
-                const scaled = @intToFloat(f64, self.offset_coefficient_A) * unscaled;
-                return @floatToInt(i64, std.math.floor(scaled)) +
+                const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
+                return @as(i64, @intFromFloat(std.math.floor(scaled))) +
                     self.prng.random().intRangeAtMost(
                     i64,
-                    -@intCast(i64, self.offset_coefficient_C),
+                    -@as(i64, @intCast(self.offset_coefficient_C)),
                     self.offset_coefficient_C,
                 );
             },

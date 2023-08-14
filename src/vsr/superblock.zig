@@ -581,24 +581,23 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.storage_size_limit <= constants.storage_size_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
 
-            const shard_count_limit = @intCast(usize, @divFloor(
+            const shard_count_limit = @as(usize, @intCast(@divFloor(
                 options.storage_size_limit - data_file_size_min,
                 constants.block_size * FreeSet.shard_bits,
-            ));
+            )));
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
             assert(block_count_limit <= grid_blocks_max);
 
-            const a = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
+            const a = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
             errdefer allocator.free(a);
 
-            const b = try allocator.allocAdvanced(SuperBlockHeader, constants.sector_size, 1, .exact);
+            const b = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
             errdefer allocator.free(b);
 
-            const reading = try allocator.allocAdvanced(
+            const reading = try allocator.alignedAlloc(
                 [constants.superblock_copies]SuperBlockHeader,
                 constants.sector_size,
                 1,
-                .exact,
             );
             errdefer allocator.free(reading);
 
@@ -618,27 +617,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
             var client_sessions = try ClientSessions.init(allocator);
             errdefer client_sessions.deinit(allocator);
 
-            const manifest_buffer = try allocator.allocAdvanced(
+            const manifest_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 superblock_trailer_manifest_size_max,
-                .exact,
             );
             errdefer allocator.free(manifest_buffer);
 
-            const free_set_buffer = try allocator.allocAdvanced(
+            const free_set_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 SuperBlockFreeSet.encode_size_max(block_count_limit),
-                .exact,
             );
             errdefer allocator.free(free_set_buffer);
 
-            const client_sessions_buffer = try allocator.allocAdvanced(
+            const client_sessions_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
                 superblock_trailer_client_sessions_size_max,
-                .exact,
             );
             errdefer allocator.free(client_sessions_buffer);
 
@@ -725,7 +721,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
 
-            mem.set(SuperBlockHeader.Snapshot, &superblock.working.snapshots, .{
+            @memset(&superblock.working.snapshots, .{
                 .created = 0,
                 .queried = 0,
                 .timeout = 0,
@@ -919,15 +915,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (context.vsr_headers) |*headers| {
                 assert(context.caller.updates_vsr_headers());
 
-                superblock.staging.vsr_headers_count = @intCast(u32, headers.array.len);
+                superblock.staging.vsr_headers_count = @as(u32, @intCast(headers.array.len));
                 stdx.copy_disjoint(
                     .exact,
                     vsr.Header,
                     superblock.staging.vsr_headers_all[0..headers.array.len],
                     headers.array.constSlice(),
                 );
-                std.mem.set(
-                    vsr.Header,
+                @memset(
                     superblock.staging.vsr_headers_all[headers.array.len..],
                     std.mem.zeroes(vsr.Header),
                 );
@@ -954,7 +949,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.manifest_buffer;
 
-            staging.manifest_size = @intCast(u32, superblock.manifest.encode(target));
+            staging.manifest_size = @as(u32, @intCast(superblock.manifest.encode(target)));
             staging.manifest_checksum = vsr.checksum(target[0..staging.manifest_size]);
         }
 
@@ -983,7 +978,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 // of storage_size_limit.
                 staging.free_set_size = 0;
             } else {
-                staging.free_set_size = @intCast(u32, superblock.free_set.encode(target));
+                staging.free_set_size = @as(u32, @intCast(superblock.free_set.encode(target)));
             }
             staging.free_set_checksum = vsr.checksum(target[0..staging.free_set_size]);
         }
@@ -992,7 +987,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const staging: *SuperBlockHeader = superblock.staging;
             const target = superblock.client_sessions_buffer;
 
-            staging.client_sessions_size = @intCast(u32, superblock.client_sessions.encode(target));
+            staging.client_sessions_size = @as(u32, @intCast(superblock.client_sessions.encode(target)));
             staging.client_sessions_checksum = vsr.checksum(target[0..staging.client_sessions_size]);
 
             assert(staging.client_sessions_size == ClientSessions.encode_size_max);
@@ -1042,7 +1037,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = trailer_buffer_all[0..trailer_size_ceil];
             assert(trailer_checksum_ == vsr.checksum(buffer[0..trailer_size_]));
 
-            mem.set(u8, buffer[trailer_size_..], 0); // Zero sector padding.
+            @memset(buffer[trailer_size_..], 0); // Zero sector padding.
 
             const offset = trailer.zone().start_for_copy(context.copy.?);
             log.debug("{s}: write_trailer_next: " ++

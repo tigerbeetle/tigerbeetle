@@ -473,8 +473,8 @@ pub fn ReplicaType(
             self.superblock.working.vsr_state.assert_internally_consistent();
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
-            const replica = for (self.superblock.working.vsr_state.members) |member, index| {
-                if (member == replica_id) break @intCast(u8, index);
+            const replica = for (self.superblock.working.vsr_state.members, 0..) |member, index| {
+                if (member == replica_id) break @as(u8, @intCast(index));
             } else unreachable;
             const replica_count = self.superblock.working.vsr_state.replica_count;
             if (replica >= options.node_count or replica_count > options.node_count) {
@@ -592,7 +592,7 @@ pub fn ReplicaType(
             assert(op_head.? <= self.op_checkpoint_trigger());
 
             self.op = op_head.?;
-            self.commit_max = std.math.max(
+            self.commit_max = @max(
                 self.commit_max,
                 self.op -| constants.pipeline_prepare_queue_max,
             );
@@ -797,7 +797,7 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
-            for (self.grid_write_blocks) |*block, i| {
+            for (&self.grid_write_blocks, 0..) |*block, i| {
                 errdefer for (self.grid_write_blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
             }
@@ -1134,7 +1134,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 .commit = message.header.commit,
-                .timestamp = @bitCast(u64, self.clock.realtime()),
+                .timestamp = @as(u64, @bitCast(self.clock.realtime())),
             });
         }
 
@@ -1149,7 +1149,7 @@ pub fn ReplicaType(
             if (message.header.replica >= self.replica_count) return;
 
             const m0 = message.header.commit;
-            const t1 = @bitCast(i64, message.header.timestamp);
+            const t1 = @as(i64, @bitCast(message.header.timestamp));
             const m2 = self.clock.monotonic();
 
             self.clock.learn(message.header.replica, m0, t1, m2);
@@ -2029,7 +2029,7 @@ pub fn ReplicaType(
             assert(op_max >= op_min);
 
             // We must add 1 because op_max and op_min are both inclusive:
-            const count_max = std.math.min(constants.request_headers_max, op_max - op_min + 1);
+            const count_max: usize = @min(constants.request_headers_max, op_max - op_min + 1);
             assert(count_max * @sizeOf(vsr.Header) <= constants.message_body_size_max);
 
             const count = self.journal.copy_latest_headers_between(
@@ -2051,7 +2051,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            response.header.size = @intCast(u32, @sizeOf(Header) * (1 + count));
+            response.header.size = @as(u32, @intCast(@sizeOf(Header) * (1 + count)));
             response.header.set_checksum_body(response.body());
             response.header.set_checksum();
 
@@ -2183,7 +2183,7 @@ pub fn ReplicaType(
             const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body());
             assert(requests.len > 0);
 
-            request_loop: for (requests) |*request, i| {
+            request_loop: for (requests, 0..) |*request, i| {
                 for (std.mem.bytesAsSlice(u64, &request.reserved)) |word| assert(word == 0);
 
                 if (self.grid.faulty(request.block_address, null)) {
@@ -2428,7 +2428,7 @@ pub fn ReplicaType(
             }
 
             const target_buffer = self.superblock.trailer_buffer(trailer);
-            const target_size = @intCast(u32, message.header.commit);
+            const target_size = @as(u32, @intCast(message.header.commit));
             const progress = stage.trailers.getPtr(trailer).write_chunk(.{
                 .buffer = target_buffer,
                 .size = target_size,
@@ -2509,7 +2509,7 @@ pub fn ReplicaType(
                 assert(replica < self.replica_count);
 
                 if (replica != self.replica) {
-                    waiting[waiting_len] = @intCast(u8, replica);
+                    waiting[waiting_len] = @as(u8, @intCast(replica));
                     waiting_len += 1;
                 }
             } else {
@@ -2741,7 +2741,7 @@ pub fn ReplicaType(
                 // But due to our sync target (from pings), we might know that the cluster is even
                 // farther ahead in a view that we have not joined.
                 const primary_commit_max =
-                    std.math.max(self.commit_max, self.sync_target_max.?.checkpoint_op);
+                    @max(self.commit_max, self.sync_target_max.?.checkpoint_op);
                 const primary_repair_min = (primary_commit_max +
                     constants.pipeline_prepare_queue_max) -|
                     (constants.journal_slot_count - 1);
@@ -3634,7 +3634,7 @@ pub fn ReplicaType(
                 .op = prepare.header.op,
                 .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
-                .size = @sizeOf(Header) + @intCast(u32, reply_body_size),
+                .size = @sizeOf(Header) + @as(u32, @intCast(reply_body_size)),
             };
             assert(reply.header.epoch == 0);
 
@@ -3842,7 +3842,7 @@ pub fn ReplicaType(
             self.view_headers.verify();
 
             const BitSet = std.bit_set.IntegerBitSet(128);
-            comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).field_type);
+            comptime assert(BitSet.MaskInt == std.meta.fieldInfo(Header, .context).type);
 
             // Collect nack and presence bits for the headers, so that the new primary can run CTRL
             // protocol to truncate uncommitted headers. When:
@@ -3853,7 +3853,7 @@ pub fn ReplicaType(
             var nacks = BitSet.initEmpty();
             var present = BitSet.initEmpty();
             if (command == .do_view_change) {
-                for (self.view_headers.array.constSlice()) |*header, i| {
+                for (self.view_headers.array.constSlice(), 0..) |*header, i| {
                     const slot = self.journal.slot_for_op(header.op);
                     const journal_header = self.journal.header_for_op(header.op);
                     const dirty = self.journal.dirty.bit(slot);
@@ -3894,7 +3894,7 @@ pub fn ReplicaType(
             }
 
             message.header.* = .{
-                .size = @intCast(u32, @sizeOf(Header) * (1 + self.view_headers.array.len)),
+                .size = @as(u32, @intCast(@as(usize, @sizeOf(Header)) * (1 + self.view_headers.array.len))),
                 .command = command,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -4248,7 +4248,7 @@ pub fn ReplicaType(
                 log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
                     self.replica,
                     message.header.client,
-                    @enumToInt(message.header.operation),
+                    @intFromEnum(message.header.operation),
                 });
                 return true;
             }
@@ -4285,11 +4285,11 @@ pub fn ReplicaType(
                 self.op_checkpoint() + constants.lsm_batch_multiple + 1 == self.op)
             {
                 var count: usize = 0;
-                for (self.sync_target_quorum.candidates) |target, replica_index| {
+                for (self.sync_target_quorum.candidates, 0..) |target, replica_index| {
                     if (replica_index == self.replica) {
                         count += 1; // Count ourselves.
                     } else {
-                        count += @boolToInt(
+                        count += @intFromBool(
                             target != null and
                                 target.?.checkpoint_op == self.op_checkpoint(),
                         );
@@ -4791,7 +4791,7 @@ pub fn ReplicaType(
 
         /// Returns the index into the configuration of the primary for a given view.
         pub fn primary_index(self: *const Self, view: u32) u8 {
-            return @intCast(u8, @mod(view, self.replica_count));
+            return @as(u8, @intCast(@mod(view, self.replica_count)));
         }
 
         /// Returns whether the replica is the primary for the current view.
@@ -5017,7 +5017,7 @@ pub fn ReplicaType(
                     assert(self.status == .normal or self.do_view_change_quorum or self.solo());
                     // This is the oldest op that is guaranteed to be in the WALs of any replica.
                     // (Assuming that this primary has not been superseded.)
-                    break :op std.math.min(
+                    break :op @min(
                         // Add the oldest pipeline_prepare_queue_max ops because they may have been
                         // newer ops which were then truncated by a view-change, causing the head op
                         // to backtrack.
@@ -5056,7 +5056,7 @@ pub fn ReplicaType(
             assert(self.op <= self.op_checkpoint_trigger());
             assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
-            return std.math.min(self.commit_max, self.op_checkpoint_trigger());
+            return @min(self.commit_max, self.op_checkpoint_trigger());
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -5098,14 +5098,14 @@ pub fn ReplicaType(
             });
 
             // Guard against the wall clock going backwards by taking the max with timestamps issued:
-            self.state_machine.prepare_timestamp = std.math.max(
+            self.state_machine.prepare_timestamp = @max(
                 // The cluster `commit_timestamp` may be ahead of our `prepare_timestamp` because this
                 // may be our first prepare as a recently elected primary:
-                std.math.max(
+                @max(
                     self.state_machine.prepare_timestamp,
                     self.state_machine.commit_timestamp,
                 ) + 1,
-                @intCast(u64, request.realtime),
+                @as(u64, @intCast(request.realtime)),
             );
             assert(self.state_machine.prepare_timestamp > self.state_machine.commit_timestamp);
 
@@ -6011,7 +6011,7 @@ pub fn ReplicaType(
         /// We arrange standbys into a logical ring for replication.
         fn standby_index_to_replica(self: *const Self, index: u32) u8 {
             assert(self.standby_count > 0);
-            return self.replica_count + @intCast(u8, @mod(index, self.standby_count));
+            return self.replica_count + @as(u8, @intCast(@mod(index, self.standby_count)));
         }
 
         fn standby_replica_to_index(self: *const Self, replica: u8) u32 {
@@ -6025,7 +6025,7 @@ pub fn ReplicaType(
             assert(messages.len == constants.replicas_max);
             var view: ?u32 = null;
             var count: usize = 0;
-            for (messages) |*received, replica| {
+            for (messages, 0..) |*received, replica| {
                 if (received.*) |message| {
                     assert(replica < self.replica_count);
                     assert(message.header.command == command);
@@ -6740,7 +6740,7 @@ pub fn ReplicaType(
 
             if (op < self.op) {
                 // Uncommitted ops may not survive a view change, but never truncate committed ops.
-                assert(op >= std.math.max(commit_max, self.commit_max));
+                assert(op >= @max(commit_max, self.commit_max));
             }
 
             // We expect that our commit numbers may also be greater even than `commit_max` because
@@ -6772,7 +6772,7 @@ pub fn ReplicaType(
 
             // Crucially, we must never rewind `commit_max` (and then `commit_min`) because
             // `commit_min` represents what we have already applied to our state machine:
-            self.commit_max = std.math.max(self.commit_max, commit_max);
+            self.commit_max = @max(self.commit_max, commit_max);
             assert(self.commit_max >= self.commit_min);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
@@ -6875,7 +6875,7 @@ pub fn ReplicaType(
             // 4. Remaining `do_view_change` messages arrive, completing the quorum.
             // In this scenario, our own DVC's commit is `N-1`, but `commit_min=M`.
             // Don't let the commit backtrack.
-            const commit_max = std.math.max(
+            const commit_max = @max(
                 self.commit_min,
                 DVCQuorum.commit_max(self.do_view_change_from_all_replicas),
             );
@@ -6954,7 +6954,7 @@ pub fn ReplicaType(
                 const dvc_headers = message_body_as_view_headers(dvc);
                 const dvc_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.context };
                 const dvc_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.client };
-                for (dvc_headers.slice) |*header, i| {
+                for (dvc_headers.slice, 0..) |*header, i| {
                     log.debug("{}: {s}: dvc: header: " ++
                         "replica={} op={} checksum={} nack={} present={} type={s}", .{
                         self.replica,
@@ -7706,7 +7706,7 @@ pub fn ReplicaType(
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
-            self.commit_max = std.math.max(stage.target.checkpoint_op, self.commit_max);
+            self.commit_max = @max(stage.target.checkpoint_op, self.commit_max);
 
             self.sync_message_timeout.stop();
             self.superblock.sync(
@@ -7781,7 +7781,7 @@ pub fn ReplicaType(
 
             // When commit_min=op_checkpoint, the checkpoint may be missing.
             // valid_hash_chain_between() will still verify that we are connected.
-            const op_verify_min = std.math.max(self.commit_min, self.op_checkpoint() + 1);
+            const op_verify_min = @max(self.commit_min, self.op_checkpoint() + 1);
 
             // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
             if (!self.valid_hash_chain_between(op_verify_min, self.op)) {
@@ -8008,7 +8008,7 @@ pub fn ReplicaType(
                     // - or if the lead-half is in view-change status (not sending commit messages)
                     // then the lagging-half replicas must use incoming ping to determine the
                     // canonical target.
-                    break :threshold self.quorum_majority - @boolToInt(self.replica_count % 2 == 0);
+                    break :threshold self.quorum_majority - @intFromBool(self.replica_count % 2 == 0);
                 };
 
                 if (candidates_matching >= candidates_threshold) {
@@ -8272,10 +8272,10 @@ pub fn ReplicaType(
             assert(trailer_size > parameters.offset or
                 (trailer_size == 0 and parameters.offset == 0));
 
-            const body_size = @intCast(u32, @min(
+            const body_size = @as(u32, @intCast(@min(
                 trailer_size - parameters.offset,
                 constants.sync_trailer_message_body_size_max,
-            ));
+            )));
             assert(body_size > 0 or parameters.offset == 0);
             assert(body_size <= constants.message_body_size_max);
 
@@ -8421,15 +8421,15 @@ const DVCQuorum = struct {
         for (dvcs.constSlice()) |message| verify_message(message);
 
         // Verify that DVCs with the same log_view do not conflict.
-        for (dvcs.constSlice()) |dvc_a, i| {
+        for (dvcs.constSlice(), 0..) |dvc_a, i| {
             for (dvcs.constSlice()[0..i]) |dvc_b| {
                 if (dvc_a.header.request != dvc_b.header.request) continue;
 
                 const headers_a = message_body_as_view_headers(dvc_a);
                 const headers_b = message_body_as_view_headers(dvc_b);
                 // Find the intersection of the ops covered by each DVC.
-                const op_max = std.math.min(dvc_a.header.op, dvc_b.header.op);
-                const op_min = std.math.max(
+                const op_max = @min(dvc_a.header.op, dvc_b.header.op);
+                const op_min = @max(
                     headers_a.slice[headers_a.slice.len - 1].op,
                     headers_b.slice[headers_b.slice.len - 1].op,
                 );
@@ -8483,7 +8483,7 @@ const DVCQuorum = struct {
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
         var array = DVCArray{ .buffer = undefined };
-        for (dvc_quorum) |received, replica| {
+        for (dvc_quorum, 0..) |received, replica| {
             if (received) |message| {
                 assert(message.header.command == .do_view_change);
                 assert(message.header.replica == replica);
@@ -8573,10 +8573,10 @@ const DVCQuorum = struct {
             const dvc_commit_max_pipeline =
                 dvc.header.op -| constants.pipeline_prepare_queue_max;
 
-            commit_max_ = std.math.max(commit_max_, dvc_commit_max_tail);
-            commit_max_ = std.math.max(commit_max_, dvc_commit_max_pipeline);
-            commit_max_ = std.math.max(commit_max_, dvc.header.commit);
-            commit_max_ = std.math.max(commit_max_, dvc_headers.slice[0].commit);
+            commit_max_ = @max(commit_max_, dvc_commit_max_tail);
+            commit_max_ = @max(commit_max_, dvc_commit_max_pipeline);
+            commit_max_ = @max(commit_max_, dvc.header.commit);
+            commit_max_ = @max(commit_max_, dvc_headers.slice[0].commit);
         }
         return commit_max_;
     }
@@ -9047,7 +9047,7 @@ const PipelineCache = struct {
     }
 
     fn deinit(pipeline: *PipelineCache, message_pool: *MessagePool) void {
-        for (pipeline.prepares) |*entry| {
+        for (&pipeline.prepares) |*entry| {
             if (entry.*) |m| {
                 message_pool.unref(m);
                 entry.* = null;

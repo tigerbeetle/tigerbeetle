@@ -204,7 +204,7 @@ pub const Trailer = struct {
         const buffer = destination.buffer[chunk.chunk_offset..][0..chunk.chunk.len];
         if (trailer.offset == chunk.chunk_offset) {
             stdx.copy_disjoint(.exact, u8, buffer, chunk.chunk);
-            trailer.offset += @intCast(u32, chunk.chunk.len);
+            trailer.offset += @as(u32, @intCast(chunk.chunk.len));
             assert(trailer.offset <= destination.size);
 
             if (trailer.offset == destination.size) {
@@ -241,11 +241,11 @@ test "sync: Trailer chunk sequence" {
             const chunk_size = @min(chunk_step, total_want.len - chunk_offset);
             const result = trailer.write_chunk(.{
                 .buffer = total_got[0..],
-                .size = @intCast(u32, total_want.len),
+                .size = @as(u32, @intCast(total_want.len)),
                 .checksum = vsr.checksum(total_want[0..]),
             }, .{
                 .chunk = total_want[chunk_offset..][0..chunk_size],
-                .chunk_offset = @intCast(u32, chunk_offset),
+                .chunk_offset = @as(u32, @intCast(chunk_offset)),
             });
 
             chunk_offset += chunk_size;
@@ -274,7 +274,7 @@ test "sync: Trailer past/future chunk" {
     inline for (.{ .incomplete, .ignore }) |result_want| {
         const result_got = trailer.write_chunk(.{
             .buffer = total_got[0..],
-            .size = @intCast(u32, total_want.len),
+            .size = @as(u32, @intCast(total_want.len)),
             .checksum = vsr.checksum(total_want[0..]),
         }, .{
             .chunk = total_want[0..2],
@@ -287,7 +287,7 @@ test "sync: Trailer past/future chunk" {
         // Ignore a chunk we aren't ready for yet.
         const result = trailer.write_chunk(.{
             .buffer = total_got[0..],
-            .size = @intCast(u32, total_want.len),
+            .size = @as(u32, @intCast(total_want.len)),
             .checksum = vsr.checksum(total_want[0..]),
         }, .{
             .chunk = total_want[6..8],
@@ -298,7 +298,7 @@ test "sync: Trailer past/future chunk" {
 
     const result = trailer.write_chunk(.{
         .buffer = total_got[0..],
-        .size = @intCast(u32, total_want.len),
+        .size = @as(u32, @intCast(total_want.len)),
         .checksum = vsr.checksum(total_want[0..]),
     }, .{
         .chunk = total_want[2..],

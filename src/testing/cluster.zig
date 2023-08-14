@@ -42,7 +42,9 @@ pub const Failure = enum(u8) {
 /// with a replica index.
 const client_id_permutation_shift = constants.members_max;
 
-pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, comptime constants: anytype) type) type {
+// TODO(Zig): Once Zig is upgraded from 0.11, change StateMachineType from anytype back to
+// fn (comptime Storage: type, comptime constants: anytype) type.
+pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
         const Self = @This();
 
@@ -146,10 +148,10 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             const storages = try allocator.alloc(Storage, node_count);
             errdefer allocator.free(storages);
 
-            for (storages) |*storage, replica_index| {
+            for (storages, 0..) |*storage, replica_index| {
                 errdefer for (storages[0..replica_index]) |*s| s.deinit(allocator);
                 var storage_options = options.storage;
-                storage_options.replica_index = @intCast(u8, replica_index);
+                storage_options.replica_index = @as(u8, @intCast(replica_index));
                 storage_options.fault_atlas = storage_fault_atlas;
                 storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
                 // Disable most faults at startup, so that the replicas don't get stuck recovering_head.
@@ -160,7 +162,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             const aofs = try allocator.alloc(AOF, node_count);
             errdefer allocator.free(aofs);
 
-            for (aofs) |*aof, i| {
+            for (aofs, 0..) |*aof, i| {
                 errdefer for (aofs[0..i]) |*a| a.deinit(allocator);
                 aof.* = try AOF.init(allocator);
             }
@@ -169,7 +171,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
 
-            for (replica_pools) |*pool, i| {
+            for (replica_pools, 0..) |*pool, i| {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
                 pool.* = try MessagePool.init(allocator, .replica);
             }
@@ -180,12 +182,12 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             const replica_health = try allocator.alloc(ReplicaHealth, node_count);
             errdefer allocator.free(replica_health);
-            mem.set(ReplicaHealth, replica_health, .up);
+            @memset(replica_health, .up);
 
             var client_pools = try allocator.alloc(MessagePool, options.client_count);
             errdefer allocator.free(client_pools);
 
-            for (client_pools) |*pool, i| {
+            for (client_pools, 0..) |*pool, i| {
                 errdefer for (client_pools[0..i]) |*p| p.deinit(allocator);
                 pool.* = try MessagePool.init(allocator, .client);
             }
@@ -195,7 +197,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             var clients = try allocator.alloc(Client, options.client_count);
             errdefer allocator.free(clients);
 
-            for (clients) |*client, i| {
+            for (clients, 0..) |*client, i| {
                 errdefer for (clients[0..i]) |*c| c.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
@@ -223,7 +225,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             errdefer sync_checker.deinit();
 
             // Format each replica's storage (equivalent to "tigerbeetle format ...").
-            for (storages) |*storage, replica_index| {
+            for (storages, 0..) |*storage, replica_index| {
                 var superblock = try SuperBlock.init(allocator, .{
                     .storage = storage,
                     .storage_size_limit = options.storage_size_limit,
@@ -235,7 +237,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                     allocator,
                     .{
                         .cluster = options.cluster_id,
-                        .replica = @intCast(u8, replica_index),
+                        .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
                     },
                     storage,
@@ -269,12 +271,12 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
                 .sync_checker = sync_checker,
             };
 
-            for (cluster.replicas) |_, replica_index| {
+            for (cluster.replicas, 0..) |_, replica_index| {
                 errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
                 const nonce = 1 + @as(u128, replica_index) << 64;
-                try cluster.open_replica(@intCast(u8, replica_index), nonce, .{
+                try cluster.open_replica(@as(u8, @intCast(replica_index)), nonce, .{
                     .resolution = constants.tick_ms * std.time.ns_per_ms,
                     .offset_type = .linear,
                     .offset_coefficient_A = 0,
@@ -299,7 +301,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             cluster.network.deinit();
             for (cluster.clients) |*client| client.deinit(cluster.allocator);
             for (cluster.client_pools) |*pool| pool.deinit(cluster.allocator);
-            for (cluster.replicas) |*replica, i| {
+            for (cluster.replicas, 0..) |*replica, i| {
                 switch (cluster.replica_health[i]) {
                     .up => replica.deinit(cluster.allocator),
                     .down => {},
@@ -326,7 +328,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
 
             for (cluster.clients) |*client| client.tick();
             for (cluster.storages) |*storage| storage.tick();
-            for (cluster.replicas) |*replica, i| {
+            for (cluster.replicas, 0..) |*replica, i| {
                 switch (cluster.replica_health[i]) {
                     .up => {
                         replica.tick();
@@ -461,7 +463,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         }
 
         fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), client.on_reply_context.?));
+            const cluster = @as(*Self, @ptrCast(@alignCast(client.on_reply_context.?)));
             assert(reply_message.header.cluster == cluster.options.cluster_id);
             assert(reply_message.header.invalid() == null);
             assert(reply_message.header.client == client.id);
@@ -469,7 +471,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             assert(reply_message.header.command == .reply);
             assert(reply_message.header.operation == request_message.header.operation);
 
-            const client_index = for (cluster.clients) |*c, i| {
+            const client_index = for (cluster.clients, 0..) |*c, i| {
                 if (client == c) break i;
             } else unreachable;
 
@@ -477,7 +479,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
-            const cluster = @ptrCast(*Self, @alignCast(@alignOf(Self), replica.test_context.?));
+            const cluster = @as(*Self, @ptrCast(@alignCast(replica.test_context.?)));
             assert(cluster.replica_health[replica.replica] == .up);
 
             switch (event) {
@@ -542,7 +544,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
         /// Print an error message and then exit with an exit code.
         fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
             std.log.scoped(.state_checker).err(fmt_string, args);
-            std.os.exit(@enumToInt(failure));
+            std.os.exit(@intFromEnum(failure));
         }
 
         /// Print the current state of the cluster, intended for printf debugging.
@@ -646,7 +648,7 @@ pub fn ClusterType(comptime StateMachineType: fn (comptime Storage: type, compti
             log.info("{[replica]: >2} {[event]c} {[role]c} {[statuses]s}" ++
                 "  {[info]s}  {[pipeline]s}", .{
                 .replica = replica.replica,
-                .event = @enumToInt(event),
+                .event = @intFromEnum(event),
                 .role = role,
                 .statuses = statuses[0 .. cluster.replica_count + cluster.standby_count],
                 .info = info,

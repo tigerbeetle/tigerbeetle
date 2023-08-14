@@ -3,7 +3,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
-const meta = std.meta;
 
 const stdx = @import("../stdx.zig");
 
@@ -14,8 +13,8 @@ pub const Fingerprint = struct {
     mask: @Vector(8, u32),
 
     pub fn create(hash: u64) Fingerprint {
-        const hash_lower = @truncate(u32, hash);
-        const hash_upper = @intCast(u32, hash >> 32);
+        const hash_lower = @as(u32, @truncate(hash));
+        const hash_upper = @as(u32, @intCast(hash >> 32));
 
         // TODO These constants are from the paper and we understand them to be arbitrary odd
         // integers. Experimentally compare the performance of these with other randomly chosen
@@ -32,11 +31,12 @@ pub const Fingerprint = struct {
         };
 
         // Multiply-shift hashing. This produces 8 values in the range 0 to 31 (2^5 - 1).
-        const bit_indexes = (odd_integers *% @splat(8, hash_lower)) >> @splat(8, @as(u5, 32 - 5));
+        const lower: @Vector(8, u32) = @splat(hash_lower);
+        const bit_indexes = (odd_integers *% lower) >> @splat(32 - 5);
 
         return .{
             .hash = hash_upper,
-            .mask = @splat(8, @as(u32, 1)) << @intCast(@Vector(8, u5), bit_indexes),
+            .mask = @as(@Vector(8, u32), @splat(1)) << @intCast(bit_indexes),
         };
     }
 };
@@ -75,7 +75,7 @@ inline fn block_index(hash: u32, size: usize) u32 {
     assert(size > 0);
 
     const block_count = @divExact(size, @sizeOf(@Vector(8, u32)));
-    return @intCast(u32, (@as(u64, hash) * block_count) >> 32);
+    return @intCast((@as(u64, hash) * block_count) >> 32);
 }
 
 test "bloom filter: refAllDecls" {
@@ -99,7 +99,7 @@ const test_bloom_filter = struct {
 
         // `block_size` is currently the only size bloom_filter that we use.
         const filter = try std.testing.allocator.alloc(u8, block_size);
-        std.mem.set(u8, filter, 0);
+        @memset(filter, 0);
         defer std.testing.allocator.free(filter);
 
         for (keys) |key| {

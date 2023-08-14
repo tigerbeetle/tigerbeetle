@@ -162,7 +162,7 @@ pub const Storage = struct {
 
         var prng = std.rand.DefaultPrng.init(options.seed);
         const sector_count = @divExact(size, constants.sector_size);
-        const memory = try allocator.allocAdvanced(u8, constants.sector_size, size, .exact);
+        const memory = try allocator.alignedAlloc(u8, constants.sector_size, size);
         errdefer allocator.free(memory);
 
         var memory_written = try std.DynamicBitSetUnmanaged.initEmpty(allocator, sector_count);
@@ -506,19 +506,13 @@ pub const Storage = struct {
     ) *const superblock.SuperBlockHeader {
         const offset = vsr.Zone.superblock.offset(superblock.SuperBlockZone.header.start_for_copy(copy_));
         const bytes = storage.memory[offset..][0..comptime superblock.SuperBlockZone.header.size_max()];
-        return @alignCast(
-            @alignOf(superblock.SuperBlockHeader),
-            mem.bytesAsValue(superblock.SuperBlockHeader, bytes),
-        );
+        return @alignCast(mem.bytesAsValue(superblock.SuperBlockHeader, bytes));
     }
 
     pub fn wal_headers(storage: *const Storage) []const vsr.Header {
         const offset = vsr.Zone.wal_headers.offset(0);
         const size = vsr.Zone.wal_headers.size().?;
-        return @alignCast(
-            @alignOf(vsr.Header),
-            mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]),
-        );
+        return @alignCast(mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]));
     }
 
     const MessageRaw = extern struct {
@@ -534,10 +528,7 @@ pub const Storage = struct {
     pub fn wal_prepares(storage: *const Storage) []const MessageRaw {
         const offset = vsr.Zone.wal_prepares.offset(0);
         const size = vsr.Zone.wal_prepares.size().?;
-        return @alignCast(
-            @alignOf(MessageRaw),
-            mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]),
-        );
+        return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
     }
 
     pub fn grid_block(
@@ -555,10 +546,7 @@ pub const Storage = struct {
         assert(block_header.valid_checksum());
         assert(block_header.size <= constants.block_size);
 
-        return @alignCast(
-            constants.sector_size,
-            storage.memory[block_offset..][0..constants.block_size],
-        );
+        return @alignCast(storage.memory[block_offset..][0..constants.block_size]);
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
@@ -610,7 +598,7 @@ fn verify_alignment(buffer: []const u8) void {
 
     // Ensure that the read or write is aligned correctly for Direct I/O:
     // If this is not the case, the underlying syscall will return EINVAL.
-    assert(@mod(@ptrToInt(buffer.ptr), constants.sector_size) == 0);
+    assert(@mod(@intFromPtr(buffer.ptr), constants.sector_size) == 0);
     assert(@mod(buffer.len, constants.sector_size) == 0);
 }
 
@@ -685,8 +673,8 @@ const SectorRange = struct {
         if (a.max <= b.min) return null;
         if (b.max <= a.min) return null;
         return SectorRange{
-            .min = std.math.max(a.min, b.min),
-            .max = std.math.min(a.max, b.max),
+            .min = @max(a.min, b.min),
+            .max = @min(a.max, b.max),
         };
     }
 };
@@ -761,8 +749,8 @@ pub const ClusterFaultAtlas = struct {
 
         var atlas = ClusterFaultAtlas{ .options = options };
 
-        for (&atlas.faulty_superblock_areas.values) |*copies, area| {
-            if (area == @enumToInt(superblock.SuperBlockZone.header)) {
+        for (&atlas.faulty_superblock_areas.values, 0..) |*copies, area| {
+            if (area == @intFromEnum(superblock.SuperBlockZone.header)) {
                 // Only inject read/write faults into trailers, not the header.
                 // This prevents the quorum from being lost like so:
                 // - copy₀: B (ok)

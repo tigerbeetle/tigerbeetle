@@ -3,7 +3,10 @@ const assert = std.debug.assert;
 
 const testing = std.testing;
 
-const c = @cImport(@cInclude("tb_client.h"));
+const c = @cImport({
+    _ = @import("tb_client.zig"); // Needed for the @export()'ed C ffi functions.
+    @cInclude("tb_client.h");
+});
 
 const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");
@@ -35,7 +38,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             result_ptr: [*c]const u8,
             result_len: u32,
         ) callconv(.C) void {
-            var self = @ptrCast(*Self, @alignCast(@alignOf(*Self), tb_packet.*.user_data.?));
+            var self = @as(*Self, @ptrCast(@alignCast(tb_packet.*.user_data.?)));
             defer self.completion.complete();
 
             self.reply = .{
@@ -46,7 +49,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
                     // Copy the message's body to the context buffer:
                     assert(result_len <= request_size_max);
                     var writable: [request_size_max]u8 = undefined;
-                    const readable = @ptrCast([*]const u8, result_ptr.?);
+                    const readable = @as([*]const u8, @ptrCast(result_ptr.?));
                     stdx.copy_disjoint(.inexact, u8, &writable, readable[0..result_len]);
                     break :blk writable;
                 } else null,
@@ -108,7 +111,7 @@ test "c_client echo" {
         &tb_client,
         cluster_id,
         address,
-        @intCast(u32, address.len),
+        @as(u32, @intCast(address.len)),
         concurrency_max,
         tb_context,
         RequestContext.on_complete,
@@ -168,7 +171,7 @@ test "c_client echo" {
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(tb_client, request.reply.?.tb_client);
             try testing.expectEqual(c.TB_PACKET_OK, request.packet.status);
-            try testing.expectEqual(@ptrToInt(request.packet), @ptrToInt(request.reply.?.tb_packet));
+            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
             try testing.expect(request.reply.?.result != null);
             try testing.expectEqual(request.sent_data_size, request.reply.?.result_len);
 
@@ -194,7 +197,7 @@ test "c_client tb_status" {
                 &tb_client,
                 cluster_id,
                 addresses.ptr,
-                @intCast(u32, addresses.len),
+                @as(u32, @intCast(addresses.len)),
                 concurrency_max,
                 tb_context,
                 RequestContextType(0).on_complete,
@@ -245,7 +248,7 @@ test "c_client tb_packet_status" {
         &tb_client,
         cluster_id,
         address,
-        @intCast(u32, address.len),
+        @as(u32, @intCast(address.len)),
         concurrency_max,
         tb_context,
         RequestContext.on_complete,
@@ -294,7 +297,7 @@ test "c_client tb_packet_status" {
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(client, request.reply.?.tb_client);
-            try testing.expectEqual(@ptrToInt(request.packet), @ptrToInt(request.reply.?.tb_packet));
+            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
             try testing.expectEqual(tb_packet_status_expected, request.packet.status);
         }
     }.action;

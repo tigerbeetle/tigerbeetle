@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build go_client -Drelease-safe
+      - run: ./zig/zig build go_client -Doptimize=ReleaseSafe
 
       - name: Upload binaries
         uses: actions/upload-artifact@v3
