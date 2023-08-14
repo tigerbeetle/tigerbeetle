@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
@@ -17,10 +18,21 @@ port: u16,
 port_str: std.BoundedArray(u8, 8),
 
 tmp_dir: std.testing.TmpDir,
-process: std.ChildProcess,
-stderr_reader: std.Thread,
 
-pub fn init(gpa: std.mem.Allocator) !TmpTigerBeetle {
+// Lifetimes are tricky here! The order is:
+// - `kill` the process,
+// - `join` the thread,
+// - `destroy` the read buffer
+//
+// Killing the process guarantees to unblock the thread.
+stderr_reader: *StderrReader,
+stderr_reader_thread: std.Thread,
+process: std.ChildProcess,
+
+pub fn init(
+    gpa: std.mem.Allocator,
+    options: struct { echo: bool = true },
+) !TmpTigerBeetle {
     const shell = try Shell.create(gpa);
     defer shell.destroy();
 
@@ -31,6 +43,8 @@ pub fn init(gpa: std.mem.Allocator) !TmpTigerBeetle {
     _ = shell.project_root.statFile(tigerbeetle_exe) catch {
         log.info("building TigerBeetle", .{});
         try shell.zig("build", .{});
+
+        _ = try shell.project_root.statFile(tigerbeetle_exe);
     };
 
     const tigerbeetle: []const u8 = try shell.project_root.realpathAlloc(gpa, tigerbeetle_exe);
@@ -56,50 +70,93 @@ pub fn init(gpa: std.mem.Allocator) !TmpTigerBeetle {
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );
     errdefer {
-        _ = process.kill() catch {};
-        _ = process.wait() catch unreachable;
+        _ = process.kill() catch unreachable;
     }
+
+    var stderr_reader = try StderrReader.create(gpa, process.stderr.?);
+    errdefer stderr_reader.destroy(gpa);
+
+    stderr_reader.echo = options.echo;
 
     // Parse stderr to learn the assigned port. After that, spawn a dedicated thread to read the
     // rest of stderr to avoid blocking stderr. No need to read stdout as we don't print there.
-    var buf: [4096]u8 = undefined;
-    var buf_cursor: usize = 0;
     var limit: u32 = 0;
     const port = while (limit < 32) : (limit += 1) {
-        buf_cursor += try process.stderr.?.read(buf[buf_cursor..]);
-        if (parse_port(buf[0..buf_cursor])) |port| break port;
+        const line = try stderr_reader.read_line();
+        if (parse_port(line)) |port| break port;
     } else {
-        log.err("can't start TigerBeetle", .{});
-        std.debug.print("stderr:\n{s}\n", .{buf[0..buf_cursor]});
+        log.err("failed to read port number from tigerbeetle process", .{});
         return error.NoPort;
     };
 
     var port_str: std.BoundedArray(u8, 8) = .{};
     std.fmt.formatInt(port, 10, .lower, .{}, port_str.writer()) catch unreachable;
 
-    const stderr_reader = try read_stderr_in_background(&process);
-    errdefer stderr_reader.join();
+    const stderr_reader_thread = try std.Thread.spawn(.{}, StderrReader.read_all, .{stderr_reader});
+    errdefer stderr_reader_thread.join();
 
     return TmpTigerBeetle{
-        .tmp_dir = tmp_dir,
-        .process = process,
         .port = port,
         .port_str = port_str,
+        .tmp_dir = tmp_dir,
         .stderr_reader = stderr_reader,
+        .stderr_reader_thread = stderr_reader_thread,
+        .process = process,
     };
 }
 
-pub fn deinit(tb: *TmpTigerBeetle) void {
-    _ = tb.process.kill() catch {};
-    tb.stderr_reader.join();
-    _ = tb.process.wait() catch unreachable;
+pub fn deinit(tb: *TmpTigerBeetle, gpa: std.mem.Allocator) void {
+    _ = tb.process.kill() catch unreachable;
+    tb.stderr_reader_thread.join();
+    tb.stderr_reader.destroy(gpa);
     tb.tmp_dir.cleanup();
 }
 
+const StderrReader = struct {
+    fd: std.fs.File,
+    echo: bool = false,
+    buf: [4096]u8 = undefined,
+
+    fn create(gpa: std.mem.Allocator, fd: std.fs.File) !*StderrReader {
+        // We need to `dup` the file descriptor we will be reading from to avoid a race with
+        // concurrent `.kill` of the process.
+        //
+        // See https://github.com/ziglang/zig/issues/16820
+        const fd_dup = std.fs.File{ .handle = try std.os.dup(fd.handle) };
+        errdefer fd_dup.close();
+
+        var reader = try gpa.create(StderrReader);
+        errdefer gpa.destroy(reader);
+
+        reader.* = .{ .fd = fd_dup };
+        return reader;
+    }
+
+    fn destroy(reader: *StderrReader, gpa: std.mem.Allocator) void {
+        reader.fd.close();
+        gpa.destroy(reader);
+    }
+
+    fn read_line(reader: *StderrReader) ![]const u8 {
+        const line = try reader.fd.reader().readUntilDelimiter(&reader.buf, '\n');
+        if (reader.echo) {
+            std.debug.print("{s}\n", .{line});
+        }
+        return line;
+    }
+
+    fn read_all(reader: *StderrReader) void {
+        while (true) {
+            _ = reader.read_line() catch return;
+        }
+    }
+};
+
 fn parse_port(stderr_log: []const u8) ?u16 {
+    assert(std.mem.indexOf(u8, stderr_log, "\n") == null);
+
     var result = stderr_log;
     result = (stdx.cut(result, "listening on ") orelse return null).suffix;
-    result = (stdx.cut(result, "\n") orelse return null).prefix;
     result = (stdx.cut(result, ":") orelse return null).suffix;
     const port = std.fmt.parseInt(u16, result, 10) catch return null;
     return port;
@@ -107,23 +164,7 @@ fn parse_port(stderr_log: []const u8) ?u16 {
 
 test parse_port {
     try std.testing.expectEqual(
-        parse_port("info(main): 0: cluster=1: listening on 127.0.0.1:39047\n"),
+        parse_port("info(main): 0: cluster=1: listening on 127.0.0.1:39047"),
         39047,
-    );
-}
-
-fn read_stderr_in_background(process: *const std.ChildProcess) !std.Thread {
-    return try std.Thread.spawn(
-        .{},
-        struct {
-            fn read_stderr(stderr: std.fs.File) void {
-                var buf: [4096]u8 = undefined;
-                while (true) {
-                    const n = stderr.read(&buf) catch return;
-                    if (n == 0) return;
-                }
-            }
-        }.read_stderr,
-        .{process.stderr.?},
     );
 }
