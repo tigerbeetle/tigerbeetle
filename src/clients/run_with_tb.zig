@@ -24,8 +24,8 @@ const file_or_directory_exists = @import("./shutil.zig").file_or_directory_exist
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
 
 pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8, cwd: []const u8) !void {
-    var tb = try TmpTigerBeetle.init(arena.allocator());
-    defer tb.deinit();
+    var tb = try TmpTigerBeetle.init(arena.allocator(), .{});
+    defer tb.deinit(arena.allocator());
 
     std.debug.print("Running commands: {s}\n", .{commands});
 
