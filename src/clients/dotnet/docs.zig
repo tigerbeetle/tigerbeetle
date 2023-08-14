@@ -49,10 +49,12 @@ fn current_commit_post_install_hook(
     const generated_csproj_file_exists =
         file_or_directory_exists(generated_csproj_filename);
 
-    const csproj_filename = blk: {
-        var walker = try dir.walk(arena.allocator());
-        defer walker.deinit();
+    // entry.path found by the walker needs to live on past the blk:
+    // initialization block.
+    var walker = try dir.walk(arena.allocator());
+    defer walker.deinit();
 
+    const csproj_filename = blk: {
         while (try walker.next()) |entry| {
             // Need to see if there's another .csproj file. If there
             // is, we can delete the generated one.
@@ -65,8 +67,8 @@ fn current_commit_post_install_hook(
                 if (generated_csproj_file_exists) {
                     try run_shell(arena, try std.fmt.allocPrint(
                         arena.allocator(),
-                        "rm {s}",
-                        .{generated_csproj_filename},
+                        "rm '.{s}{s}'",
+                        .{ path_separator, generated_csproj_filename },
                     ));
                 }
 
