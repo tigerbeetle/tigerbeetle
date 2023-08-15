@@ -2238,8 +2238,8 @@ pub fn ReplicaType(
                     .message = reply.ref(),
                 };
 
-                self.grid.read_block_from_replica(
-                    on_request_blocks_read_repair,
+                self.grid.read_block(
+                    .{ .from_local = on_request_blocks_read_repair },
                     &read.read,
                     request.block_address,
                     request.block_checksum,

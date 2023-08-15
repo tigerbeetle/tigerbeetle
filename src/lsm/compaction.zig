@@ -393,8 +393,8 @@ pub fn CompactionType(
                     },
                     .disk => |table_ref| {
                         compaction.state = .iterator_init_a;
-                        compaction.context.grid.read_block_from_cluster(
-                            on_iterator_init_a,
+                        compaction.context.grid.read_block(
+                            .{ .from_local_or_global= on_iterator_init_a },
                             &compaction.read,
                             table_ref.table_info.address,
                             table_ref.table_info.checksum,

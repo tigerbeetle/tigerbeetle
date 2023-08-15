@@ -69,11 +69,11 @@ pub fn GridType(comptime Storage: type) type {
 
         const ReadBlockCallback = union(enum) {
             /// If the local read fails, report the error.
-            local: *const fn (*Grid.Read, ReadBlockResult) void,
+            from_local: *const fn (*Grid.Read, ReadBlockResult) void,
             /// If the local read fails, this read will be added to a linked list, which Replica can
             /// then interrogate each tick(). The callback passed to this function won't be called
             /// until the block has been recovered.
-            remote: *const fn (*Grid.Read, BlockPtrConst) void,
+            from_local_or_global: *const fn (*Grid.Read, BlockPtrConst) void,
         };
 
         pub const Read = struct {
@@ -674,51 +674,13 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        // TODO read_block, .from_local, .from_local_or_global cache_{read,write}
-        pub fn read_block_from_replica(
-            grid: *Grid,
-            callback: *const fn (*Grid.Read, ReadBlockResult) void,
-            read: *Grid.Read,
-            address: u64,
-            checksum: u128,
-            options: struct {
-                cache_read: bool,
-                cache_write: bool,
-            },
-        ) void {
-            grid.read_block(.{ .local = callback }, read, address, checksum, .{
-                .coherent = false,
-                .cache_read = options.cache_read,
-                .cache_write = options.cache_write,
-            });
-        }
-
-        pub fn read_block_from_cluster(
-            grid: *Grid,
-            callback: *const fn (*Grid.Read, BlockPtrConst) void,
-            read: *Grid.Read,
-            address: u64,
-            checksum: u128,
-            options: struct {
-                cache_read: bool,
-                cache_write: bool,
-            },
-        ) void {
-            grid.read_block(.{ .remote = callback }, read, address, checksum, .{
-                .coherent = true,
-                .cache_read = options.cache_read,
-                .cache_write = options.cache_write,
-            });
-        }
-
-        fn read_block(
+        pub fn read_block(
             grid: *Grid,
             callback: ReadBlockCallback,
             read: *Grid.Read,
             address: u64,
             checksum: u128,
             options: struct {
-                coherent: bool,
                 cache_read: bool,
                 cache_write: bool,
             },
@@ -727,26 +689,26 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             assert(address > 0);
 
-            if (options.coherent) {
-                assert(grid.checkpointing == null);
-                assert(!grid.superblock.free_set.is_free(address));
-                assert(grid.writing(address, null) != .create);
-                assert(callback == .remote);
-            } else {
-                maybe(grid.checkpointing == null);
-                // We try to read the block even when it is free — if we recently released it,
-                // it might be found on disk anyway.
-                // TODO maybe not, to unify invariants?
-                maybe(grid.superblock.free_set.is_free(address));
-                maybe(grid.writing(address, null) == .create);
-                assert(callback == .local);
+            switch (callback) {
+                .from_local => {
+                    maybe(grid.checkpointing == null);
+                    // We try to read the block even when it is free — if we recently released it,
+                    // it might be found on disk anyway.
+                    maybe(grid.superblock.free_set.is_free(address));
+                    maybe(grid.writing(address, null) == .create);
+                },
+                .from_local_or_global => {
+                    assert(grid.checkpointing == null);
+                    assert(!grid.superblock.free_set.is_free(address));
+                    assert(grid.writing(address, null) != .create);
+                },
             }
 
             read.* = .{
                 .callback = callback,
                 .address = address,
                 .checksum = checksum,
-                .coherent = options.coherent,
+                .coherent = callback == .from_local_or_global,
                 .cache_read = options.cache_read,
                 .cache_write = options.cache_write,
                 .checkpoint_id = grid.superblock.working.checkpoint_id(),
@@ -778,7 +740,7 @@ pub fn GridType(comptime Storage: type) type {
                 &grid.read_faulty_queue,
             }) |queue| {
                 // Don't remote-repair repairs – the block may not belong in our current checkpoint.
-                if (read.callback == .local) {
+                if (read.callback == .from_local) {
                     if (queue == &grid.read_faulty_queue) continue;
                 }
 
@@ -978,8 +940,8 @@ pub fn GridType(comptime Storage: type) type {
                 }
 
                 switch (pending_read.callback) {
-                    .local => |callback| callback(pending_read, result),
-                    .remote => |callback| {
+                    .from_local => |callback| callback(pending_read, result),
+                    .from_local_or_global => |callback| {
                         if (result == .valid) {
                             callback(pending_read, result.valid);
                         } else {
@@ -992,8 +954,8 @@ pub fn GridType(comptime Storage: type) type {
             // Then invoke the callback with the cache block (which should be valid for the duration
             // of the callback as any nested Grid calls cannot synchronously update the cache).
             switch (read.callback) {
-                .local => |callback| callback(read, result),
-                .remote => |callback| {
+                .from_local => |callback| callback(read, result),
+                .from_local_or_global => |callback| {
                     if (result == .valid) {
                         callback(read, result.valid);
                     } else {
@@ -1007,7 +969,7 @@ pub fn GridType(comptime Storage: type) type {
             // read in the recovery queue and enqueue to it.
             if (read_remote_resolves.pop()) |read_remote_head_pending| {
                 const read_remote_head = @fieldParentPtr(Read, "pending", read_remote_head_pending);
-                assert(read_remote_head.callback == .remote);
+                assert(read_remote_head.callback == .from_local_or_global);
                 assert(read_remote_head.coherent);
 
                 // On the result of an invalid block, move the "root" read (and all others it
