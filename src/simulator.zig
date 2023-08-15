@@ -27,21 +27,22 @@ const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
-/// The `log` namespace in this root file is required to implement our custom `log` function.
 pub const output = std.log.scoped(.cluster);
+const log = std.log.scoped(.simulator);
 
-/// The -Dsimulator-log=<full|short> build option selects two logging modes.
-/// In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
-/// "full" mode is the usual logging according to the level.
-pub const log_level: std.log.Level = if (vsr_simulator_options.log == .short) .info else .debug;
+pub const std_options = struct {
+    /// The -Dsimulator-log=<full|short> build option selects two logging modes.
+    /// In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
+    /// "full" mode is the usual logging according to the level.
+    pub const log_level: std.log.Level = if (vsr_simulator_options.log == .short) .info else .debug;
+    pub const logFn = log_override;
+};
 
 // Uncomment if you need per-scope control over the log levels.
 // pub const scope_levels = [_]std.log.ScopeLevel{
 //     .{ .scope = .cluster, .level = .info },
 //     .{ .scope = .replica, .level = .debug },
 // };
-
-const log_simulator = std.log.scoped(.simulator);
 
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
@@ -76,7 +77,7 @@ pub fn main() !void {
             // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
             @panic("no seed provided: the simulator must be run with -OReleaseSafe");
         }
-        if (log_level == .debug) {
+        if (vsr_simulator_options.log != .short) {
             output.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
         }
     }
@@ -429,7 +430,7 @@ pub const Simulator = struct {
             simulator.options.cluster.replica_count,
             simulator.options.cluster.standby_count,
         );
-        log_simulator.debug("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
+        log.debug("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
 
         var it = simulator.core.iterator(.{});
         while (it.next()) |replica_index| {
@@ -587,7 +588,7 @@ pub const Simulator = struct {
             assert(commit.request.header.command == .request);
             assert(commit.request.header.client == commit_client.id);
 
-            log_simulator.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
+            log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
                 commit.reply.header.op,
                 commit.reply.header.operation,
                 commit.request.header.client,
@@ -696,7 +697,7 @@ pub const Simulator = struct {
                         replica.status != .recovering_head and
                         replica.syncing == .idle);
 
-                    log_simulator.debug("{}: crash replica", .{replica.replica});
+                    log.debug("{}: crash replica", .{replica.replica});
                     simulator.cluster.crash_replica(replica.replica);
 
                     simulator.replica_stability[replica.replica] =
@@ -737,7 +738,7 @@ pub const Simulator = struct {
             }
         }
 
-        log_simulator.debug("{}: restart replica (faults={})", .{
+        log.debug("{}: restart replica (faults={})", .{
             replica_index,
             fault,
         });
@@ -842,7 +843,7 @@ var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
     .unbuffered_writer = undefined,
 };
 
-pub fn log(
+fn log_override(
     comptime level: std.log.Level,
     comptime scope: @TypeOf(.EnumLiteral),
     comptime format: []const u8,

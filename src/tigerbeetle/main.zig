@@ -31,8 +31,10 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
-pub const log_level: std.log.Level = constants.log_level;
-pub const log = constants.log;
+pub const std_options = struct {
+    pub const log_level: std.log.Level = constants.log_level;
+    pub const logFn = constants.log;
+};
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
