@@ -1275,7 +1275,7 @@ test "JNI: DirectByteBuffer" {
     var native_buffer = blk: {
         var array: [32]u8 = undefined;
         var value: u8 = array.len;
-        for (array) |*byte| {
+        for (&array) |*byte| {
             value -= 1;
             byte.* = value;
         }
@@ -1474,7 +1474,7 @@ test "JNI: primitive arrays" {
                         get_array_region(env, array, 5, 10, &buffer);
                         try testing.expect(env.exception_check() == .jni_false);
 
-                        for (buffer, 0..) |*element, i| {
+                        for (&buffer, 0..) |*element, i| {
                             try testing.expectEqual(cast(i + 5), element.*);
                             element.* = cast(i);
                         }
