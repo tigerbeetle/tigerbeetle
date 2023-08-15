@@ -224,8 +224,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(block.tree == manifest_log.tree_id);
                 assert(block.address > 0);
 
-                manifest_log.grid.read_block_from_cluster(
-                    open_read_block_callback,
+                manifest_log.grid.read_block(
+                    .{ .from_local_or_global = open_read_block_callback },
                     &manifest_log.read,
                     block.address,
                     block.checksum,
@@ -578,8 +578,8 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.reading = true;
                 manifest_log.read_block_reference = block;
 
-                manifest_log.grid.read_block_from_cluster(
-                    compact_read_block_callback,
+                manifest_log.grid.read_block(
+                    .{ .from_local_or_global = compact_read_block_callback },
                     &manifest_log.read,
                     block.address,
                     block.checksum,

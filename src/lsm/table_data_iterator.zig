@@ -100,8 +100,8 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 };
 
                 it.callback = .{ .read = callback };
-                it.context.grid.read_block_from_cluster(
-                    on_read,
+                it.context.grid.read_block(
+                    .{ .from_local_or_global = on_read },
                     &it.read,
                     it.context.addresses[index],
                     it.context.checksums[index],

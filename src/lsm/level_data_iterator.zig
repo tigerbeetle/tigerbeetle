@@ -124,8 +124,8 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
                 // Refill `table_data_iterator` before calling `table_next`.
                 const table_ref = it.context.tables[it.table_index];
                 it.callback = .{ .level_next = callback };
-                it.context.grid.read_block_from_cluster(
-                    on_level_next,
+                it.context.grid.read_block(
+                    .{ .from_local_or_global = on_level_next },
                     &it.read,
                     table_ref.table_info.address,
                     table_ref.table_info.checksum,
