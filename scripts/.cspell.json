@@ -133,6 +133,7 @@
 	"tigerbeetlex",
 	"Jepsen",
 	"Dtest",
+	"Doptimize",
 	"kcov",
 	"Fsyncgate"
     ]
