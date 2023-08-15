@@ -85,8 +85,8 @@ pub fn GridType(comptime Storage: type) type {
             checkpoint_id: u128,
 
             coherent: bool,
-            cache_check: bool,
-            cache_update: bool,
+            cache_read: bool,
+            cache_write: bool,
             pending: ReadPending = .{},
             resolves: FIFO(ReadPending) = .{ .name = null },
 
@@ -674,6 +674,7 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
+        // TODO read_block, .from_local, .from_local_or_global cache_{read,write}
         pub fn read_block_from_replica(
             grid: *Grid,
             callback: *const fn (*Grid.Read, ReadBlockResult) void,
@@ -681,14 +682,14 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
             options: struct {
-                cache_check: bool,
-                cache_update: bool,
+                cache_read: bool,
+                cache_write: bool,
             },
         ) void {
             grid.read_block(.{ .local = callback }, read, address, checksum, .{
                 .coherent = false,
-                .cache_check = options.cache_check,
-                .cache_update = options.cache_update,
+                .cache_read = options.cache_read,
+                .cache_write = options.cache_write,
             });
         }
 
@@ -699,14 +700,14 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
             options: struct {
-                cache_check: bool,
-                cache_update: bool,
+                cache_read: bool,
+                cache_write: bool,
             },
         ) void {
             grid.read_block(.{ .remote = callback }, read, address, checksum, .{
                 .coherent = true,
-                .cache_check = options.cache_check,
-                .cache_update = options.cache_update,
+                .cache_read = options.cache_read,
+                .cache_write = options.cache_write,
             });
         }
 
@@ -718,8 +719,8 @@ pub fn GridType(comptime Storage: type) type {
             checksum: u128,
             options: struct {
                 coherent: bool,
-                cache_check: bool,
-                cache_update: bool,
+                cache_read: bool,
+                cache_write: bool,
             },
         ) void {
             assert(grid.superblock.opened);
@@ -746,13 +747,13 @@ pub fn GridType(comptime Storage: type) type {
                 .address = address,
                 .checksum = checksum,
                 .coherent = options.coherent,
-                .cache_check = options.cache_check,
-                .cache_update = options.cache_update,
+                .cache_read = options.cache_read,
+                .cache_write = options.cache_write,
                 .checkpoint_id = grid.superblock.working.checkpoint_id(),
                 .grid = grid,
             };
 
-            if (options.cache_check) {
+            if (options.cache_read) {
                 grid.on_next_tick(read_block_tick_callback, &read.next_tick);
             } else {
                 read_block_tick_callback(&read.next_tick);
@@ -795,9 +796,9 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            // When Read.cache_check is set, the caller of read_block() is responsible for calling
+            // When Read.cache_read is set, the caller of read_block() is responsible for calling
             // us via next_tick().
-            if (read.cache_check) {
+            if (read.cache_read) {
                 if (grid.read_block_from_cache(
                     read.address,
                     read.checksum,
@@ -865,9 +866,9 @@ pub fn GridType(comptime Storage: type) type {
 
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index =
-                if (read.cache_update) grid.cache.insert_index(&read.address) else null;
+                if (read.cache_write) grid.cache.insert_index(&read.address) else null;
             const block = block: {
-                if (read.cache_update) {
+                if (read.cache_write) {
                     const cache_block = &grid.cache_blocks[cache_index.?];
                     std.mem.swap(BlockPtr, iop_block, cache_block);
                     @memset(iop_block.*, 0);

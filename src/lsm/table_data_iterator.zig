@@ -105,7 +105,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     &it.read,
                     it.context.addresses[index],
                     it.context.checksums[index],
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 it.callback = .{ .next_tick = callback };

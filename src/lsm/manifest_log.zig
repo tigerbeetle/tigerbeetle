@@ -229,7 +229,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 // Use next_tick because the manifest may be empty (no blocks to read).
@@ -583,7 +583,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 manifest_log.read_callback = null;
