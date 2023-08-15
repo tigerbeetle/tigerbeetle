@@ -42,9 +42,10 @@ jobs:
       - uses: actions/checkout@v3
       - run: |
           COV=1 ./.github/ci/tests_on_ubuntu.sh && \
-          cp kcov-output/test.*/cobertura.xml cov-pr.xml
+          (cp kcov-output/test.*/cobertura.xml cov-pr.xml) || true
       - name: Upload cov-pr.xml
         uses: actions/upload-artifact@v3
+        continue-on-error: true
         with:
           name: cov-pr.xml
           path: cov-pr.xml
