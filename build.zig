@@ -213,7 +213,6 @@ pub fn build(b: *std.Build) !void {
             .optimize = mode,
             .filter = test_filter,
         });
-        unit_tests.addModule("vsr", vsr_module);
         unit_tests.addModule("vsr_options", vsr_options_module);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
         link_tracer_backend(unit_tests, git_clone_tracy, tracer_backend, target);
