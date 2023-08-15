@@ -923,15 +923,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (context.vsr_headers) |*headers| {
                 assert(context.caller.updates_vsr_headers());
 
-                superblock.staging.vsr_headers_count = @as(u32, @intCast(headers.array.len));
+                superblock.staging.vsr_headers_count = headers.array.count_as(u32);
                 stdx.copy_disjoint(
                     .exact,
                     vsr.Header,
-                    superblock.staging.vsr_headers_all[0..headers.array.len],
-                    headers.array.constSlice(),
+                    superblock.staging.vsr_headers_all[0..headers.array.count()],
+                    headers.array.const_slice(),
                 );
                 @memset(
-                    superblock.staging.vsr_headers_all[headers.array.len..],
+                    superblock.staging.vsr_headers_all[headers.array.count()..],
                     std.mem.zeroes(vsr.Header),
                 );
             } else {

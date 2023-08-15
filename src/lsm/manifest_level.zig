@@ -86,7 +86,7 @@ pub fn ManifestLevelType(
             /// The maximum key across both levels.
             key_max: Key,
             // References to tables in level B that intersect with the chosen table in level A.
-            tables: std.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
+            tables: stdx.BoundedArray(TableInfoReference, constants.lsm_growth_factor),
         };
 
         pub const LevelKeyRange = struct {
@@ -590,7 +590,7 @@ pub fn ManifestLevelType(
                     snapshot,
                     max_overlapping_tables,
                 ) orelse continue;
-                if (optimal == null or range.tables.len < optimal.?.range.tables.len) {
+                if (optimal == null or range.tables.count() < optimal.?.range.tables.count()) {
                     optimal = LeastOverlapTable{
                         .table = TableInfoReference{
                             .table_info = @constCast(table),
@@ -600,11 +600,11 @@ pub fn ManifestLevelType(
                     };
                 }
                 // If the table can be moved directly between levels then that is already optimal.
-                if (optimal.?.range.tables.len == 0) break;
+                if (optimal.?.range.tables.empty()) break;
             }
             assert(iterations > 0);
             assert(iterations == level_a.table_count_visible or
-                optimal.?.range.tables.len == 0);
+                optimal.?.range.tables.empty());
 
             return optimal.?;
         }
@@ -702,7 +702,7 @@ pub fn ManifestLevelType(
             var range = OverlapRange{
                 .key_min = key_min,
                 .key_max = key_max,
-                .tables = .{ .buffer = undefined },
+                .tables = .{},
             };
             const snapshots = [1]u64{snapshot};
             var it = level.iterator(
@@ -729,12 +729,12 @@ pub fn ManifestLevelType(
                 }
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section.
-                if (range.tables.len < max_overlapping_tables) {
+                if (range.tables.count() < max_overlapping_tables) {
                     var table_info_reference = TableInfoReference{
                         .table_info = @constCast(table),
                         .generation = level.generation,
                     };
-                    range.tables.appendAssumeCapacity(table_info_reference);
+                    range.tables.append_assume_capacity(table_info_reference);
                 } else {
                     return null;
                 }
@@ -812,8 +812,8 @@ pub fn TestContext(
         level: TestLevel,
 
         snapshot_max: u64 = 1,
-        snapshots: std.BoundedArray(u64, 8) = .{ .buffer = undefined },
-        snapshot_tables: std.BoundedArray(std.ArrayList(TableInfo), 8) = .{ .buffer = undefined },
+        snapshots: stdx.BoundedArray(u64, 8) = .{},
+        snapshot_tables: stdx.BoundedArray(std.ArrayList(TableInfo), 8) = .{},
 
         /// Contains only tables with snapshot_max == lsm.snapshot_latest
         reference: std.ArrayList(TableInfo),
@@ -983,22 +983,22 @@ pub fn TestContext(
         }
 
         fn create_snapshot(context: *Self) !void {
-            if (context.snapshots.len == context.snapshots.capacity()) return;
+            if (context.snapshots.full()) return;
 
-            context.snapshots.appendAssumeCapacity(context.take_snapshot());
+            context.snapshots.append_assume_capacity(context.take_snapshot());
 
-            const tables = context.snapshot_tables.addOneAssumeCapacity();
+            const tables = context.snapshot_tables.add_one_assume_capacity();
             tables.* = std.ArrayList(TableInfo).init(testing.allocator);
             try tables.insertSlice(0, context.reference.items);
         }
 
         fn drop_snapshot(context: *Self) !void {
-            if (context.snapshots.len == 0) return;
+            if (context.snapshots.empty()) return;
 
-            const index = context.random.uintLessThanBiased(usize, context.snapshots.len);
+            const index = context.random.uintLessThanBiased(usize, context.snapshots.count());
 
-            _ = context.snapshots.swapRemove(index);
-            var tables = context.snapshot_tables.swapRemove(index);
+            _ = context.snapshots.swap_remove(index);
+            var tables = context.snapshot_tables.swap_remove(index);
             defer tables.deinit();
 
             // Use this memory as a scratch buffer since it's conveniently already allocated.
@@ -1113,7 +1113,7 @@ pub fn TestContext(
         }
 
         fn remove_all(context: *Self) !void {
-            while (context.snapshots.len > 0) try context.drop_snapshot();
+            while (context.snapshots.count() > 0) try context.drop_snapshot();
             while (context.reference.items.len > 0) try context.delete_tables();
 
             try testing.expectEqual(@as(u32, 0), context.level.keys.len());

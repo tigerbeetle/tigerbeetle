@@ -15,7 +15,7 @@ const TmpTigerBeetle = @This();
 /// Port the TigerBeetle instance is listening on.
 port: u16,
 /// For convenience, the same port pre-converted to string.
-port_str: std.BoundedArray(u8, 8),
+port_str: stdx.BoundedArray(u8, 8),
 
 tmp_dir: std.testing.TmpDir,
 
@@ -91,7 +91,7 @@ pub fn init(
         return error.NoPort;
     };
 
-    var port_str: std.BoundedArray(u8, 8) = .{};
+    var port_str: stdx.BoundedArray(u8, 8) = .{};
     std.fmt.formatInt(port, 10, .lower, .{}, port_str.writer()) catch unreachable;
 
     const stderr_reader_thread = try std.Thread.spawn(.{}, StderrReader.read_all, .{stderr_reader});
