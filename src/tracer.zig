@@ -461,68 +461,97 @@ const TracerTracy = struct {
     }
 
     // Copied from zig/src/tracy.zig
-    pub const TracedAllocator = struct {
-        parent_allocator: std.mem.Allocator,
+    // This function only accepts comptime-known strings, see `messageColorCopy` for runtime strings
+    pub inline fn messageColor(comptime msg: [:0]const u8, color: u32) void {
+        c.___tracy_emit_messageLC(msg.ptr, color, callstack_depth);
+    }
+    pub fn TracyAllocator(comptime name: ?[:0]const u8) type {
+        return struct {
+            parent_allocator: std.mem.Allocator,
 
-        pub fn init(parent_allocator: std.mem.Allocator) TracedAllocator {
-            return .{
-                .parent_allocator = parent_allocator,
-            };
-        }
+            const Self = @This();
 
-        pub fn allocator(self: *TracedAllocator) std.mem.Allocator {
-            return std.mem.Allocator.init(self, allocFn, resizeFn, freeFn);
-        }
+            pub fn init(parent_allocator: std.mem.Allocator) Self {
+                return .{
+                    .parent_allocator = parent_allocator,
+                };
+            }
 
-        fn allocFn(
-            self: *TracedAllocator,
-            len: usize,
-            ptr_align: u29,
-            len_align: u29,
-            ret_addr: usize,
-        ) std.mem.Allocator.Error![]u8 {
-            const result = self.parent_allocator.rawAlloc(len, ptr_align, len_align, ret_addr);
-            if (result) |data| {
-                if (data.len != 0) {
-                    c.___tracy_emit_memory_alloc_callstack(data.ptr, data.len, callstack_depth, 0);
+            pub fn allocator(self: *Self) std.mem.Allocator {
+                return .{
+                    .ptr = self,
+                    .vtable = &.{
+                        .alloc = allocFn,
+                        .resize = resizeFn,
+                        .free = freeFn,
+                    },
+                };
+            }
+
+            fn allocFn(ptr: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                const result = self.parent_allocator.rawAlloc(len, ptr_align, ret_addr);
+                if (result) |data| {
+                    if (len != 0) {
+                        if (name) |n| {
+                            allocNamed(data, len, n);
+                        } else {
+                            alloc(data, len);
+                        }
+                    }
+                } else {
+                    messageColor("allocation failed", 0xFF0000);
                 }
-            } else |_| {}
-            return result;
-        }
-
-        fn resizeFn(
-            self: *TracedAllocator,
-            buf: []u8,
-            buf_align: u29,
-            new_len: usize,
-            len_align: u29,
-            ret_addr: usize,
-        ) ?usize {
-            if (self.parent_allocator.rawResize(
-                buf,
-                buf_align,
-                new_len,
-                len_align,
-                ret_addr,
-            )) |resized_len| {
-                c.___tracy_emit_memory_free_callstack(buf.ptr, callstack_depth, 0);
-                c.___tracy_emit_memory_alloc_callstack(buf.ptr, resized_len, callstack_depth, 0);
-
-                return resized_len;
+                return result;
             }
 
-            // during normal operation the compiler hits this case thousands of times due to this
-            // emitting messages for it is both slow and causes clutter
-            return null;
-        }
+            fn resizeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, new_len: usize, ret_addr: usize) bool {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                if (self.parent_allocator.rawResize(buf, buf_align, new_len, ret_addr)) {
+                    if (name) |n| {
+                        freeNamed(buf.ptr, n);
+                        allocNamed(buf.ptr, new_len, n);
+                    } else {
+                        free(buf.ptr);
+                        alloc(buf.ptr, new_len);
+                    }
 
-        fn freeFn(self: *TracedAllocator, buf: []u8, buf_align: u29, ret_addr: usize) void {
-            self.parent_allocator.rawFree(buf, buf_align, ret_addr);
-            // this condition is to handle free being called on an empty slice that was never even allocated
-            // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`
-            if (buf.len != 0) {
-                c.___tracy_emit_memory_free_callstack(buf.ptr, callstack_depth, 0);
+                    return true;
+                }
+
+                // during normal operation the compiler hits this case thousands of times due to this
+                // emitting messages for it is both slow and causes clutter
+                return false;
             }
-        }
-    };
+
+            fn freeFn(ptr: *anyopaque, buf: []u8, buf_align: u8, ret_addr: usize) void {
+                const self: *Self = @ptrCast(@alignCast(ptr));
+                self.parent_allocator.rawFree(buf, buf_align, ret_addr);
+                // this condition is to handle free being called on an empty slice that was never even allocated
+                // example case: `std.process.getSelfExeSharedLibPaths` can return `&[_][:0]u8{}`
+                if (buf.len != 0) {
+                    if (name) |n| {
+                        freeNamed(buf.ptr, n);
+                    } else {
+                        free(buf.ptr);
+                    }
+                }
+            }
+        };
+    }
+    inline fn alloc(ptr: [*]u8, len: usize) void {
+        c.___tracy_emit_memory_alloc_callstack(ptr, len, callstack_depth, 0);
+    }
+
+    inline fn allocNamed(ptr: [*]u8, len: usize, comptime name: [:0]const u8) void {
+        c.___tracy_emit_memory_alloc_callstack_named(ptr, len, callstack_depth, 0, name.ptr);
+    }
+
+    inline fn free(ptr: [*]u8) void {
+        c.___tracy_emit_memory_free_callstack(ptr, callstack_depth, 0);
+    }
+
+    inline fn freeNamed(ptr: [*]u8, comptime name: [:0]const u8) void {
+        c.___tracy_emit_memory_free_callstack_named(ptr, callstack_depth, 0, name.ptr);
+    }
 };

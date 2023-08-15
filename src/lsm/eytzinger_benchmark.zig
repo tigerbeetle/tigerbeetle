@@ -91,7 +91,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
     var pages = try blob_alloc.allocator().alloc(Page, page_count);
     random.bytes(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
-        for (page.values, 0..) |*value, i| value.key = i;
+        for (&page.values, 0..) |*value, i| value.key = i;
         Eytzinger.layout_from_keys_or_values(K, V, V.key_from_value, V.max_key, &page.values, &page.keys);
     }
 
@@ -289,7 +289,7 @@ const Benchmark = struct {
 // shuffle([0,1,…,n-1])
 fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
     var indices: [n]usize = undefined;
-    for (indices, 0..) |*i, j| i.* = j;
+    for (&indices, 0..) |*i, j| i.* = j;
     rand.shuffle(usize, indices[0..]);
     return indices;
 }
