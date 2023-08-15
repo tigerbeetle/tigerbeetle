@@ -536,7 +536,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             }
 
@@ -560,7 +560,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     completion,
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             }
 
@@ -586,7 +586,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         completion,
                         context.data_block.?.address,
                         context.data_block.?.checksum,
-                        .{ .cache_check = true, .cache_update = true },
+                        .{ .cache_read = true, .cache_write = true },
                     );
                 } else {
                     context.tree.filter_block_misses += 1;

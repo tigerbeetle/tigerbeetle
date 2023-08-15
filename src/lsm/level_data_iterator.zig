@@ -129,7 +129,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
                     &it.read,
                     table_ref.table_info.address,
                     table_ref.table_info.checksum,
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 it.table_next(callback);

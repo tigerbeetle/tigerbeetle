@@ -123,7 +123,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
                     &it.read,
                     table_info.address,
                     table_info.checksum,
-                    .{ .cache_check = true, .cache_update = true },
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 it.callback = .{ .next_tick = callback };
