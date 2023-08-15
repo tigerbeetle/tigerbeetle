@@ -954,7 +954,8 @@ fn c_client_sample(
 fn maybe_execute(
     b: *std.Build,
     allocator: std.mem.Allocator,
-    step: *std.Build.Step,
+    top_level_step: *std.Build.Step,
+    install_step: *std.Build.Step.InstallArtifact,
     binary_name: []const u8,
 ) void {
     var to_run = std.ArrayList([]const u8).init(allocator);
@@ -993,7 +994,8 @@ fn maybe_execute(
 
     if (build_and_run) {
         const run = b.addSystemCommand(to_run.items);
-        step.dependOn(&run.step);
+        run.step.dependOn(&install_step.step);
+        top_level_step.dependOn(&run.step);
     }
 }
 
@@ -1017,7 +1019,7 @@ fn run_with_tb(
     const install_step = b.addInstallArtifact(binary, .{});
     run_with_tb_build.dependOn(&install_step.step);
 
-    maybe_execute(b, allocator, run_with_tb_build, "run_with_tb");
+    maybe_execute(b, allocator, run_with_tb_build, install_step, "run_with_tb");
 }
 
 // See src/clients/README.md for documentation.
@@ -1041,7 +1043,7 @@ fn client_integration(
     const install_step = b.addInstallArtifact(binary, .{});
     client_integration_build.dependOn(&install_step.step);
 
-    maybe_execute(b, allocator, client_integration_build, "client_integration");
+    maybe_execute(b, allocator, client_integration_build, install_step, "client_integration");
 }
 
 // See src/clients/README.md for documentation.
@@ -1065,7 +1067,7 @@ fn client_docs(
     const install_step = b.addInstallArtifact(binary, .{});
     client_docs_build.dependOn(&install_step.step);
 
-    maybe_execute(b, allocator, client_docs_build, "client_docs");
+    maybe_execute(b, allocator, client_docs_build, install_step, "client_docs");
 }
 
 /// Detects the system's JVM.
