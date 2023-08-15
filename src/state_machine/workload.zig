@@ -575,14 +575,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .pending => {
                     transfer.flags = .{ .pending = true };
                     // Bound the timeout to ensure we never hit `overflows_timeout`.
-                    transfer.timeout = 1 + @min(
+                    transfer.timeout = 1 + @as(u64, @min(
                         std.math.maxInt(u64) / 2,
                         fuzz.random_int_exponential(
                             self.random,
                             u64,
                             self.options.pending_timeout_mean,
                         ),
-                    );
+                    ));
                 },
                 .post_pending, .void_pending => {
                     // Don't depend on `HashMap.keyIterator()` being deterministic.

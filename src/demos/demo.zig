@@ -20,7 +20,9 @@ const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 
-pub const log_level: std.log.Level = .alert;
+pub const std_options = struct {
+    pub const log_level: std.log.Level = .alert;
+};
 
 pub const vsr_options = .{
     .config_base = .default,
