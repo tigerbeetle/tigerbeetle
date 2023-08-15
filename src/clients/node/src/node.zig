@@ -24,8 +24,10 @@ const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 const Client = vsr.Client(StateMachine, MessageBus);
 
-// Since this is running in application space, log only critical messages to reduce noise.
-pub const log_level: std.log.Level = .err;
+pub const std_options = struct {
+    // Since this is running in application space, log only critical messages to reduce noise.
+    pub const log_level: std.log.Level = .err;
+};
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
