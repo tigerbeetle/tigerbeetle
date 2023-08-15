@@ -127,7 +127,7 @@ const Command = struct {
 
     pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
         var traced_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracedAllocator.init(arena.allocator())
+            tracer.TracyAllocator("tracy").init(arena.allocator())
         else
             arena;
 
