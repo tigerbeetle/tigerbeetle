@@ -4,6 +4,7 @@ const log = std.log.scoped(.test_replica);
 const expectEqual = std.testing.expectEqual;
 const allocator = std.testing.allocator;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
@@ -1112,8 +1113,8 @@ const TestContext = struct {
 
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
-        var replica_indexes = std.BoundedArray(u8, constants.members_max){ .buffer = undefined };
-        for (replica_processes.constSlice()) |p| replica_indexes.appendAssumeCapacity(p.replica);
+        var replica_indexes = stdx.BoundedArray(u8, constants.members_max){};
+        for (replica_processes.const_slice()) |p| replica_indexes.append_assume_capacity(p.replica);
         return TestReplicas{
             .context = t,
             .cluster = t.cluster,
@@ -1122,9 +1123,9 @@ const TestContext = struct {
     }
 
     pub fn clients(t: *TestContext, index: usize, count: usize) TestClients {
-        var client_indexes = std.BoundedArray(usize, constants.clients_max){ .buffer = undefined };
+        var client_indexes = stdx.BoundedArray(usize, constants.clients_max){};
         var i = index;
-        while (i < index + count) : (i += 1) client_indexes.appendAssumeCapacity(i);
+        while (i < index + count) : (i += 1) client_indexes.append_assume_capacity(i);
         return TestClients{
             .context = t,
             .cluster = t.cluster,
@@ -1154,7 +1155,7 @@ const TestContext = struct {
         t.client_replies[client] += 1;
     }
 
-    const ProcessList = std.BoundedArray(Process, constants.members_max + constants.clients_max);
+    const ProcessList = stdx.BoundedArray(Process, constants.members_max + constants.clients_max);
 
     fn processes(t: *const TestContext, selector: ProcessSelector) ProcessList {
         const replica_count = t.cluster.options.replica_count;
@@ -1162,45 +1163,45 @@ const TestContext = struct {
         var view: u32 = 0;
         for (t.cluster.replicas) |*r| view = @max(view, r.view);
 
-        var array = ProcessList{ .buffer = undefined };
+        var array = ProcessList{};
         switch (selector) {
-            .R0 => array.appendAssumeCapacity(.{ .replica = 0 }),
-            .R1 => array.appendAssumeCapacity(.{ .replica = 1 }),
-            .R2 => array.appendAssumeCapacity(.{ .replica = 2 }),
-            .R3 => array.appendAssumeCapacity(.{ .replica = 3 }),
-            .R4 => array.appendAssumeCapacity(.{ .replica = 4 }),
-            .R5 => array.appendAssumeCapacity(.{ .replica = 5 }),
-            .S0 => array.appendAssumeCapacity(.{ .replica = replica_count + 0 }),
-            .S1 => array.appendAssumeCapacity(.{ .replica = replica_count + 1 }),
-            .S2 => array.appendAssumeCapacity(.{ .replica = replica_count + 2 }),
-            .S3 => array.appendAssumeCapacity(.{ .replica = replica_count + 3 }),
-            .S4 => array.appendAssumeCapacity(.{ .replica = replica_count + 4 }),
-            .S5 => array.appendAssumeCapacity(.{ .replica = replica_count + 5 }),
-            .A0 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 0) % replica_count)) }),
-            .B1 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 1) % replica_count)) }),
-            .B2 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 2) % replica_count)) }),
-            .B3 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 3) % replica_count)) }),
-            .B4 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 4) % replica_count)) }),
-            .B5 => array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast((view + 5) % replica_count)) }),
+            .R0 => array.append_assume_capacity(.{ .replica = 0 }),
+            .R1 => array.append_assume_capacity(.{ .replica = 1 }),
+            .R2 => array.append_assume_capacity(.{ .replica = 2 }),
+            .R3 => array.append_assume_capacity(.{ .replica = 3 }),
+            .R4 => array.append_assume_capacity(.{ .replica = 4 }),
+            .R5 => array.append_assume_capacity(.{ .replica = 5 }),
+            .S0 => array.append_assume_capacity(.{ .replica = replica_count + 0 }),
+            .S1 => array.append_assume_capacity(.{ .replica = replica_count + 1 }),
+            .S2 => array.append_assume_capacity(.{ .replica = replica_count + 2 }),
+            .S3 => array.append_assume_capacity(.{ .replica = replica_count + 3 }),
+            .S4 => array.append_assume_capacity(.{ .replica = replica_count + 4 }),
+            .S5 => array.append_assume_capacity(.{ .replica = replica_count + 5 }),
+            .A0 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 0) % replica_count)) }),
+            .B1 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 1) % replica_count)) }),
+            .B2 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 2) % replica_count)) }),
+            .B3 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 3) % replica_count)) }),
+            .B4 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 4) % replica_count)) }),
+            .B5 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 5) % replica_count)) }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
-                        array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast(i)) });
+                        array.append_assume_capacity(.{ .replica = @as(u8, @intCast(i)) });
                     }
                 }
                 if (selector == .__ or selector == .S_) {
                     for (t.cluster.replicas[replica_count..], 0..) |_, i| {
-                        array.appendAssumeCapacity(.{ .replica = @as(u8, @intCast(replica_count + i)) });
+                        array.append_assume_capacity(.{ .replica = @as(u8, @intCast(replica_count + i)) });
                     }
                 }
                 if (selector == .__ or selector == .C_) {
                     for (t.cluster.clients) |*client| {
-                        array.appendAssumeCapacity(.{ .client = client.id });
+                        array.append_assume_capacity(.{ .client = client.id });
                     }
                 }
             },
         }
-        assert(array.len > 0);
+        assert(array.count() > 0);
         return array;
     }
 };
@@ -1208,20 +1209,20 @@ const TestContext = struct {
 const TestReplicas = struct {
     context: *TestContext,
     cluster: *Cluster,
-    replicas: std.BoundedArray(u8, constants.members_max),
+    replicas: stdx.BoundedArray(u8, constants.members_max),
 
     pub fn stop(t: *const TestReplicas) void {
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             log.info("{}: crash replica", .{r});
             t.cluster.crash_replica(r);
         }
     }
 
     pub fn open(t: *const TestReplicas) !void {
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
             t.cluster.restart_replica(r) catch |err| {
-                assert(t.replicas.len == 1);
+                assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
                     error.WALInvalid => return error.WALInvalid,
@@ -1232,7 +1233,7 @@ const TestReplicas = struct {
     }
 
     pub fn index(t: *const TestReplicas) u8 {
-        assert(t.replicas.len == 1);
+        assert(t.replicas.count() == 1);
         return t.replicas.get(0);
     }
 
@@ -1241,12 +1242,12 @@ const TestReplicas = struct {
         comptime field: std.meta.FieldEnum(Cluster.Replica),
     ) std.meta.fieldInfo(Cluster.Replica, field).type {
         var value_all: ?std.meta.fieldInfo(Cluster.Replica, field).type = null;
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             const value = @field(replica, @tagName(field));
             if (value_all) |all| {
                 if (all != value) {
-                    for (t.replicas.constSlice()) |replica_index| {
+                    for (t.replicas.const_slice()) |replica_index| {
                         log.err("replica={} field={s} value={}", .{
                             replica_index,
                             @tagName(field),
@@ -1287,10 +1288,10 @@ const TestReplicas = struct {
     }
 
     fn sync_stage(t: *const TestReplicas) vsr.SyncStage {
-        assert(t.replicas.len > 0);
+        assert(t.replicas.count() > 0);
 
         var sync_stage_all: ?vsr.SyncStage = null;
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             if (sync_stage_all) |all| {
                 assert(std.meta.eql(all, replica.syncing));
@@ -1329,7 +1330,7 @@ const TestReplicas = struct {
 
     pub fn role(t: *const TestReplicas) Role {
         var role_all: ?Role = null;
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             const replica_role: Role = role: {
                 if (replica.standby()) {
@@ -1348,7 +1349,7 @@ const TestReplicas = struct {
 
     pub fn op_checkpoint_id(t: *const TestReplicas) u128 {
         var checkpoint_id_all: ?u128 = null;
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             const replica_checkpoint_id = replica.superblock.working.checkpoint_id();
             assert(checkpoint_id_all == null or checkpoint_id_all.? == replica_checkpoint_id);
@@ -1359,7 +1360,7 @@ const TestReplicas = struct {
 
     pub fn op_checkpoint(t: *const TestReplicas) u64 {
         var checkpoint_all: ?u64 = null;
-        for (t.replicas.constSlice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             assert(checkpoint_all == null or checkpoint_all.? == replica.op_checkpoint());
             checkpoint_all = replica.op_checkpoint();
@@ -1369,13 +1370,13 @@ const TestReplicas = struct {
 
     pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
         assert(t.replicas.len == 1);
-        return t.cluster.replicas[t.replicas.get(0)].view_headers.array.constSlice();
+        return t.cluster.replicas[t.replicas.get(0)].view_headers.array.const_slice();
     }
 
     /// Simulate a storage determinism bug.
     /// (Replicas must be running and between compaction beats for this to run.)
     pub fn diverge(t: *TestReplicas) void {
-        for (t.replicas.slice()) |r| {
+        for (t.replicas.const_slice()) |r| {
             t.cluster.diverge(r);
         }
     }
@@ -1392,28 +1393,28 @@ const TestReplicas = struct {
         switch (target) {
             .wal_header => |slot| {
                 const fault_offset = vsr.Zone.wal_headers.offset(slot * @sizeOf(vsr.Header));
-                for (t.replicas.constSlice()) |r| {
+                for (t.replicas.const_slice()) |r| {
                     t.cluster.storages[r].memory[fault_offset] +%= 1;
                 }
             },
             .wal_prepare => |slot| {
                 const fault_offset = vsr.Zone.wal_prepares.offset(slot * constants.message_size_max);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
-                for (t.replicas.constSlice()) |r| {
+                for (t.replicas.const_slice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);
                 }
             },
             .client_reply => |slot| {
                 const fault_offset = vsr.Zone.client_replies.offset(slot * constants.message_size_max);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
-                for (t.replicas.constSlice()) |r| {
+                for (t.replicas.const_slice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);
                 }
             },
             .grid_block => |address| {
                 const fault_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
                 const fault_sector = @divExact(fault_offset, constants.sector_size);
-                for (t.replicas.constSlice()) |r| {
+                for (t.replicas.const_slice()) |r| {
                     t.cluster.storages[r].faults.set(fault_sector);
                 }
             },
@@ -1424,14 +1425,14 @@ const TestReplicas = struct {
 
     pub fn pass_all(t: *const TestReplicas, peer: ProcessSelector, direction: LinkDirection) void {
         const paths = t.peer_paths(peer, direction);
-        for (paths.constSlice()) |path| {
+        for (paths.const_slice()) |path| {
             t.cluster.network.link_filter(path).* = LinkFilter.initFull();
         }
     }
 
     pub fn drop_all(t: *const TestReplicas, peer: ProcessSelector, direction: LinkDirection) void {
         const paths = t.peer_paths(peer, direction);
-        for (paths.constSlice()) |path| t.cluster.network.link_filter(path).* = LinkFilter{};
+        for (paths.const_slice()) |path| t.cluster.network.link_filter(path).* = LinkFilter{};
     }
 
     pub fn pass(
@@ -1441,7 +1442,7 @@ const TestReplicas = struct {
         command: vsr.Command,
     ) void {
         const paths = t.peer_paths(peer, direction);
-        for (paths.constSlice()) |path| t.cluster.network.link_filter(path).insert(command);
+        for (paths.const_slice()) |path| t.cluster.network.link_filter(path).insert(command);
     }
 
     pub fn drop(
@@ -1451,7 +1452,7 @@ const TestReplicas = struct {
         command: vsr.Command,
     ) void {
         const paths = t.peer_paths(peer, direction);
-        for (paths.constSlice()) |path| t.cluster.network.link_filter(path).remove(command);
+        for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
     }
 
     pub fn record(
@@ -1461,7 +1462,7 @@ const TestReplicas = struct {
         command: vsr.Command,
     ) void {
         const paths = t.peer_paths(peer, direction);
-        for (paths.constSlice()) |path| t.cluster.network.link_record(path).insert(command);
+        for (paths.const_slice()) |path| t.cluster.network.link_record(path).insert(command);
     }
 
     pub fn replay_recorded(
@@ -1477,17 +1478,17 @@ const TestReplicas = struct {
         t: *const TestReplicas,
         peer: ProcessSelector,
         direction: LinkDirection,
-    ) std.BoundedArray(Network.Path, paths_max) {
-        var paths = std.BoundedArray(Network.Path, paths_max){ .buffer = undefined };
+    ) stdx.BoundedArray(Network.Path, paths_max) {
+        var paths = stdx.BoundedArray(Network.Path, paths_max){};
         const peers = t.context.processes(peer);
-        for (t.replicas.constSlice()) |a| {
+        for (t.replicas.const_slice()) |a| {
             const process_a = Process{ .replica = a };
-            for (peers.constSlice()) |process_b| {
+            for (peers.const_slice()) |process_b| {
                 if (direction == .bidirectional or direction == .outgoing) {
-                    paths.appendAssumeCapacity(.{ .source = process_a, .target = process_b });
+                    paths.append_assume_capacity(.{ .source = process_a, .target = process_b });
                 }
                 if (direction == .bidirectional or direction == .incoming) {
-                    paths.appendAssumeCapacity(.{ .source = process_b, .target = process_a });
+                    paths.append_assume_capacity(.{ .source = process_b, .target = process_a });
                 }
             }
         }
@@ -1498,7 +1499,7 @@ const TestReplicas = struct {
 const TestClients = struct {
     context: *TestContext,
     cluster: *Cluster,
-    clients: std.BoundedArray(usize, constants.clients_max),
+    clients: stdx.BoundedArray(usize, constants.clients_max),
     requests: usize = 0,
 
     pub fn request(t: *TestClients, requests: usize, expect_replies: usize) !void {
@@ -1506,7 +1507,7 @@ const TestClients = struct {
         defer assert(t.requests == requests);
 
         outer: while (true) {
-            for (t.clients.constSlice()) |c| {
+            for (t.clients.const_slice()) |c| {
                 if (t.requests == requests) break :outer;
                 t.context.client_requests[c] += 1;
                 t.requests += 1;
@@ -1518,7 +1519,7 @@ const TestClients = struct {
         while (tick < tick_max) : (tick += 1) {
             if (t.context.tick()) tick = 0;
 
-            for (t.clients.constSlice()) |c| {
+            for (t.clients.const_slice()) |c| {
                 const client = &t.cluster.clients[c];
                 if (client.request_queue.empty() and
                     t.context.client_requests[c] > client.request_number)
@@ -1538,7 +1539,7 @@ const TestClients = struct {
 
     pub fn replies(t: *const TestClients) usize {
         var replies_total: usize = 0;
-        for (t.clients.constSlice()) |c| replies_total += t.context.client_replies[c];
+        for (t.clients.const_slice()) |c| replies_total += t.context.client_replies[c];
         return replies_total;
     }
 };

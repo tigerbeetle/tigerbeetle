@@ -1870,7 +1870,7 @@ pub fn ReplicaType(
                 assert(self.view_headers.array.get(0).view <= self.view);
                 assert(self.view_headers.array.get(0).op == message.header.op);
                 maybe(self.view_headers.array.get(0).op > self.op_checkpoint_next_trigger());
-                assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
+                assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
                     self.op_checkpoint_next_trigger());
             }
 
@@ -3865,7 +3865,7 @@ pub fn ReplicaType(
             var nacks = BitSet.initEmpty();
             var present = BitSet.initEmpty();
             if (command == .do_view_change) {
-                for (self.view_headers.array.constSlice(), 0..) |*header, i| {
+                for (self.view_headers.array.const_slice(), 0..) |*header, i| {
                     const slot = self.journal.slot_for_op(header.op);
                     const journal_header = self.journal.header_for_op(header.op);
                     const dirty = self.journal.dirty.bit(slot);
@@ -3906,8 +3906,7 @@ pub fn ReplicaType(
             }
 
             message.header.* = .{
-                .size = @as(u32, @intCast(@as(usize, @sizeOf(Header)) *
-                    (1 + @as(usize, self.view_headers.array.len)))),
+                .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)),
                 .command = command,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -3935,7 +3934,7 @@ pub fn ReplicaType(
                 .exact,
                 Header,
                 std.mem.bytesAsSlice(Header, message.body()),
-                self.view_headers.array.constSlice(),
+                self.view_headers.array.const_slice(),
             );
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -3950,16 +3949,16 @@ pub fn ReplicaType(
             assert(self.view_headers.command == .start_view);
             if (self.status == .recovering) assert(self.solo());
 
-            self.view_headers.array.len = 0;
+            self.view_headers.array.clear();
 
             var op = self.op + 1;
             while (op > 0 and
-                self.view_headers.array.len < constants.view_change_headers_suffix_max)
+                self.view_headers.array.count() < constants.view_change_headers_suffix_max)
             {
                 op -= 1;
                 self.view_headers.append(self.journal.header_with_op(op).?);
             }
-            assert(self.view_headers.array.len + 2 <= constants.view_change_headers_max);
+            assert(self.view_headers.array.count() + 2 <= constants.view_change_headers_max);
 
             // Determine the consecutive extent of the log that we can help recover.
             // This may precede op_repair_min if we haven't had a view-change recently.
@@ -6629,7 +6628,7 @@ pub fn ReplicaType(
             // Otherwise headers could be nacked, truncated, then restored after a crash.
             assert(self.log_view < self.view or self.replica != self.primary_index(self.view) or
                 self.status == .normal or self.status == .recovering);
-            assert(self.view_headers.array.len > 0);
+            assert(self.view_headers.array.count() > 0);
             assert(self.view_headers.array.get(0).view <= self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
@@ -6807,9 +6806,9 @@ pub fn ReplicaType(
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
 
             const dvcs_all = DVCQuorum.dvcs_all(self.do_view_change_from_all_replicas);
-            assert(dvcs_all.len >= self.quorum_view_change);
+            assert(dvcs_all.count() >= self.quorum_view_change);
 
-            for (dvcs_all.constSlice()) |message| {
+            for (dvcs_all.const_slice()) |message| {
                 assert(message.header.op <=
                     self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max);
             }
@@ -6836,7 +6835,7 @@ pub fn ReplicaType(
                 if (header.op > self.op_checkpoint_next_trigger()) {
                     // Any ops in the next checkpoint are definitely uncommitted — otherwise,
                     // we would have forfeited to favor a different primary.
-                    for (dvcs_all.constSlice()) |dvc| {
+                    for (dvcs_all.const_slice()) |dvc| {
                         assert(dvc.header.timestamp <= self.op_checkpoint());
                     }
                 } else {
@@ -6850,7 +6849,7 @@ pub fn ReplicaType(
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
             assert(header_head.op <= self.op_checkpoint_next_trigger());
-            for (dvcs_all.constSlice()) |dvc| assert(header_head.op >= dvc.header.commit);
+            for (dvcs_all.const_slice()) |dvc| assert(header_head.op >= dvc.header.commit);
 
             // When computing the new commit_max, we cannot simply rely on the fact that our own
             // commit_min is attached to our own DVC in the quorum.
@@ -6889,7 +6888,7 @@ pub fn ReplicaType(
 
             const dvcs_uncanonical =
                 DVCQuorum.dvcs_uncanonical(self.do_view_change_from_all_replicas);
-            for (dvcs_uncanonical.constSlice()) |message| {
+            for (dvcs_uncanonical.const_slice()) |message| {
                 const message_headers = message_body_as_view_headers(message);
                 for (message_headers.slice) |*header| {
                     if (vsr.Headers.dvc_header_type(header) != .valid) continue;
@@ -6923,7 +6922,7 @@ pub fn ReplicaType(
             assert(self.view > self.log_view);
 
             const dvcs_all = DVCQuorum.dvcs_all(self.do_view_change_from_all_replicas);
-            for (dvcs_all.constSlice()) |dvc| {
+            for (dvcs_all.const_slice()) |dvc| {
                 log.debug(
                     "{}: {s}: dvc: replica={} log_view={} op={} commit_min={} checkpoint={}",
                     .{
@@ -7337,7 +7336,7 @@ pub fn ReplicaType(
                 assert(self.view < view_new);
 
                 self.view_headers.command = .do_view_change;
-                self.view_headers.array.len = 0;
+                self.view_headers.array.clear();
                 self.view_headers.append(self.journal.header_with_op(self.op).?);
 
                 // The DVC headers include:
@@ -7374,7 +7373,7 @@ pub fn ReplicaType(
 
             self.view_headers.verify();
             assert(self.view_headers.command == .do_view_change);
-            assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
+            assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
                 self.commit_max);
 
             if (self.view == view_new) {
@@ -8404,15 +8403,15 @@ pub fn ReplicaType(
 /// - uncommitted — if the header is chosen, but cannot be recovered from any replica, then
 ///   it will be discarded by the nack protocol.
 const DVCQuorum = struct {
-    const DVCArray = std.BoundedArray(*const Message, constants.replicas_max);
+    const DVCArray = stdx.BoundedArray(*const Message, constants.replicas_max);
 
     fn verify(dvc_quorum: QuorumMessages) void {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |message| verify_message(message);
+        for (dvcs.const_slice()) |message| verify_message(message);
 
         // Verify that DVCs with the same log_view do not conflict.
-        for (dvcs.constSlice(), 0..) |dvc_a, i| {
-            for (dvcs.constSlice()[0..i]) |dvc_b| {
+        for (dvcs.const_slice(), 0..) |dvc_a, i| {
+            for (dvcs.const_slice()[0..i]) |dvc_b| {
                 if (dvc_a.header.request != dvc_b.header.request) continue;
 
                 const headers_a = message_body_as_view_headers(dvc_a);
@@ -8472,13 +8471,13 @@ const DVCQuorum = struct {
     }
 
     fn dvcs_all(dvc_quorum: QuorumMessages) DVCArray {
-        var array = DVCArray{ .buffer = undefined };
+        var array = DVCArray{};
         for (dvc_quorum, 0..) |received, replica| {
             if (received) |message| {
                 assert(message.header.command == .do_view_change);
                 assert(message.header.replica == replica);
 
-                array.appendAssumeCapacity(message);
+                array.append_assume_capacity(message);
             }
         }
         return array;
@@ -8489,12 +8488,12 @@ const DVCQuorum = struct {
     }
 
     fn dvcs_with_log_view(dvc_quorum: QuorumMessages, log_view: u32) DVCArray {
-        var array = DVCArray{ .buffer = undefined };
+        var array = DVCArray{};
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |message| {
+        for (dvcs.const_slice()) |message| {
             const message_log_view = message.header.request;
             if (message_log_view == log_view) {
-                array.appendAssumeCapacity(message);
+                array.append_assume_capacity(message);
             }
         }
         return array;
@@ -8502,14 +8501,14 @@ const DVCQuorum = struct {
 
     fn dvcs_uncanonical(dvc_quorum: QuorumMessages) DVCArray {
         const log_view_max_ = DVCQuorum.log_view_max(dvc_quorum);
-        var array = DVCArray{ .buffer = undefined };
+        var array = DVCArray{};
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |message| {
+        for (dvcs.const_slice()) |message| {
             const log_view = message.header.request;
             assert(log_view <= log_view_max_);
 
             if (log_view < log_view_max_) {
-                array.appendAssumeCapacity(message);
+                array.append_assume_capacity(message);
             }
         }
         return array;
@@ -8518,7 +8517,7 @@ const DVCQuorum = struct {
     fn op_checkpoint_max(dvc_quorum: QuorumMessages) u64 {
         var checkpoint_max: ?u64 = null;
         const dvcs = dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |dvc| {
+        for (dvcs.const_slice()) |dvc| {
             const dvc_checkpoint = dvc.header.timestamp;
             if (checkpoint_max == null or checkpoint_max.? < dvc_checkpoint) {
                 checkpoint_max = dvc_checkpoint;
@@ -8534,7 +8533,7 @@ const DVCQuorum = struct {
     fn log_view_max(dvc_quorum: QuorumMessages) u32 {
         var log_view_max_: ?u32 = null;
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |message| {
+        for (dvcs.const_slice()) |message| {
             // The view when this replica was last in normal status, which:
             // * may be higher than the view in any of the prepare headers.
             // * must be lower than the view of this view change.
@@ -8550,10 +8549,10 @@ const DVCQuorum = struct {
 
     fn commit_max(dvc_quorum: QuorumMessages) u64 {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        assert(dvcs.len > 0);
+        assert(dvcs.count() > 0);
 
         var commit_max_: u64 = 0;
-        for (dvcs.constSlice()) |dvc| {
+        for (dvcs.const_slice()) |dvc| {
             const dvc_headers = message_body_as_view_headers(dvc);
             // DVC generation stops when a header with op ≤ commit_max is appended.
             const dvc_commit_max_tail = dvc_headers.slice[dvc_headers.slice.len - 1].op;
@@ -8575,7 +8574,7 @@ const DVCQuorum = struct {
     fn timestamp_max(dvc_quorum: QuorumMessages) u64 {
         var timestamp_max_: ?u64 = null;
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
-        for (dvcs.constSlice()) |dvc| {
+        for (dvcs.const_slice()) |dvc| {
             const dvc_headers = message_body_as_view_headers(dvc);
             const dvc_head = &dvc_headers.slice[0];
             if (timestamp_max_ == null or timestamp_max_.? < dvc_head.timestamp) {
@@ -8588,7 +8587,7 @@ const DVCQuorum = struct {
     fn op_max_canonical(dvc_quorum: QuorumMessages) u64 {
         var op_max: ?u64 = null;
         const dvcs = DVCQuorum.dvcs_canonical(dvc_quorum);
-        for (dvcs.constSlice()) |message| {
+        for (dvcs.const_slice()) |message| {
             if (op_max == null or op_max.? < message.header.op) {
                 op_max = message.header.op;
             }
@@ -8632,11 +8631,11 @@ const DVCQuorum = struct {
         }
 
         const dvcs_all_ = DVCQuorum.dvcs_all(dvc_quorum);
-        if (dvcs_all_.len < options.quorum_view_change) return .awaiting_quorum;
+        if (dvcs_all_.count() < options.quorum_view_change) return .awaiting_quorum;
 
         const dvcs_canonical_ = DVCQuorum.dvcs_canonical(dvc_quorum);
-        assert(dvcs_canonical_.len > 0);
-        assert(dvcs_canonical_.len <= dvcs_all_.len);
+        assert(dvcs_canonical_.count() > 0);
+        assert(dvcs_canonical_.count() <= dvcs_all_.count());
 
         const op_head_max = DVCQuorum.op_max_canonical(dvc_quorum);
         const op_head_min = DVCQuorum.commit_max(dvc_quorum);
@@ -8644,7 +8643,7 @@ const DVCQuorum = struct {
         // Iterate the highest definitely committed op and all maybe-uncommitted ops.
         var op = op_head_min;
         const op_head = while (op <= op_head_max) : (op += 1) {
-            const header_canonical = for (dvcs_canonical_.constSlice()) |dvc| {
+            const header_canonical = for (dvcs_canonical_.const_slice()) |dvc| {
                 // This DVC is canonical, but lagging far behind.
                 if (dvc.header.op < op) continue;
 
@@ -8660,7 +8659,7 @@ const DVCQuorum = struct {
 
             var copies: usize = 0;
             var nacks: usize = 0;
-            for (dvcs_all_.constSlice()) |dvc| {
+            for (dvcs_all_.const_slice()) |dvc| {
                 if (dvc.header.op < op) {
                     nacks += 1;
                     continue;
@@ -8709,7 +8708,7 @@ const DVCQuorum = struct {
             if (header_canonical == null or
                 (header_canonical != null and copies == 0))
             {
-                if (dvcs_all_.len < options.replica_count) {
+                if (dvcs_all_.count() < options.replica_count) {
                     return .awaiting_repair;
                 } else {
                     return .complete_invalid;
@@ -8737,7 +8736,7 @@ const DVCQuorum = struct {
         child_parent: ?u128 = null,
 
         fn next(iterator: *HeaderIterator) ?*const Header {
-            assert(iterator.dvcs.len > 0);
+            assert(iterator.dvcs.count() > 0);
             assert(iterator.op_min <= iterator.op_max);
             assert((iterator.child_op == null) == (iterator.child_parent == null));
 
@@ -8748,7 +8747,7 @@ const DVCQuorum = struct {
             var header: ?*const Header = null;
 
             const log_view = iterator.dvcs.get(0).header.request;
-            for (iterator.dvcs.constSlice()) |dvc| {
+            for (iterator.dvcs.const_slice()) |dvc| {
                 assert(log_view == dvc.header.request);
 
                 if (op > dvc.header.op) continue;

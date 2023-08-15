@@ -855,7 +855,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             );
 
             // +1 to count the input table from level A.
-            assert(range_b.tables.len + 1 <= compaction_tables_input_max);
+            assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
             assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
             assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);
 
@@ -865,7 +865,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.table_immutable.values.len,
                 tree.table_immutable.snapshot_min,
                 op_min,
-                range_b.tables.len + 1,
+                range_b.tables.count() + 1,
             });
 
             tree.compaction_io_pending += 1;
@@ -893,14 +893,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             const table_a = table_range.table_a.table_info;
             const range_b = table_range.range_b;
 
-            assert(range_b.tables.len + 1 <= compaction_tables_input_max);
+            assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
             assert(compare_keys(table_a.key_min, table_a.key_max) != .gt);
             assert(compare_keys(range_b.key_min, table_a.key_min) != .gt);
             assert(compare_keys(range_b.key_max, table_a.key_max) != .lt);
 
             log.debug("{s}: compacting {d} tables from level {d} to level {d}", .{
                 tree.config.name,
-                range_b.tables.len + 1,
+                range_b.tables.count() + 1,
                 context.level_a,
                 context.level_b,
             });
@@ -927,7 +927,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             } else {
                 log.debug("{s}: compacted {d} tables from level {d} to level {d}", .{
                     tree.config.name,
-                    compaction.context.range_b.tables.len + 1,
+                    compaction.context.range_b.tables.count() + 1,
                     compaction.context.level_b - 1,
                     compaction.context.level_b,
                 });
