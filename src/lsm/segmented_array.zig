@@ -46,6 +46,7 @@ pub const Options = struct {
     verify: bool = false,
 };
 
+// TODO Check whether this would be faster if compare_keys() passed `*const K` values.
 fn SegmentedArrayType(
     comptime T: type,
     comptime NodePool: type,
@@ -213,11 +214,16 @@ fn SegmentedArrayType(
             ) u32 {
                 if (options.verify) array.verify();
 
+                const count_before = array.len();
+
                 const cursor = array.search(key_from_value(&element));
                 const absolute_index = array.absolute_index_for_cursor(cursor);
                 array.insert_elements_at_absolute_index(node_pool, absolute_index, &[_]T{element});
 
                 if (options.verify) array.verify();
+
+                const count_after = array.len();
+                assert(count_after == count_before + 1);
 
                 return absolute_index;
             }
@@ -230,11 +236,16 @@ fn SegmentedArrayType(
             ) void {
                 if (options.verify) array.verify();
 
+                const count_before = array.len();
+
                 array.insert_elements_at_absolute_index(
                     node_pool,
                     absolute_index,
                     elements,
                 );
+
+                const count_after = array.len();
+                assert(count_after == count_before + elements.len);
 
                 if (options.verify) array.verify();
             }
