@@ -207,13 +207,25 @@ pub fn build(b: *std.Build) !void {
             "Skip tests that do not match filter",
         );
 
+        // This needs to be built separately from src/unit_tests.zig
+        // because repl.zig and repl_test.zig depend on the `vsr`
+        // package. Zig 0.11.0 is no longer ok with importing both `vsr`,
+        // the module, and `vsr.zig` within the same build unit.
+        const repl_tests = b.addTest(.{
+            .root_source_file = .{ .path = "src/tigerbeetle/repl_test.zig" },
+            .target = target,
+            .optimize = mode,
+            .filter = test_filter,
+        });
+        repl_tests.addModule("vsr", vsr_module);
+        repl_tests.addModule("vsr_options", vsr_options_module);
+
         const unit_tests = b.addTest(.{
             .root_source_file = .{ .path = "src/unit_tests.zig" },
             .target = target,
             .optimize = mode,
             .filter = test_filter,
         });
-        unit_tests.addModule("vsr", vsr_module);
         unit_tests.addModule("vsr_options", vsr_options_module);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
         link_tracer_backend(unit_tests, git_clone_tracy, tracer_backend, target);
@@ -238,14 +250,19 @@ pub fn build(b: *std.Build) !void {
 
         const unit_tests_exe_step = b.step("test:build", "Build the unit tests");
         const install_unit_tests_exe = b.addInstallArtifact(unit_tests, .{});
+        const install_repl_tests_exe = b.addInstallArtifact(repl_tests, .{});
         unit_tests_exe_step.dependOn(&install_unit_tests_exe.step);
+        unit_tests_exe_step.dependOn(&install_repl_tests_exe.step);
 
         const unit_tests_step = b.step("test:unit", "Run the unit tests");
         const run_unit_tests = b.addRunArtifact(unit_tests);
+        const run_repl_tests = b.addRunArtifact(repl_tests);
         unit_tests_step.dependOn(&run_unit_tests.step);
+        unit_tests_step.dependOn(&run_repl_tests.step);
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&run_unit_tests.step);
+        test_step.dependOn(&run_repl_tests.step);
 
         if (test_filter == null) {
             // Test that our demos compile, but don't run them.
@@ -341,6 +358,11 @@ pub fn build(b: *std.Build) !void {
         );
         client_docs(
             b.allocator,
+            b,
+            mode,
+            target,
+        );
+        repl_integration(
             b,
             mode,
             target,
@@ -1061,6 +1083,7 @@ fn run_with_tb(
         .root_source_file = .{ .path = "src/clients/run_with_tb.zig" },
         .target = target,
         .optimize = mode,
+        .main_pkg_path = .{ .path = "src" },
     });
 
     const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
@@ -1118,6 +1141,26 @@ fn client_docs(
     client_docs_build.dependOn(&install_step.step);
 
     maybe_execute(b, allocator, client_docs_build, install_step, "client_docs");
+}
+
+fn repl_integration(
+    b: *std.build.Builder,
+    mode: Mode,
+    target: CrossTarget,
+) void {
+    const binary = b.addExecutable(.{
+        .name = "repl_integration",
+        .root_source_file = .{ .path = "src/clients/repl_integration.zig" },
+        .target = target,
+        .optimize = mode,
+        .main_pkg_path = .{ .path = "src" },
+    });
+
+    const repl_integration_build = b.step("repl_integration", "Build cli client integration test script.");
+    repl_integration_build.dependOn(&binary.step);
+
+    const install_step = b.addInstallArtifact(binary, .{});
+    repl_integration_build.dependOn(&install_step.step);
 }
 
 /// Steps which unconditionally fails with a message.
