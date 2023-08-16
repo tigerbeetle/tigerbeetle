@@ -476,7 +476,7 @@ comptime {
 ///               a        (a)      a         Repair any broken copies of `a`.
 ///
 /// checkpoint    seq      seq      seq
-///               a        a        a
+/// (or sync)     a        a        a
 ///               a        a+1
 ///               a        a+1      a+1
 ///               a+1      a+1      a+1       Read quorum; verify 3/4 are valid.

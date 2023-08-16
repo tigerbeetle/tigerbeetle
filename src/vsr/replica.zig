@@ -462,7 +462,7 @@ pub fn ReplicaType(
                 },
             );
 
-            // Once initialzed, the replica is in charge of calling superblock.deinit()
+            // Once initialized, the replica is in charge of calling superblock.deinit().
             var initialized = false;
             errdefer if (!initialized) self.superblock.deinit(allocator);
 
@@ -929,7 +929,7 @@ pub fn ReplicaType(
         }
 
         /// Free all memory and unref all messages held by the replica.
-        /// This does not deinitialize the StateMachine, MessageBus, Storage, or Time.
+        /// This does not deinitialize the Storage or Time.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             assert(self.tracer_slot_checkpoint == null);
             assert(self.tracer_slot_commit == null);
