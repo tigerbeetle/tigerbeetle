@@ -462,7 +462,7 @@ pub fn ReplicaType(
                 },
             );
 
-            // Once initialzed, the replica is in charge of calling superblock.deinit()
+            // Once initialized, the replica is in charge of calling superblock.deinit().
             var initialized = false;
             errdefer if (!initialized) self.superblock.deinit(allocator);
 
