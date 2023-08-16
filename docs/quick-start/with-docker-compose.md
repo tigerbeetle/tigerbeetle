@@ -84,10 +84,11 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 ... and so on ...
 ```
 
+### Connect with the CLI
 
 Now you can connect to the running server with any client. For a quick
-start, try [creating accounts and transfers in the Node
-CLI](./node-cli.md).
+start, try creating accounts and transfers [using the TigerBeetle CLI
+client](./cli-client.md).
 
 ## `error: SystemResources` on macOS
 
