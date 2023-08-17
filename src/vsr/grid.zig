@@ -887,8 +887,10 @@ pub fn GridType(comptime Storage: type) type {
                 },
             );
 
-            // Don't cache a corrupt or incorrect block.
-            grid.cache.remove(read.address);
+            if (read.cache_write) {
+                // Don't cache a corrupt or incorrect block.
+                grid.cache.remove(read.address);
+            }
 
             grid.read_block_resolve(read, result);
         }
