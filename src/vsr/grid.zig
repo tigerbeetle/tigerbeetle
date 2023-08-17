@@ -84,6 +84,14 @@ pub fn GridType(comptime Storage: type) type {
             /// Used to verify that the checkpoint does not advance while the read is in progress.
             checkpoint_id: u128,
 
+            /// When coherent=true:
+            /// - the block (address+checksum) is part of the current checkpoint.
+            /// - the read will complete before the next checkpoint occurs.
+            /// - callback == .from_local_or_global_storage
+            /// When coherent=false:
+            /// - the block (address+checksum) is not necessarily part of the current checkpoint.
+            /// - the read may complete after a future checkpoint.
+            /// - callback == .from_local_storage
             coherent: bool,
             cache_read: bool,
             cache_write: bool,
