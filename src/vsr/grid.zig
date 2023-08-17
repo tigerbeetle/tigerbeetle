@@ -390,23 +390,23 @@ pub fn GridType(comptime Storage: type) type {
             return false;
         }
 
-        const Writing = enum { create, repair, none };
+        const Writing = enum { create, repair, not_writing };
 
         /// If the address is being written to by a non-repair, return `.create`.
         /// If the address is being written to by a repair, return `.repair`.
-        /// Otherwise return `.none`.
+        /// Otherwise return `.not_writing`.
         ///
         /// Assert that the block pointer is not being used for any write if non-null.
         pub fn writing(grid: *Grid, address: u64, block: ?BlockPtrConst) Writing {
             assert(address > 0);
 
-            var result = Writing.none;
+            var result = Writing.not_writing;
             {
                 var it = grid.write_queue.peek();
                 while (it) |queued_write| : (it = queued_write.next) {
                     assert(block != queued_write.block.*);
                     if (address == queued_write.address) {
-                        assert(result == .none);
+                        assert(result == .not_writing);
                         result = if (queued_write.repair) .repair else .create;
                     }
                 }
@@ -416,7 +416,7 @@ pub fn GridType(comptime Storage: type) type {
                 while (it.next()) |iop| {
                     assert(block != iop.write.block.*);
                     if (address == iop.write.address) {
-                        assert(result == .none);
+                        assert(result == .not_writing);
                         result = if (iop.write.repair) .repair else .create;
                     }
                 }
@@ -485,7 +485,7 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             assert(address > 0);
             assert(grid.canceling == null);
-            assert(grid.writing(address, block.*) == .none);
+            assert(grid.writing(address, block.*) == .not_writing);
             grid.assert_not_reading(address, block.*);
 
             if (constants.verify) {
@@ -529,7 +529,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             assert(!grid.superblock.free_set.is_free(address));
             assert(grid.faulty(address, header.checksum));
-            assert(grid.writing(address, block.*) == .none);
+            assert(grid.writing(address, block.*) == .not_writing);
 
             write.* = .{
                 .callback = callback,
