@@ -4297,7 +4297,7 @@ pub fn ReplicaType(
             // For an explanation, see: "Cluster: repair: primary checkpoint, backup crash before
             // checkpoint, primary prepare".
             if (self.op_checkpoint() != 0 and
-                self.op_checkpoint() + constants.lsm_batch_multiple + 1 == self.op)
+                vsr.Op.trigger_from_checkpoint(self.op_checkpoint()) + 1 == self.op)
             {
                 var count: usize = 0;
                 for (self.sync_target_quorum.candidates, 0..) |target, replica_index| {
@@ -4960,24 +4960,16 @@ pub fn ReplicaType(
         ///     %  op_checkpoint's trigger
         ///
         fn op_checkpoint_next(self: *const Self) u64 {
+            assert(vsr.Op.checkpoint_valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
                 self.status == .recovering or self.status == .recovering_head);
-            assert(self.op_checkpoint() == 0 or
-                (self.op_checkpoint() + 1) % constants.lsm_batch_multiple == 0);
 
-            const op = if (self.op_checkpoint() == 0)
-                // First wrap: op_checkpoint_next = 8-2-1 = 5
-                constants.journal_slot_count - constants.lsm_batch_multiple - 1
-            else
-                // Second wrap: op_checkpoint_next = 5+8-2 = 11
-                // Third wrap: op_checkpoint_next = 11+8-2 = 17
-                self.op_checkpoint() + constants.journal_slot_count - constants.lsm_batch_multiple;
-            assert((op + 1) % constants.lsm_batch_multiple == 0);
-            // The checkpoint always advances.
-            assert(op > self.op_checkpoint());
+            const checkpoint_next = vsr.Op.checkpoint_after_checkpoint(self.op_checkpoint());
+            assert(vsr.Op.checkpoint_valid(checkpoint_next));
+            assert(checkpoint_next > self.op_checkpoint()); // The checkpoint always advances.
 
-            return op;
+            return checkpoint_next;
         }
 
         /// Returns the next op that will trigger a checkpoint.
@@ -4988,7 +4980,7 @@ pub fn ReplicaType(
         ///
         /// See `op_checkpoint_next` for more detail.
         fn op_checkpoint_next_trigger(self: *const Self) u64 {
-            return self.op_checkpoint_next() + constants.lsm_batch_multiple;
+            return vsr.Op.trigger_from_checkpoint(self.op_checkpoint_next());
         }
 
         fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
@@ -4996,7 +4988,7 @@ pub fn ReplicaType(
                 if (op < self.op_repair_min()) return null;
 
                 const op_checkpoint_next_trigger_previous =
-                    self.op_checkpoint() + constants.lsm_batch_multiple;
+                    vsr.Op.trigger_from_checkpoint(self.op_checkpoint());
                 if (op <= op_checkpoint_next_trigger_previous) {
                     return self.superblock.working.vsr_state.previous_checkpoint_id;
                 }
@@ -7977,7 +7969,7 @@ pub fn ReplicaType(
             }
 
             const candidate_canonical = canonical: {
-                const candidate_trigger = candidate.checkpoint_op + constants.lsm_batch_multiple;
+                const candidate_trigger = vsr.Op.trigger_from_checkpoint(candidate.checkpoint_op);
 
                 if (header.command == .commit and header.commit > candidate_trigger) {
                     // Normal case: The primary has committed atop the checkpoint.

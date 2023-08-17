@@ -229,7 +229,7 @@ pub const SuperBlockHeader = extern struct {
         /// to ensure deterministic storage.
         pub fn op_compacted(state: VSRState, op: u64) bool {
             // If commit_min is 0, we have never checkpointed, so no compactions are checkpointed.
-            return state.commit_min > 0 and op <= state.commit_min + constants.lsm_batch_multiple;
+            return state.commit_min > 0 and op <= vsr.Op.trigger_from_checkpoint(state.commit_min);
         }
     };
 

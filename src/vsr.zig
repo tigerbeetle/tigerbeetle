@@ -1918,3 +1918,52 @@ const ViewChangeHeadersArray = struct {
         headers.array.appendAssumeCapacity(Headers.dvc_blank(op));
     }
 };
+
+pub const Op = struct {
+    pub fn checkpoint_before_checkpoint(checkpoint: u64) ?u64 {
+        assert(checkpoint_valid(checkpoint));
+
+        if (checkpoint == 0) {
+            return null;
+        }
+
+        if (checkpoint == constants.journal_slot_count - constants.lsm_batch_multiple - 1) {
+            return 0;
+        }
+
+        return checkpoint - (constants.journal_slot_count - constants.lsm_batch_multiple);
+    }
+
+    pub fn checkpoint_after_checkpoint(checkpoint: u64) u64 {
+        assert(checkpoint_valid(checkpoint));
+
+        const checkpoint_next = op: {
+            if (checkpoint == 0) {
+                // First wrap: op_checkpoint_next = 8-2-1 = 5
+                break :op constants.journal_slot_count - constants.lsm_batch_multiple - 1;
+            } else {
+                // Second wrap: op_checkpoint_next = 5+8-2 = 11
+                // Third wrap: op_checkpoint_next = 11+8-2 = 17
+                break :op checkpoint + constants.journal_slot_count - constants.lsm_batch_multiple;
+            }
+        };
+
+        assert((checkpoint_next + 1) % constants.lsm_batch_multiple == 0);
+        assert(checkpoint_valid(checkpoint_next));
+        assert(checkpoint_before_checkpoint(checkpoint_next) == checkpoint);
+
+        return checkpoint_next;
+    }
+
+    pub fn trigger_from_checkpoint(checkpoint_nonzero: u64) u64 {
+        assert(checkpoint_nonzero != 0);
+        assert(checkpoint_valid(checkpoint_nonzero));
+
+        return checkpoint_nonzero + constants.lsm_batch_multiple;
+    }
+
+    pub fn checkpoint_valid(op: u64) bool {
+        return op == 0 or
+            (op + 1) % (constants.journal_slot_count - constants.lsm_batch_multiple) == 0;
+    }
+};
