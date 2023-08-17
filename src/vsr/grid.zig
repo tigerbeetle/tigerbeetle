@@ -870,26 +870,23 @@ pub fn GridType(comptime Storage: type) type {
                 .checksum = read.checksum,
             });
 
-            if (result == .valid) {
-                grid.read_block_resolve(read, .{ .valid = block.* });
-                return;
-            }
+            if (result != .valid) {
+                const header = mem.bytesAsValue(vsr.Header, block.*[0..@sizeOf(vsr.Header)]);
+                log.err(
+                    "{s}: expected address={} checksum={}, found address={} checksum={}",
+                    .{
+                        @tagName(result),
+                        read.address,
+                        read.checksum,
+                        header.op,
+                        header.checksum,
+                    },
+                );
 
-            const header = mem.bytesAsValue(vsr.Header, block.*[0..@sizeOf(vsr.Header)]);
-            log.err(
-                "{s}: expected address={} checksum={}, found address={} checksum={}",
-                .{
-                    @tagName(result),
-                    read.address,
-                    read.checksum,
-                    header.op,
-                    header.checksum,
-                },
-            );
-
-            if (read.cache_write) {
-                // Don't cache a corrupt or incorrect block.
-                grid.cache.remove(read.address);
+                if (read.cache_write) {
+                    // Don't cache a corrupt or incorrect block.
+                    grid.cache.remove(read.address);
+                }
             }
 
             grid.read_block_resolve(read, result);
