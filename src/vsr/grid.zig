@@ -105,6 +105,8 @@ pub fn GridType(comptime Storage: type) type {
             next: ?*Read = null,
         };
 
+        /// Although we distinguish between the reasons why the block is invalid, we only use this
+        /// info for logging, not logic.
         pub const ReadBlockResult = union(enum) {
             valid: BlockPtrConst,
             /// Checksum of block header is invalid.
