@@ -170,19 +170,19 @@ pub const Operation = enum(u8) {
     _,
 
     pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
-        check_state_machine_operations(StateMachine.Operation);
+        check_state_machine_operations(StateMachine);
         return @as(Operation, @enumFromInt(@intFromEnum(op)));
     }
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
-        check_state_machine_operations(StateMachine.Operation);
+        check_state_machine_operations(StateMachine);
         assert(self.valid(StateMachine));
         assert(!self.vsr_reserved());
         return @as(StateMachine.Operation, @enumFromInt(@intFromEnum(self)));
     }
 
     pub fn valid(self: Operation, comptime StateMachine: type) bool {
-        check_state_machine_operations(StateMachine.Operation);
+        check_state_machine_operations(StateMachine);
 
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
             const ops = comptime std.enums.values(Enum);
@@ -213,12 +213,13 @@ pub const Operation = enum(u8) {
         unreachable;
     }
 
-    fn check_state_machine_operations(comptime Op: type) void {
+    fn check_state_machine_operations(comptime StateMachine: type) void {
         comptime {
-            assert(@typeInfo(Op).Enum.is_exhaustive);
-            assert(@typeInfo(Op).Enum.tag_type == @typeInfo(Operation).Enum.tag_type);
-            for (@typeInfo(Op).Enum.fields) |field| {
-                const op = @field(Op, field.name);
+            assert(@typeInfo(StateMachine.Operation).Enum.is_exhaustive);
+            assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
+                @typeInfo(Operation).Enum.tag_type);
+            for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
+                const op = @field(StateMachine.Operation, field.name);
                 if (@intFromEnum(op) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
                 }
