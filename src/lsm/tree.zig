@@ -532,7 +532,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count <= constants.lsm_levels);
 
                 context.tree.grid.read_block(
-                    .{ .from_local_or_global = read_index_block_callback },
+                    .{ .from_local_or_global_storage = read_index_block_callback },
                     &context.completion,
                     context.index_block_addresses[context.index_block],
                     context.index_block_checksums[context.index_block],
@@ -556,7 +556,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 };
 
                 context.tree.grid.read_block(
-                    .{ .from_local_or_global = read_filter_block_callback },
+                    .{ .from_local_or_global_storage = read_filter_block_callback },
                     completion,
                     blocks.filter_block_address,
                     blocks.filter_block_checksum,
@@ -582,7 +582,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     );
 
                     context.tree.grid.read_block(
-                        .{ .from_local_or_global = read_data_block_callback },
+                        .{ .from_local_or_global_storage = read_data_block_callback },
                         completion,
                         context.data_block.?.address,
                         context.data_block.?.checksum,
