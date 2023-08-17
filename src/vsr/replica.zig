@@ -2239,7 +2239,7 @@ pub fn ReplicaType(
                 };
 
                 self.grid.read_block(
-                    .{ .from_local = on_request_blocks_read_repair },
+                    .{ .from_local_storage = on_request_blocks_read_repair },
                     &read.read,
                     request.block_address,
                     request.block_checksum,

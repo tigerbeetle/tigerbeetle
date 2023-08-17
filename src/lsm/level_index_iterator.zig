@@ -119,7 +119,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
                     },
                 };
                 it.context.grid.read_block(
-                    .{ .from_local_or_global = on_read },
+                    .{ .from_local_or_global_storage = on_read },
                     &it.read,
                     table_info.address,
                     table_info.checksum,

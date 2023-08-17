@@ -69,11 +69,11 @@ pub fn GridType(comptime Storage: type) type {
 
         const ReadBlockCallback = union(enum) {
             /// If the local read fails, report the error.
-            from_local: *const fn (*Grid.Read, ReadBlockResult) void,
+            from_local_storage: *const fn (*Grid.Read, ReadBlockResult) void,
             /// If the local read fails, this read will be added to a linked list, which Replica can
             /// then interrogate each tick(). The callback passed to this function won't be called
             /// until the block has been recovered.
-            from_local_or_global: *const fn (*Grid.Read, BlockPtrConst) void,
+            from_local_or_global_storage: *const fn (*Grid.Read, BlockPtrConst) void,
         };
 
         pub const Read = struct {
@@ -690,14 +690,14 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             switch (callback) {
-                .from_local => {
+                .from_local_storage => {
                     maybe(grid.checkpointing == null);
                     // We try to read the block even when it is free — if we recently released it,
                     // it might be found on disk anyway.
                     maybe(grid.superblock.free_set.is_free(address));
                     maybe(grid.writing(address, null) == .create);
                 },
-                .from_local_or_global => {
+                .from_local_or_global_storage => {
                     assert(grid.checkpointing == null);
                     assert(!grid.superblock.free_set.is_free(address));
                     assert(grid.writing(address, null) != .create);
@@ -708,7 +708,7 @@ pub fn GridType(comptime Storage: type) type {
                 .callback = callback,
                 .address = address,
                 .checksum = checksum,
-                .coherent = callback == .from_local_or_global,
+                .coherent = callback == .from_local_or_global_storage,
                 .cache_read = options.cache_read,
                 .cache_write = options.cache_write,
                 .checkpoint_id = grid.superblock.working.checkpoint_id(),
@@ -740,7 +740,7 @@ pub fn GridType(comptime Storage: type) type {
                 &grid.read_faulty_queue,
             }) |queue| {
                 // Don't remote-repair repairs – the block may not belong in our current checkpoint.
-                if (read.callback == .from_local) {
+                if (read.callback == .from_local_storage) {
                     if (queue == &grid.read_faulty_queue) continue;
                 }
 
@@ -940,8 +940,8 @@ pub fn GridType(comptime Storage: type) type {
                 }
 
                 switch (pending_read.callback) {
-                    .from_local => |callback| callback(pending_read, result),
-                    .from_local_or_global => |callback| {
+                    .from_local_storage => |callback| callback(pending_read, result),
+                    .from_local_or_global_storage => |callback| {
                         if (result == .valid) {
                             callback(pending_read, result.valid);
                         } else {
@@ -954,8 +954,8 @@ pub fn GridType(comptime Storage: type) type {
             // Then invoke the callback with the cache block (which should be valid for the duration
             // of the callback as any nested Grid calls cannot synchronously update the cache).
             switch (read.callback) {
-                .from_local => |callback| callback(read, result),
-                .from_local_or_global => |callback| {
+                .from_local_storage => |callback| callback(read, result),
+                .from_local_or_global_storage => |callback| {
                     if (result == .valid) {
                         callback(read, result.valid);
                     } else {
@@ -969,7 +969,7 @@ pub fn GridType(comptime Storage: type) type {
             // read in the recovery queue and enqueue to it.
             if (read_remote_resolves.pop()) |read_remote_head_pending| {
                 const read_remote_head = @fieldParentPtr(Read, "pending", read_remote_head_pending);
-                assert(read_remote_head.callback == .from_local_or_global);
+                assert(read_remote_head.callback == .from_local_or_global_storage);
                 assert(read_remote_head.coherent);
 
                 // On the result of an invalid block, move the "root" read (and all others it
