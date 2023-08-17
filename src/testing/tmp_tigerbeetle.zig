@@ -111,9 +111,10 @@ pub fn deinit(tb: *TmpTigerBeetle, gpa: std.mem.Allocator) void {
     // Signal to the `stderr_reader_thread` that it can exit
     // TODO(Zig) https://github.com/ziglang/zig/issues/16820
     if (builtin.os.tag == .windows) {
-        std.os.windows.TerminateProcess(tb.process.handle, 1) catch {};
+        const exit_code = 1;
+        std.os.windows.TerminateProcess(tb.process.id, exit_code) catch {};
     } else {
-        std.os.kill(tb.process.pid, std.os.SIG.TERM) catch {};
+        std.os.kill(tb.process.id, std.os.SIG.TERM) catch {};
     }
 
     tb.stderr_reader_thread.join();
