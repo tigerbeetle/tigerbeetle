@@ -2327,7 +2327,7 @@ pub fn ReplicaType(
                     });
                     return;
                 },
-                .none => {},
+                .not_writing => {},
             }
 
             const write = self.grid_writes.acquire() orelse {
@@ -8203,7 +8203,7 @@ pub fn ReplicaType(
             while (reads) |read| : (reads = read.next) {
                 assert(read.address > 0);
                 assert(!self.superblock.free_set.is_free(read.address));
-                if (self.grid.writing(read.address, null) != .none) continue;
+                if (self.grid.writing(read.address, null) != .not_writing) continue;
 
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
                     self.replica,
