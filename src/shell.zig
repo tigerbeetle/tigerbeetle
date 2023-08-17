@@ -427,29 +427,26 @@ test "shell: expand_argv" {
 ///
 /// Caller is responsible for closing the dir.
 fn discover_project_root() !std.fs.Dir {
-    if (false) { // TODO(Zig): https://github.com/ziglang/zig/issues/16779
-        var current = try std.fs.cwd().openDir(".", .{}); // dup cwd so that the caller can close
+    // TODO(Zig): https://github.com/ziglang/zig/issues/16779
+    const ancestors = "./" ++ "../" ** 16;
+
+    var level: u32 = 0;
+    while (level < 16) : (level += 1) {
+        const ancestor = ancestors[0 .. 2 + 3 * level];
+        assert(ancestor[ancestor.len - 1] == '/');
+
+        var current = try std.fs.cwd().openDir(ancestor, .{});
         errdefer current.close();
 
-        var level: u32 = 0;
-        while (level < 16) : (level += 1) {
-            if (current.statFile("build.zig")) |_| {
-                assert(try subdir_exists(current, ".github"));
-                return current;
-            } else |err| switch (err) {
-                error.FileNotFound => {
-                    var parent = try current.openDir("..", .{});
-                    current.close();
-                    current = parent;
-                },
-                else => return err,
-            }
+        if (current.statFile("src/shell.zig")) |_| {
+            return current;
+        } else |err| switch (err) {
+            error.FileNotFound => {
+                current.close();
+            },
+            else => return err,
         }
-
-        return error.DiscoverProjectRootDepthExceeded;
-    } else {
-        const this_file = @src().file;
-        const root_dir = std.fs.path.dirname(std.fs.path.dirname(this_file).?).?;
-        return try std.fs.cwd().openDir(root_dir, .{});
     }
+
+    return error.DiscoverProjectRootDepthExceeded;
 }
