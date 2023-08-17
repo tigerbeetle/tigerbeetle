@@ -20,12 +20,8 @@ pub fn build(b: *std.Build) !void {
     defer shell.destroy();
 
     // The "tigerbeetle version" command includes the build-time commit hash.
-    options.addOption(
-        ?[]const u8,
-        "git_commit",
-        if (shell.git_commit()) |commit| @as([]const u8, &commit) else |_| null,
-    );
-    options.addOption(?[]const u8, "git_tag", shell.git_tag() catch null);
+    options.addOption([]const u8, "git_commit", try shell.git_commit());
+    options.addOption([]const u8, "git_tag", try shell.git_tag());
 
     options.addOption(
         config.ConfigBase,

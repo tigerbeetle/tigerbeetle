@@ -249,6 +249,9 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
           file: tools/docker/Dockerfile
+          # So that we can copy in .git to the build step so we can
+          # get the correct version.
+          context: .
 
       # This is required because we can't load multiple platforms. Instead,
       # just load amd64 for verification below.
@@ -267,6 +270,9 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
           file: tools/docker/Dockerfile
+          # So that we can copy in .git to the build step so we can
+          # get the correct version.
+          context: .
 
       # Validate the image
       - if: matrix.debug == 'production'

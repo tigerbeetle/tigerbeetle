@@ -7,6 +7,10 @@
 set -e
 
 docker run -v "$(pwd)/../../..":/wrk -w /wrk --entrypoint bash node:14-buster -c '
+# Deals with an error git throws within Docker when a git repo is
+# volume mounted.:
+#   fatal: detected dubious ownership in repository at '/wrk'
+git config --global --add safe.directory /wrk
 wget --output-document="/tmp/node-headers.tar.gz" "$(node -p 'process.release.headersUrl')"
 tar -xf "/tmp/node-headers.tar.gz" --strip-components=1 -C /usr/local
 ./scripts/install_zig.sh
