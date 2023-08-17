@@ -182,7 +182,6 @@ const naughty_list = [_][]const u8{
     "time.zig",
     "tracer.zig",
     "vsr.zig",
-    "vsr/checksum.zig",
     "vsr/client_replies.zig",
     "vsr/client.zig",
     "vsr/clock.zig",
