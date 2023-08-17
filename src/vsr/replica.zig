@@ -2239,7 +2239,7 @@ pub fn ReplicaType(
                 };
 
                 self.grid.read_block(
-                    .{ .from_local_storage = on_request_blocks_read_repair },
+                    .{ .from_local_storage = on_request_blocks_read_block },
                     &read.read,
                     request.block_address,
                     request.block_checksum,
@@ -2248,7 +2248,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_request_blocks_read_repair(
+        fn on_request_blocks_read_block(
             grid_read: *Grid.Read,
             result: Grid.ReadBlockResult,
         ) void {
