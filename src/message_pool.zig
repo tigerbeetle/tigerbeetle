@@ -123,7 +123,7 @@ pub const MessagePool = struct {
         var free_count: usize = 0;
         while (pool.free_list) |message| {
             pool.free_list = message.next;
-            allocator.free(@as([]const u8, message.buffer));
+            allocator.free(message.buffer);
             allocator.destroy(message);
             free_count += 1;
         }
