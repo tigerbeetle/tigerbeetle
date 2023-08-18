@@ -1920,7 +1920,7 @@ const ViewChangeHeadersArray = struct {
 };
 
 pub const Op = struct {
-    pub fn checkpoint_before_checkpoint(checkpoint: u64) ?u64 {
+    pub fn checkpoint_before(checkpoint: u64) ?u64 {
         assert(checkpoint_valid(checkpoint));
 
         if (checkpoint == 0) {
@@ -1934,7 +1934,7 @@ pub const Op = struct {
         return checkpoint - (constants.journal_slot_count - constants.lsm_batch_multiple);
     }
 
-    pub fn checkpoint_after_checkpoint(checkpoint: u64) u64 {
+    pub fn checkpoint_after(checkpoint: u64) u64 {
         assert(checkpoint_valid(checkpoint));
 
         const checkpoint_next = op: {
@@ -1950,7 +1950,7 @@ pub const Op = struct {
 
         assert((checkpoint_next + 1) % constants.lsm_batch_multiple == 0);
         assert(checkpoint_valid(checkpoint_next));
-        assert(checkpoint_before_checkpoint(checkpoint_next) == checkpoint);
+        assert(checkpoint_before(checkpoint_next) == checkpoint);
 
         return checkpoint_next;
     }
