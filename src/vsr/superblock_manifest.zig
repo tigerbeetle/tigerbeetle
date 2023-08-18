@@ -194,10 +194,6 @@ pub const Manifest = struct {
         assert(size == source.len);
         assert(@divExact(size, BlockReferenceSize) == manifest.count);
 
-        @memset(manifest.trees[manifest.count..], 0);
-        @memset(manifest.checksums[manifest.count..], 0);
-        @memset(manifest.addresses[manifest.count..], 0);
-
         if (constants.verify) manifest.verify();
     }
 
