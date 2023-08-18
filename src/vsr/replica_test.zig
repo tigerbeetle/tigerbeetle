@@ -15,12 +15,12 @@ const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 
 const slot_count = constants.journal_slot_count;
-const checkpoint_1 = vsr.Op.checkpoint_after(0);
-const checkpoint_2 = vsr.Op.checkpoint_after(checkpoint_1);
-const checkpoint_3 = vsr.Op.checkpoint_after(checkpoint_2);
-const checkpoint_1_trigger = vsr.Op.trigger_from_checkpoint(checkpoint_1);
-const checkpoint_2_trigger = vsr.Op.trigger_from_checkpoint(checkpoint_2);
-const checkpoint_3_trigger = vsr.Op.trigger_from_checkpoint(checkpoint_3);
+const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);
+const checkpoint_2 = vsr.Checkpoint.checkpoint_after(checkpoint_1);
+const checkpoint_3 = vsr.Checkpoint.checkpoint_after(checkpoint_2);
+const checkpoint_1_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_1).?;
+const checkpoint_2_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_2).?;
+const checkpoint_3_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_3).?;
 const log_level = std.log.Level.err;
 
 // TODO Test client eviction once it no longer triggers a client panic.

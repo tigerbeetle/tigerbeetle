@@ -568,7 +568,7 @@ pub fn ReplicaType(
             //    for op `X - journal_slot_count` (same slot, prior wrap) from vsr_headers
             //    into the journal.
             // 5. Replica A participates in a view-change, but nacks[/does not include] op X.
-            // 6. Op X is truncated.
+            // 6. Checkpoint X is truncated.
             for (vsr_headers.slice) |*vsr_header| {
                 if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
                     vsr_header.op <= self.op_checkpoint_next_trigger() and
@@ -4297,7 +4297,7 @@ pub fn ReplicaType(
             // For an explanation, see: "Cluster: repair: primary checkpoint, backup crash before
             // checkpoint, primary prepare".
             if (self.op_checkpoint() != 0 and
-                vsr.Op.trigger_from_checkpoint(self.op_checkpoint()) + 1 == self.op)
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).? + 1 == self.op)
             {
                 var count: usize = 0;
                 for (self.sync_target_quorum.candidates, 0..) |target, replica_index| {
@@ -4937,36 +4937,14 @@ pub fn ReplicaType(
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
-        ///
-        /// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
-        ///
-        ///   checkpoint() call           0   1   2   3
-        ///   op_checkpoint               0   5  11  17
-        ///   op_checkpoint_next          5  11  17  23
-        ///   op_checkpoint_next_trigger  7  13  19  25
-        ///
-        ///     commit log (ops)           │ write-ahead log (slots)
-        ///     0   4   8   2   6   0   4  │ 0---4---
-        ///   0 ─────✓·%                   │ 01234✓6%   initial log fill
-        ///   1 ───────────✓·%             │ 890✓2%45   first wrap of log
-        ///   2 ─────────────────✓·%       │ 6✓8%0123   second wrap of log
-        ///   3 ───────────────────────✓·% │ 4%67890✓   third wrap of log
-        ///
-        /// Legend:
-        ///
-        ///   ─/✓  op on disk at checkpoint
-        ///   ·/%  op in memory at checkpoint
-        ///     ✓  op_checkpoint
-        ///     %  op_checkpoint's trigger
-        ///
         fn op_checkpoint_next(self: *const Self) u64 {
-            assert(vsr.Op.checkpoint_valid(self.op_checkpoint()));
+            assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
                 self.status == .recovering or self.status == .recovering_head);
 
-            const checkpoint_next = vsr.Op.checkpoint_after(self.op_checkpoint());
-            assert(vsr.Op.checkpoint_valid(checkpoint_next));
+            const checkpoint_next = vsr.Checkpoint.checkpoint_after(self.op_checkpoint());
+            assert(vsr.Checkpoint.valid(checkpoint_next));
             assert(checkpoint_next > self.op_checkpoint()); // The checkpoint always advances.
 
             return checkpoint_next;
@@ -4980,7 +4958,7 @@ pub fn ReplicaType(
         ///
         /// See `op_checkpoint_next` for more detail.
         fn op_checkpoint_next_trigger(self: *const Self) u64 {
-            return vsr.Op.trigger_from_checkpoint(self.op_checkpoint_next());
+            return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
         fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
@@ -4988,7 +4966,7 @@ pub fn ReplicaType(
                 if (op < self.op_repair_min()) return null;
 
                 const op_checkpoint_next_trigger_previous =
-                    vsr.Op.trigger_from_checkpoint(self.op_checkpoint());
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
                 if (op <= op_checkpoint_next_trigger_previous) {
                     return self.superblock.working.vsr_state.previous_checkpoint_id;
                 }
@@ -7969,7 +7947,7 @@ pub fn ReplicaType(
             }
 
             const candidate_canonical = canonical: {
-                const candidate_trigger = vsr.Op.trigger_from_checkpoint(candidate.checkpoint_op);
+                const candidate_trigger = vsr.Checkpoint.trigger_for_checkpoint(candidate.checkpoint_op).?;
 
                 if (header.command == .commit and header.commit > candidate_trigger) {
                     // Normal case: The primary has committed atop the checkpoint.
