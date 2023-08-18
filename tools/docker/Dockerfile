@@ -4,7 +4,7 @@
 FROM --platform=$BUILDPLATFORM ubuntu:22.04 AS build
 
 RUN  apt-get update \
-  && apt-get install -y wget xz-utils
+  && apt-get install -y wget xz-utils git
 
 WORKDIR /opt/beta-beetle
 
@@ -21,6 +21,7 @@ ARG DEBUG=false
 # So, explicitly install zig before then, to not need to do it twice.
 RUN ./scripts/install_zig.sh
 
+COPY .git .git
 COPY scripts ./scripts
 COPY src ./src
 COPY build.zig ./build.zig
