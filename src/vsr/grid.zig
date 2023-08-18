@@ -239,7 +239,8 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         /// Invoke the callback after all pending repair-writes to blocks that are about to be
-        /// released have completed.
+        /// released have completed. This guarantees that there are no outstanding writes to
+        /// (now-)free blocks when we enter the new checkpoint.
         pub fn checkpoint(grid: *Grid, callback: *const fn (*Grid) void) void {
             assert(grid.checkpointing == null);
             assert(grid.canceling == null);
