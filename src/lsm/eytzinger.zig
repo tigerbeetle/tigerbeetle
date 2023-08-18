@@ -3,6 +3,8 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
+const constants = @import("../constants.zig");
+
 /// keys_count must be one less than a power of two. This allows us to align the layout
 /// such that great great grandchildren of a node are not unnecessarily split across cache lines.
 pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
@@ -138,6 +140,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             comptime Key: type,
             comptime Value: type,
             comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+            comptime prefetch: bool,
             layout: *const [keys_count + 1]Key,
             values: []const Value,
             key: Key,
@@ -183,7 +186,55 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
 
             var i: u32 = 0;
             while (i < keys.len) {
-                // TODO use @prefetch when available: https://github.com/ziglang/zig/issues/3600
+                if (comptime prefetch) {
+                    // Prefetching next levels from memory:
+                    // ARRAY LAYOUTS FOR COMPARISON-BASED SEARCHING, page 25.
+                    // https://arxiv.org/abs/1509.05053.
+
+                    // Prefetching is only worthy if we can fit many keys into the cache line.
+                    comptime assert(constants.cache_line_size > @sizeOf(Key));
+
+                    // Example of prefetcing, using a tree where each key is a `u32`:
+                    // We can fit `64 / @sizeOf(u32) == 16` keys per the cache line, that is,
+                    // prefetching ahead 16 elements corresponding to the great-great-grand-children
+                    // relative to `i` given by the formula `2i + 1`.
+                    //
+                    //         +---          . . i . .
+                    // Current |            /         \
+                    //   cache |          2i+1        2i+2
+                    //    line |          /   \       /   \
+                    // 16 keys |        4i+3  4i+4  4i+5  4i+6
+                    //         |        /   \ /   \ /   \ /   \
+                    //         +---   8i+7 .................. 8i+14
+                    //                /   \  / \   / \   / \  /   \
+                    //             16i+15 ....................... 16i+30
+                    //              |                                |
+                    //              +---  Next cache line 16 keys ---+
+                    //
+                    // Replacing `16i + 15` with the actual number of keys per cache line,
+                    // e.g. `B = 64 / @sizeOf(Key)`, we can prefetch `(B * i) + B - 1` ahead.
+                    //
+                    // Note: The paper mentioned above suggests using `⌊3B/2⌋ − 1` as offset,
+                    // landing exactly at the middle of the level (e.g 16i + 23).
+                    // However we found this approach less efficient for our workload.
+                    const cache_line_keys = comptime @divExact(
+                        constants.cache_line_size,
+                        @sizeOf(Key),
+                    );
+                    comptime assert(cache_line_keys % 2 == 0);
+
+                    // We need to use pointer arithmetic to avoid bounds checks.
+                    // Locality = 0 means no temporal locality. That is, the data can be immediately
+                    // dropped from the cache after it is accessed.
+                    @prefetch(keys.ptr + (cache_line_keys * i) + cache_line_keys - 1, .{
+                        .rw = .read,
+                        .locality = 0,
+                        .cache = .data,
+                    });
+                }
+
+                // The branchy version using `if .. else` is faster than the branchless one,
+                // e.g `i = 2 * i + 1 + @intFromBool(compare_keys(key, keys[i]) == .gt);`.
                 i = if (compare_keys(key, keys[i]) == .gt) 2 * i + 2 else 2 * i + 1;
             }
 
@@ -223,6 +274,7 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
         pub fn search_keys(
             comptime Key: type,
             comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
+            comptime prefetch: bool,
             layout: *const [keys_count + 1]Key,
             values_count: u32,
             key: Key,
@@ -234,7 +286,20 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
             const keys = layout[1..];
             var i: u32 = 0;
             while (i < keys.len) {
-                // TODO use @prefetch when available: https://github.com/ziglang/zig/issues/3600
+                if (comptime prefetch) {
+                    comptime assert(constants.cache_line_size > @sizeOf(Key));
+                    const cache_line_keys = comptime @divExact(
+                        constants.cache_line_size,
+                        @sizeOf(Key),
+                    );
+                    comptime assert(cache_line_keys % 2 == 0);
+
+                    @prefetch(keys.ptr + (cache_line_keys * i) + cache_line_keys - 1, .{
+                        .rw = .read,
+                        .locality = 0,
+                        .cache = .data,
+                    });
+                }
                 i = if (compare_keys(key, keys[i]) == .gt) 2 * i + 2 else 2 * i + 1;
             }
             const upper = @as(u64, i + 1) >> ffs(~(i + 1));
@@ -343,136 +408,140 @@ const test_eytzinger = struct {
 
         var layout: [keys_count + 1]u32 = undefined;
 
-        var sentinels: usize = 0;
-        while (sentinels < sentinels_max) : (sentinels += 1) {
-            const values = values_full[0 .. values_full.len - sentinels];
-            e.layout_from_keys_or_values(u32, Value, Value.to_key, sentinel_key, values, &layout);
+        inline for (&.{ true, false }) |prefetch| {
+            var sentinels: usize = 0;
+            while (sentinels < sentinels_max) : (sentinels += 1) {
+                const values = values_full[0 .. values_full.len - sentinels];
+                e.layout_from_keys_or_values(u32, Value, Value.to_key, sentinel_key, values, &layout);
 
-            const keys = layout[1..];
+                const keys = layout[1..];
 
-            if (log) {
-                std.debug.print("keys count: {}, values max: {}, sentinels: {}\n", .{
-                    keys_count,
-                    values_max,
-                    sentinels,
-                });
-                std.debug.print("values: {any}\n", .{values});
-                std.debug.print("eytzinger layout: {any}\n", .{e.tree});
-                std.debug.print("keys: {any}\n", .{@as([]u32, keys)});
-            }
-
-            // This is a regression test for our test code. We added this after we originally failed
-            // to test exactly the case this is checking for.
-            var at_least_one_target_key_not_in_values = false;
-
-            var target_key: u32 = 0;
-            while (target_key < values[values.len - 1].to_key() + 13) : (target_key += 1) {
-                if (log) std.debug.print("target key: {}\n", .{target_key});
-                var expect_keys: Bounds = .{
-                    .lower = null,
-                    .upper = null,
-                };
-                for (keys, 0..) |key, index| {
-                    const i = @as(u32, @intCast(index));
-                    if (key == sentinel_key) continue;
-                    switch (compare_keys(key, target_key)) {
-                        .eq => {
-                            expect_keys.lower = i;
-                            expect_keys.upper = i;
-                            break;
-                        },
-                        .gt => if (expect_keys.upper == null or
-                            compare_keys(key, keys[expect_keys.upper.?]) == .lt)
-                        {
-                            expect_keys.upper = i;
-                        },
-                        .lt => if (expect_keys.lower == null or
-                            compare_keys(key, keys[expect_keys.lower.?]) == .gt)
-                        {
-                            expect_keys.lower = i;
-                        },
-                    }
+                if (log) {
+                    std.debug.print("keys count: {}, values max: {}, sentinels: {}\n", .{
+                        keys_count,
+                        values_max,
+                        sentinels,
+                    });
+                    std.debug.print("values: {any}\n", .{values});
+                    std.debug.print("eytzinger layout: {any}\n", .{e.tree});
+                    std.debug.print("keys: {any}\n", .{@as([]u32, keys)});
                 }
 
-                const expect_upper_bound = if (expect_keys.upper) |u| e.tree[u] else null;
-                var actual_upper_bound = e.search_keys(
-                    u32,
-                    compare_keys,
-                    &layout,
-                    @as(u32, @intCast(values.len)),
-                    target_key,
-                );
-                try std.testing.expectEqual(expect_upper_bound, actual_upper_bound);
+                // This is a regression test for our test code. We added this after we originally failed
+                // to test exactly the case this is checking for.
+                var at_least_one_target_key_not_in_values = false;
 
-                var expect_values: Bounds = .{
-                    .lower = null,
-                    .upper = null,
-                };
-                var target_key_found = false;
-                for (values, 0..) |value, i| {
-                    if (compare_keys(value.to_key(), target_key) == .eq) target_key_found = true;
-
-                    if (expect_keys.lower) |l| {
-                        if (compare_keys(value.to_key(), keys[l]) == .eq) {
-                            expect_values.lower = @as(u32, @intCast(i));
+                var target_key: u32 = 0;
+                while (target_key < values[values.len - 1].to_key() + 13) : (target_key += 1) {
+                    if (log) std.debug.print("target key: {}\n", .{target_key});
+                    var expect_keys: Bounds = .{
+                        .lower = null,
+                        .upper = null,
+                    };
+                    for (keys, 0..) |key, index| {
+                        const i = @as(u32, @intCast(index));
+                        if (key == sentinel_key) continue;
+                        switch (compare_keys(key, target_key)) {
+                            .eq => {
+                                expect_keys.lower = i;
+                                expect_keys.upper = i;
+                                break;
+                            },
+                            .gt => if (expect_keys.upper == null or
+                                compare_keys(key, keys[expect_keys.upper.?]) == .lt)
+                            {
+                                expect_keys.upper = i;
+                            },
+                            .lt => if (expect_keys.lower == null or
+                                compare_keys(key, keys[expect_keys.lower.?]) == .gt)
+                            {
+                                expect_keys.lower = i;
+                            },
                         }
                     }
-                    if (expect_keys.upper) |u| {
-                        if (compare_keys(value.to_key(), keys[u]) == .eq) {
-                            expect_values.upper = @as(u32, @intCast(i));
+
+                    const expect_upper_bound = if (expect_keys.upper) |u| e.tree[u] else null;
+                    var actual_upper_bound = e.search_keys(
+                        u32,
+                        compare_keys,
+                        prefetch,
+                        &layout,
+                        @as(u32, @intCast(values.len)),
+                        target_key,
+                    );
+                    try std.testing.expectEqual(expect_upper_bound, actual_upper_bound);
+
+                    var expect_values: Bounds = .{
+                        .lower = null,
+                        .upper = null,
+                    };
+                    var target_key_found = false;
+                    for (values, 0..) |value, i| {
+                        if (compare_keys(value.to_key(), target_key) == .eq) target_key_found = true;
+
+                        if (expect_keys.lower) |l| {
+                            if (compare_keys(value.to_key(), keys[l]) == .eq) {
+                                expect_values.lower = @as(u32, @intCast(i));
+                            }
+                        }
+                        if (expect_keys.upper) |u| {
+                            if (compare_keys(value.to_key(), keys[u]) == .eq) {
+                                expect_values.upper = @as(u32, @intCast(i));
+                            }
                         }
                     }
-                }
-                if (!target_key_found) at_least_one_target_key_not_in_values = true;
-                assert((expect_keys.lower == null) == (expect_values.lower == null));
-                assert((expect_keys.upper == null) == (expect_values.upper == null));
+                    if (!target_key_found) at_least_one_target_key_not_in_values = true;
+                    assert((expect_keys.lower == null) == (expect_values.lower == null));
+                    assert((expect_keys.upper == null) == (expect_values.upper == null));
 
-                if (expect_values.lower != null) {
-                    if (compare_keys(values[expect_values.lower.?].to_key(), target_key) == .lt) {
-                        expect_values.lower.? += 1;
-                    } else {
-                        assert(compare_keys(values[expect_values.lower.?].to_key(), target_key) == .eq);
+                    if (expect_values.lower != null) {
+                        if (compare_keys(values[expect_values.lower.?].to_key(), target_key) == .lt) {
+                            expect_values.lower.? += 1;
+                        } else {
+                            assert(compare_keys(values[expect_values.lower.?].to_key(), target_key) == .eq);
+                        }
                     }
-                }
-                if (expect_values.upper != null) {
-                    var exclusion: u32 = undefined;
-                    if (compare_keys(values[expect_values.upper.?].to_key(), target_key) == .gt) {
-                        exclusion = 1;
-                    } else {
-                        exclusion = 0;
-                        assert(compare_keys(values[expect_values.upper.?].to_key(), target_key) == .eq);
+                    if (expect_values.upper != null) {
+                        var exclusion: u32 = undefined;
+                        if (compare_keys(values[expect_values.upper.?].to_key(), target_key) == .gt) {
+                            exclusion = 1;
+                        } else {
+                            exclusion = 0;
+                            assert(compare_keys(values[expect_values.upper.?].to_key(), target_key) == .eq);
+                        }
+                        // Convert the inclusive upper bound to an exclusive upper bound for slicing.
+                        expect_values.upper.? += 1;
+                        // Now, apply the conditional exclusion. The order is important here to avoid
+                        // underflow if expect_values.upper is 0.
+                        expect_values.upper.? -= exclusion;
                     }
-                    // Convert the inclusive upper bound to an exclusive upper bound for slicing.
-                    expect_values.upper.? += 1;
-                    // Now, apply the conditional exclusion. The order is important here to avoid
-                    // underflow if expect_values.upper is 0.
-                    expect_values.upper.? -= exclusion;
+
+                    const expect_slice_lower = expect_values.lower orelse 0;
+                    const expect_slice_upper = expect_values.upper orelse values.len;
+                    const expect_slice = values[expect_slice_lower..expect_slice_upper];
+                    if (target_key_found and expect_slice.len == 1) {
+                        assert(compare_keys(expect_slice[0].to_key(), target_key) == .eq);
+                    }
+
+                    const actual_slice = e.search_values(
+                        u32,
+                        Value,
+                        compare_keys,
+                        prefetch,
+                        &layout,
+                        values,
+                        target_key,
+                    );
+
+                    try std.testing.expectEqual(
+                        @as([*]const Value, expect_slice.ptr),
+                        actual_slice.ptr,
+                    );
+                    try std.testing.expectEqual(expect_slice.len, actual_slice.len);
                 }
 
-                const expect_slice_lower = expect_values.lower orelse 0;
-                const expect_slice_upper = expect_values.upper orelse values.len;
-                const expect_slice = values[expect_slice_lower..expect_slice_upper];
-                if (target_key_found and expect_slice.len == 1) {
-                    assert(compare_keys(expect_slice[0].to_key(), target_key) == .eq);
-                }
-
-                const actual_slice = e.search_values(
-                    u32,
-                    Value,
-                    compare_keys,
-                    &layout,
-                    values,
-                    target_key,
-                );
-
-                try std.testing.expectEqual(
-                    @as([*]const Value, expect_slice.ptr),
-                    actual_slice.ptr,
-                );
-                try std.testing.expectEqual(expect_slice.len, actual_slice.len);
+                assert(at_least_one_target_key_not_in_values);
             }
-
-            assert(at_least_one_target_key_not_in_values);
         }
     }
 };
