@@ -59,6 +59,7 @@ const CommitStage = enum {
     compact_state_machine,
     checkpoint_state_machine,
     checkpoint_client_replies,
+    checkpoint_grid_repair,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -128,7 +129,7 @@ pub fn ReplicaType(
         const Clock = vsr.ClockType(Time);
 
         const BlockRead = struct {
-            read: Grid.ReadRepair,
+            read: Grid.Read,
             replica: *Self,
             destination: u8,
             message: *Message,
@@ -2178,24 +2179,18 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (self.grid.canceling) |_| {
+                log.debug("{}: on_request_blocks: ignoring; canceling grid", .{self.replica});
+                return;
+            }
+
             // TODO Rate limit replicas that keep requesting the same blocks (maybe via checksum_body?)
             // to avoid unnecessary work in the presence of an asymmetric partition.
             const requests = std.mem.bytesAsSlice(vsr.BlockRequest, message.body());
             assert(requests.len > 0);
 
-            request_loop: for (requests, 0..) |*request, i| {
-                for (std.mem.bytesAsSlice(u64, &request.reserved)) |word| assert(word == 0);
-
-                if (self.grid.faulty(request.block_address, null)) {
-                    log.warn("{}: on_request_blocks: ignoring block request; faulty " ++
-                        "(replica={} address={} checksum={})", .{
-                        self.replica,
-                        message.header.replica,
-                        request.block_address,
-                        request.block_checksum,
-                    });
-                    continue;
-                }
+            next_request: for (requests, 0..) |*request, i| {
+                assert(stdx.zeroed(&request.reserved));
 
                 var reads = self.grid_reads.iterate();
                 while (reads.next()) |read| {
@@ -2210,7 +2205,7 @@ pub fn ReplicaType(
                             request.block_address,
                             request.block_checksum,
                         });
-                        continue :request_loop;
+                        continue :next_request;
                     }
                 }
 
@@ -2243,17 +2238,20 @@ pub fn ReplicaType(
                     .message = reply.ref(),
                 };
 
-                self.grid.read_block_repair(
-                    on_request_blocks_read_repair,
+                self.grid.read_block(
+                    .{ .from_local_storage = on_request_blocks_read_block },
                     &read.read,
-                    reply.buffer[0..constants.block_size],
                     request.block_address,
                     request.block_checksum,
+                    .{ .cache_read = true, .cache_write = false },
                 );
             }
         }
 
-        fn on_request_blocks_read_repair(grid_read: *Grid.ReadRepair, result: error{BlockNotFound}!void) void {
+        fn on_request_blocks_read_block(
+            grid_read: *Grid.Read,
+            result: Grid.ReadBlockResult,
+        ) void {
             const read = @fieldParentPtr(BlockRead, "read", grid_read);
             const self = read.replica;
             defer {
@@ -2263,24 +2261,26 @@ pub fn ReplicaType(
 
             assert(read.destination != self.replica);
 
-            result catch {
-                log.debug("{}: on_request_blocks: block not found " ++
+            if (result != .valid) {
+                log.debug("{}: on_request_blocks: error: {s}: " ++
                     "(destination={} address={} checksum={})", .{
                     self.replica,
+                    @tagName(result),
                     read.destination,
                     grid_read.address,
                     grid_read.checksum,
                 });
                 return;
-            };
+            }
 
-            log.debug("{}: on_request_blocks: block found " ++
-                "(destination={} address={} checksum={})", .{
+            log.debug("{}: on_request_blocks: success: (destination={} address={} checksum={})", .{
                 self.replica,
                 read.destination,
                 grid_read.address,
                 grid_read.checksum,
             });
+
+            stdx.copy_disjoint(.inexact, u8, read.message.buffer, result.valid);
 
             assert(read.message.header.command == .block);
             assert(read.message.header.op == grid_read.address);
@@ -2318,7 +2318,7 @@ pub fn ReplicaType(
             }
 
             switch (self.grid.writing(message.header.op, null)) {
-                .init => unreachable,
+                .create => unreachable,
                 .repair => {
                     log.debug("{}: on_block: ignoring; already writing block (address={} checksum={})", .{
                         self.replica,
@@ -2327,7 +2327,7 @@ pub fn ReplicaType(
                     });
                     return;
                 },
-                .none => {},
+                .not_writing => {},
             }
 
             const write = self.grid_writes.acquire() orelse {
@@ -2727,6 +2727,7 @@ pub fn ReplicaType(
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
             if (self.commit_stage == .checkpoint_superblock) return;
+            if (self.commit_stage == .checkpoint_grid_repair) return;
 
             // TODO Test connectivity to cluster to rule out a network partition.
 
@@ -3074,6 +3075,7 @@ pub fn ReplicaType(
                 .checkpoint_client_replies => {
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
+                .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3421,10 +3423,9 @@ pub fn ReplicaType(
                 );
                 if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
 
-                assert(self.grid.read_queue.empty());
-                assert(self.grid.read_faulty_queue.empty());
-                assert(self.grid.write_queue.empty());
-                assert(self.grid.write_iops.executing() == 0);
+                // TODO(Compaction pacing) Move this out of the conditional once there is no IO
+                // between beats.
+                self.grid.assert_only_repairing();
 
                 self.commit_dispatch(.checkpoint_state_machine);
             } else {
@@ -3438,10 +3439,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid.write_iops.executing() == 0);
+            self.grid.assert_only_repairing();
 
             self.commit_dispatch(.checkpoint_client_replies);
         }
@@ -3450,20 +3448,33 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_stage == .checkpoint_client_replies);
 
+            self.commit_dispatch(.checkpoint_grid_repair);
+        }
+
+        fn commit_op_checkpoint_grid_repair(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
+
+            self.grid.checkpoint(commit_op_checkpoint_grid_repair_callback);
+        }
+
+        fn commit_op_checkpoint_grid_repair_callback(grid: *Grid) void {
+            const self = @fieldParentPtr(Self, "grid", grid);
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
+
             self.commit_dispatch(.checkpoint_superblock);
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
+            assert(self.state_machine_opened);
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
-            assert(self.grid.write_queue.empty());
-            assert(self.grid.write_iops.executing() == 0);
             assert(self.op_checkpoint_trigger() == self.op);
             assert(self.op_checkpoint_trigger() <= self.commit_max);
+            self.grid.assert_only_repairing();
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
             //
@@ -3497,6 +3508,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() == self.commit_min - constants.lsm_batch_multiple);
             assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
             assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+            self.grid.assert_only_repairing();
 
             log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{
                 self.replica,
@@ -7473,6 +7485,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7616,6 +7629,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => {},
             }
@@ -7664,8 +7678,6 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
             assert(!self.grid_repair_message_timeout.ticking);
-            assert(self.grid.read_queue.empty());
-            assert(self.grid.read_pending_queue.empty());
             assert(self.grid.read_faulty_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid_writes.executing() == 0);
@@ -7698,6 +7710,8 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
             assert(self.sync_message_timeout.ticking);
+            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.write_queue.empty());
             maybe(self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
@@ -7724,7 +7738,10 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.write_queue.empty());
             assert(self.syncing == .updating_superblock);
+            assert(!self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
@@ -7740,7 +7757,6 @@ pub fn ReplicaType(
                 self.transition_to_recovering_head();
             }
 
-            self.grid.cache_invalidate();
             self.state_machine.open(state_machine_open_callback);
             self.sync_dispatch(.idle);
         }
@@ -8140,11 +8156,10 @@ pub fn ReplicaType(
             assert(!self.superblock.free_set.is_free(read.address));
             maybe(self.state_machine_opened);
 
-            log.warn("{}: on_grid_read_fault: address={} checksum={} block_type={}", .{
+            log.warn("{}: on_grid_read_fault: address={} checksum={}", .{
                 self.replica,
                 read.address,
                 read.checksum,
-                read.block_type,
             });
 
             if (self.solo()) @panic("grid is corrupt");
@@ -8189,7 +8204,7 @@ pub fn ReplicaType(
             while (reads) |read| : (reads = read.next) {
                 assert(read.address > 0);
                 assert(!self.superblock.free_set.is_free(read.address));
-                if (self.grid.writing(read.address, null) != .none) continue;
+                if (self.grid.writing(read.address, null) != .not_writing) continue;
 
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
                     self.replica,
