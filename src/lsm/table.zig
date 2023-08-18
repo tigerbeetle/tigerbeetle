@@ -760,10 +760,12 @@ pub fn TableType(
                 const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
 
                 const e = eytzinger(data.key_count, data.value_count_max);
+                const prefetch = true;
                 break :blk e.search_values(
                     Key,
                     Value,
                     compare_keys,
+                    prefetch,
                     key_layout,
                     data_block_values_used(data_block),
                     key,
