@@ -225,7 +225,6 @@ pub const IO = struct {
         op_data: anytype,
         comptime OperationImpl: type,
     ) void {
-        const Context = @TypeOf(context);
         const Callback = struct {
             fn onComplete(ctx: Completion.Context) void {
                 // Perform the operation and get the result
@@ -248,7 +247,7 @@ pub const IO = struct {
 
                 // The completion is finally ready to invoke the callback
                 callback(
-                    @as(Context, @ptrFromInt(@intFromPtr(ctx.completion.context))),
+                    @ptrCast(@alignCast(ctx.completion.context)),
                     ctx.completion,
                     result,
                 );
@@ -558,7 +557,7 @@ pub const IO = struct {
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
                 .len = @as(u32, @intCast(buffer_limit(buffer.len))),
-                .buf = @as([*]u8, @ptrFromInt(@intFromPtr(buffer.ptr))),
+                .buf = @constCast(buffer.ptr),
             },
             .overlapped = undefined,
             .pending = false,
@@ -855,7 +854,7 @@ pub const IO = struct {
 
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
-                    const socket = @as(os.socket_t, @ptrCast(op.fd));
+                    const socket: os.socket_t = @ptrCast(op.fd);
                     getsockoptError(socket) catch |err| switch (err) {
                         error.FileDescriptorNotASocket => return os.windows.CloseHandle(op.fd),
                         else => {},
@@ -885,11 +884,11 @@ pub const IO = struct {
         if (nanoseconds == 0) {
             completion.* = .{
                 .next = null,
-                .context = @as(?*anyopaque, @ptrCast(context)),
+                .context = @ptrCast(context),
                 .operation = undefined,
                 .callback = struct {
                     fn on_complete(ctx: Completion.Context) void {
-                        const _context = @as(Context, @ptrFromInt(@intFromPtr(ctx.completion.context)));
+                        const _context: Context = @ptrCast(@alignCast(ctx.completion.context));
                         callback(_context, ctx.completion, {});
                     }
                 }.on_complete,

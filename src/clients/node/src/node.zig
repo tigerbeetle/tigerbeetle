@@ -59,7 +59,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
     // state.
     translate.set_instance_data(
         env,
-        @as(*anyopaque, @ptrCast(@alignCast(global))),
+        @ptrCast(@alignCast(global)),
         Globals.destroy,
     ) catch {
         global.deinit();
@@ -117,7 +117,7 @@ const Globals = struct {
 };
 
 fn globalsCast(globals_raw: *anyopaque) *Globals {
-    return @as(*Globals, @ptrCast(@alignCast(globals_raw)));
+    return @ptrCast(@alignCast(globals_raw));
 }
 
 const Context = struct {
@@ -163,7 +163,7 @@ const Context = struct {
 };
 
 fn contextCast(context_raw: *anyopaque) !*Context {
-    return @as(*Context, @ptrCast(@alignCast(context_raw)));
+    return @ptrCast(@alignCast(context_raw));
 }
 
 fn validate_timestamp(env: c.napi_env, object: c.napi_value) !u64 {

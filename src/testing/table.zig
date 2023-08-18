@@ -55,7 +55,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
                 const Field = value_field.type;
                 if (value_field.default_value) |ptr| {
                     if (eat(tokens, "_")) {
-                        const value_ptr = @as(*const Field, @ptrCast(@alignCast(ptr)));
+                        const value_ptr: *const Field = @ptrCast(@alignCast(ptr));
                         @field(data, value_field.name) = value_ptr.*;
                     } else {
                         @field(data, value_field.name) = parse_data(Field, tokens);
