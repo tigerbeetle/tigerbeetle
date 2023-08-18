@@ -216,12 +216,13 @@ pub fn eytzinger(comptime keys_count: u32, comptime values_max: u32) type {
                     //
                     // Note: The paper mentioned above suggests using `⌊3B/2⌋ − 1` as offset,
                     // landing exactly at the middle of the level (e.g 16i + 23).
-                    // However we found this approach less efficient for our workload.
+                    // This approach can be efficient if the level is split between cache lines,
+                    // but it's not our case as key sizes are always a power of two.
                     const cache_line_keys = comptime @divExact(
                         constants.cache_line_size,
                         @sizeOf(Key),
                     );
-                    comptime assert(cache_line_keys % 2 == 0);
+                    comptime assert(math.isPowerOfTwo(cache_line_keys));
 
                     // We need to use pointer arithmetic to avoid bounds checks.
                     // Locality = 0 means no temporal locality. That is, the data can be immediately
