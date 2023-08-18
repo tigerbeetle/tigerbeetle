@@ -159,7 +159,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// (Constructed by the Forest.)
         pub const Config = struct {
             /// Unique (stable) identifier, across all trees in the forest.
-            id: u128,
+            id: u16,
             /// Human-readable tree name for logging.
             name: []const u8,
         };

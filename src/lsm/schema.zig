@@ -124,8 +124,8 @@ pub const TableIndex = struct {
     };
 
     pub const Parent = extern struct {
-        // TODO u16 + padding.
-        tree_id: u128,
+        tree_id: u16,
+        reserved: [14]u8 = .{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -221,11 +221,13 @@ pub const TableIndex = struct {
         });
     }
 
-    pub fn tree_id(index_block: BlockPtrConst) u128 {
+    pub fn tree_id(index_block: BlockPtrConst) u16 {
         const header = header_from_block(index_block);
         assert(BlockType.from(header.operation) == .index);
 
-        return @as(Parent, @bitCast(header.parent)).tree_id;
+        const parent = @as(Parent, @bitCast(header.parent));
+        assert(stdx.zeroed(&parent.reserved));
+        return parent.tree_id;
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
@@ -337,8 +339,8 @@ pub const TableFilter = struct {
     };
 
     pub const Parent = extern struct {
-        // TODO u16 + padding.
-        tree_id: u128,
+        tree_id: u16,
+        reserved: [14]u8 = .{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -385,11 +387,13 @@ pub const TableFilter = struct {
         return TableFilter.init(@as(Context, @bitCast(header.context)));
     }
 
-    pub fn tree_id(filter_block: BlockPtrConst) u128 {
+    pub fn tree_id(filter_block: BlockPtrConst) u16 {
         const header = header_from_block(filter_block);
         assert(BlockType.from(header.operation) == .filter);
 
-        return @as(Parent, @bitCast(header.parent)).tree_id;
+        const parent = @as(Parent, @bitCast(header.parent));
+        assert(stdx.zeroed(&parent.reserved));
+        return parent.tree_id;
     }
 
     pub inline fn block_filter(
@@ -422,8 +426,8 @@ pub const TableData = struct {
     };
 
     pub const Parent = extern struct {
-        // TODO u16 + padding.
-        tree_id: u128,
+        tree_id: u16,
+        reserved: [14]u8 = .{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -488,11 +492,13 @@ pub const TableData = struct {
         return TableData.init(@as(Context, @bitCast(header.context)));
     }
 
-    pub fn tree_id(data_block: BlockPtrConst) u128 {
+    pub fn tree_id(data_block: BlockPtrConst) u16 {
         const header = header_from_block(data_block);
         assert(BlockType.from(header.operation) == .data);
 
-        return @as(Parent, @bitCast(header.parent)).tree_id;
+        const parent = @as(Parent, @bitCast(header.parent));
+        assert(stdx.zeroed(&parent.reserved));
+        return parent.tree_id;
     }
 
     pub inline fn block_values_bytes(

@@ -115,7 +115,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
         superblock: *SuperBlock,
         grid: *Grid,
         grid_reservation: ?Grid.Reservation = null,
-        tree_id: u128,
+        tree_id: u16,
 
         /// The head block is used to accumulate a full block, to be written at the next flush.
         /// The remaining blocks must accommodate all further appends.
@@ -149,7 +149,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         next_tick: Grid.NextTick = undefined,
 
-        pub fn init(allocator: mem.Allocator, grid: *Grid, tree_id: u128) !ManifestLog {
+        pub fn init(allocator: mem.Allocator, grid: *Grid, tree_id: u16) !ManifestLog {
             // TODO RingBuffer for .pointer should be extended to take care of alignment:
 
             var blocks: [blocks_count_max]BlockPtr = undefined;

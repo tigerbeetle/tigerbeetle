@@ -453,7 +453,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
-                tree_id: u128,
+                tree_id: u16,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
@@ -573,7 +573,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
-                tree_id: u128,
+                tree_id: u16,
             };
 
             pub fn filter_block_finish(builder: *Builder, options: FilterFinishOptions) void {
@@ -623,7 +623,7 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
-                tree_id: u128,
+                tree_id: u16,
             };
 
             pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
