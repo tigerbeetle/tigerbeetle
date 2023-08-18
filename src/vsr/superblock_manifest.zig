@@ -19,6 +19,8 @@ pub const Manifest = struct {
     // This is a struct-of-arrays of `BlockReference`s.
     // Only the first `manifest.count` entries are valid.
     // Entries are ordered from oldest to newest.
+    // TODO(Unified manifest): These are u16's now, but since they will shortly be removed entirely
+    // I'm not reworking the storage format yet.
     trees: []u128,
     checksums: []u128,
     addresses: []u64,
@@ -40,7 +42,7 @@ pub const Manifest = struct {
     pub const Tables = std.AutoHashMapUnmanaged(TableExtentKey, TableExtent);
 
     pub const TableExtentKey = struct {
-        tree_id: u128,
+        tree_id: u16,
         table: u64,
     };
 
@@ -202,7 +204,7 @@ pub const Manifest = struct {
     /// Addresses must be unique across all appends, or remove() must be called first.
     /// Warning: The caller is responsible for ensuring that concurrent tree compactions call
     /// append() in a deterministic order with respect to each other.
-    pub fn append(manifest: *Manifest, tree: u128, checksum: u128, address: u64) void {
+    pub fn append(manifest: *Manifest, tree: u16, checksum: u128, address: u64) void {
         assert(address > 0);
         assert(manifest.index_for_address(address) == null);
 
@@ -235,7 +237,7 @@ pub const Manifest = struct {
         }
     }
 
-    pub fn remove(manifest: *Manifest, tree: u128, checksum: u128, address: u64) void {
+    pub fn remove(manifest: *Manifest, tree: u16, checksum: u128, address: u64) void {
         assert(address > 0);
 
         const index = manifest.index_for_address(address).?;
@@ -293,7 +295,7 @@ pub const Manifest = struct {
 
     pub fn oldest_block_queued_for_compaction(
         manifest: *const Manifest,
-        tree: u128,
+        tree: u16,
     ) ?BlockReference {
         var index: u32 = 0;
         while (index < manifest.count) : (index += 1) {
@@ -301,7 +303,7 @@ pub const Manifest = struct {
             if (!manifest.queued_for_compaction(manifest.addresses[index])) continue;
 
             return BlockReference{
-                .tree = manifest.trees[index],
+                .tree = @as(u16, @intCast(manifest.trees[index])),
                 .checksum = manifest.checksums[index],
                 .address = manifest.addresses[index],
             };
@@ -312,7 +314,7 @@ pub const Manifest = struct {
 
     /// Inserts the table extent if it does not yet exist, and returns true.
     /// Otherwise, returns false.
-    pub fn insert_table_extent(manifest: *Manifest, tree_id: u128, table: u64, block: u64, entry: u32) bool {
+    pub fn insert_table_extent(manifest: *Manifest, tree_id: u16, table: u64, block: u64, entry: u32) bool {
         assert(table > 0);
         assert(block > 0);
 
@@ -333,7 +335,7 @@ pub const Manifest = struct {
     /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(manifest: *Manifest, tree_id: u128, table: u64, block: u64, entry: u32) ?u64 {
+    pub fn update_table_extent(manifest: *Manifest, tree_id: u16, table: u64, block: u64, entry: u32) ?u64 {
         assert(table > 0);
         assert(block > 0);
 
@@ -353,7 +355,7 @@ pub const Manifest = struct {
 
     /// Removes the table extent if { block, entry } is the latest version, and returns true.
     /// Otherwise, returns false.
-    pub fn remove_table_extent(manifest: *Manifest, tree_id: u128, table: u64, block: u64, entry: u32) bool {
+    pub fn remove_table_extent(manifest: *Manifest, tree_id: u16, table: u64, block: u64, entry: u32) bool {
         assert(table > 0);
         assert(block > 0);
 
@@ -375,7 +377,7 @@ pub const Manifest = struct {
 
     /// Reference to a ManifestLog block.
     pub const BlockReference = struct {
-        tree: u128,
+        tree: u16,
         checksum: u128,
         address: u64,
     };
@@ -385,7 +387,7 @@ pub const Manifest = struct {
 
     pub const IteratorReverse = struct {
         manifest: *const Manifest,
-        tree: u128,
+        tree: u16,
         count: u32,
 
         pub fn next(it: *IteratorReverse) ?BlockReference {
@@ -398,7 +400,7 @@ pub const Manifest = struct {
                     assert(it.manifest.addresses[it.count] > 0);
 
                     return BlockReference{
-                        .tree = it.manifest.trees[it.count],
+                        .tree = @as(u16, @intCast(it.manifest.trees[it.count])),
                         .checksum = it.manifest.checksums[it.count],
                         .address = it.manifest.addresses[it.count],
                     };
@@ -410,7 +412,7 @@ pub const Manifest = struct {
 
     /// Return all block references for a given tree in reverse order, latest-appended-first-out.
     /// Using a reverse iterator is an optimization to avoid redundant updates to tree manifests.
-    pub fn iterator_reverse(manifest: *const Manifest, tree: u128) IteratorReverse {
+    pub fn iterator_reverse(manifest: *const Manifest, tree: u16) IteratorReverse {
         return IteratorReverse{
             .manifest = manifest,
             .tree = tree,
@@ -435,7 +437,7 @@ pub const Manifest = struct {
     pub fn verify_index_tree_checksum_address(
         manifest: *const Manifest,
         index: u32,
-        tree: u128,
+        tree: u16,
         checksum: u128,
         address: u64,
     ) void {
@@ -450,7 +452,7 @@ pub const Manifest = struct {
 
 fn test_iterator_reverse(
     manifest: *Manifest,
-    tree: u128,
+    tree: u16,
     expect: []const Manifest.BlockReference,
 ) !void {
     const expectEqualSlices = std.testing.expectEqualSlices;
