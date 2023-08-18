@@ -70,7 +70,7 @@ pub fn ewah(comptime Word: type) type {
             var source_index: usize = 0;
             var target_index: usize = 0;
             while (source_index < source_words.len) {
-                const marker = @as(*const Marker, @ptrCast(&source_words[source_index]));
+                const marker: *const Marker = @ptrCast(&source_words[source_index]);
                 source_index += 1;
                 @memset(
                     target_words[target_index..][0..marker.uniform_word_count],

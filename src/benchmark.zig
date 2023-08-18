@@ -435,7 +435,7 @@ const Benchmark = struct {
         );
 
         b.client.request(
-            @as(u128, @intCast(@intFromPtr(b))),
+            @intCast(@intFromPtr(b)),
             send_complete,
             operation,
             b.message.?,
@@ -470,7 +470,7 @@ const Benchmark = struct {
             else => unreachable,
         }
 
-        const b = @as(*Benchmark, @ptrFromInt(@as(u64, @intCast(user_data))));
+        const b: *Benchmark = @ptrFromInt(@as(u64, @intCast(user_data)));
 
         b.client.unref(b.message.?);
         b.message = null;

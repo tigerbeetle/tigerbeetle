@@ -1150,7 +1150,7 @@ const TestContext = struct {
     fn on_client_reply(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void {
         _ = request;
         _ = reply;
-        const t = @as(*TestContext, @ptrCast(@alignCast(cluster.context.?)));
+        const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));
         t.client_replies[client] += 1;
     }
 
