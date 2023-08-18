@@ -40,7 +40,7 @@ pub const Manifest = struct {
     pub const Tables = std.AutoHashMapUnmanaged(TableExtentKey, TableExtent);
 
     pub const TableExtentKey = struct {
-        tree_hash: u128,
+        tree_id: u128,
         table: u64,
     };
 
@@ -312,12 +312,12 @@ pub const Manifest = struct {
 
     /// Inserts the table extent if it does not yet exist, and returns true.
     /// Otherwise, returns false.
-    pub fn insert_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) bool {
+    pub fn insert_table_extent(manifest: *Manifest, tree_id: u128, table: u64, block: u64, entry: u32) bool {
         assert(table > 0);
         assert(block > 0);
 
         var extent = manifest.tables.getOrPutAssumeCapacity(.{
-            .tree_hash = tree_hash,
+            .tree_id = tree_id,
             .table = table,
         });
         if (extent.found_existing) return false;
@@ -333,12 +333,12 @@ pub const Manifest = struct {
     /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) ?u64 {
+    pub fn update_table_extent(manifest: *Manifest, tree_id: u128, table: u64, block: u64, entry: u32) ?u64 {
         assert(table > 0);
         assert(block > 0);
 
         var extent = manifest.tables.getOrPutAssumeCapacity(.{
-            .tree_hash = tree_hash,
+            .tree_id = tree_id,
             .table = table,
         });
         const previous_block = if (extent.found_existing) extent.value_ptr.block else null;
@@ -353,17 +353,17 @@ pub const Manifest = struct {
 
     /// Removes the table extent if { block, entry } is the latest version, and returns true.
     /// Otherwise, returns false.
-    pub fn remove_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) bool {
+    pub fn remove_table_extent(manifest: *Manifest, tree_id: u128, table: u64, block: u64, entry: u32) bool {
         assert(table > 0);
         assert(block > 0);
 
         const extent = manifest.tables.getPtr(.{
-            .tree_hash = tree_hash,
+            .tree_id = tree_id,
             .table = table,
         }).?;
         if (extent.block == block and extent.entry == entry) {
             assert(manifest.tables.remove(.{
-                .tree_hash = tree_hash,
+                .tree_id = tree_id,
                 .table = table,
             }));
 
