@@ -245,11 +245,26 @@ pub const Manifest = struct {
         manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
 
         const tail = manifest.count - (index + 1);
-        stdx.copy_left(.inexact, u128, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
-        stdx.copy_left(.inexact, u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
-        stdx.copy_left(.inexact, u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
-        manifest.count -= 1;
+        stdx.copy_left(
+            .inexact,
+            u128,
+            manifest.trees[index..],
+            manifest.trees[index + 1 ..][0..tail],
+        );
+        stdx.copy_left(
+            .inexact,
+            u128,
+            manifest.checksums[index..],
+            manifest.checksums[index + 1 ..][0..tail],
+        );
+        stdx.copy_left(
+            .inexact,
+            u64,
+            manifest.addresses[index..],
+            manifest.addresses[index + 1 ..][0..tail],
+        );
 
+        manifest.count -= 1;
         manifest.trees[manifest.count] = 0;
         manifest.checksums[manifest.count] = 0;
         manifest.addresses[manifest.count] = 0;
@@ -314,7 +329,13 @@ pub const Manifest = struct {
 
     /// Inserts the table extent if it does not yet exist, and returns true.
     /// Otherwise, returns false.
-    pub fn insert_table_extent(manifest: *Manifest, tree_id: u16, table: u64, block: u64, entry: u32) bool {
+    pub fn insert_table_extent(
+        manifest: *Manifest,
+        tree_id: u16,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) bool {
         assert(table > 0);
         assert(block > 0);
 
@@ -335,7 +356,13 @@ pub const Manifest = struct {
     /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(manifest: *Manifest, tree_id: u16, table: u64, block: u64, entry: u32) ?u64 {
+    pub fn update_table_extent(
+        manifest: *Manifest,
+        tree_id: u16,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) ?u64 {
         assert(table > 0);
         assert(block > 0);
 
@@ -355,7 +382,13 @@ pub const Manifest = struct {
 
     /// Removes the table extent if { block, entry } is the latest version, and returns true.
     /// Otherwise, returns false.
-    pub fn remove_table_extent(manifest: *Manifest, tree_id: u16, table: u64, block: u64, entry: u32) bool {
+    pub fn remove_table_extent(
+        manifest: *Manifest,
+        tree_id: u16,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) bool {
         assert(table > 0);
         assert(block > 0);
 
