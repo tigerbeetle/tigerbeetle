@@ -205,7 +205,6 @@ const naughty_list = [_][]const u8{
     "vsr/superblock_client_sessions.zig",
     "vsr/superblock_client_table.zig",
     "vsr/superblock_free_set.zig",
-    "vsr/superblock_manifest.zig",
     "vsr/superblock_quorums.zig",
     "vsr/superblock.zig",
     "vsr/sync.zig",
