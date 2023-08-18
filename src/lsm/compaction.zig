@@ -393,12 +393,12 @@ pub fn CompactionType(
                     },
                     .disk => |table_ref| {
                         compaction.state = .iterator_init_a;
-                        compaction.context.grid.read_block_from_cache_or_storage(
-                            on_iterator_init_a,
+                        compaction.context.grid.read_block(
+                            .{ .from_local_or_global_storage = on_iterator_init_a },
                             &compaction.read,
                             table_ref.table_info.address,
                             table_ref.table_info.checksum,
-                            .index,
+                            .{ .cache_read = true, .cache_write = true },
                         );
                     },
                 }

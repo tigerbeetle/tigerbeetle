@@ -392,7 +392,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const writing = grid.writing(read.address, null);
             // If the same block faulted more than once, we should only repair once.
             if (writing == .repair) return;
-            assert(writing == .none);
+            assert(writing == .not_writing);
 
             env.grid_repair_queue.append(.{
                 .address = read.address,

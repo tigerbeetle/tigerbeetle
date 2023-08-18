@@ -224,12 +224,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 assert(block.tree == manifest_log.tree_id);
                 assert(block.address > 0);
 
-                manifest_log.grid.read_block_from_cache_or_storage(
-                    open_read_block_callback,
+                manifest_log.grid.read_block(
+                    .{ .from_local_or_global_storage = open_read_block_callback },
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .manifest,
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 // Use next_tick because the manifest may be empty (no blocks to read).
@@ -578,12 +578,12 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
                 manifest_log.reading = true;
                 manifest_log.read_block_reference = block;
 
-                manifest_log.grid.read_block_from_cache_or_storage(
-                    compact_read_block_callback,
+                manifest_log.grid.read_block(
+                    .{ .from_local_or_global_storage = compact_read_block_callback },
                     &manifest_log.read,
                     block.address,
                     block.checksum,
-                    .manifest,
+                    .{ .cache_read = true, .cache_write = true },
                 );
             } else {
                 manifest_log.read_callback = null;
