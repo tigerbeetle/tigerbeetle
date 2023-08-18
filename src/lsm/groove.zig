@@ -145,7 +145,7 @@ pub fn GrooveType(
     comptime Object: type,
     /// An anonymous struct instance which contains the following:
     ///
-    /// - ids: { .tree = u128 }:
+    /// - ids: { .tree = u16 }:
     ///     An anonymous struct which maps each of the groove's trees to a stable, forest-unique,
     ///     tree identifier.
     ///

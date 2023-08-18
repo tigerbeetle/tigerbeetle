@@ -156,7 +156,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
-            tree_id: u128,
+            tree_id: u16,
         ) !Manifest {
             var levels: [constants.lsm_levels]Level = undefined;
             for (&levels, 0..) |*level, i| {

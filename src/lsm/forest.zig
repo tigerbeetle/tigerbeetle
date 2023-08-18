@@ -57,7 +57,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
     {
         // Verify that every tree id is unique.
-        comptime var ids: []const u128 = &.{};
+        comptime var ids: []const u16 = &.{};
 
         inline for (std.meta.fields(_Grooves)) |groove_field| {
             const Groove = groove_field.type;
@@ -65,8 +65,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             for (std.meta.fields(@TypeOf(Groove.config.ids))) |field| {
                 const id = @field(Groove.config.ids, field.name);
 
-                assert(std.mem.indexOfScalar(u128, ids, id) == null);
-                ids = ids ++ [_]u128{id};
+                assert(std.mem.indexOfScalar(u16, ids, id) == null);
+                ids = ids ++ [_]u16{id};
             }
         }
     }
