@@ -5,6 +5,9 @@ set -eu
 docker run -v "$(pwd)":/build:ro -w /tmp node:19 bash -c '
 set -eux
 
+# Deals with an error git throws within Docker when a git repo is
+# volume mounted.:
+#   fatal: detected dubious ownership in repository at '/wrk'
 git config --global --add safe.directory /build
 
 # Using a fork of this validate-links check to include checks on

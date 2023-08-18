@@ -192,7 +192,17 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     errdefer shell.arena.allocator().free(res.stdout);
 
     switch (res.term) {
-        .Exited => |code| if (code == 0) return error.NonZeroExitStatus,
+        .Exited => |code| if (code != 0) {
+            std.debug.print(
+                \\Debugging failure (stdout): {s}
+                \\Debugging failure (stderr): {s}
+                \\
+            , .{
+                res.stdout,
+                res.stderr,
+            });
+            return error.NonZeroExitStatus;
+        },
         else => return error.CommandFailed,
     }
 
@@ -201,16 +211,17 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
 }
 
 /// Returns current git commit hash as an ASCII string.
-pub fn git_commit(shell: *Shell) ![40]u8 {
+pub fn git_commit(shell: *Shell) ![]const u8 {
     const stdout = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
     // +1 for trailing newline.
     if (stdout.len != 40 + 1) return error.InvalidCommitFormat;
-    return stdout[0..40].*;
+    return stdout[0..40];
 }
 
 /// Returns current git tag.
 pub fn git_tag(shell: *Shell) ![]const u8 {
-    const stdout = try shell.exec_stdout("git describe --tags", .{});
+    // --always is necessary in cases where we haven't yet `git fetch`-ed.
+    const stdout = try shell.exec_stdout("git describe --tags --always", .{});
     return stdout;
 }
 
