@@ -4965,7 +4965,7 @@ pub fn ReplicaType(
             assert(self.op_checkpoint() <= self.op or
                 self.status == .recovering or self.status == .recovering_head);
 
-            const checkpoint_next = vsr.Op.checkpoint_after_checkpoint(self.op_checkpoint());
+            const checkpoint_next = vsr.Op.checkpoint_after(self.op_checkpoint());
             assert(vsr.Op.checkpoint_valid(checkpoint_next));
             assert(checkpoint_next > self.op_checkpoint()); // The checkpoint always advances.
 
