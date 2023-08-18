@@ -611,9 +611,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const AcceptError!os.socket_t, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const AcceptError!os.socket_t, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -653,9 +653,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const CloseError!void, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const CloseError!void, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -704,9 +704,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const ConnectError!void, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const ConnectError!void, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -752,9 +752,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const ReadError!usize, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const ReadError!usize, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -799,9 +799,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const RecvError!usize, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const RecvError!usize, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -850,9 +850,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const SendError!usize, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const SendError!usize, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -886,9 +886,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const TimeoutError!void, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const TimeoutError!void, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -943,9 +943,9 @@ pub const IO = struct {
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
                     callback(
-                        @as(Context, @ptrFromInt(@intFromPtr(ctx))),
+                        @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const WriteError!usize, @ptrFromInt(@intFromPtr(res))).*,
+                        @as(*const WriteError!usize, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
