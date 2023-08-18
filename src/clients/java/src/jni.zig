@@ -3232,13 +3232,10 @@ fn JniInterface(comptime T: type) type {
                 functions: [*]const *const anyopaque,
             };
 
-            const vtable = @as(
-                *VTable,
-                @ptrCast(@alignCast(self)),
-            );
-            const fn_ptr = @as(*const Fn, @ptrCast(@alignCast(
+            const vtable: *VTable = @ptrCast(@alignCast(self));
+            const fn_ptr: *const Fn = @ptrCast(@alignCast(
                 vtable.functions[@intFromEnum(function)],
-            )));
+            ));
             return @call(.auto, fn_ptr, .{self} ++ args);
         }
     };

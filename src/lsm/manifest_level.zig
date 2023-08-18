@@ -731,7 +731,7 @@ pub fn ManifestLevelType(
                 // mutable. That is, the table is not in the .text or .rodata section.
                 if (range.tables.len < max_overlapping_tables) {
                     var table_info_reference = TableInfoReference{
-                        .table_info = @as(*TableInfo, @ptrFromInt(@intFromPtr(table))),
+                        .table_info = @constCast(table),
                         .generation = level.generation,
                     };
                     range.tables.appendAssumeCapacity(table_info_reference);
@@ -1047,7 +1047,7 @@ pub fn TestContext(
                 while (it.next()) |level_table| {
                     if (level_table.equal(table)) {
                         context.level.set_snapshot_max(snapshot, .{
-                            .table_info = @as(*TableInfo, @ptrFromInt(@intFromPtr(level_table))),
+                            .table_info = @constCast(level_table),
                             .generation = context.level.generation,
                         });
                         table.snapshot_max = snapshot;

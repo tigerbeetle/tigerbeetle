@@ -1511,8 +1511,8 @@ test "JNI: primitive arrays" {
                         };
                         defer env.release_primitive_array_critical(array, critical, .default);
 
-                        var elements = @as([*]PrimitiveType, @ptrCast(@alignCast(critical)));
-                        for (elements[0..@as(usize, @intCast(len))], 0..) |*element, i| {
+                        var elements: [*]PrimitiveType = @ptrCast(@alignCast(critical));
+                        for (elements[0..@intCast(len)], 0..) |*element, i| {
                             element.* = cast(i + 10);
                         }
                     }
@@ -1525,8 +1525,8 @@ test "JNI: primitive arrays" {
                         };
                         defer env.release_primitive_array_critical(array, critical, .default);
 
-                        var elements = @as([*]PrimitiveType, @ptrCast(@alignCast(critical)));
-                        for (elements[0..@as(usize, @intCast(len))], 0..) |element, i| {
+                        var elements: [*]PrimitiveType = @ptrCast(@alignCast(critical));
+                        for (elements[0..@intCast(len)], 0..) |element, i| {
                             try testing.expectEqual(cast(i + 10), element);
                         }
                     }

@@ -463,7 +463,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {
-            const cluster = @as(*Self, @ptrCast(@alignCast(client.on_reply_context.?)));
+            const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
             assert(reply_message.header.cluster == cluster.options.cluster_id);
             assert(reply_message.header.invalid() == null);
             assert(reply_message.header.client == client.id);
@@ -479,7 +479,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
-            const cluster = @as(*Self, @ptrCast(@alignCast(replica.test_context.?)));
+            const cluster: *Self = @ptrCast(@alignCast(replica.test_context.?));
             assert(cluster.replica_health[replica.replica] == .up);
 
             switch (event) {

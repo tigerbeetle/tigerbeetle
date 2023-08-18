@@ -242,7 +242,6 @@ pub const IO = struct {
         operation_data: anytype,
         comptime OperationImpl: type,
     ) void {
-        const Context = @TypeOf(context);
         const onCompleteFn = struct {
             fn onComplete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operaton
@@ -265,8 +264,9 @@ pub const IO = struct {
                 }
 
                 // Complete the Completion
+
                 return callback(
-                    @as(Context, @ptrFromInt(@intFromPtr(_completion.context))),
+                    @ptrCast(@alignCast(_completion.context)),
                     _completion,
                     result,
                 );
@@ -580,7 +580,7 @@ pub const IO = struct {
                 .callback = struct {
                     fn on_complete(_io: *IO, _completion: *Completion) void {
                         _ = _io;
-                        const _context = @as(Context, @ptrFromInt(@intFromPtr(_completion.context)));
+                        const _context: Context = @ptrCast(@alignCast(_completion.context));
                         callback(_context, _completion, {});
                     }
                 }.on_complete,

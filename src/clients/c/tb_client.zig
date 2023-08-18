@@ -50,7 +50,7 @@ pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
 }
 
 fn client_to_context(tb_client: tb_client_t) *ContextImplementation {
-    return @as(*ContextImplementation, @ptrCast(@alignCast(tb_client)));
+    return @ptrCast(@alignCast(tb_client));
 }
 
 pub fn init_error_to_status(err: InitError) tb_status_t {

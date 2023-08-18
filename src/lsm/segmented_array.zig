@@ -150,9 +150,7 @@ fn SegmentedArrayType(
             if (options.verify) array.verify();
 
             for (array.nodes[0..array.node_count]) |node| {
-                node_pool.?.release(
-                    @as(NodePool.Node, @ptrCast(@alignCast(node.?))),
-                );
+                node_pool.?.release(@ptrCast(@alignCast(node.?)));
             }
             allocator.free(array.nodes);
             allocator.free(array.indexes);
@@ -635,9 +633,7 @@ fn SegmentedArrayType(
             assert(node < array.node_count);
             assert(array.count(node) == 0);
 
-            node_pool.release(
-                @as(NodePool.Node, @ptrCast(@alignCast(array.nodes[node].?))),
-            );
+            node_pool.release(@ptrCast(@alignCast(array.nodes[node].?)));
 
             stdx.copy_left(
                 .exact,
