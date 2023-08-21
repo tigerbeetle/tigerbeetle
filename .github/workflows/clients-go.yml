@@ -57,7 +57,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
-        sample: [basic, two-phase]
+        sample: [basic, two-phase, two-phase-many]
 
     runs-on: ${{ matrix.os }}
     steps:
