@@ -511,6 +511,27 @@ pub const Storage = struct {
         }
     }
 
+    pub fn area_memory(
+        storage: *const Storage,
+        area: Area,
+    ) []align(constants.sector_size) const u8 {
+        const sectors = area.sectors();
+        const area_min = sectors.min * constants.sector_size;
+        const area_max = sectors.max * constants.sector_size;
+        return @alignCast(storage.memory[area_min..area_max]);
+    }
+
+    /// Returns whether any sector in the area is corrupt.
+    pub fn area_faulty(storage: *const Storage, area: Area) bool {
+        const sectors = area.sectors();
+        var sector = sectors.min;
+        var faulty: bool = false;
+        while (sector < sectors.max) : (sector += 1) {
+            faulty = faulty or storage.faults.isSet(sector);
+        }
+        return faulty;
+    }
+
     pub fn superblock_header(
         storage: *const Storage,
         copy_: u8,
@@ -621,7 +642,7 @@ pub const Area = union(enum) {
     grid: struct { address: u64 },
 
     fn sectors(area: Area) SectorRange {
-        switch (area) {
+        return switch (area) {
             .superblock => |data| SectorRange.from_zone(
                 .superblock,
                 data.zone.start_for_copy(data.copy),
@@ -647,7 +668,7 @@ pub const Area = union(enum) {
                 constants.block_size * (data.address - 1),
                 constants.block_size,
             ),
-        }
+        };
     }
 };
 
