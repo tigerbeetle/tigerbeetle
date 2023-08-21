@@ -39,7 +39,6 @@
 //! │                          │ parent: schema.TableData.Parent,
 //! │                          │ request=values_count
 //! │                          │ timestamp=snapshot_min
-//! │ [block_key_count + 1]Key │ Eytzinger-layout keys from a subset of the values.
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
@@ -410,10 +409,9 @@ pub const TableFilter = struct {
 pub const TableData = struct {
     /// Stored in every data block's header's `context` field.
     pub const Context = extern struct {
-        key_count: u32,
-        key_layout_size: u32,
         value_count_max: u32,
         value_size: u32,
+        padding: [8]u8 = [_]u8{0} ** 8,
 
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
@@ -422,8 +420,8 @@ pub const TableData = struct {
     };
 
     pub const Parent = extern struct {
-        // TODO u16 + padding.
-        tree_id: u128,
+        tree_id: u16,
+        padding: [14]u8 = [_]u8{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -431,16 +429,10 @@ pub const TableData = struct {
         }
     };
 
-    // The number of keys in the Eytzinger layout per data block.
-    key_count: u32,
     // @sizeOf(Table.Value)
     value_size: u32,
     // The maximum number of values in a data block.
     value_count_max: u32,
-
-    key_layout_offset: u32,
-    // The number of bytes used by the keys in the data block.
-    key_layout_size: u32,
 
     values_offset: u32,
     values_size: u32,
@@ -453,24 +445,17 @@ pub const TableData = struct {
         assert(parameters.value_size > 0);
         assert(std.math.isPowerOfTwo(parameters.value_size));
 
-        const key_count = parameters.key_count;
         const value_count_max = parameters.value_count_max;
 
-        const key_layout_offset = @sizeOf(vsr.Header);
-        const key_layout_size = parameters.key_layout_size;
-
-        const values_offset = key_layout_offset + key_layout_size;
+        const values_offset = @sizeOf(vsr.Header);
         const values_size = parameters.value_count_max * parameters.value_size;
 
         const padding_offset = values_offset + values_size;
         const padding_size = constants.block_size - padding_offset;
 
         return .{
-            .key_count = key_count,
             .value_size = parameters.value_size,
             .value_count_max = value_count_max,
-            .key_layout_offset = key_layout_offset,
-            .key_layout_size = key_layout_size,
             .values_offset = values_offset,
             .values_size = values_size,
             .padding_offset = padding_offset,

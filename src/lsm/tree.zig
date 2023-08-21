@@ -13,7 +13,6 @@ const tracer = @import("../tracer.zig");
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 const bloom_filter = @import("bloom_filter.zig");
 const schema = @import("schema.zig");
@@ -159,7 +158,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// (Constructed by the Forest.)
         pub const Config = struct {
             /// Unique (stable) identifier, across all trees in the forest.
-            id: u128,
+            id: u16,
             /// Human-readable tree name for logging.
             name: []const u8,
         };
@@ -364,27 +363,30 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 };
 
                 const key_blocks = Table.index_blocks_for_key(index_block, key);
-                switch (tree.cached_filter_block_search(
-                    key_blocks.filter_block_address,
-                    key_blocks.filter_block_checksum,
-                    fingerprint,
-                )) {
-                    .negative => {
-                        if (constants.verify) {
-                            assert(tree.cached_data_block_search(
-                                key_blocks.data_block_address,
-                                key_blocks.data_block_checksum,
-                                key,
-                            ) != .positive);
-                        }
-                        // Filter block indicates that the key is not present in the data block,
-                        // move on to the next table that could contain the key.
-                        continue;
-                    },
-                    .possible, .block_not_in_cache => {
-                        // Give yourself another fighting chance to rule out the existence of
-                        // the key; search for the data block in the grid cache.
-                    },
+                // Only general purpose tables have filter blocks.
+                if (comptime Table.usage == .general) {
+                    switch (tree.cached_filter_block_search(
+                        key_blocks.filter_block_address,
+                        key_blocks.filter_block_checksum,
+                        fingerprint,
+                    )) {
+                        .negative => {
+                            if (constants.verify) {
+                                assert(tree.cached_data_block_search(
+                                    key_blocks.data_block_address,
+                                    key_blocks.data_block_checksum,
+                                    key,
+                                ) != .positive);
+                            }
+                            // Filter block indicates that the key is not present in the data block,
+                            // move on to the next table that could contain the key.
+                            continue;
+                        },
+                        .possible, .block_not_in_cache => {
+                            // Give yourself another fighting chance to rule out the existence of
+                            // the key; search for the data block in the grid cache.
+                        },
+                    }
                 }
 
                 switch (tree.cached_data_block_search(
@@ -410,6 +412,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             checksum: u128,
             fingerprint: Fingerprint,
         ) enum { negative, possible, block_not_in_cache } {
+            comptime assert(Table.usage == .general);
+
             if (tree.grid.read_block_from_cache(
                 address,
                 checksum,
@@ -555,16 +559,29 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .checksum = blocks.data_block_checksum,
                 };
 
-                context.tree.grid.read_block(
-                    .{ .from_local_or_global_storage = read_filter_block_callback },
-                    completion,
-                    blocks.filter_block_address,
-                    blocks.filter_block_checksum,
-                    .{ .cache_read = true, .cache_write = true },
-                );
+                // Only general purpose tables have filter blocks.
+                if (comptime Table.usage == .general) {
+                    context.tree.grid.read_block(
+                        .{ .from_local_or_global_storage = read_filter_block_callback },
+                        completion,
+                        blocks.filter_block_address,
+                        blocks.filter_block_checksum,
+                        .{ .cache_read = true, .cache_write = true },
+                    );
+                } else {
+                    context.tree.grid.read_block(
+                        .{ .from_local_or_global_storage = read_data_block_callback },
+                        completion,
+                        context.data_block.?.address,
+                        context.data_block.?.checksum,
+                        .{ .cache_read = true, .cache_write = true },
+                    );
+                }
             }
 
             fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
+                comptime assert(Table.usage == .general);
+
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
