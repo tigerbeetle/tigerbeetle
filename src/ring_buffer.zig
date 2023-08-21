@@ -8,8 +8,8 @@ const stdx = @import("stdx.zig");
 /// A First In, First Out ring buffer holding at most `count_max` elements.
 pub fn RingBuffer(
     comptime T: type,
-    comptime count_max_: usize,
-    comptime buffer_type: enum { array, pointer },
+    comptime count_max_: ?usize,
+    comptime buffer_type: enum { array, pointer, slice }, // union(enum)
 ) type {
     return struct {
         const Self = @This();
@@ -17,8 +17,9 @@ pub fn RingBuffer(
         pub const count_max = count_max_;
 
         buffer: switch (buffer_type) {
-            .array => [count_max]T,
-            .pointer => *[count_max]T,
+            .array => [count_max.?]T,
+            .pointer => *[count_max.?]T,
+            .slice => []T,
         },
 
         /// The index of the slot with the first item, if any.
@@ -44,6 +45,17 @@ pub fn RingBuffer(
                     allocator.destroy(self.buffer);
                 }
             },
+            .slice => struct {
+                pub fn init(allocator: mem.Allocator, capacity: usize) !Self {
+                    const buffer = try allocator.alloc(T, capacity);
+                    errdefer allocator.free(buffer);
+                    return Self{ .buffer = buffer };
+                }
+
+                pub fn deinit(self: *Self, allocator: mem.Allocator) void {
+                    allocator.free(self.buffer);
+                }
+            },
         };
 
         pub inline fn clear(self: *Self) void {
@@ -53,58 +65,58 @@ pub fn RingBuffer(
 
         // TODO Add doc comments to these functions:
         pub inline fn head(self: Self) ?T {
-            if (count_max == 0 or self.empty()) return null;
+            if (self.buffer.len == 0 or self.empty()) return null;
             return self.buffer[self.index];
         }
 
         pub inline fn head_ptr(self: *Self) ?*T {
-            if (count_max == 0 or self.empty()) return null;
+            if (self.buffer.len == 0 or self.empty()) return null;
             return &self.buffer[self.index];
         }
 
         pub inline fn head_ptr_const(self: *const Self) ?*const T {
-            if (count_max == 0 or self.empty()) return null;
+            if (self.buffer.len == 0 or self.empty()) return null;
             return &self.buffer[self.index];
         }
 
         pub inline fn tail(self: Self) ?T {
-            if (count_max == 0 or self.empty()) return null;
+            if (self.buffer.len == 0 or self.empty()) return null;
             return self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
         pub inline fn tail_ptr(self: *Self) ?*T {
-            if (count_max == 0 or self.empty()) return null;
+            if (self.buffer.len == 0 or self.empty()) return null;
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
         pub inline fn tail_ptr_const(self: *const Self) ?*const T {
-            if (count_max == 0 or self.empty()) return null;
+            if (self.buffer.len == 0 or self.empty()) return null;
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
         pub inline fn get_ptr(self: *Self, index: usize) ?*T {
-            if (count_max == 0) unreachable;
+            if (self.buffer.len == 0) unreachable;
 
             if (index < self.count) {
                 return &self.buffer[(self.index + index) % self.buffer.len];
             } else {
-                assert(index < count_max);
+                assert(index < self.buffer.len);
                 return null;
             }
         }
 
         pub inline fn next_tail(self: Self) ?T {
-            if (count_max == 0 or self.full()) return null;
+            if (self.buffer.len == 0 or self.full()) return null;
             return self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
         pub inline fn next_tail_ptr(self: *Self) ?*T {
-            if (count_max == 0 or self.full()) return null;
+            if (self.buffer.len == 0 or self.full()) return null;
             return &self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
         pub inline fn next_tail_ptr_const(self: *const Self) ?*const T {
-            if (count_max == 0 or self.full()) return null;
+            if (self.buffer.len == 0 or self.full()) return null;
             return &self.buffer[(self.index + self.count) % self.buffer.len];
         }
 
@@ -151,7 +163,7 @@ pub fn RingBuffer(
         }
 
         pub fn push_slice(self: *Self, items: []const T) error{NoSpaceLeft}!void {
-            if (count_max == 0) return error.NoSpaceLeft;
+            if (self.buffer.len == 0) return error.NoSpaceLeft;
             if (self.count + items.len > self.buffer.len) return error.NoSpaceLeft;
 
             const pre_wrap_start = (self.index + self.count) % self.buffer.len;
@@ -183,7 +195,7 @@ pub fn RingBuffer(
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
-                if (count_max == 0) return null;
+                if (it.ring.buffer.len == 0) return null;
                 // TODO Use next_ptr() internally to avoid duplicating this code.
                 assert(it.count <= it.ring.count);
                 if (it.count == it.ring.count) return null;
@@ -193,7 +205,7 @@ pub fn RingBuffer(
 
             pub fn next_ptr(it: *Iterator) ?*const T {
                 assert(it.count <= it.ring.count);
-                if (count_max == 0) return null;
+                if (it.ring.buffer.len == 0) return null;
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
                 return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
@@ -212,7 +224,7 @@ pub fn RingBuffer(
 
             pub fn next_ptr(it: *IteratorMutable) ?*T {
                 assert(it.count <= it.ring.count);
-                if (count_max == 0) return null;
+                if (it.ring.buffer.len == 0) return null;
                 if (it.count == it.ring.count) return null;
                 defer it.count += 1;
                 return &it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];

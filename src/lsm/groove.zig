@@ -13,6 +13,7 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const Fingerprint = @import("bloom_filter.zig").Fingerprint;
+const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
@@ -375,6 +376,7 @@ pub fn GrooveType(
         pub const config = groove_options;
 
         const Grid = GridType(Storage);
+        const ManifestLog = ManifestLogType(Storage);
 
         const Callback = *const fn (*Groove) void;
         const JoinOp = enum {
@@ -453,12 +455,14 @@ pub fn GrooveType(
             allocator: mem.Allocator,
             node_pool: *NodePool,
             grid: *Grid,
+            manifest_log: *ManifestLog,
             options: Options,
         ) !Groove {
             var object_tree = try ObjectTree.init(
                 allocator,
                 node_pool,
                 grid,
+                manifest_log,
                 .{
                     .id = @field(groove_options.ids, "timestamp"),
                     .name = @typeName(Object),
@@ -471,6 +475,7 @@ pub fn GrooveType(
                 allocator,
                 node_pool,
                 grid,
+                manifest_log,
                 .{
                     .id = @field(groove_options.ids, "id"),
                     .name = @typeName(Object) ++ ".id",
@@ -498,6 +503,7 @@ pub fn GrooveType(
                     allocator,
                     node_pool,
                     grid,
+                    manifest_log,
                     .{
                         .id = @field(groove_options.ids, field.name),
                         .name = @typeName(Object) ++ "." ++ field.name,
@@ -1020,16 +1026,12 @@ pub fn GrooveType(
             };
         }
 
-        pub fn open(groove: *Groove, callback: Callback) void {
-            const Join = JoinType(.open);
-            Join.start(groove, callback);
-
-            if (has_id) groove.ids.open(Join.tree_callback(.ids));
-            groove.objects.open(Join.tree_callback(.objects));
+        pub fn open_done(groove: *Groove) void {
+            if (has_id) groove.ids.open_done();
+            groove.objects.open_done();
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const open_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).open(open_callback);
+                @field(groove.indexes, field.name).open_done();
             }
         }
 
