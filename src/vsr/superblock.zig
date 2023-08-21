@@ -184,7 +184,7 @@ pub const SuperBlockHeader = extern struct {
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
-            vsr.assert_valid_member(&state.members, state.replica_id);
+            assert(vsr.member_index(&state.members, state.replica_id) != null);
         }
 
         pub fn monotonic(old: VSRState, new: VSRState) bool {
@@ -571,6 +571,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// careful to submit at most one view change at a time.
         queue_head: ?*Context = null,
         queue_tail: ?*Context = null,
+
+        /// Set to non-null after open().
+        /// Used for logging.
+        replica_index: ?u8 = null,
 
         pub const Options = struct {
             storage: *Storage,
@@ -1244,10 +1248,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_headers_count == 1);
 
                     assert(working.vsr_state.replica_count <= constants.replicas_max);
-                    vsr.assert_valid_member(
+                    assert(vsr.member_index(
                         &working.vsr_state.members,
                         working.vsr_state.replica_id,
-                    );
+                    ) != null);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
                 }
@@ -1509,6 +1513,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .open => {
                     assert(!superblock.opened);
                     superblock.opened = true;
+                    superblock.replica_index = vsr.member_index(
+                        &superblock.working.vsr_state.members,
+                        superblock.working.vsr_state.replica_id,
+                    ).?;
 
                     if (superblock.working.manifest_size > 0) {
                         assert(superblock.manifest.count > 0);
