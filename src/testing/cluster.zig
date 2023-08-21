@@ -590,7 +590,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 break :role '\\';
             };
 
-            var info_buffer: [64]u8 = undefined;
+            var info_buffer: [128]u8 = undefined;
             var info: []u8 = "";
             var pipeline_buffer: [16]u8 = undefined;
             var pipeline: []u8 = "";
@@ -619,7 +619,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
-                    "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
+                    "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
+                    "<{[commit_unsynced_min]:_>3}:{[commit_unsynced_max]:_>3}> " ++
                     "{[grid_blocks_free]:>7}Gf " ++
                     "{[grid_blocks_faulty]:>2}G!", .{
                     .view = replica.view,
@@ -631,6 +632,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .journal_faulty = replica.journal.faulty.count,
                     .wal_op_min = wal_op_min,
                     .wal_op_max = wal_op_max,
+                    .commit_unsynced_min = replica.superblock.working.vsr_state.commit_unsynced_min,
+                    .commit_unsynced_max = replica.superblock.working.vsr_state.commit_unsynced_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
                     .grid_blocks_faulty = replica.grid.read_global_queue.count,
                 }) catch unreachable;

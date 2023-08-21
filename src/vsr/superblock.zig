@@ -5,6 +5,7 @@
 //!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
 //!     - vsr_state.commit_min ≤ vsr_state.commit_max
 //!     - vsr_state.log_view ≤ vsr_state.view
+//!     - vsr_state.commit_unsynced_min ≤ vsr_state.commit_unsynced_max
 //!     - checkpoint() must advance the superblock's vsr_state.commit_min.
 //!     - view_change() must not advance the superblock's vsr_state.commit_min.
 //!     - The following are monotonically increasing:
@@ -105,7 +106,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [2920]u8 = [_]u8{0} ** 2920,
+    reserved: [2904]u8 = [_]u8{0} ** 2904,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -143,6 +144,18 @@ pub const SuperBlockHeader = extern struct {
         /// The highest operation up to which we may commit.
         commit_max: u64,
 
+        /// See `commit_unsynced_max`.
+        commit_unsynced_min: u64,
+
+        /// When zero, all of the grid blocks and replies are synced.
+        /// (When zero, `commit_unsynced_min` is also zero.)
+        ///
+        /// When nonzero, we must repair grid-blocks/client-replies that would have been written
+        /// during the commits between `commit_unsynced_min` and `commit_unsynced_max` (inclusive).
+        /// (Those grid-blocks and client-replies were not written normally because we "skipped"
+        /// past them via state sync.)
+        commit_unsynced_max: u64,
+
         /// The last view in which the replica's status was normal.
         log_view: u32,
 
@@ -155,7 +168,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [7]u8 = [_]u8{0} ** 7,
 
         comptime {
-            assert(@sizeOf(VSRState) == 272);
+            assert(@sizeOf(VSRState) == 288);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -174,6 +187,8 @@ pub const SuperBlockHeader = extern struct {
                 .commit_min_checksum = vsr.Header.root_prepare(options.cluster).checksum,
                 .commit_min = 0,
                 .commit_max = 0,
+                .commit_unsynced_min = 0,
+                .commit_unsynced_max = 0,
                 .log_view = 0,
                 .view = 0,
             };
@@ -181,6 +196,7 @@ pub const SuperBlockHeader = extern struct {
 
         pub fn assert_internally_consistent(state: VSRState) void {
             assert(state.commit_max >= state.commit_min);
+            assert(state.commit_unsynced_max >= state.commit_unsynced_min);
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
@@ -194,6 +210,8 @@ pub const SuperBlockHeader = extern struct {
                 if (old.commit_min_checksum == 0 and old.commit_min == 0) {
                     // "old" is the root VSRState.
                     assert(old.commit_max == 0);
+                    assert(old.commit_unsynced_min == 0);
+                    assert(old.commit_unsynced_max == 0);
                     assert(old.log_view == 0);
                     assert(old.view == 0);
                 } else {
@@ -717,6 +735,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .members = members,
                     .commit_min = 0,
                     .commit_max = 0,
+                    .commit_unsynced_min = 0,
+                    .commit_unsynced_max = 0,
                     .log_view = 0,
                     .view = 0,
                     .replica_count = options.replica_count,
@@ -777,6 +797,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_min_checksum: u128,
             commit_min: u64,
             commit_max: u64,
+            commit_unsynced_min: u64,
+            commit_unsynced_max: u64,
         };
 
         /// Must update the commit_min and commit_min_checksum.
@@ -788,13 +810,16 @@ pub fn SuperBlockType(comptime Storage: type) type {
         ) void {
             assert(superblock.opened);
             assert(update.commit_min <= update.commit_max);
-            assert(superblock.staging.vsr_state.commit_min < update.commit_min);
-            assert(superblock.staging.vsr_state.commit_min_checksum != update.commit_min_checksum);
+            assert(update.commit_min > superblock.staging.vsr_state.commit_min);
+            assert(update.commit_min_checksum != superblock.staging.vsr_state.commit_min_checksum);
+            assert(update.commit_unsynced_min <= update.commit_unsynced_max);
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.commit_min_checksum = update.commit_min_checksum;
             vsr_state.commit_min = update.commit_min;
             vsr_state.commit_max = update.commit_max;
+            vsr_state.commit_unsynced_min = update.commit_unsynced_min;
+            vsr_state.commit_unsynced_max = update.commit_unsynced_max;
             vsr_state.previous_checkpoint_id = superblock.staging.checkpoint_id();
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
@@ -860,6 +885,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_min_checksum: u128,
             commit_min: u64,
             commit_max: u64,
+            commit_unsynced_min: u64,
+            commit_unsynced_max: u64,
         };
 
         pub fn sync(
@@ -873,12 +900,17 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.commit_min <= update.commit_max);
             assert((update.commit_min == superblock.staging.vsr_state.commit_min) ==
                 (update.commit_min_checksum == superblock.staging.vsr_state.commit_min_checksum));
+            assert(update.commit_unsynced_min <= update.commit_unsynced_max);
+            assert(update.commit_unsynced_max > update.commit_min);
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.previous_checkpoint_id = update.previous_checkpoint_id;
             vsr_state.commit_min_checksum = update.commit_min_checksum;
             vsr_state.commit_min = update.commit_min;
             vsr_state.commit_max = update.commit_max;
+            vsr_state.commit_unsynced_min = update.commit_unsynced_min;
+            vsr_state.commit_unsynced_max = update.commit_unsynced_max;
+
             // VSRState is usually updated, but not if we are syncing to the same checkpoint op
             // (i.e. if we are a divergent replica trying).
             maybe(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
