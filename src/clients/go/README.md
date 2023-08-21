@@ -66,6 +66,8 @@ features of TigerBeetle.
 * [Basic](/src/clients/go/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/go/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
+* [Many Two-Phase Transfers](/src/clients/go/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+between them, posting and voiding alternating transfers.
 ### Sidenote: `uint128`
 
 Throughout this README there will be a reference to a
