@@ -675,6 +675,10 @@ pub fn ReplicaType(
 
             self.state_machine_opened = true;
 
+            if (self.superblock.working.vsr_state.commit_unsynced_max > 0) {
+                self.sync_content();
+            }
+
             if (self.solo()) {
                 if (self.commit_min < self.op) {
                     self.commit_journal(self.op);
@@ -2449,11 +2453,6 @@ pub fn ReplicaType(
                 stage.trailers.get(trailer).offset,
                 target_size,
             });
-
-            if (progress == .complete) {
-                @field(self.superblock, @tagName(trailer)).reset();
-                @field(self.superblock, @tagName(trailer)).decode(target_buffer[0..target_size]);
-            }
 
             if (stage.done()) {
                 assert(progress == .complete);
@@ -6468,7 +6467,6 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
                 .request_reply => {
-                    assert(!self.standby());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -7690,6 +7688,18 @@ pub fn ReplicaType(
                 .client_sessions_checksum = stage.trailers.get(.client_sessions).final.?.checksum,
             });
 
+            inline for (comptime std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
+                const trailer_size = stage.trailers.get(trailer).final.?.size;
+                @field(self.superblock, @tagName(trailer)).reset();
+                @field(self.superblock, @tagName(trailer)).decode(
+                    self.superblock.trailer_buffer(trailer)[0..trailer_size],
+                );
+            }
+            // Faulty bits will be set in state_machine_open_callback().
+            while (self.client_replies.faulty.findFirstSet()) |slot| {
+                self.client_replies.faulty.unset(slot);
+            }
+
             self.sync_dispatch(.{ .updating_superblock = .{
                 .target = stage.target,
                 .previous_checkpoint_id = stage.previous_checkpoint_id.?,
@@ -7779,12 +7789,38 @@ pub fn ReplicaType(
             self.sync_dispatch(.idle);
         }
 
+        /// We have just:
+        /// - finished state sync,
+        /// - replaced our superblock,
+        /// - repaired the manifest blocks,
+        /// - and opened the state machine.
+        /// Now we sync:
+        /// - the missed LSM table blocks (index/filter/data), and
+        /// - client reply messages.
+        fn sync_content(self: *Self) void {
+            assert(self.syncing == .idle);
+            assert(self.state_machine_opened);
+            assert(self.superblock.working.vsr_state.commit_unsynced_max > 0);
+
+            var entry_slot: usize = 0;
+            while (entry_slot < constants.clients_max) : (entry_slot += 1) {
+                const entry = &self.superblock.client_sessions.entries[entry_slot];
+                const entry_free = self.superblock.client_sessions.entries_free.isSet(entry_slot);
+                const entry_faulty = !entry_free and
+                    entry.header.size > @sizeOf(Header) and
+                    entry.header.op >= self.superblock.working.vsr_state.commit_unsynced_min and
+                    entry.header.op <= self.superblock.working.vsr_state.commit_unsynced_max;
+
+                self.client_replies.faulty.setValue(entry_slot, entry_faulty);
+            }
+        }
+
         pub fn sync_content_done(self: *const Self) bool {
             if (self.superblock.staging.vsr_state.commit_unsynced_max == 0) {
                 return true;
             } else {
-                // TODO Return whether all tables and replies are synced.
-                return true;
+                // TODO Return whether all tables are synced.
+                return self.client_replies.faulty.count() == 0;
             }
         }
 
