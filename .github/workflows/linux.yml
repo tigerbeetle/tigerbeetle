@@ -199,7 +199,7 @@ jobs:
           submodules: recursive
       - run: ./scripts/install_zig.sh
       - run: zig/zig build build_benchmark_ewah
-      - run: zig/zig build build_benchmark_eytzinger
+      - run: zig/zig build build_benchmark_binary_search
       - run: zig/zig build build_benchmark_segmented_array
       - run: zig/zig build -Dtracer-backend=tracy
 

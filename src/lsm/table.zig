@@ -10,7 +10,6 @@ const bloom_filter = @import("bloom_filter.zig");
 
 const stdx = @import("../stdx.zig");
 const div_ceil = stdx.div_ceil;
-const eytzinger = @import("eytzinger.zig").eytzinger;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
 
@@ -113,63 +112,13 @@ pub fn TableType(
             assert(block_size % constants.sector_size == 0);
             assert(math.isPowerOfTwo(block_size));
 
-            // Searching the values array is more expensive than searching the per-block index
-            // as the larger values size leads to more cache misses. We can therefore speed
-            // up lookups by making the per block index larger at the cost of reducing the
-            // number of values that may be stored per block.
-            //
-            // X = values per block
-            // Y = keys per block
-            //
-            // R = constants.lsm_value_to_key_layout_ratio_min
-            //
-            // To maximize:
-            //     Y
-            // Given constraints:
-            //     body >= X * value_size + Y * key_size
-            //     (X * value_size) / (Y * key_size) >= R
-            //     X >= Y
-            //
-            // Plots of above constraints:
-            //     https://www.desmos.com/calculator/elqqaalgbc
-            //
-            // body - X * value_size = Y * key_size
-            // Y = (body - X * value_size) / key_size
-            //
-            // (X * value_size) / (body - X * value_size) = R
-            // (X * value_size) = R * body - R * X * value_size
-            // (R + 1) * X * value_size = R * body
-            // X = R * body / ((R + 1)* value_size)
-            //
-            // Y = (body - (R * body / ((R + 1) * value_size)) * value_size) / key_size
-            // Y = (body - (R / (R + 1)) * body) / key_size
-            // Y = body / ((R + 1) * key_size)
-            var block_keys_layout_count = @min(
-                block_body_size / ((constants.lsm_value_to_key_layout_ratio_min + 1) * key_size),
-                block_body_size / (value_size + key_size),
-            );
-
-            // Round to the next lowest power of two. This speeds up lookups in the Eytzinger
-            // layout and should help ensure better alignment for the following values.
-            // We could round to the nearest power of two, but then we would need
-            // care to avoid breaking e.g. the X >= Y invariant above.
-            block_keys_layout_count = math.floorPowerOfTwo(u64, block_keys_layout_count);
-
             // If the index is smaller than 16 keys then there are key sizes >= 4 such that
             // the total index size is not 64 byte cache line aligned.
             assert(@sizeOf(Key) >= 4);
             assert(@sizeOf(Key) % 4 == 0);
-            if (block_keys_layout_count < @divExact(constants.cache_line_size, 4)) {
-                block_keys_layout_count = 0;
-            }
-            assert((block_keys_layout_count * key_size) % constants.cache_line_size == 0);
-
-            const block_key_layout_size = block_keys_layout_count * key_size;
-            const block_key_count =
-                if (block_keys_layout_count == 0) 0 else block_keys_layout_count - 1;
 
             const block_value_count_max = @divFloor(
-                block_body_size - block_key_layout_size,
+                block_body_size,
                 value_size,
             );
 
@@ -185,10 +134,6 @@ pub fn TableType(
             const filter_blocks = div_ceil(data_blocks, filter_data_block_count_max);
 
             break :layout .{
-                // The number of keys in the Eytzinger layout per data block.
-                .block_key_count = block_key_count,
-                // The number of bytes used by the keys in the data block.
-                .block_key_layout_size = block_key_layout_size,
                 // The maximum number of values in a data block.
                 .block_value_count_max = block_value_count_max,
 
@@ -220,8 +165,6 @@ pub fn TableType(
         });
 
         pub const data = schema.TableData.init(.{
-            .key_count = layout.block_key_count,
-            .key_layout_size = layout.block_key_layout_size,
             .value_count_max = layout.block_value_count_max,
             .value_size = value_size,
         });
@@ -261,10 +204,7 @@ pub fn TableType(
                     \\    padding_offset: {}
                     \\    padding_size: {}
                     \\data:
-                    \\    key_count: {}
                     \\    value_count_max: {}
-                    \\    key_layout_offset: {}
-                    \\    key_layout_size: {}
                     \\    values_offset: {}
                     \\    values_size: {}
                     \\    padding_offset: {}
@@ -300,10 +240,7 @@ pub fn TableType(
                         filter.padding_offset,
                         filter.padding_size,
 
-                        data.key_count,
                         data.value_count_max,
-                        data.key_layout_offset,
-                        data.key_layout_size,
                         data.values_offset,
                         data.values_size,
                         data.padding_offset,
@@ -347,20 +284,7 @@ pub fn TableType(
             assert(block_size == filter.padding_offset + filter.padding_size);
             assert(block_size == @sizeOf(vsr.Header) + filter.filter_size + filter.padding_size);
 
-            if (data.key_count > 0) {
-                assert(data.key_count >= 3);
-                assert(math.isPowerOfTwo(data.key_count + 1));
-                assert(data.key_count + 1 == @divExact(data.key_layout_size, key_size));
-                assert(data.values_size / data.key_layout_size >=
-                    constants.lsm_value_to_key_layout_ratio_min);
-            } else {
-                assert(data.key_count == 0);
-                assert(data.key_layout_size == 0);
-                assert(data.values_offset == data.key_layout_offset);
-            }
-
             assert(data.value_count_max > 0);
-            assert(data.value_count_max >= data.key_count);
             assert(@divExact(data.values_size, value_size) == data.value_count_max);
             assert(data.values_offset % constants.cache_line_size == 0);
             // You can have any size value you want, as long as it fits
@@ -368,8 +292,7 @@ pub fn TableType(
             assert((data.value_count_max * value_size) % constants.cache_line_size == 0);
 
             assert(data.padding_size >= 0);
-            assert(block_size == @sizeOf(vsr.Header) + data.key_layout_size +
-                data.values_size + data.padding_size);
+            assert(block_size == @sizeOf(vsr.Header) + data.values_size + data.padding_size);
             assert(block_size == data.padding_offset + data.padding_size);
 
             // We expect no block padding at least for TigerBeetle's objects and indexes:
@@ -453,11 +376,11 @@ pub fn TableType(
                 cluster: u32,
                 address: u64,
                 snapshot_min: u64,
-                tree_id: u128,
+                tree_id: u16,
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
-                // For each block we write the sorted values, initialize the Eytzinger layout,
+                // For each block we write the sorted values,
                 // complete the block header, and add the block's max key to the table index.
 
                 assert(options.address > 0);
@@ -475,11 +398,13 @@ pub fn TableType(
 
                 const values = values_max[0..builder.value_count];
 
-                const filter_bytes = filter.block_filter(builder.filter_block);
-                for (values) |*value| {
-                    const key = key_from_value(value);
-                    const fingerprint = key_fingerprint(key);
-                    bloom_filter.add(fingerprint, filter_bytes);
+                if (comptime Table.usage == .general) {
+                    const filter_bytes = filter.block_filter(builder.filter_block);
+                    for (values) |*value| {
+                        const key = key_from_value(value);
+                        const fingerprint = key_fingerprint(key);
+                        bloom_filter.add(fingerprint, filter_bytes);
+                    }
                 }
 
                 const key_max = key_from_value(&values[values.len - 1]);
@@ -492,23 +417,6 @@ pub fn TableType(
                     }
                 }
 
-                if (data.key_count > 0) {
-                    assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-
-                    const key_layout_bytes = block[data.key_layout_offset..][0..data.key_layout_size];
-                    const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
-
-                    const e = eytzinger(data.key_count, data.value_count_max);
-                    e.layout_from_keys_or_values(
-                        Key,
-                        Value,
-                        key_from_value,
-                        sentinel_key,
-                        values,
-                        key_layout,
-                    );
-                }
-
                 const values_padding = mem.sliceAsBytes(values_max[builder.value_count..]);
                 const block_padding = block[data.padding_offset..][0..data.padding_size];
                 assert(compare_keys(key_from_value(&values[values.len - 1]), key_max) == .eq);
@@ -518,8 +426,6 @@ pub fn TableType(
                     .cluster = options.cluster,
                     .parent = @bitCast(schema.TableData.Parent{ .tree_id = options.tree_id }),
                     .context = @bitCast(schema.TableData.Context{
-                        .key_count = data.key_count,
-                        .key_layout_size = data.key_layout_size,
                         .value_count_max = data.value_count_max,
                         .value_size = value_size,
                     }),
@@ -752,25 +658,7 @@ pub fn TableType(
         }
 
         pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
-            const values = blk: {
-                if (data.key_count == 0) break :blk data_block_values_used(data_block);
-
-                assert(@divExact(data.key_layout_size, key_size) == data.key_count + 1);
-                const key_layout_bytes = data_block[data.key_layout_offset..][0..data.key_layout_size];
-                const key_layout = mem.bytesAsValue([data.key_count + 1]Key, key_layout_bytes);
-
-                const e = eytzinger(data.key_count, data.value_count_max);
-                const prefetch = true;
-                break :blk e.search_values(
-                    Key,
-                    Value,
-                    compare_keys,
-                    prefetch,
-                    key_layout,
-                    data_block_values_used(data_block),
-                    key,
-                );
-            };
+            const values = data_block_values_used(data_block);
 
             const result = binary_search.binary_search_values(
                 Key,

@@ -495,8 +495,6 @@ comptime {
 
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 
-pub const lsm_value_to_key_layout_ratio_min = config.cluster.lsm_value_to_key_layout_ratio_min;
-
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = config.process.tick_ms;
