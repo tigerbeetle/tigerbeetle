@@ -170,19 +170,19 @@ pub const Operation = enum(u8) {
     _,
 
     pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
-        check_state_machine_operations(StateMachine.Operation);
+        check_state_machine_operations(StateMachine);
         return @as(Operation, @enumFromInt(@intFromEnum(op)));
     }
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
-        check_state_machine_operations(StateMachine.Operation);
+        check_state_machine_operations(StateMachine);
         assert(self.valid(StateMachine));
         assert(!self.vsr_reserved());
         return @as(StateMachine.Operation, @enumFromInt(@intFromEnum(self)));
     }
 
     pub fn valid(self: Operation, comptime StateMachine: type) bool {
-        check_state_machine_operations(StateMachine.Operation);
+        check_state_machine_operations(StateMachine);
 
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
             const ops = comptime std.enums.values(Enum);
@@ -213,12 +213,13 @@ pub const Operation = enum(u8) {
         unreachable;
     }
 
-    fn check_state_machine_operations(comptime Op: type) void {
+    fn check_state_machine_operations(comptime StateMachine: type) void {
         comptime {
-            assert(@typeInfo(Op).Enum.is_exhaustive);
-            assert(@typeInfo(Op).Enum.tag_type == @typeInfo(Operation).Enum.tag_type);
-            for (@typeInfo(Op).Enum.fields) |field| {
-                const op = @field(Op, field.name);
+            assert(@typeInfo(StateMachine.Operation).Enum.is_exhaustive);
+            assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
+                @typeInfo(Operation).Enum.tag_type);
+            for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
+                const op = @field(StateMachine.Operation, field.name);
                 if (@intFromEnum(op) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
                 }
@@ -1915,5 +1916,78 @@ const ViewChangeHeadersArray = struct {
         assert(headers.command == .do_view_change);
         assert(headers.array.len > 0);
         headers.array.appendAssumeCapacity(Headers.dvc_blank(op));
+    }
+};
+
+/// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
+///
+///   checkpoint() call           0   1   2   3
+///   op_checkpoint               0   5  11  17
+///   op_checkpoint_next          5  11  17  23
+///   op_checkpoint_next_trigger  7  13  19  25
+///
+///     commit log (ops)           │ write-ahead log (slots)
+///     0   4   8   2   6   0   4  │ 0---4---
+///   0 ─────✓·%                   │ 01234✓6%   initial log fill
+///   1 ───────────✓·%             │ 890✓2%45   first wrap of log
+///   2 ─────────────────✓·%       │ 6✓8%0123   second wrap of log
+///   3 ───────────────────────✓·% │ 4%67890✓   third wrap of log
+///
+/// Legend:
+///
+///   ─/✓  op on disk at checkpoint
+///   ·/%  op in memory at checkpoint
+///     ✓  op_checkpoint
+///     %  op_checkpoint's trigger
+///
+pub const Checkpoint = struct {
+    comptime {
+        assert(constants.journal_slot_count > constants.lsm_batch_multiple);
+        assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
+    }
+
+    pub fn checkpoint_before(checkpoint: u64) ?u64 {
+        assert(valid(checkpoint));
+
+        if (checkpoint == 0) return null;
+        if (checkpoint == constants.journal_slot_count - constants.lsm_batch_multiple - 1) return 0;
+
+        return checkpoint - (constants.journal_slot_count - constants.lsm_batch_multiple);
+    }
+
+    pub fn checkpoint_after(checkpoint: u64) u64 {
+        assert(valid(checkpoint));
+
+        const result = op: {
+            if (checkpoint == 0) {
+                // First wrap: op_checkpoint_next = 8-2-1 = 5
+                break :op constants.journal_slot_count - constants.lsm_batch_multiple - 1;
+            } else {
+                // Second wrap: op_checkpoint_next = 5+8-2 = 11
+                // Third wrap: op_checkpoint_next = 11+8-2 = 17
+                break :op checkpoint + constants.journal_slot_count - constants.lsm_batch_multiple;
+            }
+        };
+
+        assert((result + 1) % constants.lsm_batch_multiple == 0);
+        assert(valid(result));
+        assert(checkpoint_before(result) == checkpoint);
+
+        return result;
+    }
+
+    pub fn trigger_for_checkpoint(checkpoint: u64) ?u64 {
+        assert(valid(checkpoint));
+
+        if (checkpoint == 0) {
+            return null;
+        } else {
+            return checkpoint + constants.lsm_batch_multiple;
+        }
+    }
+
+    pub fn valid(op: u64) bool {
+        return op == 0 or
+            (op + 1) % (constants.journal_slot_count - constants.lsm_batch_multiple) == 0;
     }
 };

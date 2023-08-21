@@ -260,7 +260,7 @@ pub fn ReplicaType(
         /// * `replica.op - replica.commit_min    ≤ journal_slot_count`
         /// * `replica.op - replica.op_checkpoint ≤ journal_slot_count`
         ///   It is safe to overwrite `op_checkpoint` itself.
-        /// * `replica.op ≤ replica.op_checkpoint_trigger`:
+        /// * `replica.op ≤ replica.op_checkpoint_next_trigger`:
         ///   Don't wrap the WAL until we are sure that the overwritten entry will not be required
         ///   for recovery.
         op: u64,
@@ -519,7 +519,7 @@ pub fn ReplicaType(
             const vsr_headers = self.superblock.working.vsr_headers();
             // If we were a lagging backup that installed an SV but didn't finish fast-forwarding,
             // the vsr_headers head op may be part of the checkpoint after this one.
-            maybe(vsr_headers.slice[0].op > self.op_checkpoint_trigger());
+            maybe(vsr_headers.slice[0].op > self.op_checkpoint_next_trigger());
 
             // Given on-disk state, try to recover the head op after a restart.
             //
@@ -538,7 +538,7 @@ pub fn ReplicaType(
             if (self.log_view == self.view) {
                 for (self.journal.headers) |*header| {
                     if (header.command == .prepare) {
-                        assert(header.op <= self.op_checkpoint_trigger());
+                        assert(header.op <= self.op_checkpoint_next_trigger());
                         assert(header.view <= self.log_view);
 
                         if (op_head == null or op_head.? < header.op) op_head = header.op;
@@ -568,10 +568,10 @@ pub fn ReplicaType(
             //    for op `X - journal_slot_count` (same slot, prior wrap) from vsr_headers
             //    into the journal.
             // 5. Replica A participates in a view-change, but nacks[/does not include] op X.
-            // 6. Op X is truncated.
+            // 6. Checkpoint X is truncated.
             for (vsr_headers.slice) |*vsr_header| {
                 if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
-                    vsr_header.op <= self.op_checkpoint_trigger() and
+                    vsr_header.op <= self.op_checkpoint_next_trigger() and
                     (op_head == null or op_head.? <= vsr_header.op))
                 {
                     op_head = vsr_header.op;
@@ -590,7 +590,7 @@ pub fn ReplicaType(
                     op_head = self.journal.op_maximum();
                 }
             }
-            assert(op_head.? <= self.op_checkpoint_trigger());
+            assert(op_head.? <= self.op_checkpoint_next_trigger());
 
             self.op = op_head.?;
             self.commit_max = @max(
@@ -1276,7 +1276,7 @@ pub fn ReplicaType(
             }
 
             // Verify that the new request will fit in the WAL.
-            if (message.header.op > self.op_checkpoint_trigger()) {
+            if (message.header.op > self.op_checkpoint_next_trigger()) {
                 log.debug("{}: on_prepare: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
                     message.header.op,
@@ -1310,7 +1310,7 @@ pub fn ReplicaType(
                 message.header.checksum,
             });
             assert(message.header.op == self.op + 1);
-            assert(message.header.op <= self.op_checkpoint_trigger());
+            assert(message.header.op <= self.op_checkpoint_next_trigger());
             self.op = message.header.op;
             self.journal.set_header_as_dirty(message.header);
 
@@ -1691,7 +1691,7 @@ pub fn ReplicaType(
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
             if (op_checkpoint_max > self.op_checkpoint() and
-                op_head > self.op_checkpoint_trigger())
+                op_head > self.op_checkpoint_next_trigger())
             {
                 // When:
                 // 1. the cluster is at a checkpoint ahead of the local checkpoint,
@@ -1753,16 +1753,16 @@ pub fn ReplicaType(
                 assert(self.state_machine.prepare_timestamp >=
                     self.journal.header_with_op(self.op).?.timestamp);
 
-                if (op_head > self.op_checkpoint_trigger()) {
+                if (op_head > self.op_checkpoint_next_trigger()) {
                     assert(self.op == self.commit_max);
-                    assert(self.op == self.op_checkpoint_trigger());
-                    assert(op_head - self.op_checkpoint_trigger() <=
+                    assert(self.op == self.op_checkpoint_next_trigger());
+                    assert(op_head - self.op_checkpoint_next_trigger() <=
                         constants.pipeline_prepare_queue_max);
 
                     log.debug("{}: on_do_view_change: discarded uncommitted ops after trigger" ++
                         " (op={}..{})", .{
                         self.replica,
-                        self.op_checkpoint_trigger() + 1,
+                        self.op_checkpoint_next_trigger() + 1,
                         op_head,
                     });
                 } else {
@@ -1833,7 +1833,7 @@ pub fn ReplicaType(
             for (view_headers.slice) |*header| {
                 assert(header.commit <= message.header.commit);
 
-                if (header.op <= self.op_checkpoint_trigger()) {
+                if (header.op <= self.op_checkpoint_next_trigger()) {
                     if (self.log_view < self.view or
                         (self.log_view == self.view and header.op >= self.op))
                     {
@@ -1851,7 +1851,7 @@ pub fn ReplicaType(
                     log.warn("{}: on_start_view: start sync; lagging behind cluster " ++
                         "(checkpoint_trigger={} quorum_head={})", .{
                         self.replica,
-                        self.op_checkpoint_trigger(),
+                        self.op_checkpoint_next_trigger(),
                         view_headers.slice[0].op,
                     });
                     self.sync_start_from_committing();
@@ -1860,7 +1860,7 @@ pub fn ReplicaType(
             }
 
             for (view_headers.slice) |*header| {
-                if (header.op <= self.op_checkpoint_trigger()) {
+                if (header.op <= self.op_checkpoint_next_trigger()) {
                     self.replace_header(header);
                 }
             }
@@ -1869,9 +1869,9 @@ pub fn ReplicaType(
                 self.view_headers.replace(.start_view, view_headers.slice);
                 assert(self.view_headers.array.get(0).view <= self.view);
                 assert(self.view_headers.array.get(0).op == message.header.op);
-                maybe(self.view_headers.array.get(0).op > self.op_checkpoint_trigger());
+                maybe(self.view_headers.array.get(0).op > self.op_checkpoint_next_trigger());
                 assert(self.view_headers.array.get(self.view_headers.array.len - 1).op <=
-                    self.op_checkpoint_trigger());
+                    self.op_checkpoint_next_trigger());
             }
 
             switch (self.status) {
@@ -2961,7 +2961,7 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.view == self.view);
             assert(message.header.op == self.op);
-            assert(message.header.op <= self.op_checkpoint_trigger());
+            assert(message.header.op <= self.op_checkpoint_next_trigger());
 
             if (self.solo() and self.pipeline.queue.prepare_queue.count > 1) {
                 // In a cluster-of-one, the prepares must always be written to the WAL sequentially
@@ -3299,7 +3299,7 @@ pub fn ReplicaType(
         /// 1. Prefetch.
         /// 2. Commit_op: Update the state machine and the replica's commit_min/commit_max.
         /// 3. Compact.
-        /// 4. Checkpoint: (Only called when `commit_min == op_checkpoint_trigger`).
+        /// 4. Checkpoint: (Only called when `commit_min == op_checkpoint_next_trigger`).
         /// 5. Done. Go to step 1 to repeat for the next op.
         fn commit_op_prefetch(self: *Self) void {
             assert(self.state_machine_opened);
@@ -3404,9 +3404,9 @@ pub fn ReplicaType(
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
-            assert(op <= self.op_checkpoint_trigger());
+            assert(op <= self.op_checkpoint_next_trigger());
 
-            if (op == self.op_checkpoint_trigger()) {
+            if (op == self.op_checkpoint_next_trigger()) {
                 assert(op == self.op);
                 assert((op + 1) % constants.lsm_batch_multiple == 0);
                 log.debug("{}: commit_op_compact_callback: checkpoint start " ++
@@ -3438,7 +3438,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .checkpoint_state_machine);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
+            assert(self.commit_prepare.?.header.op == self.op_checkpoint_next_trigger());
             self.grid.assert_only_repairing();
 
             self.commit_dispatch(.checkpoint_client_replies);
@@ -3471,9 +3471,9 @@ pub fn ReplicaType(
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert(self.commit_prepare.?.header.op == self.op_checkpoint_trigger());
-            assert(self.op_checkpoint_trigger() == self.op);
-            assert(self.op_checkpoint_trigger() <= self.commit_max);
+            assert(self.commit_prepare.?.header.op == self.op_checkpoint_next_trigger());
+            assert(self.op_checkpoint_next_trigger() == self.op);
+            assert(self.op_checkpoint_next_trigger() <= self.commit_max);
             self.grid.assert_only_repairing();
 
             // For the given WAL (journal_slot_count=8, lsm_batch_multiple=2, op=commit_min=7):
@@ -3527,7 +3527,7 @@ pub fn ReplicaType(
         fn commit_op_cleanup(self: *Self) void {
             assert(self.commit_stage == .cleanup);
             assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert(self.commit_prepare.?.header.op < self.op_checkpoint_trigger());
+            assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
             const op = self.commit_prepare.?.header.op;
 
@@ -3972,9 +3972,9 @@ pub fn ReplicaType(
             // The SV includes headers corresponding to the triggers for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
             for ([_]u64{
-                self.op_checkpoint_trigger() -|
+                self.op_checkpoint_next_trigger() -|
                     (constants.journal_slot_count - constants.lsm_batch_multiple),
-                self.op_checkpoint_trigger() -|
+                self.op_checkpoint_next_trigger() -|
                     (constants.journal_slot_count - constants.lsm_batch_multiple) * 2,
             }) |op_hook| {
                 if (op > op_hook and op_hook >= op_min) {
@@ -4280,7 +4280,9 @@ pub fn ReplicaType(
             // Don't accept more requests than will fit in the current checkpoint.
             // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
             // when primary_pipeline_prepare() converts the request to a prepare.)
-            if (self.op + self.pipeline.queue.request_queue.count == self.op_checkpoint_trigger()) {
+            if (self.op + self.pipeline.queue.request_queue.count ==
+                self.op_checkpoint_next_trigger())
+            {
                 log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
                     self.replica,
                     self.op + self.pipeline.queue.request_queue.count,
@@ -4295,7 +4297,7 @@ pub fn ReplicaType(
             // For an explanation, see: "Cluster: repair: primary checkpoint, backup crash before
             // checkpoint, primary prepare".
             if (self.op_checkpoint() != 0 and
-                self.op_checkpoint() + constants.lsm_batch_multiple + 1 == self.op)
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).? + 1 == self.op)
             {
                 var count: usize = 0;
                 for (self.sync_target_quorum.candidates, 0..) |target, replica_index| {
@@ -4629,7 +4631,7 @@ pub fn ReplicaType(
 
                     if (self.status == .recovering_head) {
                         if (message.header.view > self.view or
-                            message.header.op >= self.op_checkpoint_trigger() or
+                            message.header.op >= self.op_checkpoint_next_trigger() or
                             message.header.context == self.nonce)
                         {
                             // This SV is guaranteed to have originated after the replica crash,
@@ -4851,7 +4853,7 @@ pub fn ReplicaType(
             // to a newer op that is less than `commit_max` but greater than `commit_min`:
             assert(header.op > self.commit_min);
             // Never overwrite an op that still needs to be checkpointed.
-            assert(header.op <= self.op_checkpoint_trigger());
+            assert(header.op <= self.op_checkpoint_next_trigger());
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
@@ -4914,7 +4916,7 @@ pub fn ReplicaType(
 
             // If faulty, this slot may hold either:
             // - op=op_checkpoint, or
-            // - op=op_checkpoint_trigger
+            // - op=op_checkpoint_next_trigger
             if (self.journal.faulty.bit(slot_op_checkpoint)) return false;
 
             const slot_known_range = vsr.SlotRange{
@@ -4935,67 +4937,37 @@ pub fn ReplicaType(
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
-        ///
-        /// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
-        ///
-        ///   checkpoint() call      0   1   2   3
-        ///   op_checkpoint          0   5  11  17
-        ///   op_checkpoint_next     5  11  17  23
-        ///   op_checkpoint_trigger  7  13  19  25
-        ///
-        ///     commit log (ops)           │ write-ahead log (slots)
-        ///     0   4   8   2   6   0   4  │ 0---4---
-        ///   0 ─────✓·%                   │ 01234✓6%   initial log fill
-        ///   1 ───────────✓·%             │ 890✓2%45   first wrap of log
-        ///   2 ─────────────────✓·%       │ 6✓8%0123   second wrap of log
-        ///   3 ───────────────────────✓·% │ 4%67890✓   third wrap of log
-        ///
-        /// Legend:
-        ///
-        ///   ─/✓  op on disk at checkpoint
-        ///   ·/%  op in memory at checkpoint
-        ///     ✓  op_checkpoint
-        ///     %  op_checkpoint_trigger
-        ///
         fn op_checkpoint_next(self: *const Self) u64 {
+            assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
                 self.status == .recovering or self.status == .recovering_head);
-            assert(self.op_checkpoint() == 0 or
-                (self.op_checkpoint() + 1) % constants.lsm_batch_multiple == 0);
 
-            const op = if (self.op_checkpoint() == 0)
-                // First wrap: op_checkpoint_next = 8-2-1 = 5
-                constants.journal_slot_count - constants.lsm_batch_multiple - 1
-            else
-                // Second wrap: op_checkpoint_next = 5+8-2 = 11
-                // Third wrap: op_checkpoint_next = 11+8-2 = 17
-                self.op_checkpoint() + constants.journal_slot_count - constants.lsm_batch_multiple;
-            assert((op + 1) % constants.lsm_batch_multiple == 0);
-            // The checkpoint always advances.
-            assert(op > self.op_checkpoint());
+            const checkpoint_next = vsr.Checkpoint.checkpoint_after(self.op_checkpoint());
+            assert(vsr.Checkpoint.valid(checkpoint_next));
+            assert(checkpoint_next > self.op_checkpoint()); // The checkpoint always advances.
 
-            return op;
+            return checkpoint_next;
         }
 
         /// Returns the next op that will trigger a checkpoint.
         ///
-        /// Receiving and storing an op higher than `op_checkpoint_trigger()` is forbidden; doing so
-        /// would overwrite a message (or the slot of a message) that has not yet been committed and
-        /// checkpointed.
+        /// Receiving and storing an op higher than `op_checkpoint_next_trigger()` is forbidden;
+        /// doing so would overwrite a message (or the slot of a message) that has not yet been
+        /// committed and checkpointed.
         ///
         /// See `op_checkpoint_next` for more detail.
-        fn op_checkpoint_trigger(self: *const Self) u64 {
-            return self.op_checkpoint_next() + constants.lsm_batch_multiple;
+        fn op_checkpoint_next_trigger(self: *const Self) u64 {
+            return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
         fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
             if (self.op_checkpoint() > 0) {
                 if (op < self.op_repair_min()) return null;
 
-                const op_checkpoint_trigger_previous =
-                    self.op_checkpoint() + constants.lsm_batch_multiple;
-                if (op <= op_checkpoint_trigger_previous) {
+                const op_checkpoint_next_trigger_previous =
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                if (op <= op_checkpoint_next_trigger_previous) {
                     return self.superblock.working.vsr_state.previous_checkpoint_id;
                 }
             }
@@ -5023,7 +4995,7 @@ pub fn ReplicaType(
         fn op_repair_min(self: *const Self) u64 {
             if (self.status == .recovering) assert(self.solo());
             assert(self.op >= self.op_checkpoint());
-            assert(self.op <= self.op_checkpoint_trigger());
+            assert(self.op <= self.op_checkpoint_next_trigger());
 
             const op = op: {
                 if (self.primary_index(self.view) == self.replica) {
@@ -5036,7 +5008,7 @@ pub fn ReplicaType(
                         // to backtrack.
                         self.op + constants.pipeline_prepare_queue_max,
                         // ...But the pipeline messages could not have moved past the checkpoint.
-                        self.op_checkpoint_trigger(),
+                        self.op_checkpoint_next_trigger(),
                     ) -| (constants.journal_slot_count - 1);
                 } else {
                     // Strictly speaking a backup only needs to repair commit_min+1… to proceed.
@@ -5066,10 +5038,10 @@ pub fn ReplicaType(
         fn op_repair_max(self: *const Self) u64 {
             assert(self.status != .recovering_head);
             assert(self.op >= self.op_checkpoint());
-            assert(self.op <= self.op_checkpoint_trigger());
+            assert(self.op <= self.op_checkpoint_next_trigger());
             assert(self.op <= self.commit_max + constants.pipeline_prepare_queue_max);
 
-            return @min(self.commit_max, self.op_checkpoint_trigger());
+            return @min(self.commit_max, self.op_checkpoint_next_trigger());
         }
 
         /// Panics if immediate neighbors in the same view would have a broken hash chain.
@@ -5226,9 +5198,10 @@ pub fn ReplicaType(
         /// Repair. Each step happens in sequence — step n+1 executes when step n is done.
         ///
         /// 1. If we are a backup and have fallen too far behind the primary, initiate state sync.
-        /// 2. Advance the head op to `op_repair_max = min(op_checkpoint_trigger, commit_max)`.
+        /// 2. Advance the head op to `op_repair_max = min(op_checkpoint_next_trigger, commit_max)`.
         ///    To advance the head op we request+await a SV. Either:
-        ///    - the SV's "hook" headers include op_checkpoint_trigger (if we are ≤1 wrap behind), or
+        ///    - the SV's "hook" headers include op_checkpoint_next_trigger (if we are ≤1 wrap
+        ///      behind), or
         ///    - the SV is too far ahead, so we will fall back from WAL repair to state sync.
         /// 3. Acquire missing or disconnected headers in reverse chronological order, backwards from
         ///    op_repair_max.
@@ -5960,7 +5933,7 @@ pub fn ReplicaType(
             assert(header.command == .prepare);
             assert(header.view <= self.view);
             assert(header.op <= self.op); // Never advance the op.
-            assert(header.op <= self.op_checkpoint_trigger());
+            assert(header.op <= self.op_checkpoint_next_trigger());
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
@@ -6387,7 +6360,7 @@ pub fn ReplicaType(
                     assert(self.status == .normal);
                     assert(self.syncing == .idle);
                     assert(message.header.view == self.view);
-                    assert(message.header.op <= self.op_checkpoint_trigger());
+                    assert(message.header.op <= self.op_checkpoint_next_trigger());
                     // We must only ever send a prepare_ok to the latest primary of the active view:
                     // We must never straddle views by sending to a primary in an older view.
                     // Otherwise, we would be enabling a partitioned primary to commit.
@@ -6397,7 +6370,7 @@ pub fn ReplicaType(
                 .reply => {
                     assert(!self.standby());
                     assert(message.header.view <= self.view);
-                    assert(message.header.op <= self.op_checkpoint_trigger());
+                    assert(message.header.op <= self.op_checkpoint_next_trigger());
                 },
                 .start_view_change => {
                     assert(!self.standby());
@@ -6747,7 +6720,7 @@ pub fn ReplicaType(
             assert(self.status == .view_change or self.status == .normal or
                 self.status == .recovering_head);
 
-            assert(op <= self.op_checkpoint_trigger());
+            assert(op <= self.op_checkpoint_next_trigger());
             maybe(op >= self.commit_max);
             maybe(op >= commit_max);
 
@@ -6828,7 +6801,7 @@ pub fn ReplicaType(
             assert(self.primary_index(self.view) == self.replica);
             assert(!self.solo());
             assert(self.syncing == .idle);
-            assert(self.commit_max <= self.op_checkpoint_trigger());
+            assert(self.commit_max <= self.op_checkpoint_next_trigger());
             assert(self.do_view_change_quorum);
             assert(self.do_view_change_from_all_replicas[self.replica] != null);
             DVCQuorum.verify(self.do_view_change_from_all_replicas);
@@ -6838,7 +6811,7 @@ pub fn ReplicaType(
 
             for (dvcs_all.constSlice()) |message| {
                 assert(message.header.op <=
-                    self.op_checkpoint_trigger() + constants.pipeline_prepare_queue_max);
+                    self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max);
             }
 
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.
@@ -6860,7 +6833,7 @@ pub fn ReplicaType(
                 },
             ).complete_valid;
             const header_head = while (quorum_headers.next()) |header| {
-                if (header.op > self.op_checkpoint_trigger()) {
+                if (header.op > self.op_checkpoint_next_trigger()) {
                     // Any ops in the next checkpoint are definitely uncommitted — otherwise,
                     // we would have forfeited to favor a different primary.
                     for (dvcs_all.constSlice()) |dvc| {
@@ -6876,7 +6849,7 @@ pub fn ReplicaType(
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
-            assert(header_head.op <= self.op_checkpoint_trigger());
+            assert(header_head.op <= self.op_checkpoint_next_trigger());
             for (dvcs_all.constSlice()) |dvc| assert(header_head.op >= dvc.header.commit);
 
             // When computing the new commit_max, we cannot simply rely on the fact that our own
@@ -6900,7 +6873,7 @@ pub fn ReplicaType(
                 // set_op_and_commit_max() and replace_header().
 
                 self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
-                assert(self.commit_max <= self.op_checkpoint_trigger());
+                assert(self.commit_max <= self.op_checkpoint_next_trigger());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
 
@@ -7372,7 +7345,8 @@ pub fn ReplicaType(
                 // - the highest cluster-committed op (if available).
                 // We cannot safely go beyond that in all cases:
                 // - During a prior view-change we might have only accepted a single header from the
-                //   DVC: "header.op = op_checkpoint_trigger", and then not completed any repair.
+                //   DVC: "header.op = op_checkpoint_next_trigger", and then not completed any
+                //   repair.
                 // - Similarly, we might have receive a catch-up SV message and only installed a
                 //   single (checkpoint trigger) hook header.
                 var op = self.op;
@@ -7393,7 +7367,7 @@ pub fn ReplicaType(
                 // start the view despite itself being one checkpoint behind us, by truncating all
                 // of these next-wrap ops.
                 //
-                // The primary's new head would match its op_checkpoint_trigger.
+                // The primary's new head would match its op_checkpoint_next_trigger.
                 // But we need not explicitly include this header in our DVC — it is automatically
                 // included if necessary thanks to the "DVC connects to commit_max" invariant.
             }
@@ -7465,9 +7439,9 @@ pub fn ReplicaType(
 
             // We learned that we are lagging behind the cluster, so we know we shouldn't actually
             // be the primary. But we can't join a new view until the view's headers are within our
-            // `op_checkpoint_trigger`. We need to bump our `op_checkpoint` first – but that is async.
-            // So even if we are arriving at `sync_start_from_committing` via `on_start_view`,
-            // `on_start_view` leaves us as the "primary" for now.
+            // `op_checkpoint_next_trigger`. We need to bump our `op_checkpoint` first – but that is
+            // async. So even if we are arriving at `sync_start_from_committing` via
+            // `on_start_view`, `on_start_view` leaves us as the "primary" for now.
             if (self.status == .normal and self.primary()) {
                 self.transition_to_view_change_status(self.view + 1);
             }
@@ -7973,7 +7947,7 @@ pub fn ReplicaType(
             }
 
             const candidate_canonical = canonical: {
-                const candidate_trigger = candidate.checkpoint_op + constants.lsm_batch_multiple;
+                const candidate_trigger = vsr.Checkpoint.trigger_for_checkpoint(candidate.checkpoint_op).?;
 
                 if (header.command == .commit and header.commit > candidate_trigger) {
                     // Normal case: The primary has committed atop the checkpoint.
