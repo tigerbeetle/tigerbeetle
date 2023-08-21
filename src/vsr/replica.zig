@@ -409,7 +409,7 @@ pub fn ReplicaType(
         repair_sync_timeout: Timeout,
 
         /// The number of ticks before sending a command=request_blocks.
-        /// (grid.read_faulty_queue.count>0)
+        /// (grid.read_global_queue.count>0)
         grid_repair_message_timeout: Timeout,
 
         /// The number of ticks before sending a sync message (message types depend on syncing).
@@ -2373,7 +2373,7 @@ pub fn ReplicaType(
                 grid_write.address,
             });
 
-            if (self.grid.read_faulty_queue.empty()) {
+            if (self.grid.read_global_queue.empty()) {
                 self.grid_repair_message_timeout.stop();
             }
         }
@@ -2759,7 +2759,7 @@ pub fn ReplicaType(
                     commit_next < primary_repair_min and
                     (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
 
-                const stuck_grid = !self.grid.read_faulty_queue.empty();
+                const stuck_grid = !self.grid.read_global_queue.empty();
 
                 if (!stuck_header and !stuck_prepare and !stuck_grid) return;
             }
@@ -2787,7 +2787,7 @@ pub fn ReplicaType(
 
         fn on_grid_repair_message_timeout(self: *Self) void {
             assert(self.grid_repair_message_timeout.ticking);
-            assert(!self.grid.read_faulty_queue.empty());
+            assert(!self.grid.read_global_queue.empty());
             maybe(self.state_machine_opened);
 
             self.grid_repair_message_timeout.reset();
@@ -7578,7 +7578,7 @@ pub fn ReplicaType(
                     self.grid_repair_message_timeout.stop();
                     self.grid.cancel(sync_cancel_grid_callback);
 
-                    assert(self.grid.read_faulty_queue.empty());
+                    assert(self.grid.read_global_queue.empty());
                 },
                 .requesting_target => {}, // Waiting for a usable sync target.
                 .requesting_trailers => self.sync_message_timeout.start(),
@@ -7619,7 +7619,7 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(self.syncing == .canceling_grid);
             assert(self.grid.read_queue.empty());
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_global_queue.empty());
 
             if (self.commit_stage == .idle) {
                 assert(self.commit_prepare == null);
@@ -7652,7 +7652,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
             assert(!self.grid_repair_message_timeout.ticking);
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.grid_writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
@@ -7684,7 +7684,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
             assert(self.sync_message_timeout.ticking);
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             maybe(self.state_machine_opened);
 
@@ -7712,7 +7712,7 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
-            assert(self.grid.read_faulty_queue.empty());
+            assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
             assert(self.syncing == .updating_superblock);
             assert(!self.state_machine_opened);
@@ -8125,7 +8125,7 @@ pub fn ReplicaType(
         fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
             // `read` is *not* a BlockRead.read; we cannot use @fieldParentPtr() on it.
             const self = @fieldParentPtr(Self, "grid", grid);
-            assert(!self.grid.read_faulty_queue.empty());
+            assert(!self.grid.read_global_queue.empty());
             assert(self.syncing != .canceling_grid);
             assert(!self.superblock.free_set.is_free(read.address));
             maybe(self.state_machine_opened);
@@ -8139,7 +8139,7 @@ pub fn ReplicaType(
             if (self.solo()) @panic("grid is corrupt");
 
             if (!self.grid_repair_message_timeout.ticking) {
-                assert(self.grid.read_faulty_queue.count == 1);
+                assert(self.grid.read_global_queue.count == 1);
 
                 self.grid_repair_message_timeout.start();
                 self.superblock.storage.on_next_tick(
@@ -8152,7 +8152,7 @@ pub fn ReplicaType(
 
         fn on_grid_read_fault_next_tick(next_tick: *Grid.NextTick) void {
             const self = @fieldParentPtr(Self, "grid_read_fault_next_tick", next_tick);
-            if (self.grid.read_faulty_queue.empty()) {
+            if (self.grid.read_global_queue.empty()) {
                 // Very unlikely, but possibly we wrote the block before next_tick fired.
             } else {
                 self.send_request_blocks();
@@ -8162,7 +8162,7 @@ pub fn ReplicaType(
         fn send_request_blocks(self: *Self) void {
             assert(!self.solo());
             assert(self.grid_repair_message_timeout.ticking);
-            assert(!self.grid.read_faulty_queue.empty());
+            assert(!self.grid.read_global_queue.empty());
             maybe(self.state_machine_opened);
 
             var message = self.message_bus.get_message();
@@ -8174,7 +8174,7 @@ pub fn ReplicaType(
                 message.buffer[@sizeOf(Header)..],
             );
 
-            var reads = self.grid.read_faulty_queue.peek();
+            var reads = self.grid.read_global_queue.peek();
             while (reads) |read| : (reads = read.next) {
                 assert(read.address > 0);
                 assert(!self.superblock.free_set.is_free(read.address));
