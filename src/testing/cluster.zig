@@ -52,7 +52,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
-        pub const StorageChecker = StorageCheckerType(Replica);
+        pub const StorageChecker = StorageCheckerType(Storage);
         pub const SyncChecker = SyncCheckerType(Replica);
 
         pub const Options = struct {
@@ -514,7 +514,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                             replica.replica,
                         });
                     } else {
-                        cluster.storage_checker.replica_checkpoint(replica) catch |err| {
+                        cluster.storage_checker.replica_checkpoint(
+                            &replica.superblock,
+                        ) catch |err| {
                             fatal(.correctness, "storage checker error: {}", .{err});
                         };
                     }
