@@ -141,7 +141,6 @@ const ConfigCluster = struct {
     lsm_growth_factor: u32 = 8,
     lsm_batch_multiple: comptime_int = 64,
     lsm_snapshots_max: usize = 32,
-    lsm_value_to_key_layout_ratio_min: comptime_int = 16,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them all to
     /// a single torn write. A replica needs at least one valid redundant header to determine an

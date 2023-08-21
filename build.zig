@@ -561,9 +561,9 @@ pub fn build(b: *std.Build) !void {
             .description = "EWAH codec",
         },
         .{
-            .name = "benchmark_eytzinger",
-            .file = "src/lsm/eytzinger_benchmark.zig",
-            .description = "array search",
+            .name = "benchmark_binary_search",
+            .file = "src/lsm/binary_search_benchmark.zig",
+            .description = "Array search",
         },
         .{
             .name = "benchmark_segmented_array",
