@@ -318,10 +318,21 @@ pub const Storage = struct {
 
         verify_alignment(buffer);
 
-        if (zone != .grid) {
-            // Grid repairs can read blocks that have not ever been written.
-            var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
-            while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+        switch (zone) {
+            .superblock,
+            .wal_headers,
+            .wal_prepares,
+            => {
+                var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
+                while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+            },
+            .client_replies,
+            .grid,
+            => {
+                // ClientReplies/Grid repairs can read blocks that have not ever been written.
+                // (The former case is possible if we sync to a new superblock and someone requests
+                // a client reply that we haven't repaired yet.)
+            },
         }
 
         read.* = .{

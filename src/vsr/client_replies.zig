@@ -326,6 +326,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 },
             }
 
+            // Clear the fault *before* the write completes, not after.
+            // Otherwise, a replica exiting state sync might mark a reply as faulty, then the
+            // ClientReplies clears that bit due to an unrelated write that was already queued.
+            client_replies.faulty.unset(slot.index);
+
             const write = client_replies.writes.acquire().?;
             write.* = .{
                 .client_replies = client_replies,
@@ -394,7 +399,6 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // Release the write *before* invoking the callback, so that if the callback
             // checks .writes.available() we doesn't appear busy when we're not.
             client_replies.writing.unset(write.slot.index);
-            client_replies.faulty.unset(write.slot.index);
             client_replies.writes.release(write);
 
             client_replies.message_pool.unref(message);
