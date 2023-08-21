@@ -363,27 +363,30 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 };
 
                 const key_blocks = Table.index_blocks_for_key(index_block, key);
-                switch (tree.cached_filter_block_search(
-                    key_blocks.filter_block_address,
-                    key_blocks.filter_block_checksum,
-                    fingerprint,
-                )) {
-                    .negative => {
-                        if (constants.verify) {
-                            assert(tree.cached_data_block_search(
-                                key_blocks.data_block_address,
-                                key_blocks.data_block_checksum,
-                                key,
-                            ) != .positive);
-                        }
-                        // Filter block indicates that the key is not present in the data block,
-                        // move on to the next table that could contain the key.
-                        continue;
-                    },
-                    .possible, .block_not_in_cache => {
-                        // Give yourself another fighting chance to rule out the existence of
-                        // the key; search for the data block in the grid cache.
-                    },
+                // Only general purpose tables have filter blocks.
+                if (comptime Table.usage == .general) {
+                    switch (tree.cached_filter_block_search(
+                        key_blocks.filter_block_address,
+                        key_blocks.filter_block_checksum,
+                        fingerprint,
+                    )) {
+                        .negative => {
+                            if (constants.verify) {
+                                assert(tree.cached_data_block_search(
+                                    key_blocks.data_block_address,
+                                    key_blocks.data_block_checksum,
+                                    key,
+                                ) != .positive);
+                            }
+                            // Filter block indicates that the key is not present in the data block,
+                            // move on to the next table that could contain the key.
+                            continue;
+                        },
+                        .possible, .block_not_in_cache => {
+                            // Give yourself another fighting chance to rule out the existence of
+                            // the key; search for the data block in the grid cache.
+                        },
+                    }
                 }
 
                 switch (tree.cached_data_block_search(
@@ -556,13 +559,24 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .checksum = blocks.data_block_checksum,
                 };
 
-                context.tree.grid.read_block(
-                    .{ .from_local_or_global_storage = read_filter_block_callback },
-                    completion,
-                    blocks.filter_block_address,
-                    blocks.filter_block_checksum,
-                    .{ .cache_read = true, .cache_write = true },
-                );
+                // Only general purpose tables have filter blocks.
+                if (comptime Table.usage == .general) {
+                    context.tree.grid.read_block(
+                        .{ .from_local_or_global_storage = read_filter_block_callback },
+                        completion,
+                        blocks.filter_block_address,
+                        blocks.filter_block_checksum,
+                        .{ .cache_read = true, .cache_write = true },
+                    );
+                } else {
+                    context.tree.grid.read_block(
+                        .{ .from_local_or_global_storage = read_data_block_callback },
+                        completion,
+                        context.data_block.?.address,
+                        context.data_block.?.checksum,
+                        .{ .cache_read = true, .cache_write = true },
+                    );
+                }
             }
 
             fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
