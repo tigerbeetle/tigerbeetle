@@ -667,7 +667,11 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
 
-            log.debug("{}: state_machine_open_callback", .{self.replica});
+            log.debug("{}: state_machine_open_callback: unsynced={}..{}", .{
+                self.replica,
+                self.superblock.working.vsr_state.commit_unsynced_min,
+                self.superblock.working.vsr_state.commit_unsynced_max,
+            });
 
             self.state_machine_opened = true;
 
@@ -3488,13 +3492,27 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
+            const vsr_state_commit_unsynced: struct { min: u64, max: u64 } = unsynced: {
+                if (self.sync_content_done()) {
+                    break :unsynced .{ .min = 0, .max = 0 };
+                } else {
+                    break :unsynced .{
+                        .min = self.superblock.staging.vsr_state.commit_unsynced_min,
+                        .max = self.superblock.staging.vsr_state.commit_unsynced_max,
+                    };
+                }
+            };
+
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
                 .{
-                    .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
+                    .commit_min_checksum =
+                        self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                     .commit_min = vsr_state_commit_min,
                     .commit_max = self.commit_max,
+                    .commit_unsynced_min = vsr_state_commit_unsynced.min,
+                    .commit_unsynced_max = vsr_state_commit_unsynced.max,
                 },
             );
         }
@@ -7696,6 +7714,31 @@ pub fn ReplicaType(
             // during the sync_start update uses the correct (new) commit_max.
             self.commit_max = @max(stage.target.checkpoint_op, self.commit_max);
 
+            const checkpoint_new = stage.target.checkpoint_op;
+            const checkpoint_old = self.op_checkpoint();
+            const commit_unsynced_max = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_new).?;
+            const commit_unsynced_min = commit_unsynced_min: {
+                const syncing_already = self.superblock.staging.vsr_state.commit_unsynced_max > 0;
+                const unsynced_min_old = self.superblock.staging.vsr_state.commit_unsynced_min;
+
+                // We must re-sync the tables created between checkpoint_old_previous and
+                // checkpoint_old since checkpoint_old might be divergent, in which case the tables
+                // we created during compaction are invalid.
+                // TODO: When we know our checkpoint is canonical, we don't need to resync it.
+                const checkpoint_old_previous = vsr.Checkpoint.checkpoint_before(checkpoint_old);
+                const unsynced_min_new = if (checkpoint_old == 0 or checkpoint_old_previous.? == 0)
+                    0
+                else
+                    // +1 because checkpoint_old_previous is definitely canonical, and the range is
+                    // inclusive.
+                    vsr.Checkpoint.trigger_for_checkpoint(checkpoint_old_previous.?).? + 1;
+
+                break :commit_unsynced_min if (syncing_already)
+                    @min(unsynced_min_old, unsynced_min_new)
+                else
+                    unsynced_min_new;
+            };
+
             self.sync_message_timeout.stop();
             self.superblock.sync(
                 sync_superblock_update_callback,
@@ -7705,6 +7748,8 @@ pub fn ReplicaType(
                     .commit_min = stage.target.checkpoint_op,
                     .commit_min_checksum = stage.checkpoint_op_checksum,
                     .previous_checkpoint_id = stage.previous_checkpoint_id,
+                    .commit_unsynced_max = commit_unsynced_max,
+                    .commit_unsynced_min = commit_unsynced_min,
                 },
             );
         }
@@ -7732,6 +7777,15 @@ pub fn ReplicaType(
 
             self.state_machine.open(state_machine_open_callback);
             self.sync_dispatch(.idle);
+        }
+
+        pub fn sync_content_done(self: *const Self) bool {
+            if (self.superblock.staging.vsr_state.commit_unsynced_max == 0) {
+                return true;
+            } else {
+                // TODO Return whether all tables and replies are synced.
+                return true;
+            }
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
