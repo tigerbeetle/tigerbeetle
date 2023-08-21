@@ -185,7 +185,6 @@ const naughty_list = [_][]const u8{
     "testing/cluster.zig",
     "testing/cluster/network.zig",
     "testing/cluster/state_checker.zig",
-    "testing/cluster/storage_checker.zig",
     "testing/hash_log.zig",
     "testing/low_level_hash_vectors.zig",
     "testing/packet_simulator.zig",
