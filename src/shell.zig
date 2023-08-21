@@ -18,6 +18,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const Shell = @This();
+
 /// For internal use by the `Shell` itself.
 gpa: std.mem.Allocator,
 
@@ -26,14 +28,29 @@ gpa: std.mem.Allocator,
 /// they don't forget to call `Shell.destroy`.
 arena: std.heap.ArenaAllocator,
 
-const Shell = @This();
+/// Root directory of this repository.
+///
+/// Prefer this to `std.fs.cwd()` if possible.
+///
+/// This is initialized when a shell is created. It would be more flexible to lazily initialize this
+/// on the first access, but, given that we always use `Shell` in the context of our repository,
+/// eager initialization is more ergonomic.
+project_root: std.fs.Dir,
 
 pub fn create(allocator: std.mem.Allocator) !*Shell {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    errdefer arena.deinit();
+
+    var project_root = try discover_project_root();
+    errdefer project_root.close();
+
     var result = try allocator.create(Shell);
     result.* = Shell{
         .gpa = allocator,
-        .arena = std.heap.ArenaAllocator.init(allocator),
+        .arena = arena,
+        .project_root = project_root,
     };
+
     return result;
 }
 
@@ -84,7 +101,11 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
 pub fn dir_exists(shell: *Shell, path: []const u8) !bool {
     _ = shell;
 
-    const stat = std.fs.cwd().statFile(path) catch |err| switch (err) {
+    return subdir_exists(std.fs.cwd(), path);
+}
+
+fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
+    const stat = dir.statFile(path) catch |err| switch (err) {
         error.FileNotFound => return false,
         error.IsDir => return true,
         else => return err,
@@ -144,6 +165,7 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
+    echo_command(&child);
     const term = try child.spawnAndWait();
 
     switch (term) {
@@ -178,6 +200,8 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
 /// Run the command and return its stdout.
 ///
 /// Returns an error if the command exists with a non-zero status or a non-empty stderr.
+///
+/// Trims the trailing newline, if any.
 pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) ![]const u8 {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
@@ -207,15 +231,83 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     }
 
     if (res.stderr.len > 0) return error.NonEmptyStderr;
-    return res.stdout;
+
+    const trailing_newline = if (std.mem.indexOf(u8, res.stdout, "\n")) |first_newline|
+        first_newline == res.stdout.len - 1
+    else
+        false;
+    return res.stdout[0 .. res.stdout.len - if (trailing_newline) @as(usize, 1) else 0];
+}
+
+/// Spawns the process, piping its stdout and stderr.
+///
+/// The caller must `.kill()` and `.wait()` the child, to minimize the chance of process leak (
+/// sadly, child will still be leaked if the parent process is killed itself, because POSIX doesn't
+/// have nice APIs for structured concurrency).
+pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.ChildProcess {
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try expand_argv(&argv, cmd, cmd_args);
+
+    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+
+    try child.spawn();
+
+    // XXX: child.argv is undefined when we return. This is fine though, as it is only used during
+    // `spawn`.
+    return child;
+}
+
+/// Runs the zig compiler.
+pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+    const zig_exe = try shell.project_root.realpathAlloc(
+        shell.gpa,
+        comptime "zig/zig" ++ builtin.target.exeFileExt(),
+    );
+    defer shell.gpa.free(zig_exe);
+
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try argv.append(zig_exe);
+    try expand_argv(&argv, cmd, cmd_args);
+
+    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    child.stdin_behavior = .Ignore;
+    child.stdout_behavior = .Inherit;
+    child.stderr_behavior = .Inherit;
+
+    echo_command(&child);
+    const term = try child.spawnAndWait();
+
+    switch (term) {
+        .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
+        else => return error.CommandFailed,
+    }
+}
+
+/// If we inherit `stdout` to show the output to the user, it's also helpful to echo the command
+/// itself.
+fn echo_command(child: *const std.ChildProcess) void {
+    assert(child.stdout_behavior == .Inherit);
+
+    std.debug.print("$ ", .{});
+    for (child.argv, 0..) |arg, i| {
+        if (i != 0) std.debug.print(" ", .{});
+        std.debug.print("{s}", .{arg});
+    }
+    std.debug.print("\n", .{});
 }
 
 /// Returns current git commit hash as an ASCII string.
 pub fn git_commit(shell: *Shell) ![]const u8 {
     const stdout = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
-    // +1 for trailing newline.
-    if (stdout.len != 40 + 1) return error.InvalidCommitFormat;
-    return stdout[0..40];
+    if (stdout.len != 40) return error.InvalidCommitFormat;
+    return stdout;
 }
 
 /// Returns current git tag.
@@ -329,4 +421,32 @@ test "shell: expand_argv" {
             \\["zig","version","--verbose"]
         ),
     );
+}
+
+/// Finds the root of TigerBeetle repo.
+///
+/// Caller is responsible for closing the dir.
+fn discover_project_root() !std.fs.Dir {
+    // TODO(Zig): https://github.com/ziglang/zig/issues/16779
+    const ancestors = "./" ++ "../" ** 16;
+
+    var level: u32 = 0;
+    while (level < 16) : (level += 1) {
+        const ancestor = ancestors[0 .. 2 + 3 * level];
+        assert(ancestor[ancestor.len - 1] == '/');
+
+        var current = try std.fs.cwd().openDir(ancestor, .{});
+        errdefer current.close();
+
+        if (current.statFile("src/shell.zig")) |_| {
+            return current;
+        } else |err| switch (err) {
+            error.FileNotFound => {
+                current.close();
+            },
+            else => return err,
+        }
+    }
+
+    return error.DiscoverProjectRootDepthExceeded;
 }
