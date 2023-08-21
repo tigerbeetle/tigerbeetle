@@ -13,7 +13,6 @@ const tracer = @import("../tracer.zig");
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const eytzinger = @import("eytzinger.zig").eytzinger;
 const vsr = @import("../vsr.zig");
 const bloom_filter = @import("bloom_filter.zig");
 const schema = @import("schema.zig");
@@ -159,7 +158,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// (Constructed by the Forest.)
         pub const Config = struct {
             /// Unique (stable) identifier, across all trees in the forest.
-            id: u128,
+            id: u16,
             /// Human-readable tree name for logging.
             name: []const u8,
         };
@@ -410,6 +409,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             checksum: u128,
             fingerprint: Fingerprint,
         ) enum { negative, possible, block_not_in_cache } {
+            comptime assert(Table.usage == .general);
+
             if (tree.grid.read_block_from_cache(
                 address,
                 checksum,
@@ -565,6 +566,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
+                comptime assert(Table.usage == .general);
+
                 const context = @fieldParentPtr(LookupContext, "completion", completion);
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
