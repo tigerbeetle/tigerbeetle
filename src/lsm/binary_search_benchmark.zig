@@ -76,42 +76,44 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
     }
 
     const stdout = std.io.getStdOut().writer();
-    var benchmark = try Benchmark.begin();
-    var i: usize = 0;
-    var v: usize = 0;
-    while (i < layout.searches) : (i += 1) {
-        const target = value_picker[v % value_picker.len];
-        const page = &pages[page_picker[i % page_picker.len]];
-        const hit = page.values[
-            binary_search_values_upsert_index(
-                K,
-                V,
-                V.key_from_value,
-                V.key_compare,
-                page.values[0..],
-                target,
-                .{},
-            )
-        ];
+    inline for (&.{ true, false }) |prefetch| {
+        var benchmark = try Benchmark.begin();
+        var i: usize = 0;
+        var v: usize = 0;
+        while (i < layout.searches) : (i += 1) {
+            const target = value_picker[v % value_picker.len];
+            const page = &pages[page_picker[i % page_picker.len]];
+            const hit = page.values[
+                binary_search_values_upsert_index(
+                    K,
+                    V,
+                    V.key_from_value,
+                    V.key_compare,
+                    page.values[0..],
+                    target,
+                    .{ .prefetch = prefetch },
+                )
+            ];
 
-        assert(hit.key == target);
-        if (i % pages.len == 0) v += 1;
+            assert(hit.key == target);
+            if (i % pages.len == 0) v += 1;
+        }
+        const result = try benchmark.end(layout.searches);
+        try stdout.print(body_fmt, .{
+            layout.key_size,
+            layout.value_size,
+            layout.values_count,
+            if (prefetch) "P" else "_",
+            "B",
+            result.wall_time,
+            result.utime,
+            result.cpu_cycles,
+            result.instructions,
+            result.cache_references,
+            result.cache_misses,
+            result.branch_misses,
+        });
     }
-    const result = try benchmark.end(layout.searches);
-    try stdout.print(body_fmt, .{
-        layout.key_size,
-        layout.value_size,
-        layout.values_count,
-        "_",
-        "B",
-        result.wall_time,
-        result.utime,
-        result.cpu_cycles,
-        result.instructions,
-        result.cache_references,
-        result.cache_misses,
-        result.branch_misses,
-    });
 }
 
 const Layout = struct {
