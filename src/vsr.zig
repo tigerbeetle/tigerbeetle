@@ -1631,12 +1631,12 @@ fn member_count(members: *const Members) u8 {
     return constants.members_max;
 }
 
-pub fn assert_valid_member(members: *const Members, replica_id: u128) void {
+pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
     assert(replica_id != 0);
     assert(valid_members(members));
-    for (members) |member| {
-        if (member == replica_id) break;
-    } else unreachable;
+    for (members, 0..) |member, replica_index| {
+        if (member == replica_id) return @intCast(replica_index);
+    } else return null;
 }
 
 pub const Headers = struct {
