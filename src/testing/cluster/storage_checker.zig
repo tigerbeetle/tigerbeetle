@@ -79,49 +79,6 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             checker.checkpoints.deinit();
         }
 
-        pub fn replica_compact(checker: *Self, replica: *const Replica) !void {
-            // If we are recovering from a crash, don't test the checksum until we are caught up.
-            // Until then our grid's checksum is too far ahead.
-            if (replica.superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
-
-            const half_measure_beat_count = @divExact(constants.lsm_batch_multiple, 2);
-            if ((replica.commit_min + 1) % half_measure_beat_count != 0) return;
-
-            // TODO(Unified Manifest) The issue is:
-            // 1. Open manifest log blocks are acquired from the freeset but not written yet.
-            // 2. We can't defer acquiring manifest log block addresses until close-time.
-            //    This is because `append()` needs the block address in order to update the
-            //    superblock manifest table extents.
-            // 3. We can't defer the superblock manifest table extent updates because then they
-            //    would be out of order with respect to the table extent *removes* performed
-            //    during manifest compaction.
-            // Hopefully with a unified manifest another approach will open up.
-            if (1 == 1) return;
-
-            const checksum = 0; // TODO: checksum_grid()
-            log.debug("{}: replica_compact: op={} area=grid checksum={x:0>32}", .{
-                replica.replica,
-                replica.commit_min,
-                checksum,
-            });
-
-            // -1 since we never compact op=1.
-            const compactions_index = @divExact(replica.commit_min + 1, half_measure_beat_count) - 1;
-            if (compactions_index == checker.compactions.items.len) {
-                try checker.compactions.append(checksum);
-            } else {
-                const checksum_expect = checker.compactions.items[compactions_index];
-                if (checksum_expect != checksum) {
-                    log.err("{}: replica_compact: mismatch area=grid expect={x:0>32} actual={x:0>32}", .{
-                        replica.replica,
-                        checksum_expect,
-                        checksum,
-                    });
-                    return error.StorageMismatch;
-                }
-            }
-        }
-
         pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
             const replica_checkpoint_op = superblock.working.vsr_state.commit_min;
 
@@ -197,7 +154,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             assert(superblock.working.vsr_state.commit_unsynced_max == 0);
 
             var checksum: u128 = 0;
-            for (superblock.client_sessions.entries) |client_session, slot| {
+            for (superblock.client_sessions.entries, 0..) |client_session, slot| {
                 if (client_session.session == 0) {
                     // Empty slot.
                 } else {

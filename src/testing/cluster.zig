@@ -498,10 +498,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         log.debug("{}: on_compact: skipping StorageChecker; diverged", .{
                             replica.replica,
                         });
-                    } else {
-                        cluster.storage_checker.replica_compact(replica) catch |err| {
-                            fatal(.correctness, "storage checker error: {}", .{err});
-                        };
                     }
                 },
                 .checkpoint_commenced => {
