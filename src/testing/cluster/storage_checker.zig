@@ -9,9 +9,9 @@
 //!  the block, this check will need to be removed or use a different strategy.
 //!
 //! Areas verified at checkpoint:
-//! - SuperBlock Manifest, FreeSet, ClientSessions
-//! - ClientReplies
-//! - Acquired Grid blocks
+//! - SuperBlock trailers (Manifest, FreeSet, ClientSessions)
+//! - ClientReplies (when repair finishes)
+//! - Acquired Grid blocks (when syncing finishes)
 //!
 //! Areas not verified:
 //! - SuperBlock headers, which hold replica-specific state.
@@ -26,9 +26,6 @@ const log = std.log.scoped(.storage_checker);
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const superblock = @import("../../vsr/superblock.zig");
-const SuperBlockHeader = superblock.SuperBlockHeader;
-const Storage = @import("../storage.zig").Storage;
 
 /// After each compaction half measure, save the cumulative hash of all acquired grid blocks.
 ///
@@ -44,19 +41,20 @@ const Compactions = std.ArrayList(u128);
 /// op to be skipped in Checkpoints).
 const Checkpoints = std.AutoHashMap(u64, Checkpoint);
 
-const Checkpoint = struct {
-    // The superblock trailers are an XOR of all copies of all respective trailers, not the
-    // `SuperBlockHeader.{trailer}_checksum`.
-    checksum_superblock_manifest: u128,
-    checksum_superblock_free_set: u128,
-    checksum_superblock_client_sessions: u128,
-    checksum_client_replies: u128,
-    checksum_grid: u128,
+const CheckpointArea = enum {
+    superblock_manifest,
+    superblock_free_set,
+    superblock_client_sessions,
+    client_replies,
+    grid,
 };
 
-pub fn StorageCheckerType(comptime Replica: type) type {
+const Checkpoint = std.enums.EnumArray(CheckpointArea, u128);
+
+pub fn StorageCheckerType(comptime Storage: type) type {
     return struct {
         const Self = @This();
+        const SuperBlock = vsr.SuperBlockType(Storage);
 
         allocator: std.mem.Allocator,
         compactions: Compactions,
@@ -100,7 +98,7 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             // Hopefully with a unified manifest another approach will open up.
             if (1 == 1) return;
 
-            const checksum = checksum_grid(replica);
+            const checksum = 0; // TODO: checksum_grid()
             log.debug("{}: replica_compact: op={} area=grid checksum={x:0>32}", .{
                 replica.replica,
                 replica.commit_min,
@@ -124,78 +122,95 @@ pub fn StorageCheckerType(comptime Replica: type) type {
             }
         }
 
-        pub fn replica_checkpoint(checker: *Self, replica: *const Replica) !void {
-            const storage = replica.superblock.storage;
-            const working = replica.superblock.working;
+        pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
+            const replica_checkpoint_op = superblock.working.vsr_state.commit_min;
 
-            var checkpoint = Checkpoint{
-                .checksum_superblock_manifest = 0,
-                .checksum_superblock_free_set = 0,
-                .checksum_superblock_client_sessions = 0,
-                // TODO State sync: Enable this when proactive client replies sync is implemented.
-                // .checksum_client_replies = checksum_client_replies(storage),
-                .checksum_client_replies = 0,
-                // TODO: State sync: Enable this (again) when proactive table sync is implemented.
-                // .checksum_grid = checksum_grid(replica),
-                .checksum_grid = 0,
-            };
+            var checkpoint_actual = std.enums.EnumMap(CheckpointArea, u128).init(.{
+                .superblock_manifest = checksum_trailer(superblock, .manifest),
+                .superblock_free_set = checksum_trailer(superblock, .free_set),
+                .superblock_client_sessions = checksum_trailer(superblock, .client_sessions),
+            });
 
-            inline for (comptime std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
-                const trailer_size = @field(working, @tagName(trailer) ++ "_size");
-                var copy: u8 = 0;
-                while (copy < constants.superblock_copies) : (copy += 1) {
-                    const trailer_start = trailer.zone().start_for_copy(copy);
-                    @field(checkpoint, "checksum_superblock_" ++ @tagName(trailer)) |=
-                        vsr.checksum(storage.memory[trailer_start..][0..trailer_size]);
-                }
+            const syncing = superblock.working.vsr_state.commit_unsynced_max > 0;
+            if (!syncing) {
+                checkpoint_actual.put(.client_replies, checksum_client_replies(superblock));
+                checkpoint_actual.put(.grid, 0);
             }
 
-            inline for (std.meta.fields(Checkpoint)) |field| {
-                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={x:0>32}", .{
-                    replica.replica,
-                    replica.op_checkpoint(),
-                    field.name,
-                    @field(checkpoint, field.name),
+            for (std.enums.values(CheckpointArea)) |area| {
+                log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={?x:0>32}", .{
+                    superblock.replica_index.?,
+                    replica_checkpoint_op,
+                    @tagName(area),
+                    checkpoint_actual.get(area),
                 });
             }
 
-            const checkpoint_expect = checker.checkpoints.get(replica.op_checkpoint()) orelse {
-                // This replica is the first to reach op_checkpoint.
-                try checker.checkpoints.putNoClobber(replica.op_checkpoint(), checkpoint);
+            const checkpoint_expect = checker.checkpoints.get(replica_checkpoint_op) orelse {
+                if (!syncing) {
+                    // This replica is the first to reach op_checkpoint.
+                    // Save its state for other replicas to check themselves against.
+                    var checkpoint: Checkpoint = undefined;
+                    for (std.enums.values(CheckpointArea)) |area| {
+                        checkpoint.set(area, checkpoint_actual.get(area).?);
+                    }
+                    try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint);
+                }
                 return;
             };
 
-            var fail: bool = false;
-            inline for (std.meta.fields(Checkpoint)) |field| {
-                const field_actual = @field(checkpoint, field.name);
-                const field_expect = @field(checkpoint_expect, field.name);
-                if (!std.meta.eql(field_expect, field_actual)) {
-                    fail = true;
-                    log.err("{}: replica_checkpoint: mismatch area={s} expect={x:0>32} actual={x:0>32}", .{
-                        replica.replica,
-                        field.name,
-                        @field(checkpoint_expect, field.name),
-                        @field(checkpoint, field.name),
+            var mismatch: bool = false;
+            for (std.enums.values(CheckpointArea)) |area| {
+                const checksum_actual = checkpoint_actual.get(area) orelse continue;
+                const checksum_expect = checkpoint_expect.get(area);
+                if (checksum_expect != checksum_actual) {
+                    log.warn("{}: replica_checkpoint: mismatch " ++
+                        "area={s} expect={x:0>32} actual={x:0>32}", .{
+                        superblock.replica_index.?,
+                        @tagName(area),
+                        checksum_expect,
+                        checksum_actual,
                     });
+
+                    mismatch = true;
                 }
             }
-            if (fail) return error.StorageMismatch;
+            if (mismatch) return error.StorageMismatch;
         }
 
-        fn checksum_client_replies(storage: *const Storage) u128 {
-            const offset = vsr.Zone.client_replies.offset(0);
-            const size = constants.clients_max * constants.message_size_max;
-            return vsr.checksum(storage.memory[offset..][0..size]);
+        fn checksum_trailer(superblock: *const SuperBlock, trailer: vsr.SuperBlockTrailer) u128 {
+            const trailer_size = superblock.working.trailer_size(trailer);
+            const trailer_checksum = superblock.working.trailer_checksum(trailer);
+
+            var copy: u8 = 0;
+            while (copy < constants.superblock_copies) : (copy += 1) {
+                const trailer_start = trailer.zone().start_for_copy(copy);
+
+                assert(trailer_checksum ==
+                    vsr.checksum(superblock.storage.memory[trailer_start..][0..trailer_size]));
+            }
+
+            return trailer_checksum;
         }
 
-        fn checksum_grid(replica: *const Replica) u128 {
-            const storage = replica.superblock.storage;
-            var acquired = replica.superblock.free_set.blocks.iterator(.{});
+        fn checksum_client_replies(superblock: *const SuperBlock) u128 {
+            assert(superblock.working.vsr_state.commit_unsynced_max == 0);
+
             var checksum: u128 = 0;
-            while (acquired.next()) |address_index| {
-                const block = storage.grid_block(address_index + 1);
-                const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                checksum ^= vsr.checksum(block[0..block_header.size]);
+            for (superblock.client_sessions.entries) |client_session, slot| {
+                if (client_session.session == 0) {
+                    // Empty slot.
+                } else {
+                    assert(client_session.header.command == .reply);
+
+                    if (client_session.header.size == @sizeOf(vsr.Header)) {
+                        // ClientReplies won't store this entry.
+                    } else {
+                        checksum ^= vsr.checksum(superblock.storage.area_memory(
+                            .{ .client_replies = .{ .slot = slot } },
+                        )[0 .. vsr.sector_ceil(client_session.header.size)]);
+                    }
+                }
             }
             return checksum;
         }
