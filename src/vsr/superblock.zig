@@ -686,6 +686,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             options: FormatOptions,
         ) void {
             assert(!superblock.opened);
+            assert(superblock.replica_index == null);
 
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
@@ -693,6 +694,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const members = vsr.root_members(options.cluster);
             const replica_id = members[options.replica];
+
+            superblock.replica_index = vsr.member_index(&members, replica_id);
 
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
