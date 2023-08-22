@@ -101,7 +101,7 @@ pub fn GridType(comptime Storage: type) type {
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
 
-            /// Link for Grid.read_queue/Grid.read_faulty_queue linked lists.
+            /// Link for Grid.read_queue/Grid.read_global_queue linked lists.
             next: ?*Read = null,
         };
 
@@ -177,7 +177,12 @@ pub fn GridType(comptime Storage: type) type {
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
         read_pending_queue: FIFO(ReadPending) = .{ .name = "grid_read_pending" },
-        read_faulty_queue: FIFO(Read) = .{ .name = "grid_read_faulty" },
+        /// List of `Read`s which are waiting for a block repair from another replica.
+        /// (Reads in this queue have already failed locally).
+        ///
+        /// Invariants:
+        /// - For each read, read.callback=from_local_or_global_storage.
+        read_global_queue: FIFO(Read) = .{ .name = "grid_read_global" },
         // True if there's a read that is resolving callbacks.
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
@@ -292,7 +297,7 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.read_queue.reset();
             grid.read_pending_queue.reset();
-            grid.read_faulty_queue.reset();
+            grid.read_global_queue.reset();
             grid.write_queue.reset();
             grid.superblock.storage.reset_next_tick_lsm();
             grid.superblock.storage.on_next_tick(
@@ -309,7 +314,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.checkpointing == null);
             assert(grid.read_queue.empty());
             assert(grid.read_pending_queue.empty());
-            assert(grid.read_faulty_queue.empty());
+            assert(grid.read_global_queue.empty());
             assert(grid.write_queue.empty());
 
             grid.cancel_join_callback();
@@ -320,7 +325,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.checkpointing == null);
             assert(grid.read_queue.empty());
             assert(grid.read_pending_queue.empty());
-            assert(grid.read_faulty_queue.empty());
+            assert(grid.read_global_queue.empty());
             assert(grid.write_queue.empty());
 
             if (grid.read_iops.executing() == 0 and
@@ -388,7 +393,7 @@ pub fn GridType(comptime Storage: type) type {
         pub fn faulty(grid: *Grid, address: u64, checksum: ?u128) bool {
             assert(address > 0);
 
-            var it = grid.read_faulty_queue.peek();
+            var it = grid.read_global_queue.peek();
             while (it) |faulty_read| : (it = faulty_read.next) {
                 if (faulty_read.address == address) {
                     assert(grid.cache.get_index(address) == null);
@@ -443,7 +448,7 @@ pub fn GridType(comptime Storage: type) type {
 
             for ([_]*const FIFO(Read){
                 &grid.read_queue,
-                &grid.read_faulty_queue,
+                &grid.read_global_queue,
             }) |queue| {
                 var it = queue.peek();
                 while (it) |queued_read| : (it = queued_read.next) {
@@ -466,7 +471,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn assert_only_repairing(grid: *Grid) void {
             assert(grid.canceling == null);
-            assert(grid.read_faulty_queue.empty());
+            assert(grid.read_global_queue.empty());
 
             var read_queue = grid.read_queue.peek();
             while (read_queue) |read| : (read_queue = read.next) {
@@ -617,12 +622,12 @@ pub fn GridType(comptime Storage: type) type {
                 // these writes from ever overlapping with compaction or checkpoints.
                 const header = schema.header_from_block(cache_block.*);
 
-                var read_ = grid.read_faulty_queue.peek();
+                var read_ = grid.read_global_queue.peek();
                 while (read_) |read| : (read_ = read.next) {
                     if (read.checksum == header.checksum and
                         read.address == completed_write.address)
                     {
-                        grid.read_faulty_queue.remove(read);
+                        grid.read_global_queue.remove(read);
                         grid.read_block_resolve(read, .{ .valid = cache_block.* });
                         break;
                     }
@@ -749,11 +754,11 @@ pub fn GridType(comptime Storage: type) type {
             // Check if a read is already processing/recovering and merge with it.
             for ([_]*const FIFO(Read){
                 &grid.read_queue,
-                &grid.read_faulty_queue,
+                &grid.read_global_queue,
             }) |queue| {
                 // Don't remote-repair repairs – the block may not belong in our current checkpoint.
                 if (read.callback == .from_local_storage) {
-                    if (queue == &grid.read_faulty_queue) continue;
+                    if (queue == &grid.read_global_queue) continue;
                 }
 
                 var it = queue.peek();
@@ -987,7 +992,7 @@ pub fn GridType(comptime Storage: type) type {
                 // resolves) to recovery queue. Future reads on the same address will see the "root"
                 // read in the recovery queue and enqueue to it.
                 read_remote_head.resolves = read_remote_resolves;
-                grid.read_faulty_queue.push(read_remote_head);
+                grid.read_global_queue.push(read_remote_head);
 
                 if (grid.on_read_fault) |on_read_fault| {
                     on_read_fault(grid, read_remote_head);

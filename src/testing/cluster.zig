@@ -632,7 +632,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .wal_op_min = wal_op_min,
                     .wal_op_max = wal_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
-                    .grid_blocks_faulty = replica.grid.read_faulty_queue.count,
+                    .grid_blocks_faulty = replica.grid.read_global_queue.count,
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {
