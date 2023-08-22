@@ -1651,7 +1651,7 @@ fn check(test_table: []const u8) !void {
     var operation: ?TestContext.StateMachine.Operation = null;
 
     const test_actions = parse_table(TestAction, test_table);
-    for (test_actions.constSlice()) |test_action| {
+    for (test_actions.const_slice()) |test_action| {
         switch (test_action) {
             .setup => |b| {
                 assert(operation == null);

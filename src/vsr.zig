@@ -1640,7 +1640,7 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
 }
 
 pub const Headers = struct {
-    pub const Array = std.BoundedArray(Header, constants.view_change_headers_max);
+    pub const Array = stdx.BoundedArray(Header, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
@@ -1846,7 +1846,7 @@ const ViewChangeHeadersArray = struct {
     ) ViewChangeHeadersArray {
         const headers = ViewChangeHeadersArray{
             .command = command,
-            .array = Headers.Array.fromSlice(slice) catch unreachable,
+            .array = Headers.Array.from_slice(slice) catch unreachable,
         };
         headers.verify();
         return headers;
@@ -1864,7 +1864,7 @@ const ViewChangeHeadersArray = struct {
     pub fn verify(headers: *const ViewChangeHeadersArray) void {
         (ViewChangeHeadersSlice{
             .command = headers.command,
-            .slice = headers.array.constSlice(),
+            .slice = headers.array.const_slice(),
         }).verify();
     }
 
@@ -1873,8 +1873,8 @@ const ViewChangeHeadersArray = struct {
         // This function is only called by a replica that is lagging behind the primary's
         // checkpoint, so the start_view has a full suffix of headers.
         assert(headers.array.get(0).op >= constants.journal_slot_count);
-        assert(headers.array.len >= constants.view_change_headers_suffix_max);
-        assert(headers.array.len >= constants.pipeline_prepare_queue_max + 1);
+        assert(headers.array.count() >= constants.view_change_headers_suffix_max);
+        assert(headers.array.count() >= constants.pipeline_prepare_queue_max + 1);
 
         const commit_max = @max(
             headers.array.get(0).op -| constants.pipeline_prepare_queue_max,
@@ -1890,7 +1890,7 @@ const ViewChangeHeadersArray = struct {
         //   (SV headers are determined by view_change_headers_suffix_max,
         //   but DVC headers must stop at commit_max.)
         headers.command = .do_view_change;
-        headers.array.len = constants.pipeline_prepare_queue_max + 1;
+        headers.array.truncate(constants.pipeline_prepare_queue_max + 1);
 
         headers.verify();
     }
@@ -1901,21 +1901,21 @@ const ViewChangeHeadersArray = struct {
         slice: []const Header,
     ) void {
         headers.command = command;
-        headers.array.len = 0;
-        for (slice) |*header| headers.array.appendAssumeCapacity(header.*);
+        headers.array.clear();
+        for (slice) |*header| headers.array.append_assume_capacity(header.*);
         headers.verify();
     }
 
     pub fn append(headers: *ViewChangeHeadersArray, header: *const Header) void {
         // We don't do comprehensive validation here — assume that verify() will be called
         // after any series of appends.
-        headers.array.appendAssumeCapacity(header.*);
+        headers.array.append_assume_capacity(header.*);
     }
 
     pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
         assert(headers.command == .do_view_change);
-        assert(headers.array.len > 0);
-        headers.array.appendAssumeCapacity(Headers.dvc_blank(op));
+        assert(headers.array.count() > 0);
+        headers.array.append_assume_capacity(Headers.dvc_blank(op));
     }
 };
 

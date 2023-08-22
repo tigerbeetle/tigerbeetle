@@ -1,10 +1,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+
 /// Parse a "table" of data with the specified schema.
 /// See test cases for example usage.
-pub fn parse(comptime Row: type, table_string: []const u8) std.BoundedArray(Row, 128) {
-    var rows = std.BoundedArray(Row, 128){ .buffer = undefined };
+pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArray(Row, 128) {
+    var rows = stdx.BoundedArray(Row, 128){};
     var row_strings = std.mem.tokenizeAny(u8, table_string, "\n");
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
@@ -12,7 +14,7 @@ pub fn parse(comptime Row: type, table_string: []const u8) std.BoundedArray(Row,
 
         var columns = std.mem.tokenizeAny(u8, row_string, " ");
         const row = parse_data(Row, &columns);
-        rows.appendAssumeCapacity(row);
+        rows.append_assume_capacity(row);
 
         // Ignore trailing line comment.
         if (columns.next()) |last| assert(std.mem.eql(u8, last, "//"));
@@ -114,7 +116,7 @@ fn test_parse(
     comptime rows_expect: []const Row,
     comptime string: []const u8,
 ) !void {
-    const rows_actual = parse(Row, string).constSlice();
+    const rows_actual = parse(Row, string).const_slice();
     try std.testing.expectEqual(rows_expect.len, rows_actual.len);
 
     for (rows_expect, 0..) |row, i| {

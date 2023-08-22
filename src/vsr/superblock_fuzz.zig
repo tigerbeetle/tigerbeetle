@@ -286,8 +286,8 @@ const Environment = struct {
             .replica_count = replica_count,
         });
 
-        var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
-        vsr_headers.appendAssumeCapacity(vsr.Header.root_prepare(cluster));
+        var vsr_headers = vsr.Headers.Array{};
+        vsr_headers.append_assume_capacity(vsr.Header.root_prepare(cluster));
 
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
@@ -342,7 +342,7 @@ const Environment = struct {
             .replica_count = replica_count,
         };
 
-        var vsr_headers = vsr.Headers.Array{ .buffer = undefined };
+        var vsr_headers = vsr.Headers.Array{};
         var vsr_head = std.mem.zeroInit(vsr.Header, .{
             .client = 1,
             .request = 1,
@@ -353,7 +353,7 @@ const Environment = struct {
         });
         vsr_head.set_checksum_body(&.{});
         vsr_head.set_checksum();
-        vsr_headers.appendAssumeCapacity(vsr_head);
+        vsr_headers.append_assume_capacity(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
@@ -413,7 +413,7 @@ const Environment = struct {
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr.Headers.Array.fromSlice(
+            .vsr_headers = vsr.Headers.Array.from_slice(
                 env.superblock.staging.vsr_headers().slice,
             ) catch unreachable,
             .free_set = checksum_free_set(env.superblock),

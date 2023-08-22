@@ -117,7 +117,7 @@ pub fn CompactionType(
 
         /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
         /// they are applied deterministically relative to other concurrent compactions.
-        manifest_entries: std.BoundedArray(struct {
+        manifest_entries: stdx.BoundedArray(struct {
             operation: enum {
                 insert_to_level_b,
                 move_to_level_b,
@@ -130,7 +130,7 @@ pub fn CompactionType(
             count += constants.lsm_growth_factor + 1; // Insert the output tables to level B.
             // (In the move-table case, only a single TableInfo is inserted, and none are updated.)
             break :manifest_entries_max count;
-        }) = .{ .buffer = undefined },
+        }) = .{},
 
         // Passed by `start`.
         context: Context,
@@ -267,7 +267,7 @@ pub fn CompactionType(
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
-            compaction.manifest_entries.len = 0;
+            compaction.manifest_entries.clear();
             if (compaction.grid_reservation) |grid_reservation| {
                 compaction.context.grid.forfeit(grid_reservation);
                 compaction.grid_reservation = null;
@@ -283,7 +283,7 @@ pub fn CompactionType(
         ) void {
             assert(compaction.state == .idle);
             assert(compaction.grid_reservation == null);
-            assert(compaction.manifest_entries.len == 0);
+            assert(compaction.manifest_entries.empty());
 
             tracer.start(
                 &compaction.tracer_slot,
@@ -296,7 +296,7 @@ pub fn CompactionType(
 
             const move_table =
                 context.table_info_a == .disk and
-                context.range_b.tables.len == 0;
+                context.range_b.tables.empty();
 
             // Reserve enough blocks to write our output tables in the worst case, where:
             // - no tombstones are dropped,
@@ -315,7 +315,7 @@ pub fn CompactionType(
             else
                 // +1 to count the input table from level A.
                 context.grid.reserve(
-                    (context.range_b.tables.len + 1) * Table.block_count_max,
+                    (context.range_b.tables.count() + 1) * Table.block_count_max,
                 ).?;
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
@@ -362,7 +362,7 @@ pub fn CompactionType(
                 const table_a = context.table_info_a.disk.table_info;
                 assert(table_a.snapshot_max >= snapshot_max);
 
-                compaction.manifest_entries.appendAssumeCapacity(.{
+                compaction.manifest_entries.append_assume_capacity(.{
                     .operation = .move_to_level_b,
                     .table = table_a.*,
                 });
@@ -381,7 +381,7 @@ pub fn CompactionType(
                     .grid = context.grid,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .tables = compaction.context.range_b.tables.constSlice(),
+                    .tables = compaction.context.range_b.tables.const_slice(),
                     .index_block = compaction.index_block_b,
                     .direction = .ascending,
                 });
@@ -749,7 +749,7 @@ pub fn CompactionType(
                     .tree_id = compaction.tree_config.id,
                 });
                 // Make this table visible at the end of this half-bar.
-                compaction.manifest_entries.appendAssumeCapacity(.{
+                compaction.manifest_entries.append_assume_capacity(.{
                     .operation = .insert_to_level_b,
                     .table = table,
                 });
@@ -879,7 +879,7 @@ pub fn CompactionType(
                         manifest.update_table(level_b - 1, snapshot_max, table_info);
                     },
                 }
-                for (compaction.context.range_b.tables.slice()) |table| {
+                for (compaction.context.range_b.tables.const_slice()) |table| {
                     manifest.update_table(level_b, snapshot_max, table);
                 }
             }
