@@ -2,14 +2,15 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
+const stdx = @import("../stdx.zig");
+
 const constants = @import("../constants.zig");
 
 pub const Config = struct {
     mode: enum { lower_bound, upper_bound } = .lower_bound,
+    prefetch: bool = true,
 };
 
-// TODO Add prefeching when @prefetch is available: https://github.com/ziglang/zig/issues/3600.
-//
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
 // which should eliminate the current poor codegen of key_from_value/compare_keys.
 
@@ -48,6 +49,46 @@ pub fn binary_search_values_upsert_index(
         }
 
         const half = length / 2;
+        if (config.prefetch) {
+            // Prefetching:
+            // ARRAY LAYOUTS FOR COMPARISON-BASED SEARCHING, page 18.
+            // https://arxiv.org/abs/1509.05053.
+            //
+            // Prefetching the two possible positions we'd need for the next iteration:
+            //
+            // [....................mid....................]
+            //           ^                       ^
+            //       one quarter          three quarters.
+
+            // We need to use pointer arithmetic and disable runtime safety to avoid bounds checks,
+            // otherwise prefetching would harm the performance instead of improving it.
+            // Since these pointers are never dereferenced, it's safe to dismiss this extra cost here.
+            @setRuntimeSafety(constants.verify);
+            const one_quarter = values.ptr + offset + half / 2;
+            const three_quarters = one_quarter + half;
+
+            // @sizeOf(Value) can be greater than a single cache line.
+            // In that case, we need to prefetch multiple cache lines for a single value:
+            comptime stdx.maybe(constants.cache_line_size >= @sizeOf(Value));
+            const CacheLineBytes = [*]const [constants.cache_line_size]u8;
+            const cache_lines_per_value = comptime stdx.div_ceil(
+                @sizeOf(Value),
+                constants.cache_line_size,
+            );
+            inline for (0..cache_lines_per_value) |i| {
+                // Locality = 0 means no temporal locality. That is, the data can be immediately
+                // dropped from the cache after it is accessed.
+                const options = .{
+                    .rw = .read,
+                    .locality = 0,
+                    .cache = .data,
+                };
+
+                @prefetch(@as(CacheLineBytes, @ptrCast(@alignCast(one_quarter))) + i, options);
+                @prefetch(@as(CacheLineBytes, @ptrCast(@alignCast(three_quarters))) + i, options);
+            }
+        }
+
         const mid = offset + half;
 
         // This trick seems to be what's needed to get llvm to emit branchless code for this,
@@ -56,7 +97,7 @@ pub fn binary_search_values_upsert_index(
         offset = next_offsets[
             // For exact matches, takes the first half if `mode == .lower_bound`,
             // or the second half if `mode == .upper_bound`.
-            @intFromBool(switch (config.mode) {
+            @intFromBool(switch (comptime config.mode) {
                 .lower_bound => compare_keys(key_from_value(&values[mid]), key) == .lt,
                 .upper_bound => compare_keys(key_from_value(&values[mid]), key) != .gt,
             })
