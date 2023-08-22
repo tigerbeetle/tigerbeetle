@@ -123,8 +123,8 @@ pub const TableIndex = struct {
     };
 
     pub const Parent = extern struct {
-        // TODO u16 + padding.
-        tree_id: u128,
+        tree_id: u16,
+        padding: [14]u8 = [_]u8{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -336,8 +336,8 @@ pub const TableFilter = struct {
     };
 
     pub const Parent = extern struct {
-        // TODO u16 + padding.
-        tree_id: u128,
+        tree_id: u16,
+        padding: [14]u8 = [_]u8{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
