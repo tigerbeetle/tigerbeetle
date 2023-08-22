@@ -396,7 +396,6 @@ pub fn GridType(comptime Storage: type) type {
             var it = grid.read_global_queue.peek();
             while (it) |faulty_read| : (it = faulty_read.next) {
                 if (faulty_read.address == address) {
-                    assert(grid.cache.get_index(address) == null);
                     assert(!grid.superblock.free_set.is_free(address));
 
                     if (checksum == null or checksum.? == faulty_read.checksum) {
