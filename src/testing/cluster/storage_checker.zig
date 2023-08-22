@@ -88,7 +88,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                 .superblock_client_sessions = checksum_trailer(superblock, .client_sessions),
             });
 
-            const syncing = superblock.working.vsr_state.commit_unsynced_max > 0;
+            const syncing = superblock.working.vsr_state.sync_op_max > 0;
             if (!syncing) {
                 checkpoint_actual.put(.client_replies, checksum_client_replies(superblock));
                 checkpoint_actual.put(.grid, 0);
@@ -151,7 +151,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
         }
 
         fn checksum_client_replies(superblock: *const SuperBlock) u128 {
-            assert(superblock.working.vsr_state.commit_unsynced_max == 0);
+            assert(superblock.working.vsr_state.sync_op_max == 0);
 
             var checksum: u128 = 0;
             for (superblock.client_sessions.entries, 0..) |client_session, slot| {

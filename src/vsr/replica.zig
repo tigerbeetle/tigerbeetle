@@ -667,15 +667,15 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
 
-            log.debug("{}: state_machine_open_callback: unsynced={}..{}", .{
+            log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
                 self.replica,
-                self.superblock.working.vsr_state.commit_unsynced_min,
-                self.superblock.working.vsr_state.commit_unsynced_max,
+                self.superblock.working.vsr_state.sync_op_min,
+                self.superblock.working.vsr_state.sync_op_max,
             });
 
             self.state_machine_opened = true;
 
-            if (self.superblock.working.vsr_state.commit_unsynced_max > 0) {
+            if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
             }
 
@@ -3491,13 +3491,13 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
-            const vsr_state_commit_unsynced: struct { min: u64, max: u64 } = unsynced: {
+            const vsr_state_sync_op: struct { min: u64, max: u64 } = sync: {
                 if (self.sync_content_done()) {
-                    break :unsynced .{ .min = 0, .max = 0 };
+                    break :sync .{ .min = 0, .max = 0 };
                 } else {
-                    break :unsynced .{
-                        .min = self.superblock.staging.vsr_state.commit_unsynced_min,
-                        .max = self.superblock.staging.vsr_state.commit_unsynced_max,
+                    break :sync .{
+                        .min = self.superblock.staging.vsr_state.sync_op_min,
+                        .max = self.superblock.staging.vsr_state.sync_op_max,
                     };
                 }
             };
@@ -3510,8 +3510,8 @@ pub fn ReplicaType(
                         self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                     .commit_min = vsr_state_commit_min,
                     .commit_max = self.commit_max,
-                    .commit_unsynced_min = vsr_state_commit_unsynced.min,
-                    .commit_unsynced_max = vsr_state_commit_unsynced.max,
+                    .sync_op_min = vsr_state_sync_op.min,
+                    .sync_op_max = vsr_state_sync_op.max,
                 },
             );
         }
@@ -7726,27 +7726,27 @@ pub fn ReplicaType(
 
             const checkpoint_new = stage.target.checkpoint_op;
             const checkpoint_old = self.op_checkpoint();
-            const commit_unsynced_max = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_new).?;
-            const commit_unsynced_min = commit_unsynced_min: {
-                const syncing_already = self.superblock.staging.vsr_state.commit_unsynced_max > 0;
-                const unsynced_min_old = self.superblock.staging.vsr_state.commit_unsynced_min;
+            const sync_op_max = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_new).?;
+            const sync_op_min = sync_op_min: {
+                const syncing_already = self.superblock.staging.vsr_state.sync_op_max > 0;
+                const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
 
                 // We must re-sync the tables created between checkpoint_old_previous and
                 // checkpoint_old since checkpoint_old might be divergent, in which case the tables
                 // we created during compaction are invalid.
                 // TODO: When we know our checkpoint is canonical, we don't need to resync it.
                 const checkpoint_old_previous = vsr.Checkpoint.checkpoint_before(checkpoint_old);
-                const unsynced_min_new = if (checkpoint_old == 0 or checkpoint_old_previous.? == 0)
+                const sync_min_new = if (checkpoint_old == 0 or checkpoint_old_previous.? == 0)
                     0
                 else
                     // +1 because checkpoint_old_previous is definitely canonical, and the range is
                     // inclusive.
                     vsr.Checkpoint.trigger_for_checkpoint(checkpoint_old_previous.?).? + 1;
 
-                break :commit_unsynced_min if (syncing_already)
-                    @min(unsynced_min_old, unsynced_min_new)
+                break :sync_op_min if (syncing_already)
+                    @min(sync_min_old, sync_min_new)
                 else
-                    unsynced_min_new;
+                    sync_min_new;
             };
 
             self.sync_message_timeout.stop();
@@ -7758,8 +7758,8 @@ pub fn ReplicaType(
                     .commit_min = stage.target.checkpoint_op,
                     .commit_min_checksum = stage.checkpoint_op_checksum,
                     .previous_checkpoint_id = stage.previous_checkpoint_id,
-                    .commit_unsynced_max = commit_unsynced_max,
-                    .commit_unsynced_min = commit_unsynced_min,
+                    .sync_op_max = sync_op_max,
+                    .sync_op_min = sync_op_min,
                 },
             );
         }
@@ -7800,7 +7800,7 @@ pub fn ReplicaType(
         fn sync_content(self: *Self) void {
             assert(self.syncing == .idle);
             assert(self.state_machine_opened);
-            assert(self.superblock.working.vsr_state.commit_unsynced_max > 0);
+            assert(self.superblock.working.vsr_state.sync_op_max > 0);
 
             var entry_slot: usize = 0;
             while (entry_slot < constants.clients_max) : (entry_slot += 1) {
@@ -7808,15 +7808,15 @@ pub fn ReplicaType(
                 const entry_free = self.superblock.client_sessions.entries_free.isSet(entry_slot);
                 const entry_faulty = !entry_free and
                     entry.header.size > @sizeOf(Header) and
-                    entry.header.op >= self.superblock.working.vsr_state.commit_unsynced_min and
-                    entry.header.op <= self.superblock.working.vsr_state.commit_unsynced_max;
+                    entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                    entry.header.op <= self.superblock.working.vsr_state.sync_op_max;
 
                 self.client_replies.faulty.setValue(entry_slot, entry_faulty);
             }
         }
 
         pub fn sync_content_done(self: *const Self) bool {
-            if (self.superblock.staging.vsr_state.commit_unsynced_max == 0) {
+            if (self.superblock.staging.vsr_state.sync_op_max == 0) {
                 return true;
             } else {
                 // TODO Return whether all tables are synced.
