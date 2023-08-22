@@ -213,6 +213,7 @@ pub fn build(b: *std.Build) !void {
             .optimize = mode,
             .filter = test_filter,
         });
+        unit_tests.addModule("vsr", vsr_module);
         unit_tests.addModule("vsr_options", vsr_options_module);
         unit_tests.step.dependOn(&tb_client_header_generate.step);
         link_tracer_backend(unit_tests, git_clone_tracy, tracer_backend, target);
@@ -851,38 +852,37 @@ fn node_client(
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
         var b_isolated = builder_with_isolated_cache(b, cross_target);
 
+        const lib = b_isolated.addSharedLibrary(.{
+            .name = "tb_nodeclient",
+            .root_source_file = .{ .path = "src/clients/node/src/node.zig" },
+            .target = cross_target,
+            .optimize = mode,
+            .main_pkg_path = .{ .path = "src" },
+        });
+        lib.linkLibC();
+
+        // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
+        // if you're running zig build node_client manually.
+        lib.addSystemIncludePath(.{ .path = "src/clients/node/node_modules/node-api-headers/include" });
+        lib.linker_allow_shlib_undefined = true;
+
         if (cross_target.os_tag.? == .windows) {
-            // No Windows support just yet. We need to be on a version with https://github.com/ziglang/zig/commit/b97a68c529b5db15705f4d542d8ead616d27c880
-        } else {
-            const lib = b_isolated.addSharedLibrary(.{
-                .name = "tb_nodeclient",
-                .root_source_file = .{ .path = "src/clients/node/src/node.zig" },
-                .target = cross_target,
-                .optimize = mode,
-                .main_pkg_path = .{ .path = "src" },
-            });
-            lib.linkLibC();
+            lib.linkSystemLibrary("ws2_32");
+            lib.linkSystemLibrary("advapi32");
 
-            // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
-            // if you're running zig build node_client manually.
-            lib.addSystemIncludePath(.{ .path = "src/clients/node/node_modules/node-api-headers/include" });
-            lib.linker_allow_shlib_undefined = true;
-
-            if (cross_target.os_tag.? == .windows) {
-                lib.linkSystemLibrary("ws2_32");
-                lib.linkSystemLibrary("advapi32");
-            }
-
-            lib.addOptions("vsr_options", options);
-            link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
-
-            lib.step.dependOn(&bindings_step.step);
-
-            // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
-            const lib_install = b.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{ .custom = "../src/clients/node/dist/bin/" ++ platform[0] };
-            build_step.dependOn(&lib_install.step);
+            lib.addLibraryPath(.{ .path = "src/clients/node" });
+            lib.linkSystemLibrary("node");
         }
+
+        lib.addOptions("vsr_options", options);
+        link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
+
+        lib.step.dependOn(&bindings_step.step);
+
+        // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
+        const lib_install = b.addInstallArtifact(lib, .{});
+        lib_install.dest_dir = .{ .custom = "../src/clients/node/dist/bin/" ++ platform[0] };
+        build_step.dependOn(&lib_install.step);
     }
 }
 
