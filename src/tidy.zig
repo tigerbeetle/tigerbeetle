@@ -6,7 +6,7 @@ const fs = std.fs;
 const mem = std.mem;
 const math = std.math;
 
-test "tidy: lines are under 100 characters long" {
+test "tidy" {
     const allocator = std.testing.allocator;
 
     const buffer_size = 1024 * 1024;
@@ -27,6 +27,14 @@ test "tidy: lines are under 100 characters long" {
             const bytes_read = try source_file.readAll(buffer);
             if (bytes_read == buffer.len) return error.FileTooLong;
             const source_file_text = buffer[0..bytes_read];
+
+            if (banned(source_file_text)) |ban| {
+                std.debug.print(
+                    "{s}: banned: {s}\n",
+                    .{ entry.path, ban },
+                );
+                return error.Banned;
+            }
 
             const long_line = try find_long_line(source_file_text);
             if (long_line) |line_number| {
@@ -49,6 +57,14 @@ test "tidy: lines are under 100 characters long" {
             }
         }
     }
+}
+
+fn banned(source: []const u8) ?[]const u8 {
+    // Note: must avoid banning ourselves!
+    if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
+        return "use stdx." ++ "BoundedArray instead of std version";
+    }
+    return null;
 }
 
 fn is_naughty(path: []const u8) bool {
