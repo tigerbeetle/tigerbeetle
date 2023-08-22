@@ -104,6 +104,8 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
             .commit_min_checksum = 0,
             .commit_min = 0,
             .commit_max = 0,
+            .sync_op_min = 0,
+            .sync_op_max = 0,
             .log_view = 0,
             .view = 0,
             .replica_id = members[replica],
@@ -330,11 +332,13 @@ const Environment = struct {
         assert(!env.pending.contains(.view_change));
         assert(env.pending.count() < 2);
 
-        const vsr_state = .{
+        const vsr_state = VSRState{
             .previous_checkpoint_id = env.superblock.staging.vsr_state.previous_checkpoint_id,
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
             .commit_min = env.superblock.staging.vsr_state.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
+            .sync_op_min = 0,
+            .sync_op_max = 0,
             .log_view = env.superblock.staging.vsr_state.log_view + 4,
             .view = env.superblock.staging.vsr_state.view + 5,
             .replica_id = env.members[replica],
@@ -384,11 +388,13 @@ const Environment = struct {
         assert(!env.pending.contains(.checkpoint));
         assert(env.pending.count() < 2);
 
-        const vsr_state = .{
+        const vsr_state = VSRState{
             .previous_checkpoint_id = env.superblock.staging.checkpoint_id(),
             .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
             .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
+            .sync_op_min = 0,
+            .sync_op_max = 0,
             .log_view = env.superblock.staging.vsr_state.log_view,
             .view = env.superblock.staging.vsr_state.view,
             .replica_id = env.members[replica],
@@ -424,8 +430,8 @@ const Environment = struct {
             .commit_min_checksum = vsr_state.commit_min_checksum,
             .commit_min = vsr_state.commit_min,
             .commit_max = vsr_state.commit_max,
-            .commit_unsynced_min = 0,
-            .commit_unsynced_max = 0,
+            .sync_op_min = 0,
+            .sync_op_max = 0,
         });
     }
 

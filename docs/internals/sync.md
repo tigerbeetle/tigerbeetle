@@ -55,17 +55,17 @@ Checkpoints:
     - Write the target checkpoint's trailers.
 7. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
 8. Update the superblock with:
-    - Set `vsr_state.commit_unsynced_min` to the minimum op which has not been repaired.
-    - Set `vsr_state.commit_unsynced_max` to the maximum op which has not been repaired.
+    - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
+    - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
 9. Sync is done.
-10. Repair replies and tables that were created within the `commit_unsynced_{min,max}` range.
+10. Repair replies and tables that were created within the `sync_op_{min,max}` range.
 11. Update the superblock with:
-    - Set `vsr_state.commit_unsynced_min = 0`
-    - Set `vsr_state.commit_unsynced_max = 0`
+    - Set `vsr_state.sync_op_min = 0`
+    - Set `vsr_state.sync_op_max = 0`
 
 If a newer sync target is discovered during steps *4*-*7* or *10*, go to step *3*.
 
-If the replica starts up with `vsr_state.commit_unsynced_max ≠ 0`, go to step *10*.
+If the replica starts up with `vsr_state.sync_op_max ≠ 0`, go to step *10*.
 
 ### 0: Scenarios
 
