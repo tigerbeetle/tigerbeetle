@@ -38,7 +38,7 @@ Storage:
 |                      `request` |  client |      primary | [Normal](#protocol-normal)                                                       |
 |                      `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
 |                   `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
-|                        `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Table](#protocol-repair-client-table) |
+|                        `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Table](#protocol-repair-client-table), [Sync Content](#protocol-sync-content) |
 |                       `commit` | primary |       backup | [Normal](#protocol-normal)                                                       |
 |            `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                 |
 |               `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                             |
@@ -46,17 +46,17 @@ Storage:
 |           `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                |
 |              `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |              `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                               |
-|                `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table)                             |
+|                `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table), [Sync Content](#protocol-sync-content) |
 |                      `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |                     `eviction` | primary |       client | [Client](#protocol-client)                                                       |
-|               `request_blocks` | replica |      replica | [State Sync](#protocol-state-sync), [Repair Grid](#protocol-repair-grid)         |
-|                        `block` | replica |      replica | [State Sync](#protocol-state-sync), [Repair Grid](#protocol-repair-grid)         |
-|        `request_sync_manifest` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
-|        `request_sync_free_set` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
-| `request_sync_client_sessions` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
-|                `sync_manifest` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
-|                `sync_free_set` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
-|         `sync_client_sessions` | replica |      replica | [State Sync](#protocol-state-sync)                                               |
+|               `request_blocks` | replica |      replica | [Sync Content](#protocol-sync-content), [Repair Grid](#protocol-repair-grid)     |
+|                        `block` | replica |      replica | [Sync Content](#protocol-sync-content), [Repair Grid](#protocol-repair-grid)     |
+|        `request_sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|        `request_sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+| `request_sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|                `sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|                `sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|         `sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 
 ### Recovery
 
@@ -253,13 +253,24 @@ That is, a replica can help other replicas repair and repair itself simultaneous
 
 TODO Describe state sync fallback.
 
-## Protocol: State Sync
+## Protocol: Sync Superblock
 
 State sync synchronizes the state of a lagging/divergent replica with the healthy cluster.
 
 State sync is used when when a lagging replica's log no longer intersects with the cluster's current log —
 [WAL repair](#protocol-repair-wal) cannot catch the replica up.
 
+This protocol updates the replica's superblock with a more recent one.
+
+See [State Sync](./sync.md) for details.
+
+## Protocol: Sync Content
+
+Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).
+
+Syncs:
+- LSM table grid blocks
+- client replies
 
 See [State Sync](./sync.md) for details.
 
