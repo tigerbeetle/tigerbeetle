@@ -38,7 +38,7 @@ pub const ClientSessions = struct {
     };
 
     /// Values are indexes into `entries`.
-    const EntriesByClient = stdx.AutoHashMapUnmanaged(u128, usize);
+    const EntriesByClient = std.AutoHashMapUnmanaged(u128, usize);
 
     const EntriesFree = std.StaticBitSet(constants.clients_max);
 
