@@ -11,4 +11,5 @@ benchmark.log
 tigerbeetle_test.log
 /benchmark
 tigerbeetle-node-*.tgz
+node.def
 node.lib
