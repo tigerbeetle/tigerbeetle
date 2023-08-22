@@ -11,6 +11,7 @@ const tracer = @import("../tracer.zig");
 const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
+const parse_dirty_semver = @import("../stdx.zig").parse_dirty_semver;
 
 pub const IO = struct {
     ring: IO_Uring,
@@ -31,8 +32,7 @@ pub const IO = struct {
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
         const uts = std.os.uname();
-        const release = std.mem.sliceTo(&uts.release, 0);
-        const version = try std.SemanticVersion.parse(release);
+        const version = try parse_dirty_semver(&uts.release);
         if (version.order(std.SemanticVersion{ .major = 5, .minor = 5, .patch = 0 }) == .lt) {
             @panic("Linux kernel 5.5 or greater is required for io_uring OP_ACCEPT");
         }
