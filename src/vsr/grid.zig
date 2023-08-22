@@ -177,6 +177,11 @@ pub fn GridType(comptime Storage: type) type {
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
         read_pending_queue: FIFO(ReadPending) = .{ .name = "grid_read_pending" },
+        /// List of `Read`s which are waiting for a block repair from another replica.
+        /// (Reads in this queue have already failed locally).
+        ///
+        /// Invariants:
+        /// - For each read, read.callback=from_local_or_global_storage.
         read_global_queue: FIFO(Read) = .{ .name = "grid_read_global" },
         // True if there's a read that is resolving callbacks.
         // If so, the read cache must not be invalidated.
