@@ -266,7 +266,7 @@ func main() {
 		log.Fatalf("Error creating transfer: %s", err.Result)
 	}
 
-	// Validate account balances after voiding 3rd pending transfer.
+	// Validate account balances after posting 3rd pending transfer.
 	assertAccountBalances(client, []tb_types.Account{
 		{
 			ID: uint128("1"),
