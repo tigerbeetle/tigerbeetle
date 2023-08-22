@@ -184,7 +184,7 @@ pub const SuperBlockHeader = extern struct {
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
-            vsr.assert_valid_member(&state.members, state.replica_id);
+            assert(vsr.member_index(&state.members, state.replica_id) != null);
         }
 
         pub fn monotonic(old: VSRState, new: VSRState) bool {
@@ -572,6 +572,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
         queue_head: ?*Context = null,
         queue_tail: ?*Context = null,
 
+        /// Set to non-null after open().
+        /// Used for logging.
+        replica_index: ?u8 = null,
+
         pub const Options = struct {
             storage: *Storage,
             storage_size_limit: u64,
@@ -682,6 +686,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             options: FormatOptions,
         ) void {
             assert(!superblock.opened);
+            assert(superblock.replica_index == null);
 
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
@@ -689,6 +694,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const members = vsr.root_members(options.cluster);
             const replica_id = members[options.replica];
+
+            superblock.replica_index = vsr.member_index(&members, replica_id);
 
             // This working copy provides the parent checksum, and will not be written to disk.
             // We therefore use zero values to make this parent checksum as stable as possible.
@@ -1041,8 +1048,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             @memset(buffer[trailer_size_..], 0); // Zero sector padding.
 
             const offset = trailer.zone().start_for_copy(context.copy.?);
-            log.debug("{s}: write_trailer_next: " ++
+            log.debug("{?}: {s}: write_trailer_next: " ++
                 "trailer={s} copy={} checksum={x:0>32} size={} offset={}", .{
+                superblock.replica_index,
                 @tagName(context.caller),
                 @tagName(trailer),
                 context.copy.?,
@@ -1102,8 +1110,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = mem.asBytes(superblock.staging);
             const offset = SuperBlockZone.header.start_for_copy(context.copy.?);
 
-            log.debug("{}: {s}: write_header: checksum={x:0>32} sequence={} copy={} size={} offset={}", .{
-                superblock.staging.vsr_state.replica_id,
+            log.debug("{?}: {s}: write_header: checksum={x:0>32} sequence={} copy={} size={} offset={}", .{
+                superblock.replica_index,
                 @tagName(context.caller),
                 superblock.staging.checksum,
                 superblock.staging.sequence,
@@ -1181,7 +1189,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = mem.asBytes(&superblock.reading[context.copy.?]);
             const offset = SuperBlockZone.header.start_for_copy(context.copy.?);
 
-            log.debug("{s}: read_header: copy={} size={} offset={}", .{
+            log.debug("{?}: {s}: read_header: copy={} size={} offset={}", .{
+                superblock.replica_index,
                 @tagName(context.caller),
                 context.copy.?,
                 buffer.len,
@@ -1244,10 +1253,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_headers_count == 1);
 
                     assert(working.vsr_state.replica_count <= constants.replicas_max);
-                    vsr.assert_valid_member(
+                    assert(vsr.member_index(
                         &working.vsr_state.members,
                         working.vsr_state.replica_id,
-                    );
+                    ) != null);
                 } else if (context.caller == .checkpoint) {
                     superblock.free_set.checkpoint();
                 }
@@ -1256,7 +1265,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.* = working.*;
 
                 log.debug(
-                    "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
+                    "{[replica]?}: " ++
+                        "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
                         "sequence={[sequence]} cluster={[cluster]} replica_id={[replica_id]} " ++
                         "size={[size]} checkpoint_id={[checkpoint_id]x:0>32} " ++
                         "manifest_checksum={[manifest_checksum]x:0>32} " ++
@@ -1265,6 +1275,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "commit_min_checksum={[commit_min_checksum]} commit_min={[commit_min]} " ++
                         "commit_max={[commit_max]} log_view={[log_view]} view={[view]}",
                     .{
+                        .replica = superblock.replica_index,
                         .caller = @tagName(context.caller),
                         .checksum = superblock.working.checksum,
                         .sequence = superblock.working.sequence,
@@ -1283,7 +1294,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     },
                 );
                 for (superblock.working.vsr_headers().slice) |*header| {
-                    log.debug("{s}: vsr_header: op={} checksum={}", .{
+                    log.debug("{?}: {s}: vsr_header: op={} checksum={}", .{
+                        superblock.replica_index,
                         @tagName(context.caller),
                         header.op,
                         header.checksum,
@@ -1331,7 +1343,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const buffer = trailer_buffer_all[0..trailer_size_ceil];
             const offset = trailer.zone().start_for_copy(context.copy.?);
 
-            log.debug("{s}: read_trailer: trailer={s} copy={} size={} offset={}", .{
+            log.debug("{?}: {s}: read_trailer: trailer={s} copy={} size={} offset={}", .{
+                superblock.replica_index,
                 @tagName(context.caller),
                 @tagName(trailer),
                 context.copy.?,
@@ -1373,7 +1386,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
 
             if (trailer_checksum_computed == trailer_checksum_expected) {
-                log.debug("open: read_trailer: {s}: ok (copy={})", .{
+                log.debug("{?}: open: read_trailer: {s}: ok (copy={})", .{
+                    superblock.replica_index,
                     @tagName(trailer),
                     copy,
                 });
@@ -1403,16 +1417,19 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 superblock.verify_manifest_blocks_are_acquired_in_free_set();
 
-                log.debug("open: read_trailer: manifest: blocks: {}/{}", .{
+                log.debug("{?}: open: read_trailer: manifest: blocks: {}/{}", .{
+                    superblock.replica_index,
                     superblock.manifest.count,
                     superblock.manifest.count_max,
                 });
-                log.debug("open: read_trailer: free_set: acquired blocks: {}/{}/{}", .{
+                log.debug("{?}: open: read_trailer: free_set: acquired blocks: {}/{}/{}", .{
+                    superblock.replica_index,
                     superblock.free_set.count_acquired(),
                     superblock.block_count_limit,
                     grid_blocks_max,
                 });
-                log.debug("open: read_trailer: client_sessions: client requests: {}/{}", .{
+                log.debug("{?}: open: read_trailer: client_sessions: client requests: {}/{}", .{
+                    superblock.replica_index,
                     superblock.client_sessions.count(),
                     constants.clients_max,
                 });
@@ -1423,7 +1440,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 context.copy = null;
                 superblock.repair(context);
             } else {
-                log.debug("open: read_trailer: {}: corrupt (copy={})", .{ trailer, copy });
+                log.debug("{?}: open: read_trailer: {}: corrupt (copy={})", .{
+                    superblock.replica_index,
+                    trailer,
+                    copy,
+                });
                 if (copy + 1 == constants.superblock_copies) {
                     std.debug.panic("superblock {s} lost", .{@tagName(trailer)});
                 } else {
@@ -1447,7 +1468,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             if (context.repairs.?.next()) |repair_copy| {
                 context.copy = repair_copy;
-                log.warn("repair: copy={}", .{repair_copy});
+                log.warn("{?}: repair: copy={}", .{ superblock.replica_index, repair_copy });
 
                 superblock.staging.* = superblock.working.*;
                 superblock.write_trailers(context);
@@ -1463,7 +1484,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 assert(Caller.transitions.get(head.caller).?.contains(context.caller));
                 assert(superblock.queue_tail == null);
 
-                log.debug("{s}: enqueued after {s}", .{
+                log.debug("{?}: {s}: enqueued after {s}", .{
+                    superblock.replica_index,
                     @tagName(context.caller),
                     @tagName(head.caller),
                 });
@@ -1473,7 +1495,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 assert(superblock.queue_tail == null);
 
                 superblock.queue_head = context;
-                log.debug("{s}: started", .{@tagName(context.caller)});
+                log.debug("{?}: {s}: started", .{
+                    superblock.replica_index,
+                    @tagName(context.caller),
+                });
 
                 if (Storage == @import("../testing/storage.zig").Storage) {
                     // We should have finished all pending superblock io before starting any more.
@@ -1496,7 +1521,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         fn release(superblock: *SuperBlock, context: *Context) void {
             assert(superblock.queue_head == context);
 
-            log.debug("{s}: complete", .{@tagName(context.caller)});
+            log.debug("{?}: {s}: complete", .{ superblock.replica_index, @tagName(context.caller) });
 
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io by now.
@@ -1509,6 +1534,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .open => {
                     assert(!superblock.opened);
                     superblock.opened = true;
+                    superblock.replica_index = vsr.member_index(
+                        &superblock.working.vsr_state.members,
+                        superblock.working.vsr_state.replica_id,
+                    ).?;
 
                     if (superblock.working.manifest_size > 0) {
                         assert(superblock.manifest.count > 0);
@@ -1581,13 +1610,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         fn log_context(superblock: *const SuperBlock, context: *const Context) void {
-            log.debug("{[caller]s}: " ++
+            log.debug("{[replica]?}: {[caller]s}: " ++
                 "commit_min={[commit_min_old]}..{[commit_min_new]} " ++
                 "commit_max={[commit_max_old]}..{[commit_max_new]} " ++
                 "commit_min_checksum={[commit_min_checksum_old]}..{[commit_min_checksum_new]} " ++
                 "log_view={[log_view_old]}..{[log_view_new]} " ++
                 "view={[view_old]}..{[view_new]} " ++
                 "head={[head_old]}..{[head_new]?}", .{
+                .replica = superblock.replica_index,
                 .caller = @tagName(context.caller),
 
                 .commit_min_old = superblock.staging.vsr_state.commit_min,
