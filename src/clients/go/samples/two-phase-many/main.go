@@ -92,7 +92,7 @@ func main() {
 		log.Fatalf("Error creating account %d: %s", err.Index, err.Result)
 	}
 
-	// Start five pending transfer.
+	// Start five pending transfers.
 	transfers := []tb_types.Transfer{
 		{
 			ID:              uint128("1"),
