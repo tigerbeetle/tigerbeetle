@@ -501,7 +501,7 @@ pub const TableData = struct {
         const header = header_from_block(data_block);
         // TODO we should be able to cross-check this with the header size
         // for more safety.
-        const used_values = @as(u32, @intCast(header.request));
+        const used_values: u32 = header.request;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
 
