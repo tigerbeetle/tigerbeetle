@@ -165,7 +165,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                     } else {
                         checksum ^= vsr.checksum(superblock.storage.area_memory(
                             .{ .client_replies = .{ .slot = slot } },
-                        )[0 .. vsr.sector_ceil(client_session.header.size)]);
+                        )[0..vsr.sector_ceil(client_session.header.size)]);
                     }
                 }
             }
