@@ -683,7 +683,7 @@ pub fn TableType(
             }
 
             if (constants.verify) {
-                for (data_block_values_used(data_block)) |*value| {
+                for (values) |*value| {
                     assert(compare_keys(key, key_from_value(value)) != .eq);
                 }
             }
