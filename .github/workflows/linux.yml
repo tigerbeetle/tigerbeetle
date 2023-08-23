@@ -304,3 +304,6 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
           file: tools/docker/Dockerfile
+          # So that we can copy in .git to the build step so we can
+          # get the correct version.
+          context: .
