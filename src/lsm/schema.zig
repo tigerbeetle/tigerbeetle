@@ -499,13 +499,13 @@ pub const TableData = struct {
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
         const header = header_from_block(data_block);
-        // TODO we should be able to cross-check this with the header size
-        // for more safety.
         const used_values: u32 = header.request;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
 
         const used_bytes = used_values * schema.value_size;
+        assert(@sizeOf(vsr.Header) + used_bytes == header.size);
+        assert(header.size <= schema.padding_offset); // This is the maximum padding_offset
         return schema.block_values_bytes_const(data_block)[0..used_bytes];
     }
 };
