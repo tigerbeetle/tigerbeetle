@@ -59,6 +59,8 @@ features of TigerBeetle.
 * [Basic](/src/clients/node/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/node/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
+* [Many Two-Phase Transfers](/src/clients/node/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+between them, posting and voiding alternating transfers.
 ### Sidenote: `BigInt`
 TigerBeetle uses 64-bit integers for many fields while JavaScript's
 builtin `Number` maximum value is `2^53-1`. The `n` suffix in JavaScript
