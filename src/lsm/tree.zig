@@ -1180,6 +1180,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             _ = tree;
             _ = snapshot;
             _ = query;
+            @panic("unimplemented");
         }
     };
 }
@@ -1343,17 +1344,5 @@ test "TreeType" {
     );
 
     const Storage = @import("../storage.zig").Storage;
-    const Tree = TreeType(Table, Storage);
-
-    _ = Tree.init;
-    _ = Tree.deinit;
-    _ = Tree.reset;
-    _ = Tree.put;
-    _ = Tree.remove;
-    _ = Tree.lookup_from_memory;
-    _ = Tree.lookup_from_levels_storage;
-    _ = Tree.open;
-    _ = Tree.compact;
-    _ = Tree.compact_end;
-    _ = Tree.checkpoint;
+    std.testing.refAllDecls(TreeType(Table, Storage));
 }
