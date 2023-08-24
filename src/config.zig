@@ -19,6 +19,8 @@ const BuildOptions = struct {
     hash_log_mode: HashLogMode,
     config_aof_record: bool,
     config_aof_recovery: bool,
+    git_tag: ?[]const u8,
+    git_commit: ?[]const u8,
 };
 
 // Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
