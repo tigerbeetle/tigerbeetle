@@ -705,8 +705,7 @@ pub fn TableType(
             const index_block = storage.grid_block(index_address);
             const addresses = index.data_addresses(index_block);
             const data_blocks_used = index.data_blocks_used(index_block);
-            var data_block_index: usize = 0;
-            while (data_block_index < data_blocks_used) : (data_block_index += 1) {
+            for (0..data_blocks_used) |data_block_index| {
                 const address = addresses[data_block_index];
                 const data_block = storage.grid_block(address);
                 const values = data_block_values_used(data_block);
