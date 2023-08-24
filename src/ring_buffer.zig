@@ -87,6 +87,14 @@ pub fn RingBuffer(
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
+        pub fn get(self: *Self, index: usize) ?T {
+            if (self.get_ptr(index)) |value| {
+                return value.*;
+            } else {
+                return null;
+            }
+        }
+
         pub inline fn get_ptr(self: *Self, index: usize) ?*T {
             if (self.buffer.len == 0) unreachable;
 
