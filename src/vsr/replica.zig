@@ -7789,7 +7789,7 @@ pub fn ReplicaType(
         }
 
         /// We have just:
-        /// - finished state sync,
+        /// - finished superblock sync,
         /// - replaced our superblock,
         /// - repaired the manifest blocks,
         /// - and opened the state machine.
@@ -7801,16 +7801,18 @@ pub fn ReplicaType(
             assert(self.state_machine_opened);
             assert(self.superblock.working.vsr_state.sync_op_max > 0);
 
-            var entry_slot: usize = 0;
-            while (entry_slot < constants.clients_max) : (entry_slot += 1) {
-                const entry = &self.superblock.client_sessions.entries[entry_slot];
-                const entry_free = self.superblock.client_sessions.entries_free.isSet(entry_slot);
-                const entry_faulty = !entry_free and
-                    entry.header.size > @sizeOf(Header) and
-                    entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
-                    entry.header.op <= self.superblock.working.vsr_state.sync_op_max;
-
-                self.client_replies.faulty.setValue(entry_slot, entry_faulty);
+            for (0..constants.clients_max) |entry_slot| {
+                if (self.superblock.client_sessions.entries_free.isSet(entry_slot)) {
+                    assert(!self.client_replies.faulty.isSet(entry_slot));
+                } else {
+                    const entry = &self.superblock.client_sessions.entries[entry_slot];
+                    if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                        entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
+                    {
+                        const entry_faulty = entry.header.size > @sizeOf(Header);
+                        self.client_replies.faulty.setValue(entry_slot, entry_faulty);
+                    }
+                }
             }
         }
 

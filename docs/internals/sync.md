@@ -20,9 +20,10 @@ In the context of state sync, "state" refers to:
 6. the grid (LSM data; acquired blocks only)
 7. client replies
 
-State sync consists of two protocols:
-- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
-- [Sync Content](./vsr.md#protocol-sync-content) (syncs 6-7)
+State sync consists of three protocols:
+- [Sync SuperBlock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
+- [Sync Grid](./vsr.md#protocol-sync-grid) (syncs 6)
+- [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 7)
 
 The target of superblock-sync is the latest checkpoint of the healthy cluster.
 When we catch up to the latest checkpoint (or very close to it), then we can transition back to a healthy state.
@@ -48,7 +49,7 @@ Checkpoints:
 2. Wait for non-grid commit operation to finish.
 3. Wait for grid IO to finish. (See `Grid.cancel()`.)
 4. Wait for a usable sync target to arrive. (Usually we already have one.)
-5. Begin sync-superblock protocol.
+5. Begin [sync-superblock protocol](./vsr.md#protocol-sync-superblock).
 6. [Request superblock trailers](#6-request-superblock-trailers).
 7. Update superblock headers:
     - Bump `vsr_state.commit_min`/`vsr_state.commit_min_checksum` to the sync target op/op-checksum.
@@ -59,12 +60,11 @@ Checkpoints:
 9. Update the superblock with:
     - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
     - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
-10. Sync-superblock protocol is done. Begin sync-content protocol.
-11. Repair replies and tables that were created within the `sync_op_{min,max}` range.
+10. Sync-superblock protocol is done.
+11. Repair [replies](./vsr.md#protocol-sync-client-replies) and [tables](./vsr.md#protocol-sync-grid) that were created within the `sync_op_{min,max}` range.
 12. Update the superblock with:
     - Set `vsr_state.sync_op_min = 0`
     - Set `vsr_state.sync_op_max = 0`
-13. Sync-content protocol is done.
 
 If a newer sync target is discovered during steps *5*-*8* or *11*, go to step *4*.
 
@@ -95,7 +95,7 @@ State sync is initially triggered by any of the following:
     - a WAL or grid repair is in progress and,
     - the replica's checkpoint is lagging behind the cluster's (far enough that the repair may never complete).
 
-### 6: Request Superblock Trailers
+### 6: Request SuperBlock Trailers
 
 The replica concurrently sends out three request messages, with the sync target identifier attached to each:
 
