@@ -119,7 +119,7 @@ pub fn ManifestLogType(comptime Storage: type, comptime TableInfo: type) type {
 
         /// The head block is used to accumulate a full block, to be written at the next flush.
         /// The remaining blocks must accommodate all further appends.
-        blocks: RingBuffer(BlockPtr, blocks_count_max, .array),
+        blocks: RingBuffer(BlockPtr, .{ .array = blocks_count_max }),
 
         /// The number of blocks that have been appended to, filled up, and then closed.
         blocks_closed: u8 = 0,
