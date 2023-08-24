@@ -1946,15 +1946,6 @@ pub const Checkpoint = struct {
         assert(constants.journal_slot_count % constants.lsm_batch_multiple == 0);
     }
 
-    pub fn checkpoint_before(checkpoint: u64) ?u64 {
-        assert(valid(checkpoint));
-
-        if (checkpoint == 0) return null;
-        if (checkpoint == constants.journal_slot_count - constants.lsm_batch_multiple - 1) return 0;
-
-        return checkpoint - (constants.journal_slot_count - constants.lsm_batch_multiple);
-    }
-
     pub fn checkpoint_after(checkpoint: u64) u64 {
         assert(valid(checkpoint));
 
@@ -1971,7 +1962,6 @@ pub const Checkpoint = struct {
 
         assert((result + 1) % constants.lsm_batch_multiple == 0);
         assert(valid(result));
-        assert(checkpoint_before(result) == checkpoint);
 
         return result;
     }
@@ -1987,7 +1977,6 @@ pub const Checkpoint = struct {
     }
 
     pub fn valid(op: u64) bool {
-        return op == 0 or
-            (op + 1) % (constants.journal_slot_count - constants.lsm_batch_multiple) == 0;
+        return op == 0 or (op + 1) % constants.lsm_batch_multiple == 0;
     }
 };
