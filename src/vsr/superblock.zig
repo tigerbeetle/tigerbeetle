@@ -4,6 +4,7 @@
 //!     - vsr_state.replica and vsr_state.replica_count are immutable for now.
 //!     - vsr_state.commit_min is initially 0 (for a newly-formatted replica).
 //!     - vsr_state.commit_min ≤ vsr_state.commit_max
+//!     - vsr_state.commit_min_before ≤ vsr_state.commit_min
 //!     - vsr_state.log_view ≤ vsr_state.view
 //!     - vsr_state.sync_op_min ≤ vsr_state.sync_op_max
 //!     - checkpoint() must advance the superblock's vsr_state.commit_min.
@@ -106,7 +107,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [2904]u8 = [_]u8{0} ** 2904,
+    reserved: [2888]u8 = [_]u8{0} ** 2888,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -138,6 +139,10 @@ pub const SuperBlockHeader = extern struct {
 
         members: vsr.Members,
 
+        /// The highest known canonical checkpoint op.
+        /// Usually the previous checkpoint op (i.e. prior to VSRState.commit_min).
+        commit_min_canonical: u64,
+
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
 
@@ -165,10 +170,10 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [7]u8 = [_]u8{0} ** 7,
+        reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
-            assert(@sizeOf(VSRState) == 288);
+            assert(@sizeOf(VSRState) == 304);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -185,6 +190,7 @@ pub const SuperBlockHeader = extern struct {
                 .members = options.members,
                 .replica_count = options.replica_count,
                 .commit_min_checksum = vsr.Header.root_prepare(options.cluster).checksum,
+                .commit_min_canonical = 0,
                 .commit_min = 0,
                 .commit_max = 0,
                 .sync_op_min = 0,
@@ -195,6 +201,7 @@ pub const SuperBlockHeader = extern struct {
         }
 
         pub fn assert_internally_consistent(state: VSRState) void {
+            assert(state.commit_min_canonical <= state.commit_min);
             assert(state.commit_max >= state.commit_min);
             assert(state.sync_op_max >= state.sync_op_min);
             assert(state.view >= state.log_view);
@@ -228,6 +235,7 @@ pub const SuperBlockHeader = extern struct {
 
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
+            if (old.commit_min_canonical > new.commit_min_canonical) return false;
             if (old.commit_min > new.commit_min) return false;
             if (old.commit_max > new.commit_max) return false;
 
@@ -733,6 +741,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .commit_min_checksum = 0,
                     .replica_id = replica_id,
                     .members = members,
+                    .commit_min_canonical = 0,
                     .commit_min = 0,
                     .commit_max = 0,
                     .sync_op_min = 0,
@@ -816,6 +825,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.commit_min_checksum = update.commit_min_checksum;
+            vsr_state.commit_min_canonical = vsr_state.commit_min;
             vsr_state.commit_min = update.commit_min;
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
