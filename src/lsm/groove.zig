@@ -1115,20 +1115,7 @@ test "Groove" {
         },
     );
 
-    _ = Groove.init;
-    _ = Groove.deinit;
-
-    _ = Groove.get;
-    _ = Groove.put;
-    _ = Groove.remove;
-
-    _ = Groove.compact;
-    _ = Groove.checkpoint;
-
-    _ = Groove.prefetch_enqueue;
-    _ = Groove.prefetch;
-    _ = Groove.prefetch_setup;
-
+    std.testing.refAllDecls(Groove);
     std.testing.refAllDecls(Groove.PrefetchWorker);
     std.testing.refAllDecls(Groove.PrefetchContext);
 }
