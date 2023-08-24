@@ -511,6 +511,11 @@ pub fn CompactionType(
                 // Assert that we're reading data blocks in key order.
                 const values_in = compaction.values_in[index];
                 if (values_in.len > 0) {
+                    if (constants.verify) {
+                        for (values_in[0 .. values_in.len - 1], values_in[1..]) |*value, *value_next| {
+                            assert(compare_keys(key_from_value(value), key_from_value(value_next)) == .lt);
+                        }
+                    }
                     const first_key = key_from_value(&values_in[0]);
                     const last_key = key_from_value(&values_in[values_in.len - 1]);
                     if (compaction.last_keys_in[index]) |last_key_prev| {
