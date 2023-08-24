@@ -7723,24 +7723,25 @@ pub fn ReplicaType(
             // during the sync_start update uses the correct (new) commit_max.
             self.commit_max = @max(stage.target.checkpoint_op, self.commit_max);
 
-            const checkpoint_new = stage.target.checkpoint_op;
-            const checkpoint_old = self.op_checkpoint();
-            const sync_op_max = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_new).?;
+            const sync_op_max =
+                vsr.Checkpoint.trigger_for_checkpoint(stage.target.checkpoint_op).?;
             const sync_op_min = sync_op_min: {
                 const syncing_already = self.superblock.staging.vsr_state.sync_op_max > 0;
                 const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
 
-                // We must re-sync the tables created between checkpoint_old_previous and
-                // checkpoint_old since checkpoint_old might be divergent, in which case the tables
-                // we created during compaction are invalid.
-                // TODO: When we know our checkpoint is canonical, we don't need to resync it.
-                const checkpoint_old_previous = vsr.Checkpoint.checkpoint_before(checkpoint_old);
-                const sync_min_new = if (checkpoint_old == 0 or checkpoint_old_previous.? == 0)
-                    0
+                // We must re-sync the tables created between `vsr_state.commit_min_canonical` and
+                // our current (pre-sync) checkpoint, since the current checkpoint might be
+                // divergent, in which case the tables we created during compaction are invalid.
+                // TODO: When we know our checkpoint is canonical (via commit/ping), we don't need
+                // to resync it.
+                const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
+                    self.superblock.working.vsr_state.commit_min_canonical,
+                )) |trigger|
+                    // +1 because `vsr_state.commit_min_canonical` is definitely canonical, and
+                    // the range is inclusive.
+                    trigger + 1
                 else
-                    // +1 because checkpoint_old_previous is definitely canonical, and the range is
-                    // inclusive.
-                    vsr.Checkpoint.trigger_for_checkpoint(checkpoint_old_previous.?).? + 1;
+                    0;
 
                 break :sync_op_min if (syncing_already)
                     @min(sync_min_old, sync_min_new)
