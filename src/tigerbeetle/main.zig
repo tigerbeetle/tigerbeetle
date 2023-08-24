@@ -6,7 +6,18 @@ const mem = std.mem;
 const os = std.os;
 const log_main = std.log.scoped(.main);
 
-const build_options = @import("vsr_options");
+const build_options = vsr_options;
+
+pub const vsr_options = .{
+    .config_base = .default,
+    .config_log_level = std.log.Level.info,
+    .tracer_backend = .none,
+    .hash_log_mode = .none,
+    .config_aof_record = false,
+    .config_aof_recovery = false,
+    .git_tag = @as(?[]const u8, "none"),
+    .git_commit = @as(?[]const u8, "none"),
+};
 
 const vsr = @import("vsr");
 const constants = vsr.constants;
