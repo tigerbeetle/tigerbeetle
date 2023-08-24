@@ -72,7 +72,9 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             message: *Message,
         };
 
-        const WriteQueue = RingBuffer(*Write, constants.client_replies_iops_write_max, .array);
+        const WriteQueue = RingBuffer(*Write, .{
+            .array = constants.client_replies_iops_write_max,
+        });
 
         storage: *Storage,
         message_pool: *MessagePool,
