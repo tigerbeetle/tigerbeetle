@@ -50,9 +50,7 @@ pub fn NodePool(comptime _node_size: u32, comptime _node_alignment: u13) type {
         }
 
         pub fn reset(pool: *Self) void {
-            // TODO(Performance): maybe a set_all (word-wise) function would be faster?
-            var iterator = pool.free.iterator(.{ .kind = .unset });
-            while (iterator.next()) |bit| pool.free.set(bit);
+            pool.free.setRangeValue(.{ .start = 0, .end = pool.free.capacity() }, true);
 
             pool.* = .{
                 .buffer = pool.buffer,
