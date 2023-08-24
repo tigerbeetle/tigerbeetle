@@ -139,6 +139,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
+                assert(!client_replies.faulty.isSet(slot.index));
+
                 var writes = client_replies.writes.iterate();
                 var write_latest: ?*const Write = null;
                 while (writes.next()) |write| {
