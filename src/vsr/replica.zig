@@ -7821,8 +7821,19 @@ pub fn ReplicaType(
             if (self.superblock.staging.vsr_state.sync_op_max == 0) {
                 return true;
             } else {
+                for (0..constants.clients_max) |entry_slot| {
+                    if (self.superblock.client_sessions.entries_free.isSet(entry_slot)) continue;
+
+                    const entry = &self.superblock.client_sessions.entries[entry_slot];
+                    if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                        entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
+                    {
+                        if (self.client_replies.faulty.isSet(entry_slot)) return false;
+                    }
+                }
+
                 // TODO Return whether all tables are synced.
-                return self.client_replies.faulty.count() == 0;
+                return true;
             }
         }
 
