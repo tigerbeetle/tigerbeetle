@@ -51,12 +51,12 @@ Storage:
 |                     `eviction` | primary |       client | [Client](#protocol-client)                                                       |
 |               `request_blocks` | replica |      replica | [Sync Grid](#protocol-sync-grid), [Repair Grid](#protocol-repair-grid)           |
 |                        `block` | replica |      replica | [Sync Grid](#protocol-sync-grid), [Repair Grid](#protocol-repair-grid)           |
-|        `request_sync_manifest` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
-|        `request_sync_free_set` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
-| `request_sync_client_sessions` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
-|                `sync_manifest` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
-|                `sync_free_set` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
-|         `sync_client_sessions` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
+|        `request_sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|        `request_sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+| `request_sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|                `sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|                `sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|         `sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 
 ### Recovery
 
@@ -253,7 +253,7 @@ That is, a replica can help other replicas repair and repair itself simultaneous
 
 TODO Describe state sync fallback.
 
-## Protocol: Sync SuperBlock
+## Protocol: Sync Superblock
 
 State sync synchronizes the state of a lagging/divergent replica with the healthy cluster.
 

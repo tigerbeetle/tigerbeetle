@@ -21,7 +21,7 @@ In the context of state sync, "state" refers to:
 7. client replies
 
 State sync consists of three protocols:
-- [Sync SuperBlock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
+- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
 - [Sync Grid](./vsr.md#protocol-sync-grid) (syncs 6)
 - [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 7)
 
@@ -95,7 +95,7 @@ State sync is initially triggered by any of the following:
     - a WAL or grid repair is in progress and,
     - the replica's checkpoint is lagging behind the cluster's (far enough that the repair may never complete).
 
-### 6: Request SuperBlock Trailers
+### 6: Request Superblock Trailers
 
 The replica concurrently sends out three request messages, with the sync target identifier attached to each:
 
