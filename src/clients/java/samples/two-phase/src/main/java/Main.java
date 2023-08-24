@@ -67,7 +67,6 @@ public final class Main {
 	    assert accounts.getCapacity() == 2;
 
 	    while (accounts.next()) {
-		accounts.getTimestamp();
 		if (Arrays.equals(accounts.getId(), UInt128.asBytes(1))) {
 		    assert accounts.getDebitsPosted() == 0;
 		    assert accounts.getCreditsPosted() == 0;
@@ -96,7 +95,6 @@ public final class Main {
 	    transfers.setCode(1);
 	    transfers.setAmount(500);
 	    transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
-	    transfers.getTimestamp();
 
 	    transferErrors = client.createTransfers(transfers);
 	    while (transferErrors.next()) {

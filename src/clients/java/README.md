@@ -112,6 +112,8 @@ features of TigerBeetle.
 * [Basic](/src/clients/java/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/java/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
+* [Many Two-Phase Transfers](/src/clients/java/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+between them, posting and voiding alternating transfers.
 ## Creating a Client
 
 A client is created with a cluster ID and replica
