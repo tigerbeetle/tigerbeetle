@@ -38,7 +38,7 @@ Storage:
 |                      `request` |  client |      primary | [Normal](#protocol-normal)                                                       |
 |                      `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
 |                   `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                   |
-|                        `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Table](#protocol-repair-client-table), [Sync Content](#protocol-sync-content) |
+|                        `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                       `commit` | primary |       backup | [Normal](#protocol-normal)                                                       |
 |            `start_view_change` | replica | all replicas | [Start-View-Change](#protocol-start-view-change)                                 |
 |               `do_view_change` | replica | all replicas | [View-Change](#protocol-view-change)                                             |
@@ -46,17 +46,17 @@ Storage:
 |           `request_start_view` |  backup |      primary | [Request/Start View](#protocol-requeststart-view)                                |
 |              `request_headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |              `request_prepare` | replica |      replica | [Repair WAL](#protocol-repair-wal)                                               |
-|                `request_reply` | replica |      replica | [Repair Client Table](#protocol-repair-client-table), [Sync Content](#protocol-sync-content) |
+|                `request_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                      `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |                     `eviction` | primary |       client | [Client](#protocol-client)                                                       |
-|               `request_blocks` | replica |      replica | [Sync Content](#protocol-sync-content), [Repair Grid](#protocol-repair-grid)     |
-|                        `block` | replica |      replica | [Sync Content](#protocol-sync-content), [Repair Grid](#protocol-repair-grid)     |
-|        `request_sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|        `request_sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-| `request_sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|                `sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|                `sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|         `sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|               `request_blocks` | replica |      replica | [Sync Grid](#protocol-sync-grid), [Repair Grid](#protocol-repair-grid)           |
+|                        `block` | replica |      replica | [Sync Grid](#protocol-sync-grid), [Repair Grid](#protocol-repair-grid)           |
+|        `request_sync_manifest` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
+|        `request_sync_free_set` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
+| `request_sync_client_sessions` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
+|                `sync_manifest` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
+|                `sync_free_set` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
+|         `sync_client_sessions` | replica |      replica | [Sync SuperBlock](#protocol-sync-superblock)                                     |
 
 ### Recovery
 
@@ -215,11 +215,11 @@ In response to a `request_prepare`:
 
 Per [PAR's CTRL Protocol](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf), we do not nack corrupt entries, since they _might_ be the prepare being requested.
 
-## Protocol: Repair Client Table
+## Protocol: Repair Client Replies
 
-The replica's client table stores the latest reply to each active client.
+The replica stores the latest reply to each active client.
 
-During repair, corrupt replies are requested & repaired.
+During repair, corrupt client replies are requested & repaired.
 
 In response to a `request_reply`:
 
@@ -253,7 +253,7 @@ That is, a replica can help other replicas repair and repair itself simultaneous
 
 TODO Describe state sync fallback.
 
-## Protocol: Sync Superblock
+## Protocol: Sync SuperBlock
 
 State sync synchronizes the state of a lagging/divergent replica with the healthy cluster.
 
@@ -264,14 +264,18 @@ This protocol updates the replica's superblock with a more recent one.
 
 See [State Sync](./sync.md) for details.
 
-## Protocol: Sync Content
+## Protocol: Sync Client Replies
 
-Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).
+Sync missed client replies using [Protocol: Repair Grid](#protocol-repair-client-replies).
 
-Syncs:
-- LSM table grid blocks
-- client replies
+(Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
+See [State Sync](./sync.md) for details.
 
+## Protocol: Sync Grid
+
+Sync missed LSM table blocks using [Protocol: Repair Grid](#protocol-repair-grid).
+
+(Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
 See [State Sync](./sync.md) for details.
 
 ## Protocol: Reconfiguration
