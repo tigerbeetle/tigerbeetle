@@ -1001,7 +1001,7 @@ pub fn GrooveType(
                         .ids => @fieldParentPtr(Groove, "ids", tree),
                         .objects => @fieldParentPtr(Groove, "objects", tree),
                         .index => |field| blk: {
-                            const indexes: *align(16) IndexTrees =
+                            const indexes: *align(@alignOf(IndexTrees)) IndexTrees =
                                 @alignCast(@fieldParentPtr(IndexTrees, field, tree));
                             break :blk @fieldParentPtr(Groove, "indexes", indexes);
                         },
