@@ -168,6 +168,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         node_pool: *NodePool,
         config: TreeConfig,
+        manifest_log: ?*ManifestLog = null,
 
         levels: [constants.lsm_levels]Level,
 
@@ -175,12 +176,6 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // This should be the greatest TableInfo.snapshot_min/snapshot_max (if deleted) or
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
-
-        manifest_log: ?*ManifestLog = null,
-
-        open_callback: ?Callback = null,
-        compact_callback: ?Callback = null,
-        checkpoint_callback: ?Callback = null,
 
         pub fn init(allocator: mem.Allocator, node_pool: *NodePool, config: TreeConfig) !Manifest {
             var levels: [constants.lsm_levels]Level = undefined;
