@@ -314,7 +314,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         ) *const fn (*GrooveFor(groove_field_name)) void {
             return struct {
                 fn groove_callback(groove: *GrooveFor(groove_field_name)) void {
-                    const grooves: *align(16) Grooves =
+                    const grooves: *align(@alignOf(Grooves)) Grooves =
                         @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
                     const forest = @fieldParentPtr(Forest, "grooves", grooves);
                     forest.compact_callback();
