@@ -52,7 +52,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
-        pub const StorageChecker = StorageCheckerType(Replica);
+        pub const StorageChecker = StorageCheckerType(Storage);
         pub const SyncChecker = SyncCheckerType(Replica);
 
         pub const Options = struct {
@@ -498,10 +498,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         log.debug("{}: on_compact: skipping StorageChecker; diverged", .{
                             replica.replica,
                         });
-                    } else {
-                        cluster.storage_checker.replica_compact(replica) catch |err| {
-                            fatal(.correctness, "storage checker error: {}", .{err});
-                        };
                     }
                 },
                 .checkpoint_commenced => {
@@ -514,7 +510,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                             replica.replica,
                         });
                     } else {
-                        cluster.storage_checker.replica_checkpoint(replica) catch |err| {
+                        cluster.storage_checker.replica_checkpoint(
+                            &replica.superblock,
+                        ) catch |err| {
                             fatal(.correctness, "storage checker error: {}", .{err});
                         };
                     }
@@ -590,7 +588,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 break :role '\\';
             };
 
-            var info_buffer: [64]u8 = undefined;
+            var info_buffer: [128]u8 = undefined;
             var info: []u8 = "";
             var pipeline_buffer: [16]u8 = undefined;
             var pipeline: []u8 = "";
@@ -619,7 +617,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
-                    "{[wal_op_min]:>3}:{[wal_op_max]:>3}Wo " ++
+                    "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
+                    "<{[sync_op_min]:_>3}:{[sync_op_max]:_>3}> " ++
                     "{[grid_blocks_free]:>7}Gf " ++
                     "{[grid_blocks_faulty]:>2}G!", .{
                     .view = replica.view,
@@ -631,6 +630,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .journal_faulty = replica.journal.faulty.count,
                     .wal_op_min = wal_op_min,
                     .wal_op_max = wal_op_max,
+                    .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
+                    .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
                     .grid_blocks_faulty = replica.grid.read_global_queue.count,
                 }) catch unreachable;

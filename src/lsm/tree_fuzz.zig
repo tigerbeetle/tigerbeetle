@@ -271,6 +271,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
                 .commit_min = op,
                 .commit_max = op + 1,
+                .sync_op_min = 0,
+                .sync_op_max = 0,
             });
         }
 

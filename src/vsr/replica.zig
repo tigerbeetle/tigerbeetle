@@ -667,9 +667,17 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
 
-            log.debug("{}: state_machine_open_callback", .{self.replica});
+            log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
+                self.replica,
+                self.superblock.working.vsr_state.sync_op_min,
+                self.superblock.working.vsr_state.sync_op_max,
+            });
 
             self.state_machine_opened = true;
+
+            if (self.superblock.working.vsr_state.sync_op_max > 0) {
+                self.sync_content();
+            }
 
             if (self.solo()) {
                 if (self.commit_min < self.op) {
@@ -2446,11 +2454,6 @@ pub fn ReplicaType(
                 target_size,
             });
 
-            if (progress == .complete) {
-                @field(self.superblock, @tagName(trailer)).reset();
-                @field(self.superblock, @tagName(trailer)).decode(target_buffer[0..target_size]);
-            }
-
             if (stage.done()) {
                 assert(progress == .complete);
                 self.sync_requesting_trailers_callback();
@@ -3488,6 +3491,17 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
+            const vsr_state_sync_op: struct { min: u64, max: u64 } = sync: {
+                if (self.sync_content_done()) {
+                    break :sync .{ .min = 0, .max = 0 };
+                } else {
+                    break :sync .{
+                        .min = self.superblock.staging.vsr_state.sync_op_min,
+                        .max = self.superblock.staging.vsr_state.sync_op_max,
+                    };
+                }
+            };
+
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
@@ -3495,6 +3509,8 @@ pub fn ReplicaType(
                     .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
                     .commit_min = vsr_state_commit_min,
                     .commit_max = self.commit_max,
+                    .sync_op_min = vsr_state_sync_op.min,
+                    .sync_op_max = vsr_state_sync_op.max,
                 },
             );
         }
@@ -6450,7 +6466,6 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
                 .request_reply => {
-                    assert(!self.standby());
                     assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
@@ -7672,6 +7687,18 @@ pub fn ReplicaType(
                 .client_sessions_checksum = stage.trailers.get(.client_sessions).final.?.checksum,
             });
 
+            inline for (comptime std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
+                const trailer_size = stage.trailers.get(trailer).final.?.size;
+                @field(self.superblock, @tagName(trailer)).reset();
+                @field(self.superblock, @tagName(trailer)).decode(
+                    self.superblock.trailer_buffer(trailer)[0..trailer_size],
+                );
+            }
+            // Faulty bits will be set in state_machine_open_callback().
+            while (self.client_replies.faulty.findFirstSet()) |slot| {
+                self.client_replies.faulty.unset(slot);
+            }
+
             self.sync_dispatch(.{ .updating_superblock = .{
                 .target = stage.target,
                 .previous_checkpoint_id = stage.previous_checkpoint_id.?,
@@ -7696,6 +7723,32 @@ pub fn ReplicaType(
             // during the sync_start update uses the correct (new) commit_max.
             self.commit_max = @max(stage.target.checkpoint_op, self.commit_max);
 
+            const sync_op_max =
+                vsr.Checkpoint.trigger_for_checkpoint(stage.target.checkpoint_op).?;
+            const sync_op_min = sync_op_min: {
+                const syncing_already = self.superblock.staging.vsr_state.sync_op_max > 0;
+                const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
+
+                // We must re-sync the tables created between `vsr_state.commit_min_canonical` and
+                // our current (pre-sync) checkpoint, since the current checkpoint might be
+                // divergent, in which case the tables we created during compaction are invalid.
+                // TODO: When we know our checkpoint is canonical (via commit/ping), we don't need
+                // to resync it.
+                const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
+                    self.superblock.working.vsr_state.commit_min_canonical,
+                )) |trigger|
+                    // +1 because `vsr_state.commit_min_canonical` is definitely canonical, and
+                    // the range is inclusive.
+                    trigger + 1
+                else
+                    0;
+
+                break :sync_op_min if (syncing_already)
+                    @min(sync_min_old, sync_min_new)
+                else
+                    sync_min_new;
+            };
+
             self.sync_message_timeout.stop();
             self.superblock.sync(
                 sync_superblock_update_callback,
@@ -7705,6 +7758,8 @@ pub fn ReplicaType(
                     .commit_min = stage.target.checkpoint_op,
                     .commit_min_checksum = stage.checkpoint_op_checksum,
                     .previous_checkpoint_id = stage.previous_checkpoint_id,
+                    .sync_op_max = sync_op_max,
+                    .sync_op_min = sync_op_min,
                 },
             );
         }
@@ -7732,6 +7787,54 @@ pub fn ReplicaType(
 
             self.state_machine.open(state_machine_open_callback);
             self.sync_dispatch(.idle);
+        }
+
+        /// We have just:
+        /// - finished superblock sync,
+        /// - replaced our superblock,
+        /// - repaired the manifest blocks,
+        /// - and opened the state machine.
+        /// Now we sync:
+        /// - the missed LSM table blocks (index/filter/data), and
+        /// - client reply messages.
+        fn sync_content(self: *Self) void {
+            assert(self.syncing == .idle);
+            assert(self.state_machine_opened);
+            assert(self.superblock.working.vsr_state.sync_op_max > 0);
+
+            for (0..constants.clients_max) |entry_slot| {
+                if (self.superblock.client_sessions.entries_free.isSet(entry_slot)) {
+                    assert(!self.client_replies.faulty.isSet(entry_slot));
+                } else {
+                    const entry = &self.superblock.client_sessions.entries[entry_slot];
+                    if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                        entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
+                    {
+                        const entry_faulty = entry.header.size > @sizeOf(Header);
+                        self.client_replies.faulty.setValue(entry_slot, entry_faulty);
+                    }
+                }
+            }
+        }
+
+        pub fn sync_content_done(self: *const Self) bool {
+            if (self.superblock.staging.vsr_state.sync_op_max == 0) {
+                return true;
+            } else {
+                for (0..constants.clients_max) |entry_slot| {
+                    if (self.superblock.client_sessions.entries_free.isSet(entry_slot)) continue;
+
+                    const entry = &self.superblock.client_sessions.entries[entry_slot];
+                    if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                        entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
+                    {
+                        if (self.client_replies.faulty.isSet(entry_slot)) return false;
+                    }
+                }
+
+                // TODO Return whether all tables are synced.
+                return true;
+            }
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
