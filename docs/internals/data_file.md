@@ -1,12 +1,14 @@
 ---
-sidebar_position: 5
+sidebar_position: 2'
 ---
 
 > “Just show me the tables already!”
 > — probably not Fred Brooks
 
 TigerBeetle stores all data inside a single file, called the data file (conventional extension is
-`.tigerbeetle`).
+`.tigerbeetle`). This document describes the high level layout of the data file. The presentation is
+simplified a bit, to provide intuition without drawning the reader in details. Consult the source
+code for byte-level details!
 
 The data file is divided into several zones, with the main ones being:
 
@@ -14,35 +16,43 @@ The data file is divided into several zones, with the main ones being:
 - superblock
 - grid
 
-
-The grid form the bulk of the data file. It is an array of 64KiB blocks:
+The grid forms the bulk of the data file (up to several terabytes). It is an array of 64KiB blocks:
 
 ```zig
 pub const Block = [constants.block_size]u8;
 pub const BlockPtr = *align(constants.sector_size) Block;
 ```
 
-The grid serves as a raw storage layer. Higher level data structured (notably, LSM) are mapped to
-physical grid blocks. A grid block is identified by a pair of a `u64` index and `u128` checksum:
+The grid serves as a raw storage layer. Higher level data structures (notably, the LSM tree) are
+mapped to physical grid blocks. A grid block is identified by a pair of a `u64` index and `u128`
+checksum:
 
 ```zig
 pub const BlockReference = struct {
     index: u64,
     checksum: u128,
-}
+};
 ```
 
 Block checksum is stored outside of the block itself, to protect from misdirected writes. So, to
 read a block, you need to know block's index and checksum from "elsewhere", where "elsewhere" is
 either a different block, or the superblock. Overall, the grid is used to implement purely
 functional, persistent (in both senses), garbage collected data structure which is updated
-atomically by updating the pointer to the root node.
+atomically by swapping the pointer to the root node.
 
-Superblock is what holds this logical "root pointer". Superblock is located at a fixed position in
-the data file, so, when a replica starts up, it can read the superblock, read root block indexes and
-hashes from the superblock, and through those get access to the rest of the data in the grid.
-Besides the logical root, superblock also stores a compressed bitset of all grid blocks which are
-not currently allocated.
+Superblock is what holds this logical "root pointer" (physically, the "root pointer" is actually
+many block references). Superblock is located at a fixed position in the data file, so, when a
+replica starts up, it can read the superblock, read root block indexes and hashes from the
+superblock, and through those get access to the rest of the data in the grid. Besides the logical
+root, superblock also stores a compressed bitset of all grid blocks which are not currently
+allocated.
+
+```zig
+pub const SuperBlock = struct {
+    root: BlockReference[],
+    free_set: BitSet,
+};
+```
 
 Superblock is updated atomically and relatively infrequently. So, the normal mode of operation is
 that the replica starts up, reads the current superblock and free set to memory, then proceeds
@@ -57,10 +67,10 @@ latest superblock which has at least 2 copies written. Picking just the latest c
 reads (i.e., a misdirected read can hide the sole latest copy).
 
 Because the superblock (and hence, logical grid state) is updated infrequently and in bursts, it
-can't be the whole state. The rest of the state is stored in the write ahead log. WAL is a ring
-buffer with prepares, and represents the logical diff which should be applied to the state
-represented by superblock/grid to get the actual current state of the system. When a replica
-processes a prepare it, roughly:
+can't represent the entirety of persistent state. The rest of the state is stored in the write ahead
+log. WAL is a ring buffer with prepares, and represents the logical diff which should be applied to
+the state represented by superblock/grid to get the actual current state of the system. When a
+replica processes a prepare it, roughly:
 
 * writes it to WAL on disk
 * applies changes from prepare to the in-memory data structure representing the current state
@@ -73,16 +83,18 @@ disk state.
 This covers how the three major areas of the data file -- the write-ahead log, the superblock and
 the grid -- work together to represent abstract persistent logical state.
 
-Concretely, the sate of TigerBeetle is a collection (forest) of LSM trees. Each LSM tree stores a
-set of objects. Objects are:
+Concretely, the sate of TigerBeetle is a collection (forest) of LSM trees. LSM structure is
+described [in a separate document](./lsm.md), here only high level on-disk layout is discussed.
+
+Each LSM tree stores a set of values. Values are:
 
 * fixed in size,
 * small (hundreds of bytes),
 * sorted by key,
-* which is embedded in the object itself.
+* which is embedded in the value itself (e.g, an `Account` value uses `timestamp` as a unique key).
 
-To start from the middle, objects are arranged in tables on disk. Each table represents a sorted
-array of objects which is stored in multiple blocks. Specifically:
+To start from the middle, values are arranged in tables on disk. Each table represents a sorted
+array of values and is physically stored in multiple blocks. Specifically:
 
 * table's data blocks are just sorted array of objects
 * table's index block stores pointers to the data blocks, as well as boundary keys.
@@ -99,6 +111,7 @@ const TableIndexBlock = struct {
 };
 
 const TableInfo = struct {
+    tree_id: u16,
     index_block_index: u64,
     index_block_checksum: u128,
     key_min: Key,
@@ -109,8 +122,10 @@ const TableInfo = struct {
 To lookup an object in a table, binary search the index block to locate the data block which should
 hold the object, then binary search inside the data block.
 
-Table size is limited by a single index block which can hold only so many references to data blocks.
-Tables are arranged in levels. Each subsequent level contains exponentially more tables.
+Table size is physically limited by a single index block which can hold only so many references to
+data blocks. However, tables are further artificially limited to hold only a certain (compile-time
+constant) number of entries. Tables are arranged in levels. Each subsequent level contains
+exponentially more tables.
 
 Tables in a single level are pairwise disjoint. Tables in different layers overlap, but the key LSM:
 invariant is observed: values in shallow layers override values in deeper layers. This means that
@@ -123,44 +138,45 @@ inserts the result of the intersection.
 Schematically, effect of compaction can be represented as a sequence of events:
 
 ```zig
+const CompactionEvent = struct {
+    label: Label
+    table: TableInfo, // points to table's index block
+}
+
 const Label = struct {
     level: u7,
     event: enum(u1) { insert, remove },
 }
-
-const CompactionOperation = struct {
-    label: Label
-    table: TableInfo, // points to table's index block
-}
 ```
 
-What's more, the current state of a tree can be represented as a sequence of such table creation and
-removal events. And that's exactly how it is represented in a data file!
+What's more, the current state of a tree can be represented implicitly as a sequence of such
+insertion and removal events, which starts from hte empty set of tables.  And that's exactly how it
+is represented physically in a data file!
 
 Specifically, each LSM tree is a collection of layers which is stored implicitly as log of events.
-The log consist of a sequence of `ManifestLogBLocks`:
+The log consist of a sequence of `ManifestBLocks`:
 
 ```zig
-const ManifestLogBlock = struct {
+const ManifestBlock = struct {
   labels: [entry_count_max]Label,
   tables: [entry_count_max]TableInfo,
 }
 ```
 
-The superblock then stores all mainfest log blocks for all trees:
+The superblock then stores all manifest log blocks for all trees:
 
 ```zig
 const Superblock = {
-  tree_id: [count]u128,
-  manifest_log_block_index: [count]u64,
-  manifest_log_block_checksum: [count]u128,
+  manifest_block_index: [count]u64,
+  manifest_block_checksum: [count]u128,
 }
 ```
 
 Tying everything together:
 
 State is represented as a collection of LSM trees. Superblock is the root of all state. For each LSM
-tree, superblock contains the pointers to the blocks constituting tree's compaction log. Compaction
-log describes a sequence of tables additions and deletions. By replaying compaction log, it is
-possible to reconstruct in memory, the tables which constitute a level. A table is a pointer to its
-index block. The index block is a sorted array of pointers to data blocks.
+tree, superblock contains the pointers to the blocks constituting tree's manifest log -- a sequence
+of individual tables additions and deletions. By replaying this manifest log, it is possible to
+reconstruct the manifest in memory. Manifest describes levels and tables of a single LSM tree. A
+table is a pointer to its index block. The index block is a sorted array of pointers to data blocks.
+Data blocks are sorted arrays of values. 
