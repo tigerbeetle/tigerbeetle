@@ -20,25 +20,27 @@ In the context of state sync, "state" refers to:
 6. the grid (LSM data; acquired blocks only)
 7. client replies
 
-However, state sync protocol itself only syncs the first 5.
-6/7 are replicated after state sync protocol, driven by grid repair and the disk scrubber.
+State sync consists of three protocols:
+- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
+- [Sync Grid](./vsr.md#protocol-sync-grid) (syncs 6)
+- [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 7)
 
-The target of state sync is the latest checkpoint of the healthy cluster.
+The target of superblock-sync is the latest checkpoint of the healthy cluster.
 When we catch up to the latest checkpoint (or very close to it), then we can transition back to a healthy state.
 
 ## Glossary
 
 Replica roles:
 
-- _syncing replica_: A replica performing state sync. (Any step within *1*-*9* of the [sync algorithm](#algorithm))
-- _healthy replica_: A replica _not_ performing state sync — part of the active cluster.
+- _syncing replica_: A replica performing superblock-sync. (Any step within *1*-*10* of the [sync algorithm](#algorithm))
+- _healthy replica_: A replica _not_ performing superblock-sync — part of the active cluster.
 - _divergent replica_: A replica with a checkpoint that is (and can never be) canonical.
 
 Checkpoints:
 
 - [_checkpoint id_/_checkpoint identifier_](#checkpoint-identifier): Uniquely identifies a particular checkpoint reproducibly across replicas.
 - [_canonical checkpoint_](#canonical-checkpoint): Any checkpoint which either: _A_: has any ops committed atop it by the primary, or _B_: a majority quorum has reached.
-- [_sync target_](#sync-target): The checkpoint identifier of the target of state sync. Every sync target is a canonical checkpoint.
+- [_sync target_](#sync-target): The checkpoint identifier of the target of superblock-sync. Every sync target is a canonical checkpoint.
 
 ## Algorithm
 
@@ -47,17 +49,26 @@ Checkpoints:
 2. Wait for non-grid commit operation to finish.
 3. Wait for grid IO to finish. (See `Grid.cancel()`.)
 4. Wait for a usable sync target to arrive. (Usually we already have one.)
-5. [Request superblock trailers](#5-request-superblock-trailers).
-6. Update superblock headers:
+5. Begin [sync-superblock protocol](./vsr.md#protocol-sync-superblock).
+6. [Request superblock trailers](#6-request-superblock-trailers).
+7. Update superblock headers:
     - Bump `vsr_state.commit_min`/`vsr_state.commit_min_checksum` to the sync target op/op-checksum.
     - Bump `vsr_state.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
     - Write the target checkpoint's trailers.
-7. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
-8. Request and write table blocks. (TODO: This step is not implemented yet.)
-9. Done.
+8. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
+9. Update the superblock with:
+    - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
+    - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
+10. Sync-superblock protocol is done.
+11. Repair [replies](./vsr.md#protocol-sync-client-replies) and [tables](./vsr.md#protocol-sync-grid) that were created within the `sync_op_{min,max}` range.
+12. Update the superblock with:
+    - Set `vsr_state.sync_op_min = 0`
+    - Set `vsr_state.sync_op_max = 0`
 
-If a newer sync target is discovered during steps *4*-*8*, go to step *3*.
+If a newer sync target is discovered during steps *5*-*8* or *11*, go to step *4*.
+
+If the replica starts up with `vsr_state.sync_op_max ≠ 0`, go to step *11*.
 
 ### 0: Scenarios
 
@@ -84,7 +95,7 @@ State sync is initially triggered by any of the following:
     - a WAL or grid repair is in progress and,
     - the replica's checkpoint is lagging behind the cluster's (far enough that the repair may never complete).
 
-### 5: Request Superblock Trailers
+### 6: Request Superblock Trailers
 
 The replica concurrently sends out three request messages, with the sync target identifier attached to each:
 
@@ -118,7 +129,7 @@ Syncing replicas must not:
 
 #### Syncing Replicas write prepares to their WAL.
 
-When the replica completes state sync, an up-to-date WAL and journal allow it to quickly catch up (i.e. commit) to the current cluster state.
+When the replica completes superblock-sync, an up-to-date WAL and journal allow it to quickly catch up (i.e. commit) to the current cluster state.
 
 #### Syncing Replicas don't ack prepares.
 
@@ -165,7 +176,7 @@ A _canonical_ checkpoint is a checkpoint:
 3. (when `R=2`: that a single replica has reached).
 
 The primary ignores `command=prepare_ok`s which have a different checkpoint id attached than they expect.
-This means that if a replica's history diverges (due to nondeterminism), the diverging replica is effectively excluded from participating in consensus until it has performed state sync.
+This means that if a replica's history diverges (due to nondeterminism), the diverging replica is effectively excluded from participating in consensus until it has performed superblock-sync.
 See [Storage Determinism](#storage-determinism).
 
 This bounds the "distance" that a history can diverge by.
@@ -173,7 +184,7 @@ Every checkpoint's previous (i.e. parent) checkpoint is canonical.
 
 ### Sync Target
 
-A _sync target_ is the [checkpoint identifier](#checkpoint-identifier) of the checkpoint that the state sync is syncing towards.
+A _sync target_ is the [checkpoint identifier](#checkpoint-identifier) of the checkpoint that the superblock-syn is syncing towards.
 
 Not all checkpoint identifiers are valid sync targets.
 

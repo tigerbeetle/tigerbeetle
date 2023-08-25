@@ -318,10 +318,21 @@ pub const Storage = struct {
 
         verify_alignment(buffer);
 
-        if (zone != .grid) {
-            // Grid repairs can read blocks that have not ever been written.
-            var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
-            while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+        switch (zone) {
+            .superblock,
+            .wal_headers,
+            .wal_prepares,
+            => {
+                var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
+                while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
+            },
+            .client_replies,
+            .grid,
+            => {
+                // ClientReplies/Grid repairs can read blocks that have not ever been written.
+                // (The former case is possible if we sync to a new superblock and someone requests
+                // a client reply that we haven't repaired yet.)
+            },
         }
 
         read.* = .{
@@ -500,6 +511,27 @@ pub const Storage = struct {
         }
     }
 
+    pub fn area_memory(
+        storage: *const Storage,
+        area: Area,
+    ) []align(constants.sector_size) const u8 {
+        const sectors = area.sectors();
+        const area_min = sectors.min * constants.sector_size;
+        const area_max = sectors.max * constants.sector_size;
+        return @alignCast(storage.memory[area_min..area_max]);
+    }
+
+    /// Returns whether any sector in the area is corrupt.
+    pub fn area_faulty(storage: *const Storage, area: Area) bool {
+        const sectors = area.sectors();
+        var sector = sectors.min;
+        var faulty: bool = false;
+        while (sector < sectors.max) : (sector += 1) {
+            faulty = faulty or storage.faults.isSet(sector);
+        }
+        return faulty;
+    }
+
     pub fn superblock_header(
         storage: *const Storage,
         copy_: u8,
@@ -610,7 +642,7 @@ pub const Area = union(enum) {
     grid: struct { address: u64 },
 
     fn sectors(area: Area) SectorRange {
-        switch (area) {
+        return switch (area) {
             .superblock => |data| SectorRange.from_zone(
                 .superblock,
                 data.zone.start_for_copy(data.copy),
@@ -636,7 +668,7 @@ pub const Area = union(enum) {
                 constants.block_size * (data.address - 1),
                 constants.block_size,
             ),
-        }
+        };
     }
 };
 
