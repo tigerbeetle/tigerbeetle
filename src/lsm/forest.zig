@@ -306,7 +306,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
         fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
-            forest.compact_join_callback();
+            forest.compact_callback();
         }
 
         fn compact_groove_callback(
@@ -317,12 +317,12 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                     const grooves: *align(16) Grooves =
                         @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
                     const forest = @fieldParentPtr(Forest, "grooves", grooves);
-                    forest.compact_join_callback();
+                    forest.compact_callback();
                 }
             }.groove_callback;
         }
 
-        fn compact_join_callback(forest: *Forest) void {
+        fn compact_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
 
             const progress = &forest.progress.?.compact;

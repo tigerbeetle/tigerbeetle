@@ -379,11 +379,6 @@ pub fn GrooveType(
         const ManifestLog = ManifestLogType(Storage);
 
         const Callback = *const fn (*Groove) void;
-        const JoinOp = enum {
-            compacting,
-            checkpoint,
-            open,
-        };
 
         const primary_field = if (has_id) "id" else "timestamp";
         const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
@@ -419,9 +414,10 @@ pub fn GrooveType(
         };
         const PrefetchObjects = std.HashMapUnmanaged(Object, void, PrefetchObjectsContext, 70);
 
-        join_op: ?JoinOp = null,
-        join_pending: usize = 0,
-        join_callback: ?Callback = null,
+        compacting: ?struct {
+            pending: usize,
+            callback: Callback,
+        } = null,
 
         objects: ObjectTree,
         ids: IdTree,
@@ -956,74 +952,9 @@ pub fn GrooveType(
             groove.prefetch_objects.removeByPtr(object);
         }
 
-        /// Maximum number of pending sync callbacks (ObjectTree + IdTree + IndexTrees).
-        const join_pending_max = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
-
-        fn JoinType(comptime join_op: JoinOp) type {
-            return struct {
-                pub fn start(groove: *Groove, join_callback: Callback) void {
-                    // Make sure no sync op is currently running.
-                    assert(groove.join_op == null);
-                    assert(groove.join_pending == 0);
-                    assert(groove.join_callback == null);
-
-                    // Start the sync operations
-                    groove.join_op = join_op;
-                    groove.join_callback = join_callback;
-                    groove.join_pending = join_pending_max;
-                }
-
-                const JoinField = union(enum) {
-                    ids,
-                    objects,
-                    index: []const u8,
-                };
-
-                /// Returns LSM tree type for the given index field name (or ObjectTree if null).
-                fn TreeFor(comptime join_field: JoinField) type {
-                    return switch (join_field) {
-                        .ids => IdTree,
-                        .objects => ObjectTree,
-                        .index => |field| @TypeOf(@field(@as(IndexTrees, undefined), field)),
-                    };
-                }
-
-                pub fn tree_callback(
-                    comptime join_field: JoinField,
-                ) *const fn (*TreeFor(join_field)) void {
-                    return struct {
-                        fn tree_cb(tree: *TreeFor(join_field)) void {
-                            // Derive the groove pointer from the tree using the join_field.
-                            const groove = switch (join_field) {
-                                .ids => @fieldParentPtr(Groove, "ids", tree),
-                                .objects => @fieldParentPtr(Groove, "objects", tree),
-                                .index => |field| blk: {
-                                    const indexes: *align(16) IndexTrees =
-                                        @alignCast(@fieldParentPtr(IndexTrees, field, tree));
-                                    break :blk @fieldParentPtr(Groove, "indexes", indexes);
-                                },
-                            };
-
-                            // Make sure the sync operation is currently running.
-                            assert(groove.join_op == join_op);
-                            assert(groove.join_callback != null);
-                            assert(groove.join_pending <= join_pending_max);
-
-                            // Guard until all pending sync ops complete.
-                            groove.join_pending -= 1;
-                            if (groove.join_pending > 0) return;
-
-                            const callback = groove.join_callback.?;
-                            groove.join_op = null;
-                            groove.join_callback = null;
-                            callback(groove);
-                        }
-                    }.tree_cb;
-                }
-            };
-        }
-
         pub fn open_commence(groove: *Groove, manifest_log: *ManifestLog) void {
+            assert(groove.compacting == null);
+
             if (has_id) groove.ids.open_commence(manifest_log);
             groove.objects.open_commence(manifest_log);
 
@@ -1033,6 +964,8 @@ pub fn GrooveType(
         }
 
         pub fn open_complete(groove: *Groove) void {
+            assert(groove.compacting == null);
+
             if (has_id) groove.ids.open_complete();
             groove.objects.open_complete();
 
@@ -1042,23 +975,72 @@ pub fn GrooveType(
         }
 
         pub fn compact(groove: *Groove, callback: Callback, op: u64) void {
-            // Start a compacting join operation.
-            const Join = JoinType(.compacting);
-            Join.start(groove, callback);
+            assert(groove.compacting == null);
 
-            // Compact the ObjectTree and IdTree.
-            if (has_id) groove.ids.compact(Join.tree_callback(.ids), op);
-            groove.objects.compact(Join.tree_callback(.objects), op);
+            if (has_id) groove.ids.compact(compact_tree_callback(.ids), op);
+            groove.objects.compact(compact_tree_callback(.objects), op);
 
-            // Compact the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const compact_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).compact(compact_callback, op);
+                const compact_tree_callback_ = compact_tree_callback(.{ .index = field.name });
+                @field(groove.indexes, field.name).compact(compact_tree_callback_, op);
             }
+
+            groove.compacting = .{
+                .pending = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len,
+                .callback = callback,
+            };
+        }
+
+        fn compact_tree_callback(
+            comptime tree_field: TreeField,
+        ) *const fn (*TreeFor(tree_field)) void {
+            return struct {
+                fn tree_callback(tree: *TreeFor(tree_field)) void {
+                    // Derive the groove pointer from the tree using the tree_field.
+                    const groove = switch (tree_field) {
+                        .ids => @fieldParentPtr(Groove, "ids", tree),
+                        .objects => @fieldParentPtr(Groove, "objects", tree),
+                        .index => |field| blk: {
+                            const indexes: *align(16) IndexTrees =
+                                @alignCast(@fieldParentPtr(IndexTrees, field, tree));
+                            break :blk @fieldParentPtr(Groove, "indexes", indexes);
+                        },
+                    };
+
+                    groove.compact_callback();
+                }
+            }.tree_callback;
+        }
+
+        fn compact_callback(groove: *Groove) void {
+            assert(groove.compacting != null);
+
+            // Guard until all pending sync ops complete.
+            groove.compacting.?.pending -= 1;
+            if (groove.compacting.?.pending > 0) return;
+
+            const callback = groove.compacting.?.callback;
+            groove.compacting = null;
+            callback(groove);
+        }
+
+        const TreeField = union(enum) {
+            ids,
+            objects,
+            index: []const u8,
+        };
+
+        /// Returns LSM tree type for the given index field name (or ObjectTree if null).
+        fn TreeFor(comptime tree_field: TreeField) type {
+            return switch (tree_field) {
+                .ids => IdTree,
+                .objects => ObjectTree,
+                .index => |field| @TypeOf(@field(@as(IndexTrees, undefined), field)),
+            };
         }
 
         pub fn compact_end(groove: *Groove) void {
-            assert(groove.join_callback == null);
+            assert(groove.compacting == null);
 
             if (has_id) groove.ids.compact_end();
             groove.objects.compact_end();
@@ -1069,6 +1051,8 @@ pub fn GrooveType(
         }
 
         pub fn assert_between_bars(groove: *const Groove) void {
+            assert(groove.compacting == null);
+
             if (has_id) groove.ids.assert_between_bars();
             groove.objects.assert_between_bars();
 
