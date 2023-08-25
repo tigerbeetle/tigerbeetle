@@ -433,7 +433,7 @@ const superblock_trailer_client_sessions_size_max = blk: {
 
 /// The size of a data file that has an empty grid.
 pub const data_file_size_min =
-    superblock_zone_size + constants.journal_size_max + constants.client_replies_size;
+    superblock_zone_size + constants.journal_size + constants.client_replies_size;
 
 /// The maximum number of blocks in the grid.
 pub const grid_blocks_max = blk: {
@@ -441,7 +441,7 @@ pub const grid_blocks_max = blk: {
     size -= constants.superblock_copies * @sizeOf(SuperBlockHeader);
     size -= constants.superblock_copies * superblock_trailer_client_sessions_size_max;
     size -= constants.superblock_copies * superblock_trailer_manifest_size_max;
-    size -= constants.journal_size_max; // Zone.wal_headers + Zone.wal_prepares
+    size -= constants.journal_size; // Zone.wal_headers + Zone.wal_prepares
     size -= constants.client_replies_size; // Zone.client_replies
     // At this point, the remainder of size is split between the grid and the freeset copies.
     // The size of a freeset is related to the number of blocks it must store.
