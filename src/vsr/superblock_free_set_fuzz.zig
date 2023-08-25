@@ -51,8 +51,6 @@ fn run_fuzz(
                 assert(std.meta.eql(reservation_expect, reservation_actual));
 
                 if (reservation_expect) |reservation| {
-                    assert(reserve.blocks == free_set_model.count_free_reserved(reservation));
-                    assert(reserve.blocks == free_set.count_free_reserved(reservation));
                     try active_reservations.append(reservation);
                 }
             },
@@ -104,13 +102,6 @@ fn run_fuzz(
             free_set_model.highest_address_acquired(),
             free_set.highest_address_acquired(),
         ));
-
-        for (active_reservations.items) |reservation| {
-            assert(
-                free_set_model.count_free_reserved(reservation) ==
-                    free_set.count_free_reserved(reservation),
-            );
-        }
     }
 }
 
@@ -204,22 +195,6 @@ const FreeSetModel = struct {
 
     pub fn count_free(set: FreeSetModel) usize {
         return set.blocks_acquired.capacity() - set.blocks_acquired.count();
-    }
-
-    pub fn count_free_reserved(set: FreeSetModel, reservation: Reservation) usize {
-        assert(reservation.block_count > 0);
-        set.assert_reservation_active(reservation);
-
-        var count: usize = 0;
-        var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
-        while (iterator.next()) |block| {
-            if (block >= reservation.block_base and
-                block < reservation.block_base + reservation.block_count)
-            {
-                count += 1;
-            }
-        }
-        return count;
     }
 
     pub fn count_acquired(set: FreeSetModel) usize {
