@@ -122,28 +122,25 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         const ManifestLog = ManifestLogType(Storage);
 
         const Callback = *const fn (*Forest) void;
-        const JoinOp = enum {
-            compacting,
-            checkpoint,
-            open,
-        };
 
         pub const groove_config = groove_cfg;
         pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;
 
-        join_op: ?JoinOp = null,
-        join_pending: usize = 0,
-        join_callback: ?Callback = null,
-        callback: ?Callback = null,
+        progress: ?union(enum) {
+            open: struct { callback: Callback },
+            checkpoint: struct { callback: Callback },
+            compact: struct {
+                op: u64,
+                pending: usize,
+                callback: Callback,
+            },
+        } = null,
 
         grid: *Grid,
         grooves: Grooves,
         node_pool: *NodePool,
         manifest_log: ManifestLog,
-
-        // TODO JoinOp union?
-        compaction_op: u64 = 0,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -217,83 +214,9 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             };
         }
 
-        fn JoinType(comptime join_op: JoinOp) type {
-            return struct {
-                pub fn start(forest: *Forest, callback: Callback) void {
-                    assert(forest.join_op == null);
-                    assert(forest.join_pending == 0);
-                    assert(forest.join_callback == null);
-
-                    forest.join_op = join_op;
-                    forest.join_pending = std.meta.fields(Grooves).len;
-                    forest.join_callback = callback;
-                }
-
-                fn GrooveFor(comptime groove_field_name: []const u8) type {
-                    return @TypeOf(@field(@as(Grooves, undefined), groove_field_name));
-                }
-
-                pub fn manifest_log_callback(manifest_log: *ManifestLog) void {
-                    const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
-                    join(forest);
-                }
-
-                pub fn groove_callback(
-                    comptime groove_field_name: []const u8,
-                ) *const fn (*GrooveFor(groove_field_name)) void {
-                    return struct {
-                        fn groove_cb(groove: *GrooveFor(groove_field_name)) void {
-                            const grooves: *align(16) Grooves =
-                                @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
-                            const forest = @fieldParentPtr(Forest, "grooves", grooves);
-                            join(forest);
-                        }
-                    }.groove_cb;
-                }
-
-                fn join(forest: *Forest) void {
-                    assert(forest.join_op == join_op);
-                    assert(forest.join_callback != null);
-                    // +1 for a manifest log compaction.
-                    assert(forest.join_pending <= std.meta.fields(Grooves).len + 1);
-
-                    forest.join_pending -= 1;
-                    if (forest.join_pending > 0) return;
-
-                    if (join_op == .compacting) {
-                        inline for (std.meta.fields(Grooves)) |field| {
-                            @field(forest.grooves, field.name).compact_end();
-                        }
-
-                        const op = forest.compaction_op;
-                        if ((op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0 and
-                            op >= constants.lsm_batch_multiple and
-                            !forest.grid.superblock.working.vsr_state.op_compacted(op))
-                        {
-                            // Last beat of a half-bar.
-                            forest.manifest_log.forfeit();
-                        }
-                    }
-
-                    if (join_op == .checkpoint) {
-                        if (Storage == @import("../testing/storage.zig").Storage) {
-                            // We should have finished all checkpoint writes by now.
-                            forest.grid.superblock.storage.assert_no_pending_writes(.grid);
-                        }
-                    }
-
-                    const callback = forest.join_callback.?;
-                    forest.join_op = null;
-                    forest.join_callback = null;
-                    callback(forest);
-                }
-            };
-        }
-
         pub fn open(forest: *Forest, callback: Callback) void {
-            assert(forest.callback == null);
-            assert(forest.join_callback == null);
-            forest.callback = callback;
+            assert(forest.progress == null);
+            forest.progress = .{ .open = .{ .callback = callback } };
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).open_commence(&forest.manifest_log);
@@ -308,8 +231,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             table: *const schema.ManifestLog.TableInfo,
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
-            assert(forest.callback != null);
-            assert(forest.join_callback == null);
+            assert(forest.progress.? == .open);
             assert(level < constants.lsm_levels);
 
             // TODO Is there a faster (or cleaner) way to map tree-id to the tree?
@@ -344,44 +266,96 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
-            assert(forest.callback != null);
-            assert(forest.join_callback == null);
+            assert(forest.progress.? == .open);
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).open_complete();
             }
 
-            const callback = forest.callback.?;
-            forest.callback = null;
+            const callback = forest.progress.?.open.callback;
+            forest.progress = null;
             callback(forest);
         }
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
-            assert(forest.callback == null);
+            assert(forest.progress == null);
 
-            const Join = JoinType(.compacting);
-            Join.start(forest, callback);
-
-            forest.compaction_op = op;
+            var pending: usize = 0;
 
             if (op % @divExact(constants.lsm_batch_multiple, 2) == 0 and
                 op >= constants.lsm_batch_multiple and
                 !forest.grid.superblock.working.vsr_state.op_compacted(op))
             {
                 // This is the first beat of a bar that we have not compacted already.
-                forest.join_pending += 1;
+                pending += 1;
                 forest.manifest_log.reserve();
-                forest.manifest_log.compact(Join.manifest_log_callback);
+                forest.manifest_log.compact(compact_manifest_log_callback);
             }
 
             inline for (std.meta.fields(Grooves)) |field| {
-                @field(forest.grooves, field.name).compact(Join.groove_callback(field.name), op);
+                pending += 1;
+                @field(forest.grooves, field.name).compact(compact_groove_callback(field.name), op);
             }
+
+            forest.progress = .{ .compact = .{
+                .op = op,
+                .pending = pending,
+                .callback = callback,
+            } };
+        }
+
+        fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
+            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            forest.compact_join_callback();
+        }
+
+        fn compact_groove_callback(
+            comptime groove_field_name: []const u8,
+        ) *const fn (*GrooveFor(groove_field_name)) void {
+            return struct {
+                fn groove_callback(groove: *GrooveFor(groove_field_name)) void {
+                    const grooves: *align(16) Grooves =
+                        @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
+                    const forest = @fieldParentPtr(Forest, "grooves", grooves);
+                    forest.compact_join_callback();
+                }
+            }.groove_callback;
+        }
+
+        fn compact_join_callback(forest: *Forest) void {
+            assert(forest.progress.? == .compact);
+
+            const progress = &forest.progress.?.compact;
+            // +1 for a manifest log compaction.
+            assert(progress.pending <= std.meta.fields(Grooves).len + 1);
+
+            progress.pending -= 1;
+            if (progress.pending > 0) return;
+
+            inline for (std.meta.fields(Grooves)) |field| {
+                @field(forest.grooves, field.name).compact_end();
+            }
+
+            if ((progress.op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0 and
+                progress.op >= constants.lsm_batch_multiple and
+                !forest.grid.superblock.working.vsr_state.op_compacted(progress.op))
+            {
+                // Last beat of a half-bar.
+                forest.manifest_log.forfeit();
+            }
+
+            const callback = progress.callback;
+            forest.progress = null;
+            callback(forest);
+        }
+
+        fn GrooveFor(comptime groove_field_name: []const u8) type {
+            return @TypeOf(@field(@as(Grooves, undefined), groove_field_name));
         }
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
-            assert(forest.callback == null);
-            forest.callback = callback;
+            assert(forest.progress == null);
+            forest.progress = .{ .checkpoint = .{ .callback = callback } };
 
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all pending io before checkpointing.
@@ -392,14 +366,20 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                 @field(forest.grooves, field.name).assert_between_bars();
             }
 
-            forest.manifest_log.checkpoint(manifest_log_callback);
+            forest.manifest_log.checkpoint(checkpoint_manifest_log_callback);
         }
 
-        fn manifest_log_callback(manifest_log: *ManifestLog) void {
+        fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
-            const callback = forest.callback.?;
+            assert(forest.progress.? == .checkpoint);
 
-            forest.callback = null;
+            if (Storage == @import("../testing/storage.zig").Storage) {
+                // We should have finished all checkpoint writes by now.
+                forest.grid.superblock.storage.assert_no_pending_writes(.grid);
+            }
+
+            const callback = forest.progress.?.checkpoint.callback;
+            forest.progress = null;
             callback(forest);
         }
     };
