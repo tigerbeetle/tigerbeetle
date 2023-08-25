@@ -691,7 +691,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
 pub const Options = struct {
     /// The total number of trees in the forest.
-    tree_count: usize,
+    forest_tree_count: usize,
 
     /// The maximum number of table updates to the manifest by a half-measure of table
     /// compaction.
@@ -705,7 +705,7 @@ pub const Options = struct {
     /// - Releasing persistent snapshots.
     // TODO If insert-then-remove can update in-memory, then we can only count input tables once.
     fn compaction_appends_max(options: *const Options) usize {
-        return options.tree_count *
+        return options.forest_tree_count *
             tree.compactions_max *
             (tree.compaction_tables_input_max + // Update snapshot_max.
             tree.compaction_tables_input_max + // Remove.
