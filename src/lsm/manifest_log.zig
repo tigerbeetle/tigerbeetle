@@ -60,6 +60,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
             table: *const TableInfo,
         ) void;
 
+        const Write = struct {
+            manifest_log: *ManifestLog,
+            write: Grid.Write = undefined,
+        };
 
         superblock: *SuperBlock,
         grid: *Grid,
@@ -94,7 +98,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         /// Set for the duration of `flush` and `checkpoint`.
         writing: bool = false,
-        write: Grid.Write = undefined,
+        writes: []Write,
+        writes_pending: usize = 0,
         write_callback: ?Callback = null,
 
         next_tick: Grid.NextTick = undefined,
@@ -111,15 +116,21 @@ pub fn ManifestLogType(comptime Storage: type) type {
             }
             errdefer for (blocks.buffer) |b| allocator.free(b);
 
+            var writes = try allocator.alloc(Write, options.blocks_count_max());
+            errdefer allocator.free(writes);
+            @memset(writes, undefined);
+
             return ManifestLog{
                 .superblock = grid.superblock,
                 .grid = grid,
                 .options = options,
                 .blocks = blocks,
+                .writes = writes,
             };
         }
 
         pub fn deinit(manifest_log: *ManifestLog, allocator: mem.Allocator) void {
+            allocator.free(manifest_log.writes);
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
             manifest_log.blocks.deinit(allocator);
         }
@@ -132,6 +143,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .grid = manifest_log.grid,
                 .options = manifest_log.options,
                 .blocks = .{ .buffer = manifest_log.blocks.buffer },
+                .writes = manifest_log.writes,
             };
         }
 
@@ -335,7 +347,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
 
-            log.debug("flush: writing {} block(s)", .{ manifest_log.blocks_closed });
+            log.debug("flush: writing {} block(s)", .{manifest_log.blocks_closed});
 
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
@@ -363,7 +375,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
                     &manifest_log.next_tick,
                 );
             } else {
-                manifest_log.write_block();
+                for (0..manifest_log.blocks_closed) |_| {
+                    manifest_log.write_block();
+                }
+                assert(manifest_log.writes_pending == manifest_log.blocks_closed);
             }
         }
 
@@ -388,21 +403,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
         fn write_block(manifest_log: *ManifestLog) void {
             assert(manifest_log.opened);
             assert(manifest_log.writing);
+            assert(manifest_log.blocks_closed > 0);
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
+            assert(manifest_log.writes_pending < manifest_log.blocks_closed);
 
-            if (manifest_log.blocks_closed == 0) {
-                if (manifest_log.blocks.count == 0) {
-                    assert(manifest_log.entry_count == 0);
-                } else {
-                    assert(manifest_log.blocks.count == 1);
-                    assert(manifest_log.entry_count < schema.ManifestLog.entry_count_max);
-                }
-
-                manifest_log.flush_done();
-                return;
-            }
-
-            const block = manifest_log.blocks.head_ptr().?;
+            const block_index = manifest_log.writes_pending;
+            const block = manifest_log.blocks.get_ptr(block_index).?;
             verify_block(block.*, null, null);
 
             const header = schema.header_from_block(block.*);
@@ -412,9 +418,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const entry_count = schema.ManifestLog.entry_count(block.*);
             assert(entry_count > 0);
 
-            if (manifest_log.blocks.count == 1) {
+            if (block_index == manifest_log.blocks_closed - 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.
-                assert(manifest_log.blocks_closed == 1);
+                assert(entry_count <= schema.ManifestLog.entry_count_max);
             } else {
                 assert(entry_count == schema.ManifestLog.entry_count_max);
             }
@@ -425,24 +431,40 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 entry_count,
             });
 
+            const write = &manifest_log.writes[block_index];
+            write.* = .{ .manifest_log = manifest_log };
+
+            manifest_log.writes_pending += 1;
             manifest_log.grid.write_block(
                 write_block_callback,
-                &manifest_log.write,
+                &write.write,
                 block,
                 address,
             );
-            manifest_log.blocks.advance_head();
         }
 
-        fn write_block_callback(write: *Grid.Write) void {
-            const manifest_log = @fieldParentPtr(ManifestLog, "write", write);
+        fn write_block_callback(grid_write: *Grid.Write) void {
+            const write = @fieldParentPtr(Write, "write", grid_write);
+            const manifest_log = write.manifest_log;
             assert(manifest_log.opened);
             assert(manifest_log.writing);
-
-            manifest_log.blocks_closed -= 1;
             assert(manifest_log.blocks_closed <= manifest_log.blocks.count);
 
-            manifest_log.write_block();
+            manifest_log.writes_pending -= 1;
+
+            if (manifest_log.writes_pending == 0) {
+                for (0..manifest_log.blocks_closed) |_| manifest_log.blocks.advance_head();
+                manifest_log.blocks_closed = 0;
+
+                if (manifest_log.blocks.count == 0) {
+                    assert(manifest_log.entry_count == 0);
+                } else {
+                    assert(manifest_log.blocks.count == 1);
+                    assert(manifest_log.entry_count < schema.ManifestLog.entry_count_max);
+                }
+
+                manifest_log.flush_done();
+            }
         }
 
         /// `compact` does not close a partial block; that is only necessary during `checkpoint`.
