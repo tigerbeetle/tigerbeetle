@@ -124,7 +124,7 @@ pub const journal_slot_count = config.cluster.journal_slot_count;
 /// Writes within this file never extend the filesystem inode size reducing the cost of fdatasync().
 /// This enables static allocation of disk space so that appends cannot fail with ENOSPC.
 /// This also enables us to detect filesystem inode corruption that would change the journal size.
-pub const journal_size_max = journal_size_headers + journal_size_prepares;
+pub const journal_size = journal_size_headers + journal_size_prepares;
 pub const journal_size_headers = journal_slot_count * @sizeOf(vsr.Header);
 pub const journal_size_prepares = journal_slot_count * message_size_max;
 
@@ -150,7 +150,7 @@ comptime {
     // another pipeline of messages. (See op_repair_min()).
     assert(journal_slot_count >= pipeline_prepare_queue_max * 2);
 
-    assert(journal_size_max == journal_size_headers + journal_size_prepares);
+    assert(journal_size == journal_size_headers + journal_size_prepares);
 }
 
 /// The maximum number of connections that can be held open by the server at any time:

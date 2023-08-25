@@ -1058,9 +1058,7 @@ const TestContext = struct {
             .replica_count = options.replica_count,
             .standby_count = options.standby_count,
             .client_count = options.client_count,
-            .storage_size_limit = vsr.sector_floor(
-                constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
-            ),
+            .storage_size_limit = vsr.sector_floor(constants.storage_size_max),
             .seed = random.int(u64),
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
