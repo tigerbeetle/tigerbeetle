@@ -282,19 +282,18 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
             var pending: usize = 0;
 
+            inline for (std.meta.fields(Grooves)) |field| {
+                pending += 1;
+                @field(forest.grooves, field.name).compact(compact_groove_callback(field.name), op);
+            }
+
             if (op % @divExact(constants.lsm_batch_multiple, 2) == 0 and
                 op >= constants.lsm_batch_multiple and
                 !forest.grid.superblock.working.vsr_state.op_compacted(op))
             {
                 // This is the first beat of a bar that we have not compacted already.
                 pending += 1;
-                forest.manifest_log.reserve();
                 forest.manifest_log.compact(compact_manifest_log_callback);
-            }
-
-            inline for (std.meta.fields(Grooves)) |field| {
-                pending += 1;
-                @field(forest.grooves, field.name).compact(compact_groove_callback(field.name), op);
             }
 
             forest.progress = .{ .compact = .{
@@ -340,8 +339,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                 progress.op >= constants.lsm_batch_multiple and
                 !forest.grid.superblock.working.vsr_state.op_compacted(progress.op))
             {
-                // Last beat of a half-bar.
-                forest.manifest_log.forfeit();
+                // This is the last beat of a bar that was not already compacted.
+                forest.manifest_log.compact_end();
             }
 
             const callback = progress.callback;
