@@ -1,36 +1,36 @@
 //! Fuzz Manifest. Most public methods are covered.
 //! `compaction_must_drop_tombstones` is not called as the fuzzer deals with Key ranges, not Values.
 //! `verify` is not called as it checks Storage for valid Values in data blocks (see above).
-//! 
+//!
 //! Strategy:
-//! 
+//!
 //! Simulates operations on a Tree using only Keys instead of Values. Keys are inserted either in
 //! random order or ascending order, matching Id & Object or Derived Trees respectively. Key ranges
-//! are compacted/moved down levels for each op, simulating Compaction. This covers most of the 
+//! are compacted/moved down levels for each op, simulating Compaction. This covers most of the
 //! Manifest while occasional lookup of inserted Keys covers the rest.
-//! 
+//!
 //! Invariants:
-//! 
+//!
 //! - Inserted keys can have their range (not the exact key) retried from a following lookup.
 //! - Visible ManifestLevel tables are properly bounded after compaction between them completes.
 //! - The ingress and egress of tables between ManifestLevels are matched to avoid overflows.
-//! 
+//!
 
 const std = @import("std");
 const assert = std.debug.assert;
-const allocator = std.testing.allocator;
+const log = std.log.scoped(.lsm_manifest_fuzz);
 
 const vsr = @import("../vsr.zig");
-const log = std.log.scoped(.lsm_manifest_fuzz);
 const constants = @import("../constants.zig");
-const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
+const fuzz = @import("../testing/fuzz.zig");
+const allocator = fuzz.allocator;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const compaction_tables_input_max = @import("tree.zig").compaction_tables_input_max;
 
 const Key = u64;
-const Value = struct { key: Key, is_tombstone: u64 };
+const Value = extern struct { key: Key, is_tombstone: u64 };
 
 inline fn compare_keys(a: Key, b: Key) std.math.Order {
     return std.math.order(a, b);
@@ -62,7 +62,7 @@ const Table = @import("table.zig").TableType(
 
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const Storage = @import("../testing/storage.zig").Storage;
-const Grid = @import("grid.zig").GridType(Storage);
+const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const TableInfo = @import("manifest.zig").TableInfoType(Table);
 const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
@@ -86,28 +86,29 @@ fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const Fuz
         .create = 8,
         .lookup = 2,
     };
-    log.info("fuzz_op_distribution = {d:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
 
-    const KeyGen = enum{ ascending, randomized };
+    const KeyGen = enum { ascending, randomized };
     const key_gen = random.enumValue(KeyGen);
     log.info("key_generation = {}", .{key_gen});
 
-    const Context = struct {
-        pub inline fn eql(_: @This(), a: Key, b: Key) bool {
+    const CreatedContext = struct {
+        pub inline fn eql(_: @This(), a: Key, b: Key, b_index: usize) bool {
+            _ = b_index;
             return Table.compare_keys(a, b) == .eq;
         }
 
         pub inline fn hash(_: @This(), key: Key) u32 {
-            return @truncate(u32, stdx.hash_inline(key));
+            return @truncate(stdx.hash_inline(key));
         }
     };
 
     // Set of keys already created.
-    var created = std.ArrayHashMap(Key, void, Context, true).init(allocator);
+    var created = std.ArrayHashMap(Key, void, CreatedContext, true).init(allocator);
     try created.ensureTotalCapacity(fuzz_op_count);
     defer created.deinit();
 
-    for (fuzz_ops) |*fuzz_op, i| {
+    for (fuzz_ops, 0..) |*fuzz_op, i| {
         var tag = fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
         while (true) {
             fuzz_op.* = switch (tag) {
@@ -154,7 +155,7 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
     const random = prng.random();
 
-    const fuzz_op_count = std.math.min(
+    const fuzz_op_count: usize = @min(
         args.events_max orelse @as(usize, 2e5),
         fuzz.random_int_exponential(random, usize, 1e5),
     );
@@ -216,7 +217,7 @@ pub fn main() !void {
     };
 
     superblock.open(SuperBlockOpen.callback, &superblock_context);
-    while (!SuperBlockOpen.opened) storage.tick(); 
+    while (!SuperBlockOpen.opened) storage.tick();
 
     var grid = try Grid.init(allocator, .{ .superblock = &superblock });
     defer grid.deinit(allocator);
@@ -229,7 +230,7 @@ pub fn main() !void {
     const tree_hash = blk: {
         var hash: u256 = undefined;
         std.crypto.hash.Blake3.hash(tree_name, std.mem.asBytes(&hash), .{});
-        break :blk @truncate(u128, hash);
+        break :blk @as(u128, @truncate(hash));
     };
 
     var manifest = try Manifest.init(allocator, &node_pool, &grid, tree_hash);
@@ -256,13 +257,13 @@ pub fn main() !void {
     const Compaction = struct {
         const updates_max = constants.lsm_growth_factor + 1;
 
-        state: enum{ idle, running, done },
+        state: enum { idle, running, done },
         level_b: u8,
         range_b: Manifest.CompactionRange,
         op_min: u64,
         move_table: bool,
         split_table: u32,
-        info_a: union(enum){ immutable: KeyRange, level: Manifest.TableInfoReference },
+        info_a: union(enum) { immutable: KeyRange, level: Manifest.TableInfoReference },
         updates: std.BoundedArray(struct {
             operation: enum { insert_to_level_b, move_to_level_b },
             table: TableInfo,
@@ -314,7 +315,7 @@ pub fn main() !void {
             // Decide how to split up the unioned range using split_table.
             // split_table = 1 for info_a.immutable as TableImmutable only has one table.
             // split_table = rand(0..Compaction.updates.len) to simulate creating many tables.
-            var split = @maximum(1, compaction.split_table);
+            var split = @max(1, compaction.split_table);
             const step = (range.max - range.min) / split;
 
             while (split > 0) : (split -= 1) {
@@ -346,7 +347,7 @@ pub fn main() !void {
                     .immutable => {},
                     .level => |table_info_ref| {
                         manifest_.update_table(level_b - 1, snapshot_max, table_info_ref);
-                    }
+                    },
                 }
                 for (compaction.range_b.tables.slice()) |table_info_ref| {
                     manifest_.update_table(level_b, snapshot_max, table_info_ref);
@@ -383,10 +384,10 @@ pub fn main() !void {
     compaction_immutable.state = .idle;
 
     var compactions: [@divFloor(constants.lsm_levels, 2)]Compaction = undefined;
-    for (compactions) |*compaction| compaction.state = .idle;
+    for (&compactions) |*compaction| compaction.state = .idle;
 
     var op: u64 = 0; //constants.lsm_batch_multiple;
-    for (fuzz_ops) |fuzz_op, fuzz_op_index| {
+    for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
         const lookup_snapshot_max = op + 1;
         defer op += 1;
 
@@ -409,20 +410,20 @@ pub fn main() !void {
 
                 // Check "table mutable".
                 if (keys_mutable) |range| {
-                    found |= @boolToInt(compare_keys(key, range.min) != .lt and
+                    found |= @intFromBool(compare_keys(key, range.min) != .lt and
                         compare_keys(key, range.max) != .gt);
                 }
 
                 // Check "table immutable".
                 if (keys_immutable) |range| {
                     if (keys_immutable_snapshot <= snapshot) {
-                        found |= @boolToInt(compare_keys(key, range.min) != .lt and
+                        found |= @intFromBool(compare_keys(key, range.min) != .lt and
                             compare_keys(key, range.max) != .gt);
                     }
                 }
 
                 // Check if in iterators
-                var it = manifest.lookup(snapshot, key);
+                var it = manifest.lookup(snapshot, key, 0);
                 while (it.next()) |table| {
                     assert(table.visible(snapshot));
                     assert(compare_keys(key, table.key_min) != .lt);
@@ -463,7 +464,12 @@ pub fn main() !void {
             if (beat >= half_bar) blk: {
                 const keys = keys_immutable orelse break :blk;
                 const range_b = manifest.immutable_table_compaction_range(keys.min, keys.max);
-                
+
+                // +1 to count the input table from level A.
+                assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
+                assert(compare_keys(range_b.key_min, keys.min) != .gt);
+                assert(compare_keys(range_b.key_max, keys.max) != .lt);
+
                 compaction_immutable = .{
                     .state = .running,
                     .level_b = 0,
@@ -479,15 +485,15 @@ pub fn main() !void {
             }
 
             // Try to compact levels.
-            for (compactions) |*compaction, i| {
-                const level_a = @intCast(u8, i * 2) + @boolToInt(beat >= half_bar);
+            for (&compactions, 0..) |*compaction, i| {
+                const level_a = @as(u8, @intCast(i * 2)) + @intFromBool(beat >= half_bar);
                 if (level_a >= constants.lsm_levels - 1) break;
 
                 const table_range = manifest.compaction_table(level_a) orelse continue;
                 const table_a = table_range.table_a.table_info;
                 const range_b = table_range.range_b;
 
-                assert(range_b.tables.len + 1 <= compaction_tables_input_max);
+                assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
                 assert(compare_keys(table_a.key_min, table_a.key_max) != .gt);
                 assert(compare_keys(range_b.key_min, table_a.key_min) != .gt);
                 assert(compare_keys(range_b.key_max, table_a.key_max) != .lt);
@@ -497,13 +503,12 @@ pub fn main() !void {
                     .level_b = level_a + 1,
                     .range_b = range_b,
                     .op_min = op_min,
-                    .move_table = range_b.tables.len == 1,
+                    .move_table = range_b.tables.count() == 1,
                     .split_table = random.uintLessThan(u32, Compaction.updates_max),
                     .info_a = .{ .level = table_range.table_a },
                 };
                 compaction.drive(random);
             }
-        
         } else if (beat == half_bar - 1 or beat == constants.lsm_batch_multiple - 1) {
             // End of a bar
 
@@ -525,8 +530,8 @@ pub fn main() !void {
                 }
             }
 
-            for (compactions) |*compaction, i| {
-                const level_a = @intCast(u8, i * 2) + @boolToInt(beat >= half_bar);
+            for (&compactions, 0..) |*compaction, i| {
+                const level_a = @as(u8, @intCast(i * 2)) + @intFromBool(beat >= half_bar);
                 if (level_a >= constants.lsm_levels - 1) break;
                 switch (compaction.state) {
                     .idle => {},
@@ -555,8 +560,8 @@ pub fn main() !void {
             manifest.forfeit();
 
             assert(compaction_immutable.state == .idle);
-            for (compactions) |*compaction, i| {
-                const level_a = @intCast(u8, i * 2) + @boolToInt(beat >= half_bar);
+            for (&compactions, 0..) |*compaction, i| {
+                const level_a = @as(u8, @intCast(i * 2)) + @intFromBool(beat >= half_bar);
                 if (level_a >= constants.lsm_levels - 1) break;
                 assert(compaction.state == .idle);
             }
@@ -579,7 +584,7 @@ pub fn main() !void {
 
         if (beat == constants.lsm_batch_multiple - 1) {
             assert(compaction_immutable.state == .idle);
-            for (compactions) |*compaction| assert(compaction.state == .idle);
+            for (&compactions) |*compaction| assert(compaction.state == .idle);
 
             manifest.assert_level_table_counts();
             manifest.assert_no_invisible_tables(op_min);
