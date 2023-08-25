@@ -1593,17 +1593,20 @@ pub const Members = [constants.members_max]u128;
 /// replica ids for the initial cluster deterministically.
 pub fn root_members(cluster: u32) Members {
     const IdSeed = extern struct {
-        cluster_config_checksum: u128 align(1) = constants.config.cluster.checksum(),
+        cluster_config_checksum: u128 align(1),
         cluster: u32 align(1),
         replica: u8 align(1),
     };
-
     comptime assert(@sizeOf(IdSeed) == 21);
 
     var result = [_]u128{0} ** constants.members_max;
     var replica: u8 = 0;
     while (replica < constants.members_max) : (replica += 1) {
-        const seed = IdSeed{ .cluster = cluster, .replica = replica };
+        const seed = IdSeed{
+            .cluster_config_checksum = constants.config.cluster.checksum(),
+            .cluster = cluster,
+            .replica = replica,
+        };
         result[replica] = checksum(std.mem.asBytes(&seed));
     }
 
