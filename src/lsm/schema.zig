@@ -42,7 +42,12 @@
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
-//! TODO(Unified manifest) Import the manifest log block too.
+//! ManifestLog block schema:
+//! │ vsr.Header                  │ operation=BlockType.manifest
+//! │ [entry_count_max]Label      │ level index, insert|remove
+//! │ [≤entry_count_max]TableInfo │
+//! │ […]u8{0}                    │ padding (to end of block)
+//! Label and TableInfo entries correspond.
 const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -513,5 +518,122 @@ pub const TableData = struct {
         assert(@sizeOf(vsr.Header) + used_bytes == header.size);
         assert(header.size <= schema.padding_offset); // This is the maximum padding_offset
         return schema.block_values_bytes_const(data_block)[0..used_bytes];
+    }
+};
+
+// TODO Store timestamp (snapshot) in header.
+pub const ManifestLog = struct {
+    const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
+    const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
+
+    pub const entry_count_max =
+        @divFloor(entry_count_max_unaligned, @alignOf(TableInfo)) * @alignOf(TableInfo);
+
+    const labels_size_max = entry_count_max * @sizeOf(Label);
+    const tables_size_max = entry_count_max * @sizeOf(TableInfo);
+
+    comptime {
+        assert(entry_count_max > 0);
+        assert(labels_size_max % @alignOf(TableInfo) == 0);
+        assert(tables_size_max % @alignOf(TableInfo) == 0);
+
+        // Bit 7 is reserved to indicate whether the event is an insert or remove.
+        assert(constants.lsm_levels <= std.math.maxInt(u7) + 1);
+
+        assert(@sizeOf(Label) == @sizeOf(u8));
+
+        // All TableInfo's should already be 16-byte aligned because of the leading checksum.
+        const alignment = 16;
+        assert(@alignOf(TableInfo) == alignment);
+
+        // For keys { 8, 16, 24, 32 } all TableInfo's should be a multiple of the alignment.
+        // However, we still store Label ahead of TableInfo to save space on the network.
+        // This means we store fewer entries per manifest block, to gain less padding,
+        // since we must store entry_count_max of whichever array is first in the layout.
+        // For a better understanding of this decision, see schema.ManifestLog.size().
+        assert(@sizeOf(TableInfo) % alignment == 0);
+    }
+
+    pub const Label = packed struct(u8) {
+        level: u7,
+        event: enum(u1) { insert, remove },
+
+        comptime {
+            assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);
+        }
+    };
+
+    /// See manifest.zig's TreeTableInfoType declaration for field documentation.
+    pub const TableInfo = extern struct {
+        /// All keys must fit within 32 bytes.
+        pub const KeyPadded = [32]u8;
+
+        checksum: u128,
+        address: u64,
+        tree_id: u16,
+        reserved: [6]u8 = .{0} ** 6,
+        snapshot_min: u64,
+        snapshot_max: u64,
+        key_min: KeyPadded,
+        key_max: KeyPadded,
+
+        comptime {
+            assert(@alignOf(TableInfo) == 16);
+            assert(stdx.no_padding(TableInfo));
+        }
+    };
+
+    pub fn entry_count(block: BlockPtrConst) u32 {
+        const header = header_from_block(block);
+        assert(BlockType.from(header.operation) == .manifest);
+
+        const labels_size = labels_size_max;
+        const tables_size = header.size - @sizeOf(vsr.Header) - labels_size;
+
+        const entry_count_ = @as(u32, @intCast(@divExact(tables_size, @sizeOf(TableInfo))));
+        assert(entry_count_ > 0);
+        assert(entry_count_ <= entry_count_max);
+        return entry_count_;
+    }
+
+    pub fn size(entry_count_: u32) u32 {
+        assert(entry_count_ > 0);
+        assert(entry_count_ <= entry_count_max);
+
+        // Encode the smaller type first because this will be multiplied by entry_count_max.
+        const labels_size = entry_count_max * @sizeOf(Label);
+        assert(labels_size == labels_size_max);
+        assert((@sizeOf(vsr.Header) + labels_size) % @alignOf(TableInfo) == 0);
+        const tables_size = entry_count_ * @sizeOf(TableInfo);
+
+        return @sizeOf(vsr.Header) + labels_size + tables_size;
+    }
+
+    pub fn labels(block: BlockPtr) *[entry_count_max]Label {
+        return mem.bytesAsSlice(
+            Label,
+            block[@sizeOf(vsr.Header)..][0..labels_size_max],
+        )[0..entry_count_max];
+    }
+
+    pub fn labels_const(block: BlockPtrConst) *const [entry_count_max]Label {
+        return mem.bytesAsSlice(
+            Label,
+            block[@sizeOf(vsr.Header)..][0..labels_size_max],
+        )[0..entry_count_max];
+    }
+
+    pub fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
+        return mem.bytesAsSlice(
+            TableInfo,
+            block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
+        )[0..entry_count_max];
+    }
+
+    pub fn tables_const(block: BlockPtrConst) *const [entry_count_max]TableInfo {
+        return mem.bytesAsSlice(
+            TableInfo,
+            block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
+        )[0..entry_count_max];
     }
 };

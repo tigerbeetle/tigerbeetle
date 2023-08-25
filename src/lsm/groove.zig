@@ -13,6 +13,7 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const Fingerprint = @import("bloom_filter.zig").Fingerprint;
+const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
@@ -375,6 +376,7 @@ pub fn GrooveType(
         pub const config = groove_options;
 
         const Grid = GridType(Storage);
+        const ManifestLog = ManifestLogType(Storage);
 
         const Callback = *const fn (*Groove) void;
         const JoinOp = enum {
@@ -996,7 +998,8 @@ pub fn GrooveType(
                                 .ids => @fieldParentPtr(Groove, "ids", tree),
                                 .objects => @fieldParentPtr(Groove, "objects", tree),
                                 .index => |field| blk: {
-                                    const indexes = @fieldParentPtr(IndexTrees, field, tree);
+                                    const indexes: *align(16) IndexTrees =
+                                        @alignCast(@fieldParentPtr(IndexTrees, field, tree));
                                     break :blk @fieldParentPtr(Groove, "indexes", indexes);
                                 },
                             };
@@ -1020,16 +1023,21 @@ pub fn GrooveType(
             };
         }
 
-        pub fn open(groove: *Groove, callback: Callback) void {
-            const Join = JoinType(.open);
-            Join.start(groove, callback);
-
-            if (has_id) groove.ids.open(Join.tree_callback(.ids));
-            groove.objects.open(Join.tree_callback(.objects));
+        pub fn open_commence(groove: *Groove, manifest_log: *ManifestLog) void {
+            if (has_id) groove.ids.open_commence(manifest_log);
+            groove.objects.open_commence(manifest_log);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const open_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).open(open_callback);
+                @field(groove.indexes, field.name).open_commence(manifest_log);
+            }
+        }
+
+        pub fn open_complete(groove: *Groove) void {
+            if (has_id) groove.ids.open_complete();
+            groove.objects.open_complete();
+
+            inline for (std.meta.fields(IndexTrees)) |field| {
+                @field(groove.indexes, field.name).open_complete();
             }
         }
 
@@ -1060,19 +1068,12 @@ pub fn GrooveType(
             }
         }
 
-        pub fn checkpoint(groove: *Groove, callback: Callback) void {
-            // Start a checkpoint join operation.
-            const Join = JoinType(.checkpoint);
-            Join.start(groove, callback);
+        pub fn assert_between_bars(groove: *const Groove) void {
+            if (has_id) groove.ids.assert_between_bars();
+            groove.objects.assert_between_bars();
 
-            // Checkpoint the IdTree and ObjectTree.
-            if (has_id) groove.ids.checkpoint(Join.tree_callback(.ids));
-            groove.objects.checkpoint(Join.tree_callback(.objects));
-
-            // Checkpoint the IndexTrees.
             inline for (std.meta.fields(IndexTrees)) |field| {
-                const checkpoint_callback = Join.tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).checkpoint(checkpoint_callback);
+                @field(groove.indexes, field.name).assert_between_bars();
             }
         }
     };
