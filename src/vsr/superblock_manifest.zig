@@ -222,7 +222,8 @@ pub const Manifest = struct {
         manifest.checksums[manifest.count] = 0;
         manifest.addresses[manifest.count] = 0;
 
-        _ = manifest.compaction_set.remove(address);
+        const address_removed = manifest.compaction_set.remove(address);
+        assert(address_removed);
 
         log.debug("remove: checksum={} address={} manifest.blocks={}/{}", .{
             checksum,
