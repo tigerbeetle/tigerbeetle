@@ -154,7 +154,7 @@ test "format" {
 
     var storage = try Storage.init(
         allocator,
-        superblock_zone_size + constants.journal_size_headers + constants.journal_size_prepares,
+        superblock_zone_size + constants.journal_size + constants.client_replies_size,
         .{
             .read_latency_min = 0,
             .read_latency_mean = 0,
