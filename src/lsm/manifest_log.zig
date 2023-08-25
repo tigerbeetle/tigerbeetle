@@ -60,24 +60,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             table: *const TableInfo,
         ) void;
 
-        const alignment = 16;
-
-        comptime {
-            // Bit 7 is reserved to indicate whether the event is an insert or remove.
-            assert(constants.lsm_levels <= math.maxInt(u7) + 1);
-
-            assert(@sizeOf(Label) == @sizeOf(u8));
-
-            // All TableInfo's should already be 16-byte aligned because of the leading checksum.
-            assert(@alignOf(TableInfo) == alignment);
-
-            // For keys { 8, 16, 24, 32 } all TableInfo's should be a multiple of the alignment.
-            // However, we still store Label ahead of TableInfo to save space on the network.
-            // This means we store fewer entries per manifest block, to gain less padding,
-            // since we must store entry_count_max of whichever array is first in the layout.
-            // For a better understanding of this decision, see schema.ManifestLog.size().
-            assert(@sizeOf(TableInfo) % alignment == 0);
-        }
 
         superblock: *SuperBlock,
         grid: *Grid,
@@ -247,11 +229,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 const label = labels_used[entry];
                 const table = &tables_used[entry];
 
-                if (manifest.insert_table_extent(
-                    table.address,
-                    block_reference.address,
-                    entry,
-                )) {
+                if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
                     switch (label.event) {
                         .insert => manifest_log.open_event(manifest_log, label.level, table),
                         .remove => manifest.queue_for_compaction(block_reference.address),
@@ -279,7 +257,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// this is safer (no potential to get the event order wrong) and reduces fragmentation.
         pub fn insert(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             maybe(manifest_log.opened);
+            maybe(manifest_log.reading);
             assert(!manifest_log.writing);
+
             manifest_log.append(.{ .level = level, .event = .insert }, table);
         }
 
@@ -287,12 +267,17 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// The table must have previously been inserted to the manifest log.
         pub fn remove(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
             assert(manifest_log.opened);
+            assert(!manifest_log.reading);
             assert(!manifest_log.writing);
+
             manifest_log.append(.{ .level = level, .event = .remove }, table);
         }
 
         fn append(manifest_log: *ManifestLog, label: Label, table: *const TableInfo) void {
             assert(manifest_log.opened);
+            assert(!manifest_log.writing);
+            maybe(manifest_log.reading);
+            assert(manifest_log.grid_reservation != null);
             assert(label.level < constants.lsm_levels);
             assert(table.address > 0);
             assert(table.snapshot_min > 0);
@@ -350,27 +335,25 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
 
+            log.debug("flush: writing {} block(s)", .{ manifest_log.blocks_closed });
+
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
-
-            log.debug("flush: writing {} block(s)", .{ manifest_log.blocks_closed });
 
             // The manifest is updated synchronously relative to the beginning of compact() and
             // checkpoint() so that the SuperBlock.Manifest.append()s are deterministic relative
             // to other trees' manifest logs.
-            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
-            var i: usize = 0;
-            while (i < manifest_log.blocks_closed) : (i += 1) {
-                const block = manifest_log.blocks.get_ptr(i).?.*;
+            for (0..manifest_log.blocks_closed) |i| {
+                const block = manifest_log.blocks.get(i).?;
                 verify_block(block, null, null);
 
                 const header = schema.header_from_block(block);
                 const address = header.op;
                 assert(address > 0);
 
-                manifest.append(header.checksum, address);
+                manifest_log.superblock.manifest.append(header.checksum, address);
                 if (schema.ManifestLog.entry_count(block) < schema.ManifestLog.entry_count_max) {
-                    manifest.queue_for_compaction(address);
+                    manifest_log.superblock.manifest.queue_for_compaction(address);
                 }
             }
 
@@ -427,10 +410,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(address > 0);
 
             const entry_count = schema.ManifestLog.entry_count(block.*);
+            assert(entry_count > 0);
 
-            if (manifest_log.blocks_closed == 1 and manifest_log.blocks.count == 1) {
+            if (manifest_log.blocks.count == 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.
-                assert(entry_count > 0);
+                assert(manifest_log.blocks_closed == 1);
             } else {
                 assert(entry_count == schema.ManifestLog.entry_count_max);
             }
@@ -471,7 +455,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
             assert(manifest_log.grid_reservation == null);
-            assert(manifest_log.blocks.count <= manifest_log.blocks_closed + 1);
+            assert(manifest_log.blocks.count ==
+                manifest_log.blocks_closed + @intFromBool(manifest_log.entry_count > 0));
 
             // +1: During manifest-log compaction, we will create at most one block.
             manifest_log.grid_reservation =
@@ -486,8 +471,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.blocks_closed == 0);
-
-            const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
+            assert(manifest_log.read_callback != null);
+            assert(manifest_log.grid_reservation != null);
 
             // Compact a single manifest block — to minimize latency spikes, we want to do the bare
             // minimum of compaction work required.
@@ -495,7 +480,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // (Make sure to update the grid block reservation to account for this).
             // Or assert that compactions cannot update blocks fast enough to outpace manifest
             // log compaction (relative to the number of updates that fit in a manifest log block).
-            if (manifest.oldest_block_queued_for_compaction()) |block| {
+            if (manifest_log.superblock.manifest.oldest_block_queued_for_compaction()) |block| {
                 assert(block.address > 0);
 
                 manifest_log.reading = true;
@@ -519,6 +504,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
             assert(manifest_log.blocks_closed == 0);
+            assert(manifest_log.read_callback != null);
+            assert(manifest_log.grid_reservation != null);
 
             const block_reference = manifest_log.read_block_reference.?;
             verify_block(block, block_reference.checksum, block_reference.address);
@@ -562,7 +549,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             });
 
             // Blocks may be compacted if they contain frees, or are not completely full.
-            // For example, a partial block may be flushed as part of a checkpoint.
+            // (A partial block may be flushed as part of a checkpoint.)
             assert(frees > 0 or entry_count < schema.ManifestLog.entry_count_max);
             // At most one block could have been filled by the compaction.
             assert(manifest_log.blocks_closed <= 1);
@@ -623,6 +610,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         fn acquire_block(manifest_log: *ManifestLog) void {
             assert(manifest_log.opened);
+            maybe(manifest_log.reading);
+            assert(!manifest_log.writing);
             assert(manifest_log.entry_count == 0);
             assert(manifest_log.blocks.count == manifest_log.blocks_closed);
             assert(!manifest_log.blocks.full());
@@ -642,6 +631,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         fn close_block(manifest_log: *ManifestLog) void {
+            assert(manifest_log.opened);
+            maybe(manifest_log.reading);
+            assert(!manifest_log.writing);
             assert(manifest_log.blocks.count == manifest_log.blocks_closed + 1);
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
@@ -667,10 +659,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, null, null);
             assert(schema.ManifestLog.entry_count(block) == entry_count);
 
-            log.debug("close_block: checksum={} address={} entries={}", .{
+            log.debug("close_block: checksum={} address={} entries={}/{}", .{
                 header.checksum,
                 header.op,
                 entry_count,
+                schema.ManifestLog.entry_count_max,
             });
 
             manifest_log.blocks_closed += 1;
@@ -697,6 +690,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 }
 
 pub const Options = struct {
+    /// The total number of trees in the forest.
     tree_count: usize,
 
     /// The maximum number of table updates to the manifest by a half-measure of table
@@ -731,8 +725,6 @@ pub const Options = struct {
     /// - a manifest log compaction (+1 block in the worst case)
     /// - a leftover open block from the previous ops (+1 block)
     /// - table updates from a half bar of compactions
-    ///   (This is typically +1 block, but may be more when the block size is small).
-    ///   TODO(Beat compaction): blocks_count_appends only needs enough for 1 beat.
     fn blocks_count_max(options: *const Options) usize {
         const count = 1 + 1 + options.blocks_count_appends();
         assert(count >= 3);

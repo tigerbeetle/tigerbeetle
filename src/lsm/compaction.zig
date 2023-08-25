@@ -271,6 +271,8 @@ pub fn CompactionType(
             if (compaction.grid_reservation) |grid_reservation| {
                 compaction.context.grid.forfeit(grid_reservation);
                 compaction.grid_reservation = null;
+            } else {
+                assert(compaction.move_table);
             }
         }
 
