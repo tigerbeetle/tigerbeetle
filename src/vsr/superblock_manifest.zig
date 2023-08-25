@@ -124,7 +124,7 @@ pub const Manifest = struct {
 
         @memset(target[size..], 0);
 
-        assert(@divExact(size, BlockReferenceSize) == manifest.count);
+        assert(@divExact(size, BlockReference.size) == manifest.count);
 
         return size;
     }
@@ -134,7 +134,7 @@ pub const Manifest = struct {
         assert(manifest.tables.count() == 0);
         assert(manifest.compaction_set.count() == 0);
 
-        manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReferenceSize)));
+        manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReference.size)));
         assert(manifest.count <= manifest.count_max);
 
         var size: u64 = 0;
@@ -158,7 +158,7 @@ pub const Manifest = struct {
         size += addresses.len;
 
         assert(size == source.len);
-        assert(@divExact(size, BlockReferenceSize) == manifest.count);
+        assert(@divExact(size, BlockReference.size) == manifest.count);
 
         if (constants.verify) manifest.verify();
     }
@@ -345,11 +345,15 @@ pub const Manifest = struct {
     pub const BlockReference = struct {
         checksum: u128,
         address: u64,
-    };
 
-    /// The size of an encoded BlockReference on disk, not the size of the BlockReference struct.
-    pub const BlockReferenceSize = @sizeOf(u128) + @sizeOf(u128) + @sizeOf(u64);
-    pub const BlockReferenceSize = @sizeOf(u128) + @sizeOf(u64);
+        /// The size of an encoded BlockReference on disk, not the size of the BlockReference
+        /// struct.
+        pub const size = @sizeOf(u128) + @sizeOf(u64);
+
+        comptime {
+            assert(size <= @sizeOf(BlockReference));
+        }
+    };
 
     pub const IteratorReverse = struct {
         manifest: *const Manifest,
