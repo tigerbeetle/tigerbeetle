@@ -264,7 +264,7 @@ pub fn main() !void {
         move_table: bool,
         split_table: u32,
         info_a: union(enum) { immutable: KeyRange, level: Manifest.TableInfoReference },
-        updates: std.BoundedArray(struct {
+        updates: stdx.BoundedArray(struct {
             operation: enum { insert_to_level_b, move_to_level_b },
             table: TableInfo,
         }, updates_max) = .{ .buffer = undefined },
