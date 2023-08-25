@@ -158,7 +158,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             errdefer node_pool.deinit(allocator);
 
             var manifest_log =
-                try ManifestLog.init(allocator, grid, .{ .tree_count = tree_infos.len });
+                try ManifestLog.init(allocator, grid, .{ .forest_tree_count = tree_infos.len });
             errdefer manifest_log.deinit(allocator);
 
             var grooves: Grooves = undefined;
