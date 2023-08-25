@@ -432,10 +432,10 @@ pub const superblock_trailer_size_max = blk: {
         superblock_trailer_client_sessions_size_max;
 };
 
-// A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
+// A manifest block reference of 24 bytes contains a manifest block checksum and address.
 // These references are stored in struct-of-arrays layout in the trailer for the sake of alignment.
 const superblock_trailer_manifest_size_max = blk: {
-    assert(SuperBlockManifest.BlockReferenceSize == 16 + 16 + 8);
+    assert(SuperBlockManifest.BlockReferenceSize == 16 + 8);
 
     // Use a multiple of sector * reference so that the size is exactly divisible without padding:
     // For example, this 2.5 MiB manifest trailer == 65536 references == 65536 * 511 or 34m tables.

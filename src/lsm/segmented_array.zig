@@ -1275,7 +1275,7 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
 
     const Key = @import("composite_key.zig").CompositeKey(u64);
     const TableType = @import("table.zig").TableType;
-    const TableInfoType = @import("manifest.zig").TableInfoType;
+    const TableInfoType = @import("manifest.zig").TreeTableInfoType;
     const TableInfo = TableInfoType(TableType(
         Key,
         Key.Value,
@@ -1307,12 +1307,6 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
             return value.address;
         }
     };
-
-    comptime {
-        assert(@sizeOf(TableInfo) == 48 + @sizeOf(u128) * 2);
-        assert(@alignOf(TableInfo) == 16);
-        assert(stdx.no_padding(TableInfo));
-    }
 
     const TestOptions = struct {
         element_type: type,

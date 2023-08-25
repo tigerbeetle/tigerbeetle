@@ -167,7 +167,7 @@ pub fn ManifestLevelType(
         table_count_visible: u32 = 0,
 
         /// A monotonically increasing generation number that is used detect invalid internal
-        ///  TableInfo references.
+        /// TableInfo references.
         generation: u32 = 0,
 
         pub fn init(allocator: mem.Allocator) !Self {
@@ -799,7 +799,7 @@ pub fn TestContext(
             .general,
         );
 
-        const TableInfo = @import("manifest.zig").TableInfoType(Table);
+        const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
         const NodePool = @import("node_pool.zig").NodePool;
 
         const TestPool = NodePool(node_size, @alignOf(TableInfo));
