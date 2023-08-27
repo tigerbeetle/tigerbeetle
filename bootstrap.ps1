@@ -18,8 +18,8 @@ if ($build) {
 } else {
     echo "Downloading pre-built TigerBeetle binary for your machine."
     echo ""
-    
-    curl -o tigerbeetle.zip "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-x86_64-windows-$version.zip"
+
+    curl.exe -Lo tigerbeetle.zip "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-x86_64-windows-$version.zip"
     unzip -qo tigerbeetle.zip
 }
 
