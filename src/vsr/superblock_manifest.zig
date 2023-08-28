@@ -49,8 +49,6 @@ pub const Manifest = struct {
         // The same number is the limit for all tables across the forest since most trees are small.
         forest_table_count_max: u32,
     ) !Manifest {
-        // TODO Assert relation between manifest_block_count_max and forest_table_count_max.
-
         const checksums = try allocator.alloc(u128, manifest_block_count_max);
         errdefer allocator.free(checksums);
 
