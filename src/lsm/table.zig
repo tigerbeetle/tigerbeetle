@@ -457,6 +457,7 @@ pub fn TableType(
                 } else {
                     assert(compare_keys(builder.key_min, builder.key_max) == .lt);
                 }
+                assert(compare_keys(builder.key_max, sentinel_key) == .lt);
 
                 if (current > 0) {
                     const key_max_prev = index_data_keys(builder.index_block)[current - 1];
