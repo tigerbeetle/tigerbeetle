@@ -112,6 +112,17 @@ services:
 
 See https://github.com/tigerbeetle/tigerbeetle/issues/92 for discussion.
 
+## `exited with code 137`
+
+If you see this error without any logs from TigerBeetle, it is likely
+that the Linux OOMKiller is killing the process. If you are running
+Docker inside a virtual machine (such as is required on Docker or
+Podman for macOS), try increasing the virtual machine memory limit.
+
+Alternatively, in a development environment, you can lower the size of
+the cache so TigerBeetle uses less memory. For example, set
+`--cache-grid=128MB` when running `tigerbeetle start`.
+
 ## Debugging panics
 
 If TigerBeetle panics and you can reproduce the panic, you can get a
