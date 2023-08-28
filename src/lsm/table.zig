@@ -386,13 +386,32 @@ pub fn TableType(
                 assert(options.address > 0);
                 assert(builder.value_count > 0);
 
+                const block = builder.data_block;
+                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+                header.* = .{
+                    .cluster = options.cluster,
+                    .parent = @bitCast(schema.TableData.Parent{ .tree_id = options.tree_id }),
+                    .context = @bitCast(schema.TableData.Context{
+                        .value_count_max = data.value_count_max,
+                        .value_size = value_size,
+                    }),
+                    .op = options.address,
+                    .timestamp = options.snapshot_min,
+                    .request = builder.value_count,
+                    .size = @sizeOf(vsr.Header) + builder.value_count * @sizeOf(Value),
+                    .command = .block,
+                    .operation = schema.BlockType.data.operation(),
+                };
+
+                header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
+                header.set_checksum();
+
                 if (constants.verify) {
                     if (builder.data_blocks_in_filter == 0) {
                         assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
                     }
                 }
 
-                const block = builder.data_block;
                 const values_max = Table.data_block_values(block);
                 assert(values_max.len == data.value_count_max);
 
@@ -416,28 +435,6 @@ pub fn TableType(
                         a = b;
                     }
                 }
-
-                const values_padding = mem.sliceAsBytes(values_max[builder.value_count..]);
-                const block_padding = block[data.padding_offset..][0..data.padding_size];
-
-                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                header.* = .{
-                    .cluster = options.cluster,
-                    .parent = @bitCast(schema.TableData.Parent{ .tree_id = options.tree_id }),
-                    .context = @bitCast(schema.TableData.Context{
-                        .value_count_max = data.value_count_max,
-                        .value_size = value_size,
-                    }),
-                    .op = options.address,
-                    .timestamp = options.snapshot_min,
-                    .request = builder.value_count,
-                    .size = block_size - @as(u32, @intCast(values_padding.len + block_padding.len)),
-                    .command = .block,
-                    .operation = schema.BlockType.data.operation(),
-                };
-
-                header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
-                header.set_checksum();
 
                 if (constants.verify) {
                     assert(stdx.zeroed(block[header.size..]));
