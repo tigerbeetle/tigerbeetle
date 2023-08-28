@@ -406,16 +406,29 @@ pub fn TableType(
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
+                const values = Table.data_block_values_used(block);
+                { // Now that we have checksummed the block, sanity-check the result.
+
+                    if (constants.verify) {
+                        var a = &values[0];
+                        for (values[1..]) |*b| {
+                            assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
+                            a = b;
+                        }
+                    }
+
+                    assert(builder.value_count == values.len);
+                    assert(block_size - header.size ==
+                        (data.value_count_max - values.len) * @sizeOf(Value) + data.padding_size);
+                    // Padding is short on average, so assert unconditionally.
+                    assert(stdx.zeroed(block[header.size..]));
+                }
+
                 if (constants.verify) {
                     if (builder.data_blocks_in_filter == 0) {
                         assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
                     }
                 }
-
-                const values_max = Table.data_block_values(block);
-                assert(values_max.len == data.value_count_max);
-
-                const values = values_max[0..builder.value_count];
 
                 if (comptime Table.usage == .general) {
                     const filter_bytes = filter.block_filter(builder.filter_block);
@@ -427,18 +440,6 @@ pub fn TableType(
                 }
 
                 const key_max = key_from_value(&values[values.len - 1]);
-
-                if (constants.verify) {
-                    var a = &values[0];
-                    for (values[1..]) |*b| {
-                        assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
-                        a = b;
-                    }
-                }
-
-                if (constants.verify) {
-                    assert(stdx.zeroed(block[header.size..]));
-                }
 
                 const current = builder.data_block_count;
                 index_data_keys(builder.index_block)[current] = key_max;
