@@ -103,7 +103,7 @@ cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
 
-cmd="./zig/zig build benchmark -Dcpu=x86_64_v3+aes -Doptimize=ReleaseSafe -- --account-count=10000 --transfer-count=10000000 --transfer-count-per-second=1000000 --addresses=${var.addresses} --statsd --print-batch-timings"
+cmd="./zig/zig build benchmark -Dcpu=x86_64_v3+aes -Doptimize=ReleaseSafe -- --account-count=10000 --transfer-count=10000000 --transfer-count-per-second=1000000 --addresses=${var.addresses} --enable-statsd --print-batch-timings"
 echo "TigerBeetle Benchmark Command: ${cmd}"
 timeout -s KILL 3400 $cmd
 
