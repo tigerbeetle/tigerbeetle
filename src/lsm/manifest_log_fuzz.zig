@@ -24,12 +24,16 @@ const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExte
 const Storage = @import("../testing/storage.zig").Storage;
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const BlockType = @import("schema.zig").BlockType;
-const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage, TableInfo);
+const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
+const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
+const schema = @import("./schema.zig");
+const TableInfo = schema.ManifestLog.TableInfo;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
-const entries_max_block = ManifestLog.Block.entry_count_max;
+const manifest_log_options = ManifestLogOptions{ .forest_tree_count = 1 };
+const entries_max_block = schema.ManifestLog.entry_count_max;
 const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
 
@@ -107,29 +111,39 @@ fn run_fuzz(
 
         env.open();
         env.wait(&env.manifest_log);
-
-        env.reserve();
     }
+
+    try env.half_bar_commence();
 
     for (events) |event| {
         log.debug("event={}", .{event});
         switch (event) {
             .insert => |e| try env.insert(e.level, &e.table),
             .remove => |e| try env.remove(e.level, &e.table),
-            .compact => try env.compact(),
-            .checkpoint => try env.checkpoint(),
+            .compact => {
+                try env.half_bar_complete();
+                try env.half_bar_commence();
+            },
+            .checkpoint => {
+                // Checkpoint always immediately follows compaction.
+                try env.half_bar_complete();
+                try env.checkpoint();
+                try env.half_bar_commence();
+            },
             .noop => {},
         }
     }
+
+    try env.half_bar_complete();
 }
 
 const ManifestEvent = union(enum) {
     insert: struct { level: u7, table: TableInfo },
     remove: struct { level: u7, table: TableInfo },
-    compact: void,
-    checkpoint: void,
+    compact,
+    checkpoint,
     /// The random EventType could not be generated — this simplifies event generation.
-    noop: void,
+    noop,
 };
 
 fn generate_events(
@@ -151,18 +165,14 @@ fn generate_events(
 
     var event_distribution = fuzz.random_enum_distribution(random, EventType);
     // Don't remove too often, so that there are plenty of tables accumulating.
-    event_distribution.remove /= @as(f64, @floatFromInt(constants.lsm_levels));
+    event_distribution.remove /= @floatFromInt(constants.lsm_levels);
     // Don't compact or checkpoint too often, to approximate a real workload.
     // Additionally, checkpoint is slow because of the verification, so run it less
     // frequently.
-    event_distribution.compact /= @as(
-        f64,
-        @floatFromInt(constants.lsm_levels * constants.lsm_batch_multiple),
-    );
-    event_distribution.checkpoint /= @as(
-        f64,
-        @floatFromInt(constants.lsm_levels * constants.journal_slot_count),
-    );
+    event_distribution.compact /=
+        @floatFromInt(constants.lsm_levels * constants.lsm_batch_multiple);
+    event_distribution.checkpoint /=
+        @floatFromInt(constants.lsm_levels * constants.journal_slot_count);
 
     log.info("event_distribution = {:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
@@ -177,7 +187,7 @@ fn generate_events(
     var append_count: usize = 0;
     for (events, 0..) |*event, i| {
         const event_type = blk: {
-            if (append_count == ManifestLog.compaction_appends_max) {
+            if (append_count == manifest_log_options.compaction_appends_max()) {
                 // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
                 break :blk if (random.boolean()) EventType.compact else EventType.checkpoint;
             }
@@ -203,8 +213,9 @@ fn generate_events(
                     .address = i + 1,
                     .snapshot_min = 1,
                     .snapshot_max = 2,
-                    .key_min = 0,
-                    .key_max = 0,
+                    .key_min = .{0} ** 16,
+                    .key_max = .{0} ** 16,
+                    .tree_id = 1234,
                 };
                 try tables.append(.{
                     .level = level,
@@ -263,22 +274,6 @@ fn generate_events(
     return events;
 }
 
-const TableInfo = extern struct {
-    checksum: u128,
-    address: u64,
-    flags: u64 = 0,
-    snapshot_min: u64,
-    snapshot_max: u64 = std.math.maxInt(u64),
-    key_min: u128,
-    key_max: u128,
-
-    comptime {
-        assert(@sizeOf(TableInfo) == 48 + 16 * 2);
-        assert(@alignOf(TableInfo) == 16);
-        assert(stdx.no_padding(TableInfo));
-    }
-};
-
 const Environment = struct {
     allocator: std.mem.Allocator,
     superblock_context: SuperBlock.Context = undefined,
@@ -286,7 +281,6 @@ const Environment = struct {
     manifest_log_verify: ManifestLog,
     manifest_log_model: ManifestLogModel,
     manifest_log_opening: ?ManifestLogModel.TableMap = null,
-    manifest_log_reserved: bool = false,
     pending: usize = 0,
 
     fn init(
@@ -299,11 +293,11 @@ const Environment = struct {
         var manifest_log_model = try ManifestLogModel.init(allocator);
         errdefer manifest_log_model.deinit();
 
-        const tree_id = std.math.maxInt(u128);
-        var manifest_log = try ManifestLog.init(allocator, options.grid, tree_id);
+        var manifest_log = try ManifestLog.init(allocator, options.grid, manifest_log_options);
         errdefer manifest_log.deinit(allocator);
 
-        var manifest_log_verify = try ManifestLog.init(allocator, options.grid_verify, tree_id);
+        var manifest_log_verify =
+            try ManifestLog.init(allocator, options.grid_verify, manifest_log_options);
         errdefer manifest_log_verify.deinit(allocator);
 
         return Environment{
@@ -323,7 +317,6 @@ const Environment = struct {
 
     fn wait(env: *Environment, manifest_log: *ManifestLog) void {
         while (env.pending > 0) {
-            // manifest_log.grid.tick();
             manifest_log.superblock.storage.tick();
         }
     }
@@ -356,7 +349,6 @@ const Environment = struct {
 
     fn open(env: *Environment) void {
         assert(env.pending == 0);
-        assert(!env.manifest_log_reserved);
 
         env.pending += 1;
         env.manifest_log.open(open_event, open_callback);
@@ -376,47 +368,33 @@ const Environment = struct {
         env.pending -= 1;
     }
 
-    fn reserve(env: *Environment) void {
-        env.manifest_log.reserve();
-        env.manifest_log_reserved = true;
-    }
-
     fn insert(env: *Environment, level: u7, table: *const TableInfo) !void {
-        if (!env.manifest_log_reserved) env.manifest_log.reserve();
-        env.manifest_log_reserved = true;
-
         try env.manifest_log_model.insert(level, table);
         env.manifest_log.insert(level, table);
     }
 
     fn remove(env: *Environment, level: u7, table: *const TableInfo) !void {
-        if (!env.manifest_log_reserved) env.manifest_log.reserve();
-        env.manifest_log_reserved = true;
-
         try env.manifest_log_model.remove(level, table);
         env.manifest_log.remove(level, table);
     }
 
-    fn compact(env: *Environment) !void {
-        if (!env.manifest_log_reserved) env.manifest_log.reserve();
-        env.manifest_log_reserved = true;
-
+    fn half_bar_commence(env: *Environment) !void {
         env.pending += 1;
-        env.manifest_log.compact(compact_callback);
+        env.manifest_log.compact(manifest_log_compact_callback);
         env.wait(&env.manifest_log);
-
-        env.manifest_log.forfeit();
-        env.manifest_log_reserved = false;
     }
 
-    fn compact_callback(manifest_log: *ManifestLog) void {
+    fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
         const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
         env.pending -= 1;
     }
 
+    fn half_bar_complete(env: *Environment) !void {
+        env.manifest_log.compact_end();
+    }
+
     fn checkpoint(env: *Environment) !void {
-        // Checkpoint always follows compaction.
-        try env.compact();
+        assert(env.manifest_log.grid_reservation == null);
 
         try env.manifest_log_model.checkpoint();
 
@@ -482,11 +460,8 @@ const Environment = struct {
             });
 
             test_manifest_log.deinit(env.allocator);
-            test_manifest_log.* = try ManifestLog.init(
-                env.allocator,
-                test_grid,
-                env.manifest_log.tree_id,
-            );
+            test_manifest_log.* =
+                try ManifestLog.init(env.allocator, test_grid, manifest_log_options);
         }
 
         env.pending += 1;
@@ -623,12 +598,11 @@ fn verify_manifest(
     try std.testing.expectEqual(expect.count_max, actual.count_max);
 
     const c = expect.count;
-    try std.testing.expect(std.mem.eql(u128, expect.trees[0..c], actual.trees[0..c]));
     try std.testing.expect(std.mem.eql(u128, expect.checksums[0..c], actual.checksums[0..c]));
     try std.testing.expect(std.mem.eql(u64, expect.addresses[0..c], actual.addresses[0..c]));
 
     try std.testing.expect(hash_map_equals(
-        SuperBlock.Manifest.TableExtentKey,
+        u64,
         SuperBlock.Manifest.TableExtent,
         &expect.tables,
         &actual.tables,
@@ -655,10 +629,10 @@ fn verify_manifest_compaction_set(
         const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
         try std.testing.expectEqual(BlockType.manifest.operation(), block_header.operation);
 
-        const entry_count = ManifestLog.Block.entry_count(block);
-        var compact_soon: bool = entry_count < ManifestLog.Block.entry_count_max;
-        for (ManifestLog.Block.labels_const(block)[0..entry_count], 0..) |label, i| {
-            const table = &ManifestLog.Block.tables_const(block)[i];
+        const entry_count = schema.ManifestLog.entry_count(block);
+        var compact_soon: bool = entry_count < schema.ManifestLog.entry_count_max;
+        for (schema.ManifestLog.labels_const(block)[0..entry_count], 0..) |label, i| {
+            const table = &schema.ManifestLog.tables_const(block)[i];
             compact_soon = compact_soon or switch (label.event) {
                 .remove => true,
                 .insert => blk: {
