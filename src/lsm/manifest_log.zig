@@ -41,6 +41,15 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const schema = @import("schema.zig");
 const TableInfo = schema.ManifestLog.TableInfo;
 
+comptime {
+    // We need enough manifest blocks to accommodate the upper-bound of tables.
+    // *10 is an arbitrary lower-bound of available space for amplification, which allows compaction
+    // to be spaced more efficiently.
+    const block_entries = schema.ManifestLog.entry_count_max;
+    const manifest_entries = block_entries * vsr.superblock.manifest_blocks_max;
+    assert(manifest_entries >= tree.table_count_max * 10);
+}
+
 pub fn ManifestLogType(comptime Storage: type) type {
     return struct {
         const ManifestLog = @This();

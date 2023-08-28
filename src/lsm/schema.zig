@@ -521,6 +521,8 @@ pub const TableData = struct {
     }
 };
 
+/// A ManifestLog block's body is a SoA of Labels and TableInfos.
+/// Each Label/TableInfo pair is an "entry".
 // TODO Store timestamp (snapshot) in header.
 pub const ManifestLog = struct {
     const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);

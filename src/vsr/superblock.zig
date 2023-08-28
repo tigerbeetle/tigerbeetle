@@ -484,6 +484,10 @@ pub const grid_blocks_max = blk: {
     break :blk shard_count * SuperBlockFreeSet.shard_bits;
 };
 
+/// The maximum number of ManifestLog blocks.
+pub const manifest_blocks_max =
+    @divExact(superblock_trailer_manifest_size_max, SuperBlockManifest.BlockReference.size);
+
 comptime {
     assert(grid_blocks_max > 0);
     assert(grid_blocks_max * constants.block_size + data_file_size_min <= constants.storage_size_max);
@@ -635,10 +639,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var manifest = try Manifest.init(
                 allocator,
-                @divExact(
-                    superblock_trailer_manifest_size_max,
-                    Manifest.BlockReference.size,
-                ),
+                manifest_blocks_max,
                 @import("../lsm/tree.zig").table_count_max,
             );
             errdefer manifest.deinit(allocator);
