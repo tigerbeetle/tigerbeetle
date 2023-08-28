@@ -141,8 +141,10 @@ test "disjoint_slices" {
     try std.testing.expectEqual(false, disjoint_slices(u32, u8, b, std.mem.sliceAsBytes(b)));
 }
 
-// TODO(Performance): Iterate over words.
+/// Checks that a byteslice is zeroed.
 pub fn zeroed(bytes: []const u8) bool {
+    // This implementation already gets vectorized
+    // https://godbolt.org/z/46cMsPKPc
     var byte_bits: u8 = 0;
     for (bytes) |byte| {
         byte_bits |= byte;
