@@ -332,9 +332,9 @@ pub fn TableType(
                 errdefer allocator.free(data_block);
 
                 return Builder{
-                    .index_block = index_block[0..block_size],
-                    .filter_block = filter_block[0..block_size],
-                    .data_block = data_block[0..block_size],
+                    .index_block = index_block,
+                    .filter_block = filter_block,
+                    .data_block = data_block,
                 };
             }
 
