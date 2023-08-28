@@ -332,9 +332,9 @@ pub fn TableType(
                 errdefer allocator.free(data_block);
 
                 return Builder{
-                    .index_block = index_block[0..block_size],
-                    .filter_block = filter_block[0..block_size],
-                    .data_block = data_block[0..block_size],
+                    .index_block = index_block,
+                    .filter_block = filter_block,
+                    .data_block = data_block,
                 };
             }
 
@@ -386,41 +386,7 @@ pub fn TableType(
                 assert(options.address > 0);
                 assert(builder.value_count > 0);
 
-                if (constants.verify) {
-                    if (builder.data_blocks_in_filter == 0) {
-                        assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
-                    }
-                }
-
                 const block = builder.data_block;
-                const values_max = Table.data_block_values(block);
-                assert(values_max.len == data.value_count_max);
-
-                const values = values_max[0..builder.value_count];
-
-                if (comptime Table.usage == .general) {
-                    const filter_bytes = filter.block_filter(builder.filter_block);
-                    for (values) |*value| {
-                        const key = key_from_value(value);
-                        const fingerprint = key_fingerprint(key);
-                        bloom_filter.add(fingerprint, filter_bytes);
-                    }
-                }
-
-                const key_max = key_from_value(&values[values.len - 1]);
-
-                if (constants.verify) {
-                    var a = &values[0];
-                    for (values[1..]) |*b| {
-                        assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
-                        a = b;
-                    }
-                }
-
-                const values_padding = mem.sliceAsBytes(values_max[builder.value_count..]);
-                const block_padding = block[data.padding_offset..][0..data.padding_size];
-                assert(compare_keys(key_from_value(&values[values.len - 1]), key_max) == .eq);
-
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
                     .cluster = options.cluster,
@@ -432,7 +398,7 @@ pub fn TableType(
                     .op = options.address,
                     .timestamp = options.snapshot_min,
                     .request = builder.value_count,
-                    .size = block_size - @as(u32, @intCast(values_padding.len + block_padding.len)),
+                    .size = @sizeOf(vsr.Header) + builder.value_count * @sizeOf(Value),
                     .command = .block,
                     .operation = schema.BlockType.data.operation(),
                 };
@@ -440,10 +406,48 @@ pub fn TableType(
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
+                const values = Table.data_block_values_used(block);
+                { // Now that we have checksummed the block, sanity-check the result:
+
+                    if (constants.verify) {
+                        var a = &values[0];
+                        for (values[1..]) |*b| {
+                            assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
+                            a = b;
+                        }
+                    }
+
+                    assert(builder.value_count == values.len);
+                    assert(block_size - header.size ==
+                        (data.value_count_max - values.len) * @sizeOf(Value) + data.padding_size);
+                    // Padding is short on average, so assert unconditionally.
+                    assert(stdx.zeroed(block[header.size..]));
+                }
+
+                { // Update the filter block:
+                    if (constants.verify) {
+                        if (builder.data_blocks_in_filter == 0) {
+                            assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
+                        }
+                    }
+
+                    if (comptime Table.usage == .general) {
+                        const filter_bytes = filter.block_filter(builder.filter_block);
+                        for (values) |*value| {
+                            const key = key_from_value(value);
+                            const fingerprint = key_fingerprint(key);
+                            bloom_filter.add(fingerprint, filter_bytes);
+                        }
+                    }
+                }
+
+                const key_max = key_from_value(&values[values.len - 1]);
                 const current = builder.data_block_count;
-                index_data_keys(builder.index_block)[current] = key_max;
-                index.data_addresses(builder.index_block)[current] = options.address;
-                index.data_checksums(builder.index_block)[current] = header.checksum;
+                { // Update the index block:
+                    index_data_keys(builder.index_block)[current] = key_max;
+                    index.data_addresses(builder.index_block)[current] = options.address;
+                    index.data_checksums(builder.index_block)[current] = header.checksum;
+                }
 
                 if (current == 0) builder.key_min = key_from_value(&values[0]);
                 builder.key_max = key_max;
@@ -453,6 +457,7 @@ pub fn TableType(
                 } else {
                     assert(compare_keys(builder.key_min, builder.key_max) == .lt);
                 }
+                assert(compare_keys(builder.key_max, sentinel_key) == .lt);
 
                 if (current > 0) {
                     const key_max_prev = index_data_keys(builder.index_block)[current - 1];
