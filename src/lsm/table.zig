@@ -407,7 +407,7 @@ pub fn TableType(
                 header.set_checksum();
 
                 const values = Table.data_block_values_used(block);
-                { // Now that we have checksummed the block, sanity-check the result.
+                { // Now that we have checksummed the block, sanity-check the result:
 
                     if (constants.verify) {
                         var a = &values[0];
@@ -424,27 +424,30 @@ pub fn TableType(
                     assert(stdx.zeroed(block[header.size..]));
                 }
 
-                if (constants.verify) {
-                    if (builder.data_blocks_in_filter == 0) {
-                        assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
+                { // Update the filter block:
+                    if (constants.verify) {
+                        if (builder.data_blocks_in_filter == 0) {
+                            assert(stdx.zeroed(filter.block_filter(builder.filter_block)));
+                        }
                     }
-                }
 
-                if (comptime Table.usage == .general) {
-                    const filter_bytes = filter.block_filter(builder.filter_block);
-                    for (values) |*value| {
-                        const key = key_from_value(value);
-                        const fingerprint = key_fingerprint(key);
-                        bloom_filter.add(fingerprint, filter_bytes);
+                    if (comptime Table.usage == .general) {
+                        const filter_bytes = filter.block_filter(builder.filter_block);
+                        for (values) |*value| {
+                            const key = key_from_value(value);
+                            const fingerprint = key_fingerprint(key);
+                            bloom_filter.add(fingerprint, filter_bytes);
+                        }
                     }
                 }
 
                 const key_max = key_from_value(&values[values.len - 1]);
-
                 const current = builder.data_block_count;
-                index_data_keys(builder.index_block)[current] = key_max;
-                index.data_addresses(builder.index_block)[current] = options.address;
-                index.data_checksums(builder.index_block)[current] = header.checksum;
+                { // Update the index block:
+                    index_data_keys(builder.index_block)[current] = key_max;
+                    index.data_addresses(builder.index_block)[current] = options.address;
+                    index.data_checksums(builder.index_block)[current] = header.checksum;
+                }
 
                 if (current == 0) builder.key_min = key_from_value(&values[0]);
                 builder.key_max = key_max;
