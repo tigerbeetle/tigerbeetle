@@ -440,6 +440,10 @@ pub fn TableType(
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
+                if (constants.verify) {
+                    assert(stdx.zeroed(block[header.size..]));
+                }
+
                 const current = builder.data_block_count;
                 index_data_keys(builder.index_block)[current] = key_max;
                 index.data_addresses(builder.index_block)[current] = options.address;
