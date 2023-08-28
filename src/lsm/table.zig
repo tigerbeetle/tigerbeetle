@@ -419,7 +419,6 @@ pub fn TableType(
 
                 const values_padding = mem.sliceAsBytes(values_max[builder.value_count..]);
                 const block_padding = block[data.padding_offset..][0..data.padding_size];
-                assert(compare_keys(key_from_value(&values[values.len - 1]), key_max) == .eq);
 
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
                 header.* = .{
