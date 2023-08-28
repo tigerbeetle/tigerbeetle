@@ -23,6 +23,7 @@ const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_s
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
+const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -127,10 +128,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             superblock_format,
             superblock_open,
             tree_init,
-            tree_open,
+            manifest_log_open,
             fuzzing,
             tree_compact,
-            tree_checkpoint,
+            manifest_log_compact,
+            manifest_log_checkpoint,
             superblock_checkpoint,
             tree_lookup,
         };
@@ -148,11 +150,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         grid_repair_write: Grid.Write,
         grid_repair_block: Grid.BlockPtr,
         grid_repair_queue: GridRepairQueue,
+        manifest_log: ManifestLog,
         node_pool: NodePool,
         tree: Tree,
         lookup_context: Tree.LookupContext,
         lookup_value: ?*const Key.Value,
-        checkpoint_op: ?u64,
 
         pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
@@ -177,12 +179,16 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.grid_repair_queue = GridRepairQueue.init(allocator);
             defer env.grid_repair_queue.deinit();
 
+            env.manifest_log =
+                try ManifestLog.init(allocator, &env.grid, .{ .forest_tree_count = 1 });
+            defer env.manifest_log.deinit(allocator);
+
             env.node_pool = try NodePool.init(allocator, node_count);
             defer env.node_pool.deinit(allocator);
 
             env.tree = undefined;
             env.lookup_value = null;
-            env.checkpoint_op = null;
+            //env.checkpoint_op = null;
 
             try env.open_then_apply(fuzz_ops);
         }
@@ -217,10 +223,14 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             }, tree_options);
             defer env.tree.deinit(allocator);
 
-            env.change_state(.tree_init, .tree_open);
-            env.tree.open(tree_open_callback);
+            env.change_state(.tree_init, .manifest_log_open);
 
-            env.tick_until_state_change(.tree_open, .fuzzing);
+            env.tree.open_commence(&env.manifest_log);
+            env.manifest_log.open(manifest_log_open_event, manifest_log_open_callback);
+
+            env.tick_until_state_change(.manifest_log_open, .fuzzing);
+            env.tree.open_complete();
+
             try env.apply(fuzz_ops);
         }
 
@@ -234,16 +244,49 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.superblock_open, .tree_init);
         }
 
-        fn tree_open_callback(tree: *Tree) void {
-            const env = @fieldParentPtr(@This(), "tree", tree);
-            env.change_state(.tree_open, .fuzzing);
+        fn manifest_log_open_event(
+            manifest_log: *ManifestLog,
+            level: u7,
+            table: *const schema.ManifestLog.TableInfo,
+        ) void {
+            _ = manifest_log;
+            _ = level;
+            _ = table;
+
+            // This ManifestLog is only opened during setup, when it has no blocks.
+            unreachable;
+        }
+
+        fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
+            const env = @fieldParentPtr(@This(), "manifest_log", manifest_log);
+            env.change_state(.manifest_log_open, .fuzzing);
         }
 
         pub fn compact(env: *Environment, op: u64) void {
             env.change_state(.fuzzing, .tree_compact);
             env.tree.compact(tree_compact_callback, op);
             env.tick_until_state_change(.tree_compact, .fuzzing);
+
+            if (op % @divExact(constants.lsm_batch_multiple, 2) == 0 and
+                op >= constants.lsm_batch_multiple)
+            {
+                env.change_state(.fuzzing, .manifest_log_compact);
+                env.manifest_log.compact(manifest_log_compact_callback);
+                env.tick_until_state_change(.manifest_log_compact, .fuzzing);
+            }
+
             env.tree.compact_end();
+
+            if ((op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0 and
+                op >= constants.lsm_batch_multiple)
+            {
+                env.manifest_log.compact_end();
+            }
+        }
+
+        fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {
+            const env = @fieldParentPtr(@This(), "manifest_log", manifest_log);
+            env.change_state(.manifest_log_compact, .fuzzing);
         }
 
         fn tree_compact_callback(tree: *Tree) void {
@@ -252,19 +295,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn checkpoint(env: *Environment, op: u64) void {
-            assert(env.checkpoint_op == null);
-            env.checkpoint_op = op - constants.lsm_batch_multiple;
-
-            env.change_state(.fuzzing, .tree_checkpoint);
-            env.tree.checkpoint(tree_checkpoint_callback);
-            env.tick_until_state_change(.tree_checkpoint, .superblock_checkpoint);
-            env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
-        }
-
-        fn tree_checkpoint_callback(tree: *Tree) void {
-            const env = @fieldParentPtr(@This(), "tree", tree);
-            const op = env.checkpoint_op.?;
-            env.checkpoint_op = null;
+            //assert(env.checkpoint_op == null);
+            env.tree.assert_between_bars();
 
             {
                 // VSRState.monotonic() asserts that the previous_checkpoint id changes.
@@ -282,14 +314,17 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 _ = env.superblock.client_sessions.put(1, &reply);
             }
 
-            env.change_state(.tree_checkpoint, .superblock_checkpoint);
+            const checkpoint_op = op - constants.lsm_batch_multiple;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
-                .commit_min = op,
-                .commit_max = op + 1,
+                .commit_min = checkpoint_op,
+                .commit_max = checkpoint_op + 1,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
             });
+
+            env.change_state(.fuzzing, .superblock_checkpoint);
+            env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {

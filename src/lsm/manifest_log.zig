@@ -735,7 +735,7 @@ pub const Options = struct {
     /// - Manifest log compaction.
     /// - Releasing persistent snapshots.
     // TODO If insert-then-remove can update in-memory, then we can only count input tables once.
-    fn compaction_appends_max(options: *const Options) usize {
+    pub fn compaction_appends_max(options: *const Options) usize {
         return options.forest_tree_count *
             tree.compactions_max *
             (tree.compaction_tables_input_max + // Update snapshot_max.
