@@ -22,10 +22,10 @@ for (const ver of Object.values(headers.symbols)) {
 const defFile = path.resolve(__dirname, '../node.def')
 const libFile = path.resolve(__dirname, '../node.lib')
 const allSymbolsArr = Array.from(allSymbols)
-fs.writeFileSync(defFile, 'LIBRARY node\nEXPORTS\n' + allSymbolsArr.join('\n'))
+fs.writeFileSync(defFile, 'EXPORTS\n    ' + allSymbolsArr.join('\n    '))
 
 // Compile '.def' file to '.lib' file for zig build node_client to link to.
-execSync(`${zig} dlltool -m i386:x86-64 -d ${defFile} -l ${libFile}`)
+execSync(`${zig} dlltool -m i386:x86-64 -D node.exe -d ${defFile} -l ${libFile}`)
 
 // Build the tigerbeetle node client.
 process.chdir(path.resolve('../../../'))

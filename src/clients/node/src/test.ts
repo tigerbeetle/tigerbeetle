@@ -71,7 +71,7 @@ test('can return error on account', async (): Promise<void> => {
   const errors = await client.createAccounts([accountA, accountB])
 
   assert.strictEqual(errors.length, 1)
-  assert.deepStrictEqual(errors[0], { index: 0, code: CreateAccountError.exists })
+  assert.deepStrictEqual(errors[0], { index: 0, result: CreateAccountError.exists })
 })
 
 test('throws error if timestamp is not set to 0n on account', async (): Promise<void> => {
@@ -310,8 +310,8 @@ test('can link transfers', async (): Promise<void> => {
 
   const errors = await client.createTransfers([transfer1, transfer2])
   assert.strictEqual(errors.length, 2)
-  assert.deepStrictEqual(errors[0], { index: 0, code: CreateTransferError.linked_event_failed })
-  assert.deepStrictEqual(errors[1], { index: 1, code: CreateTransferError.exists_with_different_flags })
+  assert.deepStrictEqual(errors[0], { index: 0, result: CreateTransferError.linked_event_failed })
+  assert.deepStrictEqual(errors[1], { index: 1, result: CreateTransferError.exists_with_different_flags })
 
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   assert.strictEqual(accounts.length, 2)
