@@ -26,11 +26,11 @@
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
     "test": "node dist/test",
-    "build": "npm run build_tsc && npm run build_lib",
-    "build_tsc": "./node_modules/typescript/bin/tsc",
-    "build_lib": "node scripts/build_lib.js",
-    "prepack": "npm run build && find dist/bin \\( -iname \\*.so -o -iname \\*.dylib -o -iname \\*.dll \\) -printf \"mv '%h/%f' '%h/client.node'\\n\" | sh",
-    "clean": "rm -rf build dist node_modules src/zig-cache zig"
+    "build": "node ./scripts/build.js",
+    "build_tsc": "node ./node_modules/typescript/bin/tsc",
+    "build_lib": "node ./scripts/build_lib.js",
+    "prepack": "node ./scripts/prepack.js",
+    "clean": "node ./scripts/clean.js"
   },
   "author": "TigerBeetle, Inc",
   "license": "Apache-2.0",

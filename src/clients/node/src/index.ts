@@ -17,7 +17,8 @@ function getBinding (): Binding {
 
   const platformMap = {
     "linux": "linux",
-    "darwin": "macos"
+    "darwin": "macos",
+    "win32" : "windows",
   }
 
   if (! (arch in archMap)) {
