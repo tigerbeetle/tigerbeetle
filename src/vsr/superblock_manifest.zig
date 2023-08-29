@@ -540,6 +540,7 @@ test "SuperBlockManifest" {
     try expectEqual(@as(?u32, null), manifest.index_for_address(4));
     try expectEqual(@as(?u32, 0), manifest.index_for_address(3));
 
+    manifest.queue_for_compaction(3);
     manifest.remove(2, 3);
     try expectEqual(false, manifest.queued_for_compaction(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(3));
