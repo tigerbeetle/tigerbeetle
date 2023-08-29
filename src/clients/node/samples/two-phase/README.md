@@ -8,7 +8,7 @@ Code for this sample is in [./main.js](./main.js).
 ## Prerequisites
 
 Linux >= 5.6 is the only production environment we
-support. But for ease of development we also support macOS. Windows is not yet supported.
+support. But for ease of development we also support macOS and Windows.
 * NodeJS >= `14`
 
 ## Setup

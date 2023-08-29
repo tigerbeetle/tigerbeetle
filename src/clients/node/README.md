@@ -11,7 +11,7 @@ The TigerBeetle client for Node.js.
 ### Prerequisites
 
 Linux >= 5.6 is the only production environment we
-support. But for ease of development we also support macOS. Windows is not yet supported.
+support. But for ease of development we also support macOS and Windows.
 * NodeJS >= `14`
 
 ## Setup
@@ -615,4 +615,14 @@ npm pack
 
 ### On Windows
 
-Not yet supported.
+In PowerShell run:
+
+```console
+git clone https://github.com/tigerbeetle/tigerbeetle
+cd tigerbeetle
+git submodule update --init --recursive
+.\scripts\install_zig.bat
+cd src/clients/node
+npm install --include dev
+npm pack
+```

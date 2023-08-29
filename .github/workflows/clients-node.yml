@@ -94,8 +94,7 @@ jobs:
     needs: build
     strategy:
       matrix:
-        # Windows not yet supported.
-        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, macos-latest, windows-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
         sample: [basic, two-phase, two-phase-many]
 
     defaults:
@@ -124,8 +123,7 @@ jobs:
 
     strategy:
       matrix:
-        # Windows not yet supported.
-        os: [ubuntu-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, macos-latest, windows-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
 
     defaults:
       run:

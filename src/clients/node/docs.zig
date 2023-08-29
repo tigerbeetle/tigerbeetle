@@ -88,7 +88,10 @@ pub const NodeDocs = Docs{
     ,
 
     .install_commands = "npm install tigerbeetle-node",
-    .build_commands = "npm install typescript @types/node && npx tsc --allowJs --noEmit main.js",
+    .build_commands =
+    \\npm install typescript @types/node
+    \\npx tsc --allowJs --noEmit main.js
+    ,
     .run_commands = "node main.js",
 
     .current_commit_install_commands_hook = null,
@@ -503,7 +506,11 @@ pub const NodeDocs = Docs{
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
-    .developer_setup_pwsh_commands = "",
+    .developer_setup_pwsh_commands =
+    \\cd src/clients/node
+    \\npm install --include dev
+    \\npm pack
+    ,
     .test_main_prefix =
     \\const {
     \\  createClient,
