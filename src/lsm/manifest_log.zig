@@ -361,16 +361,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
 
-            if (manifest_log.blocks_closed == 0) {
-                manifest_log.grid.on_next_tick(
-                    flush_next_tick_callback,
-                    &manifest_log.next_tick,
-                );
-            } else {
-                for (0..manifest_log.blocks_closed) |_| {
-                    manifest_log.write_block();
-                }
-                assert(manifest_log.writes_pending == manifest_log.blocks_closed);
+            for (0..manifest_log.blocks_closed) |_| manifest_log.write_block();
+            assert(manifest_log.blocks_closed == manifest_log.writes_pending);
+
+            if (manifest_log.writes_pending == 0) {
+                manifest_log.grid.on_next_tick(flush_next_tick_callback, &manifest_log.next_tick);
             }
         }
 
