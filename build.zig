@@ -146,7 +146,7 @@ pub fn build(b: *std.Build) !void {
     // The meta-target lint runs them all
     {
         // lint_zig_fmt
-        const lint_zig_fmt = b.addSystemCommand(&.{ b.zig_exe, "fmt", "--check", "." });
+        const lint_zig_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
         const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt");
         lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
 
