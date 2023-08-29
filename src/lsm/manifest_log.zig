@@ -361,23 +361,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.writing = true;
             manifest_log.write_callback = callback;
 
-            // The manifest is updated synchronously relative to the beginning of compact() and
-            // checkpoint() so that the SuperBlock.Manifest.append()s are deterministic relative
-            // to other trees' manifest logs.
-            for (0..manifest_log.blocks_closed) |i| {
-                const block = manifest_log.blocks.get(i).?;
-                verify_block(block, null, null);
-
-                const header = schema.header_from_block(block);
-                const address = header.op;
-                assert(address > 0);
-
-                manifest_log.superblock.manifest.append(header.checksum, address);
-                if (schema.ManifestLog.entry_count(block) < schema.ManifestLog.entry_count_max) {
-                    manifest_log.superblock.manifest.queue_for_compaction(address);
-                }
-            }
-
             if (manifest_log.blocks_closed == 0) {
                 manifest_log.grid.on_next_tick(
                     flush_next_tick_callback,
@@ -717,6 +700,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             verify_block(block, null, null);
             assert(schema.ManifestLog.entry_count(block) == entry_count);
+
+            manifest_log.superblock.manifest.append(header.checksum, header.op);
+            if (schema.ManifestLog.entry_count(block) < schema.ManifestLog.entry_count_max) {
+                manifest_log.superblock.manifest.queue_for_compaction(header.op);
+            }
 
             log.debug("close_block: checksum={} address={} entries={}/{}", .{
                 header.checksum,
