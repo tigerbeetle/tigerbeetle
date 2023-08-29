@@ -141,6 +141,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         grooves: Grooves,
         node_pool: *NodePool,
         manifest_log: ManifestLog,
+        manifest_log_progress: enum { idle, compacting, done, skip } = .idle,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -280,32 +281,44 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
             assert(forest.progress == null);
 
-            var pending: usize = 0;
-
             inline for (std.meta.fields(Grooves)) |field| {
-                pending += 1;
                 @field(forest.grooves, field.name).compact(compact_groove_callback(field.name), op);
             }
 
-            if (op % @divExact(constants.lsm_batch_multiple, 2) == 0 and
-                op >= constants.lsm_batch_multiple and
-                !forest.grid.superblock.working.vsr_state.op_compacted(op))
-            {
-                // This is the first beat of a bar that we have not compacted already.
-                pending += 1;
-                forest.manifest_log.compact(compact_manifest_log_callback);
+            if (op % @divExact(constants.lsm_batch_multiple, 2) == 0) {
+                assert(forest.manifest_log_progress == .idle);
+
+                forest.manifest_log_progress = .compacting;
+                forest.manifest_log.compact(compact_manifest_log_callback, op);
+            } else {
+                if (op == 1) {
+                    assert(forest.manifest_log_progress == .idle);
+                    forest.manifest_log_progress = .skip;
+                } else {
+                    assert(forest.manifest_log_progress != .idle);
+                }
             }
 
             forest.progress = .{ .compact = .{
                 .op = op,
-                .pending = pending,
+                .pending = std.meta.fields(Grooves).len,
                 .callback = callback,
             } };
         }
 
         fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
-            forest.compact_callback();
+            assert(forest.manifest_log_progress == .compacting);
+
+            forest.manifest_log_progress = .done;
+
+            if (forest.progress) |progress| {
+                assert(progress == .compact);
+
+                forest.compact_callback();
+            } else {
+                // The manifest log compaction completed between compaction beats.
+            }
         }
 
         fn compact_groove_callback(
@@ -316,6 +329,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                     const grooves: *align(@alignOf(Grooves)) Grooves =
                         @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
                     const forest = @fieldParentPtr(Forest, "grooves", grooves);
+                    forest.progress.?.compact.pending -= 1;
                     forest.compact_callback();
                 }
             }.groove_callback;
@@ -323,24 +337,30 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
         fn compact_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
+            assert(forest.manifest_log_progress != .idle);
 
             const progress = &forest.progress.?.compact;
-            // +1 for a manifest log compaction.
-            assert(progress.pending <= std.meta.fields(Grooves).len + 1);
+            assert(progress.pending <= std.meta.fields(Grooves).len);
 
-            progress.pending -= 1;
             if (progress.pending > 0) return;
+
+            const half_bar_end =
+                (progress.op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0;
+            // On the last beat of the bar, make sure that manifest log compaction is finished.
+            if (half_bar_end and forest.manifest_log_progress == .compacting) return;
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).compact_end();
             }
 
-            if ((progress.op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0 and
-                progress.op >= constants.lsm_batch_multiple and
-                !forest.grid.superblock.working.vsr_state.op_compacted(progress.op))
-            {
-                // This is the last beat of a bar that was not already compacted.
-                forest.manifest_log.compact_end();
+            if (half_bar_end) {
+                switch (forest.manifest_log_progress) {
+                    .idle => unreachable,
+                    .compacting => unreachable,
+                    .done => forest.manifest_log.compact_end(),
+                    .skip => {},
+                }
+                forest.manifest_log_progress = .idle;
             }
 
             const callback = progress.callback;
@@ -354,6 +374,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
+            assert(forest.manifest_log_progress == .idle);
             forest.progress = .{ .checkpoint = .{ .callback = callback } };
 
             if (Storage == @import("../testing/storage.zig").Storage) {
@@ -371,6 +392,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
+            assert(forest.manifest_log_progress == .idle);
 
             if (Storage == @import("../testing/storage.zig").Storage) {
                 // We should have finished all checkpoint writes by now.

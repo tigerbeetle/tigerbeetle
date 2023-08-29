@@ -271,7 +271,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 op >= constants.lsm_batch_multiple)
             {
                 env.change_state(.fuzzing, .manifest_log_compact);
-                env.manifest_log.compact(manifest_log_compact_callback);
+                env.manifest_log.compact(manifest_log_compact_callback, op);
                 env.tick_until_state_change(.manifest_log_compact, .fuzzing);
             }
 

@@ -380,7 +380,7 @@ const Environment = struct {
 
     fn half_bar_commence(env: *Environment) !void {
         env.pending += 1;
-        env.manifest_log.compact(manifest_log_compact_callback);
+        env.manifest_log.compact(manifest_log_compact_callback, constants.lsm_batch_multiple);
         env.wait(&env.manifest_log);
     }
 
