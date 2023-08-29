@@ -479,7 +479,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// `compact` does not close a partial block; that is only necessary during `checkpoint`.
         // TODO Make sure block reservation cannot fail — before compaction begins verify that
         // enough free blocks are available for all reservations.
-        pub fn compact(manifest_log: *ManifestLog, callback: Callback) void {
+        pub fn compact(manifest_log: *ManifestLog, callback: Callback, op: u64) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
@@ -488,6 +488,15 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.grid_reservation == null);
             assert(manifest_log.blocks.count ==
                 manifest_log.blocks_closed + @intFromBool(manifest_log.entry_count > 0));
+            assert(op % @divExact(constants.lsm_batch_multiple, 2) == 0);
+
+            if (op < constants.lsm_batch_multiple or
+                manifest_log.superblock.working.vsr_state.op_compacted(op))
+            {
+                manifest_log.read_callback = callback;
+                manifest_log.grid.on_next_tick(compact_tick_callback, &manifest_log.next_tick);
+                return;
+            }
 
             // +1: During manifest-log compaction, we will create at most one block.
             manifest_log.grid_reservation =
@@ -495,6 +504,19 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_flush_callback);
+        }
+
+        fn compact_tick_callback(next_tick: *Grid.NextTick) void {
+            const manifest_log = @fieldParentPtr(ManifestLog, "next_tick", next_tick);
+            assert(manifest_log.write_callback == null);
+            assert(manifest_log.grid_reservation == null);
+            assert(manifest_log.blocks_closed == 0);
+            assert(manifest_log.blocks.count == 0);
+            assert(manifest_log.entry_count == 0);
+
+            const callback = manifest_log.read_callback.?;
+            manifest_log.read_callback = null;
+            callback(manifest_log);
         }
 
         fn compact_flush_callback(manifest_log: *ManifestLog) void {
@@ -616,10 +638,16 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(!manifest_log.writing);
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
-            assert(manifest_log.grid_reservation != null);
 
-            manifest_log.grid.forfeit(manifest_log.grid_reservation.?);
-            manifest_log.grid_reservation = null;
+            if (manifest_log.grid_reservation) |grid_reservation| {
+                manifest_log.grid.forfeit(grid_reservation);
+                manifest_log.grid_reservation = null;
+            } else {
+                // Compaction was skipped for this half-bar.
+                assert(manifest_log.entry_count == 0);
+                assert(manifest_log.blocks.count == 0);
+                assert(manifest_log.blocks_closed == 0);
+            }
         }
 
         pub fn checkpoint(manifest_log: *ManifestLog, callback: Callback) void {
