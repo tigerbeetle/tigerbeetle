@@ -6,4 +6,4 @@ First, get TigerBeetle running:
 * Or [run a single-node cluster with Docker](./with-docker.md)
 * Or [run a three-node cluster with docker-compose](./with-docker-compose.md)
 
-Then, try creating accounts and transfers [using Node.js as a CLI](./node-cli.md).
+Then, try creating accounts and transfers [using the TigerBeetle CLI](./cli-client.md).

@@ -43,6 +43,13 @@ const CliArgs = union(enum) {
         verbose: bool = false,
     },
 
+    client: struct {
+        addresses: []const u8,
+        cluster: u32,
+        verbose: bool = false,
+        command: []const u8 = "",
+    },
+
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
     pub const help = fmt.comptimePrint(
         \\Usage:
@@ -55,6 +62,8 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle version [--version]
         \\
+        \\  tigerbeetle client --cluster=<integer> --addresses=<addresses>
+        \\
         \\Commands:
         \\
         \\  format   Create a TigerBeetle replica data file at <path>.
@@ -64,6 +73,8 @@ const CliArgs = union(enum) {
         \\  start    Run a TigerBeetle replica from the data file at <path>.
         \\
         \\  version  Print the TigerBeetle build version and the compile-time config values.
+        \\
+        \\  client   Enter the TigerBeetle client REPL.
         \\
         \\Options:
         \\
@@ -113,6 +124,8 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle version --verbose
         \\
+        \\  tigerbeetle client --addresses=3003,3002,3001 --cluster=0
+        \\
     , .{
         .default_address = constants.address,
         .default_port = constants.port,
@@ -131,6 +144,13 @@ pub const Command = union(enum) {
         path: [:0]const u8,
     };
 
+    pub const Repl = struct {
+        addresses: []net.Address,
+        cluster: u32,
+        verbose: bool,
+        statements: []const u8,
+    };
+
     format: struct {
         args_allocated: std.process.ArgIterator,
         cluster: u32,
@@ -143,6 +163,7 @@ pub const Command = union(enum) {
         args_allocated: std.process.ArgIterator,
         verbose: bool,
     },
+    repl: Repl,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -150,6 +171,7 @@ pub const Command = union(enum) {
             else => {},
         }
         switch (command.*) {
+            .repl => {},
             inline else => |*cmd| cmd.args_allocated.deinit(),
         }
         command.* = undefined;
@@ -264,6 +286,18 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         start.cache_grid,
                     ),
                     .path = start.positional.path,
+                },
+            };
+        },
+        .client => |repl| {
+            const addresses = parse_addresses(allocator, repl.addresses);
+
+            return Command{
+                .repl = .{
+                    .addresses = addresses,
+                    .cluster = repl.cluster,
+                    .verbose = repl.verbose,
+                    .statements = repl.command,
                 },
             };
         },
