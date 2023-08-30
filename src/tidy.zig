@@ -135,7 +135,6 @@ const naughty_list = [_][]const u8{
     "clients/node/node_bindings.zig",
     "clients/node/src/node.zig",
     "clients/node/src/translate.zig",
-    "clients/run_with_tb.zig",
     "config.zig",
     "constants.zig",
     "ewah_benchmark.zig",

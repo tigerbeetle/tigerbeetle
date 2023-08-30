@@ -23,14 +23,32 @@ const binary_filename = @import("./shutil.zig").binary_filename;
 const file_or_directory_exists = @import("./shutil.zig").file_or_directory_exists;
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
 
-pub fn run_with_tb(arena: *std.heap.ArenaAllocator, commands: []const []const u8, cwd: []const u8) !void {
+pub fn run_with_tb(
+    arena: *std.heap.ArenaAllocator,
+    commands: []const []const u8,
+    cwd: []const u8,
+) !void {
+    try run_many_with_tb(arena, &[_][]const []const u8{commands}, cwd);
+}
+
+pub fn run_many_with_tb(
+    arena: *std.heap.ArenaAllocator,
+    commands: []const []const []const u8,
+    cwd: []const u8,
+) !void {
     var tb = try TmpTigerBeetle.init(arena.allocator(), .{});
     defer tb.deinit(arena.allocator());
 
     std.debug.print("Running commands: {s}\n", .{commands});
 
     try std.os.chdir(cwd);
-    try run_with_env(arena, commands, &[_][]const u8{ "TB_ADDRESS", tb.port_str.slice() });
+    for (commands) |command_argv| {
+        try run_with_env(
+            arena,
+            command_argv,
+            &[_][]const u8{ "TB_ADDRESS", tb.port_str.slice() },
+        );
+    }
 }
 
 fn error_main() !void {
