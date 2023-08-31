@@ -17,19 +17,31 @@ const MessagePool = vsr.message_pool.MessagePool;
 
 const tb = vsr.tigerbeetle;
 
-fn print(comptime format: []const u8, arguments: anytype) !void {
-    const stdout = std.io.getStdOut().writer();
-    try stdout.print(format, arguments);
-}
+// Printer is separate from logging since messages from the REPL
+// aren't logs but actual messages for the user. The fields are made
+// optional so that printing on failure can be disabled in tests that
+// test for failure.
+pub const Printer = struct {
+    stdout: ?std.fs.File.Writer,
+    stderr: ?std.fs.File.Writer,
 
-fn print_error(comptime format: []const u8, arguments: anytype) !void {
-    const stderr = std.io.getStdErr().writer();
-    try stderr.print(format, arguments);
-}
+    fn print(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
+        if (printer.stdout) |stdout| {
+            try stdout.print(format, arguments);
+        }
+    }
+
+    fn print_error(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
+        if (printer.stderr) |stderr| {
+            try stderr.print(format, arguments);
+        }
+    }
+};
 
 pub const Parser = struct {
     input: []const u8,
     offset: usize = 0,
+    printer: Printer,
 
     pub const Error = error{
         BadKeyValuePair,
@@ -83,18 +95,17 @@ pub const Parser = struct {
             } else unreachable;
         };
 
-        const stderr = std.io.getStdErr().writer();
-        try stderr.print("Fail near line {}, column {}:\n\n{s}\n", .{
+        try parser.printer.print_error("Fail near line {}, column {}:\n\n{s}\n", .{
             target.position_line,
             target.position_column,
             target.line,
         });
         var column = target.position_column;
         while (column > 0) {
-            try stderr.print(" ", .{});
+            try parser.printer.print_error(" ", .{});
             column -= 1;
         }
-        try stderr.print("^ Near here.\n\n", .{});
+        try parser.printer.print_error("^ Near here.\n\n", .{});
     }
 
     fn eat_whitespace(parser: *Parser) void {
@@ -140,7 +151,11 @@ pub const Parser = struct {
             const c = parser.input[parser.offset];
             if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '|')) {
                 // Allows flag fields to have whitespace before a '|'.
-                var copy = Parser{ .input = parser.input, .offset = parser.offset };
+                var copy = Parser{
+                    .input = parser.input,
+                    .offset = parser.offset,
+                    .printer = parser.printer,
+                };
                 copy.eat_whitespace();
                 if (copy.offset < parser.input.len and parser.input[copy.offset] == '|') {
                     parser.offset = copy.offset;
@@ -276,7 +291,7 @@ pub const Parser = struct {
 
             if (id_result.len == 0) {
                 try parser.print_current_position();
-                try print_error(
+                try parser.printer.print_error(
                     "Expected key starting key-value pair. e.g. `id=1`\n",
                     .{},
                 );
@@ -286,7 +301,7 @@ pub const Parser = struct {
             // Grab =.
             parser.parse_syntax_char('=') catch {
                 try parser.print_current_position();
-                try print_error(
+                try parser.printer.print_error(
                     "Expected equal sign after key '{s}' in key-value" ++
                         " pair. e.g. `id=1`.\n",
                     .{id_result},
@@ -299,7 +314,7 @@ pub const Parser = struct {
 
             if (value_result.len == 0) {
                 try parser.print_current_position();
-                try print_error(
+                try parser.printer.print_error(
                     "Expected value after equal sign in key-value pair. e.g. `id=1`.\n",
                     .{},
                 );
@@ -309,7 +324,7 @@ pub const Parser = struct {
             // Match key to a field in the struct.
             match_arg(&object, id_result, value_result) catch {
                 try parser.print_current_position();
-                try print_error(
+                try parser.printer.print_error(
                     "'{s}'='{s}' is not a valid pair for {s}.\n",
                     .{ id_result, value_result, @tagName(object) },
                 );
@@ -344,8 +359,9 @@ pub const Parser = struct {
     pub fn parse_statement(
         arena: *std.heap.ArenaAllocator,
         input: []const u8,
+        printer: Printer,
     ) (error{OutOfMemory} || std.fs.File.WriteError || Error)!Statement {
-        var parser = Parser{ .input = input };
+        var parser = Parser{ .input = input, .printer = printer };
         parser.eat_whitespace();
         const after_whitespace = parser.offset;
         const operation_identifier = parser.parse_identifier();
@@ -364,7 +380,7 @@ pub const Parser = struct {
             // token.
             parser.offset = after_whitespace;
             try parser.print_current_position();
-            try print_error(
+            try parser.printer.print_error(
                 \\Operation must be help, create_accounts, lookup_accounts,
                 \\create_transfers, or lookup_transfers. Got: '{s}'.
                 \\
@@ -395,21 +411,22 @@ pub fn ReplType(comptime MessageBus: type) type {
         debug_logs: bool,
 
         client: *Client,
+        printer: Printer,
 
         const Repl = @This();
 
         fn fail(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (!repl.interactive) {
-                try print_error(format, arguments);
+                try repl.printer.print_error(format, arguments);
                 std.os.exit(1);
             }
 
-            try print(format, arguments);
+            try repl.printer.print(format, arguments);
         }
 
         fn debug(repl: *const Repl, comptime format: []const u8, arguments: anytype) !void {
             if (repl.debug_logs) {
-                try print("[Debug] " ++ format, arguments);
+                try repl.printer.print("[Debug] " ++ format, arguments);
             }
         }
 
@@ -424,7 +441,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     try repl.debug("No command was parsed, continuing.\n", .{});
                 },
                 .help => {
-                    try display_help();
+                    try repl.display_help();
                     std.os.exit(0);
                 },
 
@@ -447,7 +464,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl: *Repl,
             arena: *std.heap.ArenaAllocator,
         ) !void {
-            try print("> ", .{});
+            try repl.printer.print("> ", .{});
 
             const stdin = std.io.getStdIn();
             var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
@@ -467,7 +484,11 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             };
 
-            const statement = Parser.parse_statement(arena, input) catch |err| {
+            const statement = Parser.parse_statement(
+                arena,
+                input,
+                repl.printer,
+            ) catch |err| {
                 switch (err) {
                     // These are parsing errors, so the REPL should
                     // not continue to execute this statement but can
@@ -507,9 +528,9 @@ pub fn ReplType(comptime MessageBus: type) type {
             try repl.do_statement(statement);
         }
 
-        fn display_help() !void {
+        fn display_help(repl: *Repl) !void {
             const version = build_options.git_tag;
-            try print("TigerBeetle CLI Client " ++ version ++ "\n" ++
+            try repl.printer.print("TigerBeetle CLI Client " ++ version ++ "\n" ++
                 \\  Hit enter after a semicolon to run a command.
                 \\
                 \\Examples:
@@ -538,6 +559,10 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .request_done = true,
                 .event_loop_done = false,
                 .interactive = statements.len == 0,
+                .printer = .{
+                    .stderr = std.io.getStdErr().writer(),
+                    .stdout = std.io.getStdOut().writer(),
+                },
             };
 
             try repl.debug("Connecting to '{any}'.\n", .{addresses});
@@ -570,6 +595,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     var statement = Parser.parse_statement(
                         &execution_arena,
                         statement_string,
+                        repl.printer,
                     ) catch |err| {
                         switch (err) {
                             // These are parsing errors and since this
@@ -611,8 +637,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     try repl.do_statement(statement);
                 }
             } else {
-                try display_help();
-                std.os.exit(0);
+                try repl.display_help();
             }
 
             while (!repl.event_loop_done) {
@@ -675,10 +700,10 @@ pub fn ReplType(comptime MessageBus: type) type {
             );
         }
 
-        fn display_object(object: anytype) !void {
+        fn display_object(repl: *Repl, object: anytype) !void {
             assert(@TypeOf(object.*) == tb.Account or @TypeOf(object.*) == tb.Transfer);
 
-            try print("{{\n", .{});
+            try repl.printer.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).Struct.fields, 0..) |object_field, i| {
                 if (comptime std.mem.eql(u8, object_field.name, "reserved")) {
                     continue;
@@ -686,36 +711,36 @@ pub fn ReplType(comptime MessageBus: type) type {
                 }
 
                 if (i > 0) {
-                    try print(",\n", .{});
+                    try repl.printer.print(",\n", .{});
                 }
 
                 if (comptime std.mem.eql(u8, object_field.name, "flags")) {
-                    try print("  \"" ++ object_field.name ++ "\": [", .{});
+                    try repl.printer.print("  \"" ++ object_field.name ++ "\": [", .{});
                     var needs_comma = false;
 
                     inline for (@typeInfo(object_field.type).Struct.fields) |flag_field| {
                         if (comptime !std.mem.eql(u8, flag_field.name, "padding")) {
                             if (@field(@field(object, "flags"), flag_field.name)) {
                                 if (needs_comma) {
-                                    try print(",", .{});
+                                    try repl.printer.print(",", .{});
                                     needs_comma = false;
                                 }
 
-                                try print("\"{s}\"", .{flag_field.name});
+                                try repl.printer.print("\"{s}\"", .{flag_field.name});
                                 needs_comma = true;
                             }
                         }
                     }
 
-                    try print("]", .{});
+                    try repl.printer.print("]", .{});
                 } else {
-                    try print(
+                    try repl.printer.print(
                         "  \"{s}\": \"{}\"",
                         .{ object_field.name, @field(object, object_field.name) },
                     );
                 }
             }
-            try print("\n}}\n", .{});
+            try repl.printer.print("\n}}\n", .{});
         }
 
         fn client_request_callback_error(
@@ -744,7 +769,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (create_account_results.len > 0) {
                         for (create_account_results) |*reason| {
-                            try print(
+                            try repl.printer.print(
                                 "Failed to create account ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
@@ -761,7 +786,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         try repl.fail("No such account or accounts exists.\n", .{});
                     } else {
                         for (lookup_account_results) |*account| {
-                            try display_object(account);
+                            try repl.display_object(account);
                         }
                     }
                 },
@@ -773,7 +798,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (create_transfer_results.len > 0) {
                         for (create_transfer_results) |*reason| {
-                            try print(
+                            try repl.printer.print(
                                 "Failed to create transfer ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
@@ -790,7 +815,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         try repl.fail("No such transfer or transfers exists.\n", .{});
                     } else {
                         for (lookup_transfer_results) |*transfer| {
-                            try display_object(transfer);
+                            try repl.display_object(transfer);
                         }
                     }
                 },
