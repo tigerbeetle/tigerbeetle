@@ -9,7 +9,11 @@ const MessageBus = vsr.message_bus.MessageBusReplica;
 
 const repl = @import("./repl.zig");
 const Parser = repl.Parser;
-const Repl = repl.ReplType(MessageBus);
+
+const null_printer = repl.Printer{
+    .stderr = null,
+    .stdout = null,
+};
 
 test "repl.zig: Parser single transfer successfully" {
     var tests = [_]struct {
@@ -94,6 +98,7 @@ test "repl.zig: Parser single transfer successfully" {
         var statement = try Parser.parse_statement(
             &arena,
             t.in,
+            null_printer,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -148,6 +153,7 @@ test "repl.zig: Parser multiple transfers successfully" {
         var statement = try Parser.parse_statement(
             &arena,
             t.in,
+            null_printer,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -225,6 +231,7 @@ test "repl.zig: Parser single account successfully" {
         var statement = try Parser.parse_statement(
             &arena,
             t.in,
+            null_printer,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -275,6 +282,7 @@ test "repl.zig: Parser multiple accounts successfully" {
         var statement = try Parser.parse_statement(
             &arena,
             t.in,
+            null_printer,
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
@@ -396,6 +404,7 @@ test "repl.zig: Parser odd but correct formatting" {
         var statement = try Parser.parse_statement(
             &arena,
             t.in,
+            null_printer,
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
@@ -461,6 +470,7 @@ test "repl.zig: Handle parsing errors" {
         var result = Parser.parse_statement(
             &arena,
             t.in,
+            null_printer,
         );
         try std.testing.expectError(t.err, result);
     }
