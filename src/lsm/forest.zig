@@ -67,8 +67,9 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
 
             for (std.meta.fields(@TypeOf(Groove.config.ids))) |field| {
                 const id = @field(Groove.config.ids, field.name);
-
+                assert(id > 0);
                 assert(std.mem.indexOfScalar(u16, ids, id) == null);
+
                 ids = ids ++ [_]u16{id};
             }
         }

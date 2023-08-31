@@ -40,6 +40,8 @@ pub fn RingBuffer(
             },
             .slice => struct {
                 pub fn init(allocator: mem.Allocator, capacity: usize) !Self {
+                    assert(capacity > 0);
+
                     const buffer = try allocator.alloc(T, capacity);
                     errdefer allocator.free(buffer);
                     return Self{ .buffer = buffer };
@@ -87,10 +89,13 @@ pub fn RingBuffer(
             return &self.buffer[(self.index + self.count - 1) % self.buffer.len];
         }
 
-        pub fn get(self: *Self, index: usize) ?T {
-            if (self.get_ptr(index)) |value| {
-                return value.*;
+        pub fn get(self: *const Self, index: usize) ?T {
+            if (self.buffer.len == 0) unreachable;
+
+            if (index < self.count) {
+                return self.buffer[(self.index + index) % self.buffer.len];
             } else {
+                assert(index < self.buffer.len);
                 return null;
             }
         }

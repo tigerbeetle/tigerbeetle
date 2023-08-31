@@ -100,6 +100,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
             const key_min = std.mem.bytesAsValue(Key, table.key_min[0..@sizeOf(Key)]);
             const key_max = std.mem.bytesAsValue(Key, table.key_max[0..@sizeOf(Key)]);
 
+            assert(compare_keys(key_min.*, key_max.*) != .gt);
             assert(stdx.zeroed(table.key_min[@sizeOf(Key)..]));
             assert(stdx.zeroed(table.key_max[@sizeOf(Key)..]));
 
@@ -553,6 +554,32 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn verify(manifest: *Manifest, snapshot: u64) void {
             assert(snapshot <= snapshot_latest);
 
+            switch (Table.usage) {
+                // Interior levels are non-empty.
+                .general => {
+                    var empty: bool = false;
+                    for (&manifest.levels) |*level| {
+                        var level_iterator =
+                            level.iterator(.visible, &.{snapshot}, .ascending, null);
+                        if (level_iterator.next()) |_| {
+                            assert(!empty);
+                        } else {
+                            empty = true;
+                        }
+                    }
+                },
+                // In the secondary index TableUsage, it is possible (albeit unlikely!) that every
+                // table in an interior level is deleted.
+                //
+                // Unlike general-usage tables, secondary-index tombstones need not compact down to
+                // the last level of the tree before they are deleted. (Rather, the tombstones are
+                // deleted as soon as they merge with their corresponding "put").
+                // In this way, enough object deletions may lead to compactions where the both input
+                // tables entirely cancel each other out, and no output table is written at all.
+                // See `TableUsage` for more detail.
+                .secondary_index => {},
+            }
+
             // TODO: When state sync is proactive, re-enable this.
             if (true) return;
 
@@ -567,6 +594,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 );
                 while (table_info_iter.next()) |table_info| {
                     if (key_max_prev) |k| {
+                        // A level's tables at given snapshot are disjoint.
                         assert(compare_keys(k, table_info.key_min) == .lt);
                     }
                     // We could have key_min == key_max if there is only one value.

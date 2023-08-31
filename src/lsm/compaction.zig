@@ -267,7 +267,6 @@ pub fn CompactionType(
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
-            compaction.manifest_entries.clear();
             if (compaction.grid_reservation) |grid_reservation| {
                 compaction.context.grid.forfeit(grid_reservation);
                 compaction.grid_reservation = null;
@@ -285,7 +284,6 @@ pub fn CompactionType(
         ) void {
             assert(compaction.state == .idle);
             assert(compaction.grid_reservation == null);
-            assert(compaction.manifest_entries.empty());
 
             tracer.start(
                 &compaction.tracer_slot,
