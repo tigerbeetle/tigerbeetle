@@ -1283,6 +1283,7 @@ const TestContext = struct {
 
         ctx.grid = try Grid.init(allocator, .{
             .superblock = &ctx.superblock,
+            .repair_queue_blocks_max = 0,
         });
         errdefer ctx.grid.deinit(allocator);
 

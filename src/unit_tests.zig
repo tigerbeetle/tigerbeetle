@@ -41,6 +41,7 @@ test {
     _ = @import("vsr.zig");
     _ = @import("vsr/clock.zig");
     _ = @import("vsr/checksum.zig");
+    _ = @import("vsr/grid_repair_queue.zig");
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");

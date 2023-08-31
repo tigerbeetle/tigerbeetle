@@ -108,6 +108,7 @@ const Environment = struct {
 
         env.grid = try Grid.init(allocator, .{
             .superblock = &env.superblock,
+            .repair_queue_blocks_max = 0,
         });
 
         env.forest = undefined;
