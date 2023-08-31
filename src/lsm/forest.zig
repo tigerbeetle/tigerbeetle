@@ -79,6 +79,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         tree_name: []const u8,
         tree_id: u16,
         groove_name: []const u8,
+        groove_tree: union(enum) { objects, ids, indexes: []const u8 },
     };
 
     const tree_infos: []const TreeInfo = tree_infos: {
@@ -91,6 +92,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                 .tree_name = groove_field.name,
                 .tree_id = @field(Groove.config.ids, "timestamp"),
                 .groove_name = groove_field.name,
+                .groove_tree = .objects,
             }};
 
             if (Groove.IdTree != void) {
@@ -99,6 +101,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                     .tree_name = groove_field.name ++ ".id",
                     .tree_id = @field(Groove.config.ids, "id"),
                     .groove_name = groove_field.name,
+                    .groove_tree = .ids,
                 }};
             }
 
@@ -108,6 +111,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                     .tree_name = groove_field.name ++ "." ++ tree_field.name,
                     .tree_id = @field(Groove.config.ids, tree_field.name),
                     .groove_name = groove_field.name,
+                    .groove_tree = .{ .indexes = tree_field.name },
                 }};
             }
         }
@@ -235,34 +239,23 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.progress.? == .open);
             assert(level < constants.lsm_levels);
 
-            // TODO Is there a faster (or cleaner) way to map tree-id to the tree?
-            inline for (std.meta.fields(Grooves)) |groove_field| {
-                var groove = &@field(forest.grooves, groove_field.name);
-                const Groove = @TypeOf(groove.*);
+            const tree_id_max: u16 = comptime tree_id_max: {
+                var tree_id_max: u16 = 0;
+                for (tree_infos) |tree_info| tree_id_max = @max(tree_id_max, tree_info.tree_id);
+                assert(tree_id_max == tree_infos.len); // There are no gaps in the tree ids.
+                break :tree_id_max tree_id_max;
+            };
 
-                if (groove.objects.config.id == table.tree_id) {
-                    groove.objects.open_table(level, table);
-                    return;
-                }
-
-                if (Groove.IdTree != void) {
-                    if (groove.ids.config.id == table.tree_id) {
-                        groove.ids.open_table(level, table);
-                        return;
-                    }
-                }
-
-                inline for (std.meta.fields(Groove.IndexTrees)) |tree_field| {
-                    const tree = &@field(groove.indexes, tree_field.name);
-                    if (tree.config.id == table.tree_id) {
-                        @field(groove.indexes, tree_field.name).open_table(level, table);
-                        return;
-                    }
-                }
+            switch (table.tree_id) {
+                inline 1...tree_id_max => |tree_id| {
+                    var t: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
+                    t.open_table(level, table);
+                },
+                else => {
+                    log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
+                    @panic("Forest.manifest_log_open_event: unknown table in manifest");
+                },
             }
-
-            log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
-            @panic("Forest.manifest_log_open_event: unknown table in manifest");
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
@@ -402,6 +395,28 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             const callback = forest.progress.?.checkpoint.callback;
             forest.progress = null;
             callback(forest);
+        }
+
+        fn TreeForIdType(comptime tree_id: u16) type {
+            for (tree_infos) |tree_info| {
+                if (tree_info.tree_id == tree_id) return tree_info.Tree;
+            }
+            unreachable;
+        }
+
+        fn tree_for_id(forest: *Forest, comptime tree_id: u16) *TreeForIdType(tree_id) {
+            inline for (tree_infos) |tree_info| {
+                if (tree_info.tree_id == tree_id) {
+                    var groove = &@field(forest.grooves, tree_info.groove_name);
+
+                    switch (tree_info.groove_tree) {
+                        .objects => return &groove.objects,
+                        .ids => return &groove.ids,
+                        .indexes => |index_name| return &@field(groove.indexes, index_name),
+                    }
+                }
+            }
+            unreachable;
         }
     };
 }
