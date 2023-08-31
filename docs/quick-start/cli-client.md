@@ -11,7 +11,7 @@ First let's create two accounts. (Don't worry about the details, you
 can read about them later.)
 
 ```console
-tigerbeetle client --addresses=3000
+./tigerbeetle client --cluster=0 --addresses=3000
 ```
 ```
 TigerBeetle Client
