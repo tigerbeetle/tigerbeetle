@@ -1548,10 +1548,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     // We should have finished all pending superblock io before starting any more.
                     superblock.storage.assert_no_pending_reads(.superblock);
                     superblock.storage.assert_no_pending_writes(.superblock);
-                    if (context.caller != .view_change) {
-                        superblock.storage.assert_no_pending_writes(.grid);
-                        // (Pending repair-reads are possible.)
-                    }
                 }
 
                 if (context.caller == .open) {

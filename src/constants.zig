@@ -277,11 +277,21 @@ pub const grid_repair_request_max = config.process.grid_repair_request_max;
 /// The number of grid reads allocated to handle incoming command=request_blocks messages.
 pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
 
-/// The number of grid writes allocated to handle incoming command=block messages.
-pub const grid_repair_writes_max = config.process.grid_repair_writes_max;
+/// Immediately after state sync we want access to all of the grid's write bandwidth to rapidly sync
+/// table blocks.
+pub const grid_repair_writes_max = grid_iops_write_max;
 
 /// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
 pub const grid_cache_size_default = config.process.grid_cache_size_default;
+
+/// The maximum capacity (in blocks) of the GridRepairQueue.
+///
+/// As this increases:
+/// - GridRepairQueue allocates more memory.
+/// - The "period" of GridRepairQueue's requests increases.
+///   This makes the repair protocol more tolerant of network latency.
+/// - (Repair protocol is used to repair manifest log blocks immediately after state sync).
+pub const grid_repair_blocks_max = config.process.grid_repair_blocks_max;
 
 comptime {
     assert(grid_repair_request_max > 0);
@@ -290,6 +300,8 @@ comptime {
 
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
+
+    assert(grid_repair_blocks_max > 0);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.

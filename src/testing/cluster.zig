@@ -620,7 +620,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
                     "<{[sync_op_min]:_>3}:{[sync_op_max]:_>3}> " ++
                     "{[grid_blocks_free]:>7}Gf " ++
-                    "{[grid_blocks_faulty]:>2}G!", .{
+                    "{[grid_blocks_global]:>2}G! " ++
+                    "{[grid_blocks_repair]:>3}G?", .{
                     .view = replica.view,
                     .commit_min = replica.commit_min,
                     .commit_max = replica.commit_max,
@@ -633,7 +634,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
-                    .grid_blocks_faulty = replica.grid.read_global_queue.count,
+                    .grid_blocks_global = replica.grid.read_global_queue.count,
+                    .grid_blocks_repair = replica.grid.repair_queue.faulty_blocks.count(),
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {

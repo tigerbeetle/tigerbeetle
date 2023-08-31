@@ -385,12 +385,9 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
             assert(forest.manifest_log_progress == .idle);
-            forest.progress = .{ .checkpoint = .{ .callback = callback } };
+            forest.grid.assert_only_repairing();
 
-            if (Storage == @import("../testing/storage.zig").Storage) {
-                // We should have finished all pending io before checkpointing.
-                forest.grid.superblock.storage.assert_no_pending_writes(.grid);
-            }
+            forest.progress = .{ .checkpoint = .{ .callback = callback } };
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).assert_between_bars();
@@ -403,11 +400,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
             assert(forest.manifest_log_progress == .idle);
-
-            if (Storage == @import("../testing/storage.zig").Storage) {
-                // We should have finished all checkpoint writes by now.
-                forest.grid.superblock.storage.assert_no_pending_writes(.grid);
-            }
+            forest.grid.assert_only_repairing();
 
             const callback = forest.progress.?.checkpoint.callback;
             forest.progress = null;
