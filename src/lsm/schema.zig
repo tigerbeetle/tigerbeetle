@@ -526,12 +526,12 @@ pub const TableData = struct {
 /// Each Label/TableInfo pair is an "entry".
 // TODO Store timestamp (snapshot) in header.
 pub const ManifestLog = struct {
-    const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
+    const entry_size = @sizeOf(TableInfo) + @sizeOf(Label);
 
     pub const entry_count_max = @divFloor(block_body_size, entry_size);
 
-    const labels_size_max = entry_count_max * @sizeOf(Label);
     const tables_size_max = entry_count_max * @sizeOf(TableInfo);
+    const labels_size_max = entry_count_max * @sizeOf(Label);
 
     comptime {
         assert(entry_count_max > 0);
@@ -568,15 +568,6 @@ pub const ManifestLog = struct {
         }
     };
 
-    pub const Label = packed struct(u8) {
-        level: u7,
-        event: enum(u1) { insert, remove },
-
-        comptime {
-            assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);
-        }
-    };
-
     /// See manifest.zig's TreeTableInfoType declaration for field documentation.
     pub const TableInfo = extern struct {
         /// All keys must fit within 32 bytes.
@@ -594,6 +585,15 @@ pub const ManifestLog = struct {
         comptime {
             assert(@alignOf(TableInfo) == 16);
             assert(stdx.no_padding(TableInfo));
+        }
+    };
+
+    pub const Label = packed struct(u8) {
+        level: u7,
+        event: enum(u1) { insert, remove },
+
+        comptime {
+            assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);
         }
     };
 
@@ -623,6 +623,20 @@ pub const ManifestLog = struct {
         return @sizeOf(vsr.Header) + tables_size + labels_size;
     }
 
+    pub fn tables(schema: *const ManifestLog, block: BlockPtr) []TableInfo {
+        return mem.bytesAsSlice(
+            TableInfo,
+            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
+        );
+    }
+
+    pub fn tables_used(schema: *const ManifestLog, block: BlockPtrConst) []const TableInfo {
+        return mem.bytesAsSlice(
+            TableInfo,
+            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
+        );
+    }
+
     pub fn labels(schema: *const ManifestLog, block: BlockPtr) []Label {
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
         const labels_size = schema.entry_count * @sizeOf(Label);
@@ -638,20 +652,6 @@ pub const ManifestLog = struct {
         return mem.bytesAsSlice(
             Label,
             block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
-        );
-    }
-
-    pub fn tables(schema: *const ManifestLog, block: BlockPtr) []TableInfo {
-        return mem.bytesAsSlice(
-            TableInfo,
-            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
-        );
-    }
-
-    pub fn tables_used(schema: *const ManifestLog, block: BlockPtrConst) []const TableInfo {
-        return mem.bytesAsSlice(
-            TableInfo,
-            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
         );
     }
 };
