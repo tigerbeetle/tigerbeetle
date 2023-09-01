@@ -234,7 +234,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
             level: u7,
-            table: *const schema.ManifestLog.TableInfo,
+            table: *const schema.Manifest.TableInfo,
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);

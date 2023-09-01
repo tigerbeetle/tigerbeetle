@@ -253,7 +253,7 @@ The manifest log is periodically compacted to remove older entries that have bee
 newer entries. For example, if a table is created and later deleted, manifest log compaction
 will eventually remove any reference to the table from the log blocks.
 
-All manifest log blocks are tracked in the superblock manifest.
+All manifest blocks are tracked in the superblock manifest.
 
 ### Manifest Level
 
