@@ -443,8 +443,8 @@ fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
 }
 
 test flag_name {
-    const field = @typeInfo(struct { enable_statsd: bool }).Struct.fields[0];
-    try std.testing.expectEqualStrings(flag_name(field), "--enable-statsd");
+    const field = @typeInfo(struct { statsd: bool }).Struct.fields[0];
+    try std.testing.expectEqualStrings(flag_name(field), "--statsd");
 }
 
 fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {

@@ -60,7 +60,7 @@ const CliArgs = struct {
     transfer_count: usize = transfer_count_default,
     transfer_count_per_second: usize = transfer_count_per_second_default,
     print_batch_timings: bool = false,
-    enable_statsd: bool = false,
+    statsd: bool = false,
     addresses: []const u8 = "127.0.0.1:" ++ std.fmt.comptimePrint("{}", .{constants.port}),
 };
 
@@ -132,7 +132,7 @@ pub fn main() !void {
     var statsd_opt: ?StatsD = null;
     defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
 
-    if (cli_args.enable_statsd) {
+    if (cli_args.statsd) {
         statsd_opt = try StatsD.init(
             allocator,
             &io,
