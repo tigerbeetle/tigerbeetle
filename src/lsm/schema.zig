@@ -546,7 +546,8 @@ pub const ManifestLog = struct {
 
         // All TableInfo's should already be 16-byte aligned because of the leading checksum.
         const alignment = 16;
-        assert(@alignOf(TableInfo) == alignment);
+        assert(alignment <= @sizeOf(vsr.Header));
+        assert(alignment == @alignOf(TableInfo));
 
         // For keys { 8, 16, 24, 32 } all TableInfo's should be a multiple of the alignment.
         // However, we still store Label ahead of TableInfo to save space on the network.

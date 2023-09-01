@@ -368,7 +368,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn GrooveFor(comptime groove_field_name: []const u8) type {
-            return @TypeOf(@field(@as(Grooves, undefined), groove_field_name));
+            const groove_field = @field(std.meta.FieldEnum(Grooves), groove_field_name);
+            return std.meta.FieldType(Grooves, groove_field);
         }
 
         pub fn checkpoint(forest: *Forest, callback: Callback) void {
