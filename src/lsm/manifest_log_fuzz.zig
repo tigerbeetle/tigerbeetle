@@ -28,12 +28,12 @@ const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
-const TableInfo = schema.ManifestLog.TableInfo;
+const TableInfo = schema.Manifest.TableInfo;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 const manifest_log_options = ManifestLogOptions{ .forest_tree_count = 1 };
-const entries_max_block = schema.ManifestLog.entry_count_max;
+const entries_max_block = schema.Manifest.entry_count_max;
 const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
 
@@ -629,10 +629,10 @@ fn verify_manifest_compaction_set(
         const block_header = std.mem.bytesToValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
         try std.testing.expectEqual(BlockType.manifest.operation(), block_header.operation);
 
-        const entry_count = schema.ManifestLog.entry_count(block);
-        var compact_soon: bool = entry_count < schema.ManifestLog.entry_count_max;
-        for (schema.ManifestLog.labels_const(block)[0..entry_count], 0..) |label, i| {
-            const table = &schema.ManifestLog.tables_const(block)[i];
+        const block_schema = schema.Manifest.from(block);
+        var compact_soon: bool = block_schema.entry_count < schema.Manifest.entry_count_max;
+        for (block_schema.labels_used(block), 0..) |label, i| {
+            const table = &block_schema.tables_used(block)[i];
             compact_soon = compact_soon or switch (label.event) {
                 .remove => true,
                 .insert => blk: {

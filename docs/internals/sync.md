@@ -56,7 +56,7 @@ Checkpoints:
     - Bump `vsr_state.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
     - Write the target checkpoint's trailers.
-8. Request and write manifest log blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
+8. Request and write manifest blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
 9. Update the superblock with:
     - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
     - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.

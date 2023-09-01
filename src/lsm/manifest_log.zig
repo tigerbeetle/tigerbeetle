@@ -39,20 +39,18 @@ const BlockType = @import("schema.zig").BlockType;
 const tree = @import("tree.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const schema = @import("schema.zig");
-const TableInfo = schema.ManifestLog.TableInfo;
+const TableInfo = schema.Manifest.TableInfo;
 
 comptime {
     // We need enough manifest blocks to accommodate the upper-bound of tables.
     // *10 is an arbitrary lower-bound of available space for amplification, which allows compaction
     // to be spaced more efficiently.
-    const block_entries = schema.ManifestLog.entry_count_max;
+    const block_entries = schema.Manifest.entry_count_max;
     const manifest_entries = block_entries * vsr.superblock.manifest_blocks_max;
     assert(manifest_entries >= tree.table_count_max * 10);
 }
 
-const block_builder_schema = schema.ManifestLog{
-    .entry_count = schema.ManifestLog.entry_count_max,
-};
+const block_builder_schema = schema.Manifest{ .entry_count = schema.Manifest.entry_count_max };
 
 pub fn ManifestLogType(comptime Storage: type) type {
     return struct {
@@ -63,7 +61,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         const BlockPtr = Grid.BlockPtr;
         const BlockPtrConst = Grid.BlockPtrConst;
-        const Label = schema.ManifestLog.Label;
+        const Label = schema.Manifest.Label;
 
         pub const Callback = *const fn (manifest_log: *ManifestLog) void;
 
@@ -241,7 +239,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block_reference = manifest_log.read_block_reference.?;
             verify_block(block, block_reference.checksum, block_reference.address);
 
-            const block_schema = schema.ManifestLog.from(block);
+            const block_schema = schema.Manifest.from(block);
             const labels_used = block_schema.labels_used(block);
             const tables_used = block_schema.tables_used(block);
 
@@ -264,7 +262,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 }
             }
 
-            if (block_schema.entry_count < schema.ManifestLog.entry_count_max) {
+            if (block_schema.entry_count < schema.Manifest.entry_count_max) {
                 manifest.queue_for_compaction(block_reference.address);
             }
 
@@ -315,7 +313,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 assert(manifest_log.blocks.count > 0);
             }
 
-            assert(manifest_log.entry_count < schema.ManifestLog.entry_count_max);
+            assert(manifest_log.entry_count < schema.Manifest.entry_count_max);
             assert(manifest_log.blocks.count - manifest_log.blocks_closed == 1);
 
             log.debug(
@@ -348,7 +346,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             }
 
             manifest_log.entry_count += 1;
-            if (manifest_log.entry_count == schema.ManifestLog.entry_count_max) {
+            if (manifest_log.entry_count == schema.Manifest.entry_count_max) {
                 manifest_log.close_block();
                 assert(manifest_log.entry_count == 0);
             }
@@ -402,7 +400,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block = manifest_log.blocks.get_ptr(block_index).?;
             verify_block(block.*, null, null);
 
-            const block_schema = schema.ManifestLog.from(block.*);
+            const block_schema = schema.Manifest.from(block.*);
             assert(block_schema.entry_count > 0);
 
             const header = schema.header_from_block(block.*);
@@ -411,9 +409,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             if (block_index == manifest_log.blocks_closed - 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.
-                assert(block_schema.entry_count <= schema.ManifestLog.entry_count_max);
+                assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
             } else {
-                assert(block_schema.entry_count == schema.ManifestLog.entry_count_max);
+                assert(block_schema.entry_count == schema.Manifest.entry_count_max);
             }
 
             log.debug("write_block: checksum={} address={} entries={}", .{
@@ -451,7 +449,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                     assert(manifest_log.entry_count == 0);
                 } else {
                     assert(manifest_log.blocks.count == 1);
-                    assert(manifest_log.entry_count < schema.ManifestLog.entry_count_max);
+                    assert(manifest_log.entry_count < schema.Manifest.entry_count_max);
                 }
 
                 manifest_log.flush_done();
@@ -514,7 +512,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // TODO Compact more than 1 block if fragmentation is outstripping the compaction rate.
             // (Make sure to update the grid block reservation to account for this).
             // Or assert that compactions cannot update blocks fast enough to outpace manifest
-            // log compaction (relative to the number of updates that fit in a manifest log block).
+            // log compaction (relative to the number of updates that fit in a manifest block).
             if (manifest_log.superblock.manifest.oldest_block_queued_for_compaction()) |block| {
                 assert(block.address > 0);
 
@@ -545,7 +543,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block_reference = manifest_log.read_block_reference.?;
             verify_block(block, block_reference.checksum, block_reference.address);
 
-            const block_schema = schema.ManifestLog.from(block);
+            const block_schema = schema.Manifest.from(block);
             const labels_used = block_schema.labels_used(block);
             const tables_used = block_schema.tables_used(block);
 
@@ -585,7 +583,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             // Blocks may be compacted if they contain frees, or are not completely full.
             // (A partial block may be flushed as part of a checkpoint.)
-            assert(frees > 0 or block_schema.entry_count < schema.ManifestLog.entry_count_max);
+            assert(frees > 0 or block_schema.entry_count < schema.Manifest.entry_count_max);
             // At most one block could have been filled by the compaction.
             assert(manifest_log.blocks_closed <= 1);
 
@@ -681,17 +679,17 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const entry_count = manifest_log.entry_count;
             assert(entry_count > 0);
-            assert(entry_count <= schema.ManifestLog.entry_count_max);
+            assert(entry_count <= schema.Manifest.entry_count_max);
 
-            const block_schema = schema.ManifestLog{ .entry_count = entry_count };
+            const block_schema = schema.Manifest{ .entry_count = entry_count };
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             assert(header.cluster == manifest_log.superblock.working.cluster);
             assert(header.op > 0);
             assert(header.command == .block);
             header.size = block_schema.size();
-            header.context = @bitCast(schema.ManifestLog.Context{ .entry_count = entry_count });
+            header.context = @bitCast(schema.Manifest.Context{ .entry_count = entry_count });
 
-            if (entry_count < schema.ManifestLog.entry_count_max) {
+            if (entry_count < schema.Manifest.entry_count_max) {
                 // Copy the labels backwards, since the block-builder schema assumed that the block
                 // would be full, and it is not.
                 stdx.copy_left(
@@ -710,7 +708,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, null, null);
 
             manifest_log.superblock.manifest.append(header.checksum, header.op);
-            if (entry_count < schema.ManifestLog.entry_count_max) {
+            if (entry_count < schema.Manifest.entry_count_max) {
                 manifest_log.superblock.manifest.queue_for_compaction(header.op);
             }
 
@@ -718,7 +716,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 header.checksum,
                 header.op,
                 entry_count,
-                schema.ManifestLog.entry_count_max,
+                schema.Manifest.entry_count_max,
             });
 
             manifest_log.blocks_closed += 1;
@@ -738,9 +736,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(address == null or header.op == address.?);
             assert(checksum == null or header.checksum == checksum.?);
 
-            const block_schema = schema.ManifestLog.from(block);
+            const block_schema = schema.Manifest.from(block);
             assert(block_schema.entry_count > 0);
-            assert(block_schema.entry_count <= schema.ManifestLog.entry_count_max);
+            assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
         }
     };
 }
@@ -769,13 +767,10 @@ pub const Options = struct {
     }
 
     fn blocks_count_appends(options: *const Options) usize {
-        return stdx.div_ceil(
-            options.compaction_appends_max(),
-            schema.ManifestLog.entry_count_max,
-        );
+        return stdx.div_ceil(options.compaction_appends_max(), schema.Manifest.entry_count_max);
     }
 
-    /// The upper-bound of manifest log blocks we must buffer.
+    /// The upper-bound of manifest blocks we must buffer.
     ///
     /// `blocks` must have sufficient capacity for:
     /// - a manifest log compaction (+1 block in the worst case)

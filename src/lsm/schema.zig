@@ -42,9 +42,9 @@
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
-//! ManifestLog block schema:
+//! Manifest block schema:
 //! │ vsr.Header                  │ operation=BlockType.manifest
-//! │                             │ context: schema.ManifestLog.Context
+//! │                             │ context: schema.Manifest.Context
 //! │ [entry_count]TableInfo      │
 //! │ [entry_count]Label          │ level index, insert|remove
 //! │ […]u8{0}                    │ padding (to end of block)
@@ -522,10 +522,10 @@ pub const TableData = struct {
     }
 };
 
-/// A ManifestLog block's body is a SoA of Labels and TableInfos.
+/// A Manifest block's body is a SoA of Labels and TableInfos.
 /// Each Label/TableInfo pair is an "entry".
 // TODO Store timestamp (snapshot) in header.
-pub const ManifestLog = struct {
+pub const Manifest = struct {
     const entry_size = @sizeOf(TableInfo) + @sizeOf(Label);
 
     pub const entry_count_max = @divFloor(block_body_size, entry_size);
@@ -553,11 +553,11 @@ pub const ManifestLog = struct {
         // However, we still store Label ahead of TableInfo to save space on the network.
         // This means we store fewer entries per manifest block, to gain less padding,
         // since we must store entry_count_max of whichever array is first in the layout.
-        // For a better understanding of this decision, see schema.ManifestLog.size().
+        // For a better understanding of this decision, see schema.Manifest.size().
         assert(@sizeOf(TableInfo) % alignment == 0);
     }
 
-    /// Stored in every manifest log block's header's `context` field.
+    /// Stored in every manifest block's header's `context` field.
     pub const Context = extern struct {
         entry_count: u32,
         reserved: [12]u8 = .{0} ** 12,
@@ -599,8 +599,8 @@ pub const ManifestLog = struct {
 
     entry_count: u32,
 
-    pub fn from(manifest_log_block: BlockPtrConst) ManifestLog {
-        const header = header_from_block(manifest_log_block);
+    pub fn from(manifest_block: BlockPtrConst) Manifest {
+        const header = header_from_block(manifest_block);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .manifest);
         assert(header.op > 0);
@@ -613,7 +613,7 @@ pub const ManifestLog = struct {
         return .{ .entry_count = context.entry_count };
     }
 
-    pub fn size(schema: *const ManifestLog) u32 {
+    pub fn size(schema: *const Manifest) u32 {
         assert(schema.entry_count > 0);
         assert(schema.entry_count <= entry_count_max);
 
@@ -623,21 +623,21 @@ pub const ManifestLog = struct {
         return @sizeOf(vsr.Header) + tables_size + labels_size;
     }
 
-    pub fn tables(schema: *const ManifestLog, block: BlockPtr) []TableInfo {
+    pub fn tables(schema: *const Manifest, block: BlockPtr) []TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
             block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
         );
     }
 
-    pub fn tables_used(schema: *const ManifestLog, block: BlockPtrConst) []const TableInfo {
+    pub fn tables_used(schema: *const Manifest, block: BlockPtrConst) []const TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
             block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
         );
     }
 
-    pub fn labels(schema: *const ManifestLog, block: BlockPtr) []Label {
+    pub fn labels(schema: *const Manifest, block: BlockPtr) []Label {
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
         const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(
@@ -646,7 +646,7 @@ pub const ManifestLog = struct {
         );
     }
 
-    pub fn labels_used(schema: *const ManifestLog, block: BlockPtrConst) []const Label {
+    pub fn labels_used(schema: *const Manifest, block: BlockPtrConst) []const Label {
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
         const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(
