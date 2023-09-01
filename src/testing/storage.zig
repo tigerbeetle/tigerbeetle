@@ -287,6 +287,12 @@ pub const Storage = struct {
         callback: *const fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
+        // The NextTick context is not already in use.
+        var next_tick_queue = storage.next_tick_queue.peek();
+        while (next_tick_queue) |next_tick_item| : (next_tick_queue = next_tick_item.next) {
+            assert(next_tick_item != next_tick);
+        }
+
         next_tick.* = .{
             .source = source,
             .callback = callback,
