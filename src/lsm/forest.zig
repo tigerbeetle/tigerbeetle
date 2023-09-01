@@ -240,15 +240,20 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.progress.? == .open);
             assert(level < constants.lsm_levels);
 
-            const tree_id_max: u16 = comptime tree_id_max: {
+            const tree_id_range = comptime tree_id_range: {
+                var tree_id_min: u16 = 1;
                 var tree_id_max: u16 = 0;
-                for (tree_infos) |tree_info| tree_id_max = @max(tree_id_max, tree_info.tree_id);
-                assert(tree_id_max == tree_infos.len); // There are no gaps in the tree ids.
-                break :tree_id_max tree_id_max;
+                for (tree_infos) |tree_info| {
+                    tree_id_min = @min(tree_id_min, tree_info.tree_id);
+                    tree_id_max = @max(tree_id_max, tree_info.tree_id);
+                }
+                // There are no gaps in the tree ids.
+                assert((tree_id_max - tree_id_min + 1) == tree_infos.len);
+                break :tree_id_range .{ .min = tree_id_min, .max = tree_id_max };
             };
 
             switch (table.tree_id) {
-                inline 1...tree_id_max => |tree_id| {
+                inline tree_id_range.min...tree_id_range.max => |tree_id| {
                     var t: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
                     t.open_table(level, table);
                 },
