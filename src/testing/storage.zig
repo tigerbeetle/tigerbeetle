@@ -287,8 +287,6 @@ pub const Storage = struct {
         callback: *const fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
-        assert(!storage.next_tick_queue.contains(next_tick));
-
         next_tick.* = .{
             .source = source,
             .callback = callback,
