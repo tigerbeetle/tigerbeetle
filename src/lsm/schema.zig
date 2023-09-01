@@ -44,8 +44,9 @@
 //!
 //! ManifestLog block schema:
 //! │ vsr.Header                  │ operation=BlockType.manifest
-//! │ [entry_count_max]Label      │ level index, insert|remove
-//! │ [≤entry_count_max]TableInfo │
+//! │                             │ context: schema.ManifestLog.Context
+//! │ [entry_count]TableInfo      │
+//! │ [entry_count]Label          │ level index, insert|remove
 //! │ […]u8{0}                    │ padding (to end of block)
 //! Label and TableInfo entries correspond.
 const std = @import("std");
@@ -526,23 +527,22 @@ pub const TableData = struct {
 // TODO Store timestamp (snapshot) in header.
 pub const ManifestLog = struct {
     const entry_size = @sizeOf(Label) + @sizeOf(TableInfo);
-    const entry_count_max_unaligned = @divFloor(block_body_size, entry_size);
 
-    pub const entry_count_max =
-        @divFloor(entry_count_max_unaligned, @alignOf(TableInfo)) * @alignOf(TableInfo);
+    pub const entry_count_max = @divFloor(block_body_size, entry_size);
 
     const labels_size_max = entry_count_max * @sizeOf(Label);
     const tables_size_max = entry_count_max * @sizeOf(TableInfo);
 
     comptime {
         assert(entry_count_max > 0);
-        assert(labels_size_max % @alignOf(TableInfo) == 0);
-        assert(tables_size_max % @alignOf(TableInfo) == 0);
+        assert(tables_size_max % @alignOf(Label) == 0);
+        assert(labels_size_max % @alignOf(Label) == 0);
 
         // Bit 7 is reserved to indicate whether the event is an insert or remove.
         assert(constants.lsm_levels <= std.math.maxInt(u7) + 1);
 
         assert(@sizeOf(Label) == @sizeOf(u8));
+        assert(@alignOf(Label) == 1);
 
         // All TableInfo's should already be 16-byte aligned because of the leading checksum.
         const alignment = 16;
@@ -556,6 +556,17 @@ pub const ManifestLog = struct {
         // For a better understanding of this decision, see schema.ManifestLog.size().
         assert(@sizeOf(TableInfo) % alignment == 0);
     }
+
+    /// Stored in every manifest log block's header's `context` field.
+    pub const Context = extern struct {
+        entry_count: u32,
+        reserved: [12]u8 = .{0} ** 12,
+
+        comptime {
+            assert(@sizeOf(Context) == @sizeOf(u128));
+            assert(stdx.no_padding(Context));
+        }
+    };
 
     pub const Label = packed struct(u8) {
         level: u7,
@@ -586,57 +597,61 @@ pub const ManifestLog = struct {
         }
     };
 
-    pub fn entry_count(block: BlockPtrConst) u32 {
-        const header = header_from_block(block);
+    entry_count: u32,
+
+    pub fn from(manifest_log_block: BlockPtrConst) ManifestLog {
+        const header = header_from_block(manifest_log_block);
+        assert(header.command == .block);
         assert(BlockType.from(header.operation) == .manifest);
+        assert(header.op > 0);
 
-        const labels_size = labels_size_max;
-        const tables_size = header.size - @sizeOf(vsr.Header) - labels_size;
+        const context = @as(Context, @bitCast(header.context));
+        assert(context.entry_count > 0);
+        assert(context.entry_count <= entry_count_max);
+        assert(stdx.zeroed(&context.reserved));
 
-        const entry_count_ = @as(u32, @intCast(@divExact(tables_size, @sizeOf(TableInfo))));
-        assert(entry_count_ > 0);
-        assert(entry_count_ <= entry_count_max);
-        return entry_count_;
+        return .{ .entry_count = context.entry_count };
     }
 
-    pub fn size(entry_count_: u32) u32 {
-        assert(entry_count_ > 0);
-        assert(entry_count_ <= entry_count_max);
+    pub fn size(schema: *const ManifestLog) u32 {
+        assert(schema.entry_count > 0);
+        assert(schema.entry_count <= entry_count_max);
 
-        // Encode the smaller type first because this will be multiplied by entry_count_max.
-        const labels_size = entry_count_max * @sizeOf(Label);
-        assert(labels_size == labels_size_max);
-        assert((@sizeOf(vsr.Header) + labels_size) % @alignOf(TableInfo) == 0);
-        const tables_size = entry_count_ * @sizeOf(TableInfo);
+        const tables_size = schema.entry_count * @sizeOf(TableInfo);
+        const labels_size = schema.entry_count * @sizeOf(Label);
 
-        return @sizeOf(vsr.Header) + labels_size + tables_size;
+        return @sizeOf(vsr.Header) + tables_size + labels_size;
     }
 
-    pub fn labels(block: BlockPtr) *[entry_count_max]Label {
+    pub fn labels(schema: *const ManifestLog, block: BlockPtr) []Label {
+        const tables_size = schema.entry_count * @sizeOf(TableInfo);
+        const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(
             Label,
-            block[@sizeOf(vsr.Header)..][0..labels_size_max],
-        )[0..entry_count_max];
+            block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
+        );
     }
 
-    pub fn labels_const(block: BlockPtrConst) *const [entry_count_max]Label {
+    pub fn labels_used(schema: *const ManifestLog, block: BlockPtrConst) []const Label {
+        const tables_size = schema.entry_count * @sizeOf(TableInfo);
+        const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(
             Label,
-            block[@sizeOf(vsr.Header)..][0..labels_size_max],
-        )[0..entry_count_max];
+            block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
+        );
     }
 
-    pub fn tables(block: BlockPtr) *[entry_count_max]TableInfo {
+    pub fn tables(schema: *const ManifestLog, block: BlockPtr) []TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
-            block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
-        )[0..entry_count_max];
+            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
+        );
     }
 
-    pub fn tables_const(block: BlockPtrConst) *const [entry_count_max]TableInfo {
+    pub fn tables_used(schema: *const ManifestLog, block: BlockPtrConst) []const TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
-            block[@sizeOf(vsr.Header) + labels_size_max ..][0..tables_size_max],
-        )[0..entry_count_max];
+            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
+        );
     }
 };
