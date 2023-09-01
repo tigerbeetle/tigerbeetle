@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const constants = @import("./constants.zig");
 const tracer = @import("./tracer.zig");
 
 /// An intrusive first in/first out linked list.
@@ -16,6 +17,8 @@ pub fn FIFO(comptime T: type) type {
         name: ?[]const u8,
 
         pub fn push(self: *Self, elem: *T) void {
+            if (constants.verify) assert(!self.contains(elem));
+
             assert(elem.next == null);
             if (self.in) |in| {
                 in.next = elem;
