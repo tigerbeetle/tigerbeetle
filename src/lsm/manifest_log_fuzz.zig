@@ -32,7 +32,10 @@ const TableInfo = schema.Manifest.TableInfo;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
-const manifest_log_options = ManifestLogOptions{ .forest_tree_count = 1 };
+const manifest_log_options = ManifestLogOptions{
+    .tree_id_min = 1,
+    .tree_id_max = 1,
+};
 const entries_max_block = schema.Manifest.entry_count_max;
 const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
@@ -215,7 +218,7 @@ fn generate_events(
                     .snapshot_max = 2,
                     .key_min = .{0} ** 16,
                     .key_max = .{0} ** 16,
-                    .tree_id = 1234,
+                    .tree_id = 1,
                 };
                 try tables.append(.{
                     .level = level,

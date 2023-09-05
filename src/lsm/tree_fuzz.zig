@@ -179,8 +179,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.grid_repair_queue = GridRepairQueue.init(allocator);
             defer env.grid_repair_queue.deinit();
 
-            env.manifest_log =
-                try ManifestLog.init(allocator, &env.grid, .{ .forest_tree_count = 1 });
+            env.manifest_log = try ManifestLog.init(allocator, &env.grid, .{
+                .tree_id_min = 1,
+                .tree_id_max = 1,
+            });
             defer env.manifest_log.deinit(allocator);
 
             env.node_pool = try NodePool.init(allocator, node_count);

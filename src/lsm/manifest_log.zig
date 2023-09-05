@@ -116,6 +116,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
         next_tick: Grid.NextTick = undefined,
 
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !ManifestLog {
+            assert(options.tree_id_min <= options.tree_id_max);
+
             // TODO RingBuffer for .slice should be extended to take care of alignment:
             var blocks =
                 try RingBuffer(BlockPtr, .slice).init(allocator, options.blocks_count_max());
@@ -251,6 +253,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
                 const label = labels_used[entry];
                 const table = &tables_used[entry];
+                assert(table.tree_id >= manifest_log.options.tree_id_min);
+                assert(table.tree_id <= manifest_log.options.tree_id_max);
 
                 if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
                     switch (label.event) {
@@ -744,8 +748,15 @@ pub fn ManifestLogType(comptime Storage: type) type {
 }
 
 pub const Options = struct {
+    tree_id_min: u16, // inclusive
+    tree_id_max: u16, // inclusive
+
     /// The total number of trees in the forest.
-    forest_tree_count: usize,
+    pub fn forest_tree_count(options: *const Options) usize {
+        assert(options.tree_id_min <= options.tree_id_max);
+
+        return (options.tree_id_max - options.tree_id_min) + 1;
+    }
 
     /// The maximum number of table updates to the manifest by a half-measure of table
     /// compaction.
@@ -759,7 +770,7 @@ pub const Options = struct {
     /// - Releasing persistent snapshots.
     // TODO If insert-then-remove can update in-memory, then we can only count input tables once.
     pub fn compaction_appends_max(options: *const Options) usize {
-        return options.forest_tree_count *
+        return options.forest_tree_count() *
             tree.compactions_max *
             (tree.compaction_tables_input_max + // Update snapshot_max.
             tree.compaction_tables_input_max + // Remove.
