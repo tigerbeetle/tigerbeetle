@@ -242,8 +242,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const block_schema = schema.Manifest.from(block);
-            const labels_used = block_schema.labels_used(block);
-            const tables_used = block_schema.tables_used(block);
+            const labels_used = block_schema.labels_const(block);
+            const tables_used = block_schema.tables_const(block);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
@@ -548,8 +548,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const block_schema = schema.Manifest.from(block);
-            const labels_used = block_schema.labels_used(block);
-            const tables_used = block_schema.tables_used(block);
+            const labels_used = block_schema.labels_const(block);
+            const tables_used = block_schema.tables_const(block);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             assert(manifest.tables.count() > 0);
@@ -687,9 +687,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             const block_schema = schema.Manifest{ .entry_count = entry_count };
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            const address = header.op;
             assert(header.cluster == manifest_log.superblock.working.cluster);
-            assert(header.op > 0);
             assert(header.command == .block);
+            assert(address > 0);
             header.size = block_schema.size();
             header.context = @bitCast(schema.Manifest.Context{ .entry_count = entry_count });
 
@@ -711,14 +712,14 @@ pub fn ManifestLogType(comptime Storage: type) type {
             header.set_checksum();
             verify_block(block, null, null);
 
-            manifest_log.superblock.manifest.append(header.checksum, header.op);
+            manifest_log.superblock.manifest.append(header.checksum, address);
             if (entry_count < schema.Manifest.entry_count_max) {
-                manifest_log.superblock.manifest.queue_for_compaction(header.op);
+                manifest_log.superblock.manifest.queue_for_compaction(address);
             }
 
             log.debug("close_block: checksum={} address={} entries={}/{}", .{
                 header.checksum,
-                header.op,
+                address,
                 entry_count,
                 schema.Manifest.entry_count_max,
             });
