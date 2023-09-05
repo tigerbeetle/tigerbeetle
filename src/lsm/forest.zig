@@ -127,6 +127,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         const ManifestLog = ManifestLogType(Storage);
 
         const Callback = *const fn (*Forest) void;
+        const GroovesBitSet = std.StaticBitSet(std.meta.fields(Grooves).len);
 
         pub const groove_config = groove_cfg;
         pub const Grooves = _Grooves;
@@ -137,7 +138,8 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             checkpoint: struct { callback: Callback },
             compact: struct {
                 op: u64,
-                pending: usize,
+                /// Count which groove compactions are in progress.
+                pending: GroovesBitSet = GroovesBitSet.initFull(),
                 callback: Callback,
             },
         } = null,
@@ -298,11 +300,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                 }
             }
 
-            forest.progress = .{ .compact = .{
-                .op = op,
-                .pending = std.meta.fields(Grooves).len,
-                .callback = callback,
-            } };
+            forest.progress = .{ .compact = .{ .op = op, .callback = callback } };
         }
 
         fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
@@ -328,7 +326,16 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                     const grooves: *align(@alignOf(Grooves)) Grooves =
                         @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
                     const forest = @fieldParentPtr(Forest, "grooves", grooves);
-                    forest.progress.?.compact.pending -= 1;
+
+                    inline for (std.meta.fields(Grooves), 0..) |groove_field, i| {
+                        if (std.mem.eql(u8, groove_field.name, groove_field_name)) {
+                            assert(forest.progress.?.compact.pending.isSet(i));
+
+                            forest.progress.?.compact.pending.unset(i);
+                            break;
+                        }
+                    } else unreachable;
+
                     forest.compact_callback();
                 }
             }.groove_callback;
@@ -339,9 +346,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.manifest_log_progress != .idle);
 
             const progress = &forest.progress.?.compact;
-            assert(progress.pending <= std.meta.fields(Grooves).len);
-
-            if (progress.pending > 0) return;
+            if (progress.pending.count() > 0) return;
 
             const half_bar_end =
                 (progress.op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0;

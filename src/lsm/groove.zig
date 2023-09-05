@@ -380,6 +380,9 @@ pub fn GrooveType(
 
         const Callback = *const fn (*Groove) void;
 
+        const trees_total = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
+        const TreesBitSet = std.StaticBitSet(trees_total);
+
         const primary_field = if (has_id) "id" else "timestamp";
         const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
 
@@ -415,7 +418,8 @@ pub fn GrooveType(
         const PrefetchObjects = std.HashMapUnmanaged(Object, void, PrefetchObjectsContext, 70);
 
         compacting: ?struct {
-            pending: usize,
+            /// Count which tree compactions are in progress.
+            pending: TreesBitSet = TreesBitSet.initFull(),
             callback: Callback,
         } = null,
 
@@ -985,10 +989,7 @@ pub fn GrooveType(
                 @field(groove.indexes, field.name).compact(compact_tree_callback_, op);
             }
 
-            groove.compacting = .{
-                .pending = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len,
-                .callback = callback,
-            };
+            groove.compacting = .{ .callback = callback };
         }
 
         fn compact_tree_callback(
@@ -1007,6 +1008,9 @@ pub fn GrooveType(
                         },
                     };
 
+                    assert(groove.compacting.?.pending.isSet(tree_field.offset()));
+                    groove.compacting.?.pending.unset(tree_field.offset());
+
                     groove.compact_callback();
                 }
             }.tree_callback;
@@ -1016,8 +1020,7 @@ pub fn GrooveType(
             assert(groove.compacting != null);
 
             // Guard until all pending sync ops complete.
-            groove.compacting.?.pending -= 1;
-            if (groove.compacting.?.pending > 0) return;
+            if (groove.compacting.?.pending.count() > 0) return;
 
             const callback = groove.compacting.?.callback;
             groove.compacting = null;
@@ -1028,6 +1031,20 @@ pub fn GrooveType(
             ids,
             objects,
             index: []const u8,
+
+            fn offset(field: TreeField) usize {
+                switch (field) {
+                    .objects => return 0,
+                    .ids => return 1,
+                    .index => |index_tree_name| {
+                        inline for (std.meta.fields(IndexTrees), 0..) |index_tree_field, i| {
+                            if (std.mem.eql(u8, index_tree_field.name, index_tree_name)) {
+                                return @as(usize, 1) + @intFromBool(has_id) + i;
+                            }
+                        } else unreachable;
+                    },
+                }
+            }
         };
 
         /// Returns LSM tree type for the given index field name (or ObjectTree if null).
