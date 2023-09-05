@@ -120,6 +120,18 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         break :tree_infos tree_infos;
     };
 
+    const tree_id_range = comptime tree_id_range: {
+        var tree_id_min: u16 = 1;
+        var tree_id_max: u16 = 0;
+        for (tree_infos) |tree_info| {
+            tree_id_min = @min(tree_id_min, tree_info.tree_id);
+            tree_id_max = @max(tree_id_max, tree_info.tree_id);
+        }
+        // There are no gaps in the tree ids.
+        assert((tree_id_max - tree_id_min + 1) == tree_infos.len);
+        break :tree_id_range .{ .min = tree_id_min, .max = tree_id_max };
+    };
+
     return struct {
         const Forest = @This();
 
@@ -165,8 +177,10 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             node_pool.* = try NodePool.init(allocator, node_count);
             errdefer node_pool.deinit(allocator);
 
-            var manifest_log =
-                try ManifestLog.init(allocator, grid, .{ .forest_tree_count = tree_infos.len });
+            var manifest_log = try ManifestLog.init(allocator, grid, .{
+                .tree_id_min = tree_id_range.min,
+                .tree_id_max = tree_id_range.max,
+            });
             errdefer manifest_log.deinit(allocator);
 
             var grooves: Grooves = undefined;
@@ -241,18 +255,6 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(level < constants.lsm_levels);
-
-            const tree_id_range = comptime tree_id_range: {
-                var tree_id_min: u16 = 1;
-                var tree_id_max: u16 = 0;
-                for (tree_infos) |tree_info| {
-                    tree_id_min = @min(tree_id_min, tree_info.tree_id);
-                    tree_id_max = @max(tree_id_max, tree_info.tree_id);
-                }
-                // There are no gaps in the tree ids.
-                assert((tree_id_max - tree_id_min + 1) == tree_infos.len);
-                break :tree_id_range .{ .min = tree_id_min, .max = tree_id_max };
-            };
 
             switch (table.tree_id) {
                 inline tree_id_range.min...tree_id_range.max => |tree_id| {
