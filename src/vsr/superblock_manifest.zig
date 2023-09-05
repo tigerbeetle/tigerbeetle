@@ -360,7 +360,7 @@ pub const Manifest = struct {
         pub fn next(it: *IteratorReverse) ?BlockReference {
             assert(it.count <= it.manifest.count);
 
-            while (it.count > 0) {
+            if (it.count > 0) {
                 it.count -= 1;
                 assert(it.manifest.addresses[it.count] > 0);
 

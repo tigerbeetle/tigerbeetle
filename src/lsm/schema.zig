@@ -71,7 +71,8 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
-    assert(header.size >= @sizeOf(vsr.Header));
+    assert(header.size >= @sizeOf(vsr.Header)); // Every block has a header.
+    assert(header.size > @sizeOf(vsr.Header)); // Every block has a non-empty body.
     assert(header.size <= block.len);
     assert(BlockType.valid(header.operation));
     assert(BlockType.from(header.operation) != .reserved);
@@ -608,6 +609,7 @@ pub const Manifest = struct {
         const context = @as(Context, @bitCast(header.context));
         assert(context.entry_count > 0);
         assert(context.entry_count <= entry_count_max);
+        assert(context.entry_count == @divExact(header.size - @sizeOf(vsr.Header), entry_size));
         assert(stdx.zeroed(&context.reserved));
 
         return .{ .entry_count = context.entry_count };
@@ -630,7 +632,7 @@ pub const Manifest = struct {
         );
     }
 
-    pub fn tables_used(schema: *const Manifest, block: BlockPtrConst) []const TableInfo {
+    pub fn tables_const(schema: *const Manifest, block: BlockPtrConst) []const TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
             block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
@@ -646,7 +648,7 @@ pub const Manifest = struct {
         );
     }
 
-    pub fn labels_used(schema: *const Manifest, block: BlockPtrConst) []const Label {
+    pub fn labels_const(schema: *const Manifest, block: BlockPtrConst) []const Label {
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
         const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(
