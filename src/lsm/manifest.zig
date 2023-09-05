@@ -146,12 +146,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const TableInfoReference = Level.TableInfoReference;
         pub const KeyRange = Level.KeyRange;
         pub const ManifestLog = ManifestLogType(Storage);
+        pub const Level =
+            ManifestLevelType(NodePool, Key, TreeTableInfo, compare_keys, table_count_max);
 
         const Grid = GridType(Storage);
         const Callback = *const fn (*Manifest) void;
-
-        const Level =
-            ManifestLevelType(NodePool, Key, TreeTableInfo, compare_keys, table_count_max);
 
         const CompactionTableRange = struct {
             table_a: TableInfoReference,

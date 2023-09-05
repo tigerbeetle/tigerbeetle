@@ -20,6 +20,7 @@ test {
     _ = @import("lsm/binary_search.zig");
     _ = @import("lsm/bloom_filter.zig");
     _ = @import("lsm/forest.zig");
+    _ = @import("lsm/forest_table_iterator.zig");
     _ = @import("lsm/groove.zig");
     _ = @import("lsm/k_way_merge.zig");
     _ = @import("lsm/manifest_level.zig");
