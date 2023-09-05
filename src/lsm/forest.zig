@@ -83,7 +83,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         groove_tree: union(enum) { objects, ids, indexes: []const u8 },
     };
 
-    const tree_infos: []const TreeInfo = tree_infos: {
+    const _tree_infos: []const TreeInfo = tree_infos: {
         var tree_infos: []const TreeInfo = &[_]TreeInfo{};
         for (std.meta.fields(_Grooves)) |groove_field| {
             const Groove = groove_field.type;
@@ -123,12 +123,12 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
     const tree_id_range = comptime tree_id_range: {
         var tree_id_min: u16 = 1;
         var tree_id_max: u16 = 0;
-        for (tree_infos) |tree_info| {
+        for (_tree_infos) |tree_info| {
             tree_id_min = @min(tree_id_min, tree_info.tree_id);
             tree_id_max = @max(tree_id_max, tree_info.tree_id);
         }
         // There are no gaps in the tree ids.
-        assert((tree_id_max - tree_id_min + 1) == tree_infos.len);
+        assert((tree_id_max - tree_id_min + 1) == _tree_infos.len);
         break :tree_id_range .{ .min = tree_id_min, .max = tree_id_max };
     };
 
@@ -144,6 +144,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         pub const groove_config = groove_cfg;
         pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;
+        pub const tree_infos = _tree_infos;
 
         progress: ?union(enum) {
             open: struct { callback: Callback },
@@ -414,7 +415,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
             unreachable;
         }
 
-        fn tree_for_id(forest: *Forest, comptime tree_id: u16) *TreeForIdType(tree_id) {
+        pub fn tree_for_id(forest: *Forest, comptime tree_id: u16) *TreeForIdType(tree_id) {
             inline for (tree_infos) |tree_info| {
                 if (tree_info.tree_id == tree_id) {
                     var groove = &@field(forest.grooves, tree_info.groove_name);
