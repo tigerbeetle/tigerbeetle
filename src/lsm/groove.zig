@@ -1008,8 +1008,8 @@ pub fn GrooveType(
                         },
                     };
 
-                    assert(groove.compacting.?.pending.isSet(tree_field.offset()));
-                    groove.compacting.?.pending.unset(tree_field.offset());
+                    assert(groove.compacting.?.pending.isSet(comptime tree_field.offset()));
+                    groove.compacting.?.pending.unset(comptime tree_field.offset());
 
                     groove.compact_callback();
                 }
@@ -1032,12 +1032,12 @@ pub fn GrooveType(
             objects,
             index: []const u8,
 
-            fn offset(field: TreeField) usize {
+            fn offset(comptime field: TreeField) usize {
                 switch (field) {
                     .objects => return 0,
                     .ids => return 1,
                     .index => |index_tree_name| {
-                        inline for (std.meta.fields(IndexTrees), 0..) |index_tree_field, i| {
+                        for (std.meta.fields(IndexTrees), 0..) |index_tree_field, i| {
                             if (std.mem.eql(u8, index_tree_field.name, index_tree_name)) {
                                 return @as(usize, 1) + @intFromBool(has_id) + i;
                             }
