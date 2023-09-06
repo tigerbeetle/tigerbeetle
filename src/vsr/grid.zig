@@ -1073,7 +1073,7 @@ pub fn GridType(comptime Storage: type) type {
             const TestStorage = @import("../testing/storage.zig").Storage;
             if (Storage != TestStorage) return;
 
-            const actual_block = grid.superblock.storage.grid_block(address);
+            const actual_block = grid.superblock.storage.grid_block(address).?;
             const actual_header = schema.header_from_block(actual_block);
             const cached_header = schema.header_from_block(cached_block);
             assert(cached_header.checksum == actual_header.checksum);

@@ -13,7 +13,7 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 
-pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
+pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     var groove_fields: []const std.builtin.Type.StructField = &.{};
     var groove_options_fields: []const std.builtin.Type.StructField = &.{};
 
@@ -141,6 +141,7 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
         const Callback = *const fn (*Forest) void;
         const GroovesBitSet = std.StaticBitSet(std.meta.fields(Grooves).len);
 
+        pub const Storage = _Storage;
         pub const groove_config = groove_cfg;
         pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;

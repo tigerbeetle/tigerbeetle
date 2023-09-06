@@ -696,7 +696,7 @@ pub fn TableType(
 
         pub fn verify(
             comptime Storage: type,
-            storage: *Storage,
+            storage: *const Storage,
             index_address: u64,
             key_min: ?Key,
             key_max: ?Key,
@@ -705,19 +705,17 @@ pub fn TableType(
                 // Too complicated to do async verification
                 return;
 
-            const index_block = storage.grid_block(index_address);
-            const addresses = index.data_addresses(index_block);
-            const data_blocks_used = index.data_blocks_used(index_block);
-            for (0..data_blocks_used) |data_block_index| {
-                const address = addresses[data_block_index];
-                const data_block = storage.grid_block(address);
+            const index_block = storage.grid_block(index_address).?;
+            const data_block_addresses = index.data_addresses_used(index_block);
+            for (data_block_addresses, 0..) |data_block_address, data_block_index| {
+                const data_block = storage.grid_block(data_block_address).?;
                 const values = data_block_values_used(data_block);
                 if (values.len > 0) {
                     if (data_block_index == 0) {
                         assert(key_min == null or
                             compare_keys(key_min.?, key_from_value(&values[0])) == .eq);
                     }
-                    if (data_block_index == data_blocks_used - 1) {
+                    if (data_block_index == data_block_addresses.len - 1) {
                         assert(key_max == null or
                             compare_keys(key_from_value(&values[values.len - 1]), key_max.?) == .eq);
                     }

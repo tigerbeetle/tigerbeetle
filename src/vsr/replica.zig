@@ -16,6 +16,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
+const TestStorage = @import("../testing/storage.zig").Storage;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -7906,6 +7907,13 @@ pub fn ReplicaType(
                     );
 
                     if (self.grid_repair_tables.available() == 0) break;
+                } else {
+                    if (StateMachine.Forest.Storage == TestStorage) {
+                        self.superblock.storage.verify_table(
+                            table_info.address,
+                            table_info.checksum,
+                        );
+                    }
                 }
             }
 
