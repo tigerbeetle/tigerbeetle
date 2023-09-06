@@ -122,11 +122,11 @@ pub fn ReplicaType(
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
-    const SuperBlock = vsr.SuperBlockType(Storage);
 
     return struct {
         const Self = @This();
 
+        pub const SuperBlock = vsr.SuperBlockType(Storage);
         const Journal = vsr.JournalType(Self, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
