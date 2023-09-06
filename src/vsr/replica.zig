@@ -802,6 +802,7 @@ pub fn ReplicaType(
                 .superblock = &self.superblock,
                 .cache_blocks_count = options.grid_cache_blocks_count,
                 .repair_queue_blocks_max = constants.grid_repair_blocks_max,
+                .repair_queue_tables_max = constants.grid_repair_tables_max,
             });
             errdefer self.grid.deinit(allocator);
 

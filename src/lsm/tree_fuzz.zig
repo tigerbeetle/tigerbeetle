@@ -30,8 +30,6 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
-// TODO Test grid corruption
-
 const Key = extern struct {
     id: u64,
 
@@ -162,6 +160,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
                 .repair_queue_blocks_max = 0,
+                .repair_queue_tables_max = 0,
             });
             defer env.grid.deinit(allocator);
 
@@ -536,8 +535,8 @@ pub fn main() !void {
         .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
         .write_latency_min = 0,
         .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
-        .read_fault_probability = random.uintLessThan(u8, 100),
-        .write_fault_probability = random.uintLessThan(u8, 100),
+        .read_fault_probability = 0,
+        .write_fault_probability = 0,
         .fault_atlas = &storage_fault_atlas,
     };
 

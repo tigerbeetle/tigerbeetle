@@ -41,6 +41,8 @@ pub fn GridType(comptime Storage: type) type {
         pub const read_iops_max = constants.grid_iops_read_max;
         pub const write_iops_max = constants.grid_iops_write_max;
 
+        pub const RepairTable = GridRepairQueue.RepairTable;
+        pub const RepairTableResult = GridRepairQueue.RepairTableResult;
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = free_set.Reservation;
@@ -198,9 +200,11 @@ pub fn GridType(comptime Storage: type) type {
             superblock: *SuperBlock,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             repair_queue_blocks_max: usize,
+            repair_queue_tables_max: usize,
         }) !Grid {
             var repair_queue = try GridRepairQueue.init(allocator, .{
                 .blocks_max = options.repair_queue_blocks_max,
+                .tables_max = options.repair_queue_tables_max,
             });
             errdefer repair_queue.deinit(allocator);
 
