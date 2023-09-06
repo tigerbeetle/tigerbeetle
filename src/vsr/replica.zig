@@ -14,6 +14,8 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
+const ForestTableIteratorType =
+    @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -127,6 +129,7 @@ pub fn ReplicaType(
         const Journal = vsr.JournalType(Self, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
+        const ForestTableIterator = ForestTableIteratorType(StateMachine.Forest);
 
         const BlockRead = struct {
             read: Grid.Read,
@@ -138,6 +141,11 @@ pub fn ReplicaType(
         const BlockWrite = struct {
             write: Grid.Write = undefined,
             replica: *Self,
+        };
+
+        const RepairTable = struct {
+            replica: *Self,
+            table: Grid.RepairTable,
         };
 
         /// We use this allocator during open/init and then disable it.
@@ -213,6 +221,7 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
+        grid_repair_tables: IOPS(RepairTable, constants.grid_repair_tables_max) = .{},
         grid_repair_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]Grid.BlockPtr,
 
@@ -223,6 +232,9 @@ pub fn ReplicaType(
         /// Kept up-to-date during every status, while syncing or healthy.
         sync_target_max: ?SyncTarget = null,
         sync_target_quorum: SyncTargetQuorum = .{},
+        /// Invariants:
+        /// - If syncing≠idle then sync_tables=null.
+        sync_tables: ?ForestTableIterator = null,
 
         /// The current view.
         /// Initialized from the superblock's VSRState.
@@ -665,6 +677,7 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
+            assert(self.sync_tables == null);
 
             log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
                 self.replica,
@@ -3481,6 +3494,9 @@ pub fn ReplicaType(
 
             const vsr_state_sync_op: struct { min: u64, max: u64 } = sync: {
                 if (self.sync_content_done()) {
+                    assert(self.sync_tables == null);
+                    assert(self.grid_repair_tables.executing() == 0);
+
                     break :sync .{ .min = 0, .max = 0 };
                 } else {
                     break :sync .{
@@ -4330,6 +4346,7 @@ pub fn ReplicaType(
         fn ignore_request_message_duplicate(self: *Self, message: *const Message) bool {
             assert(self.status == .normal);
             assert(self.primary());
+            assert(self.syncing == .idle);
 
             assert(message.header.command == .request);
             assert(message.header.client > 0);
@@ -7446,6 +7463,8 @@ pub fn ReplicaType(
                 self.superblock.staging.checkpoint_id(),
             });
 
+            self.sync_tables = null;
+
             // We learned that we are lagging behind the cluster, so we know we shouldn't actually
             // be the primary. But we can't join a new view until the view's headers are within our
             // `op_checkpoint_next_trigger`. We need to bump our `op_checkpoint` first – but that is
@@ -7485,6 +7504,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.status != .recovering);
             assert(self.syncing != .idle);
+            assert(self.sync_tables == null);
 
             log.debug("{}: sync_start_from_sync " ++
                 "(checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7618,14 +7638,13 @@ pub fn ReplicaType(
 
             // Even though the commit flow has been stopped, there may still be pending IO
             // between beats.
-            // TODO Compaction pacing: If there is no grid IO between beats, we can transition
-            // to stage=requesting_target.
             self.sync_dispatch(.canceling_grid);
         }
 
         fn sync_cancel_grid_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(self.syncing == .canceling_grid);
+            assert(self.sync_tables == null);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -7660,8 +7679,10 @@ pub fn ReplicaType(
             assert(!self.superblock.updating(.checkpoint));
             assert(self.commit_stage == .idle);
             assert(self.commit_prepare == null);
+            assert(self.sync_tables == null);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
             if (self.status == .normal) assert(!self.primary());
 
@@ -7704,8 +7725,10 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .updating_superblock);
             assert(self.sync_message_timeout.ticking);
+            assert(self.sync_tables == null);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
             maybe(self.state_machine_opened);
 
@@ -7761,8 +7784,10 @@ pub fn ReplicaType(
 
         fn sync_superblock_update_callback(superblock_context: *SuperBlock.Context) void {
             const self = @fieldParentPtr(Self, "superblock_context", superblock_context);
+            assert(self.sync_tables == null);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
+            assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
             assert(self.syncing == .updating_superblock);
             assert(!self.state_machine_opened);
@@ -7797,6 +7822,12 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.state_machine_opened);
             assert(self.superblock.working.vsr_state.sync_op_max > 0);
+            assert(self.sync_tables == null);
+
+            self.sync_tables = .{};
+            if (self.grid_repair_tables.available() > 0) {
+                self.sync_request_tables();
+            }
 
             for (0..constants.clients_max) |entry_slot| {
                 if (self.superblock.client_sessions.entries_free.isSet(entry_slot)) {
@@ -7827,9 +7858,88 @@ pub fn ReplicaType(
                         if (self.client_replies.faulty.isSet(entry_slot)) return false;
                     }
                 }
+                return self.sync_tables == null and self.grid_repair_tables.executing() == 0;
+            }
+        }
 
-                // TODO Return whether all tables are synced.
-                return true;
+        /// State sync finished, and we must repair all of the tables we missed.
+        fn sync_request_tables(self: *Self) void {
+            assert(self.syncing == .idle);
+            assert(self.sync_tables != null);
+            assert(self.state_machine_opened);
+            assert(self.superblock.working.vsr_state.sync_op_max > 0);
+            assert(self.grid_repair_tables.available() > 0);
+
+            const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
+            const sync_op_min = self.superblock.working.vsr_state.sync_op_min;
+            const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
+            while (self.sync_tables.?.next(&self.state_machine.forest)) |table_info| {
+                if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
+                    table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
+                {
+                    if (self.grid.repair_queue.request_table_queued(
+                        table_info.address,
+                        table_info.checksum,
+                    )) {
+                        assert(self.grid_repair_tables.executing() > 0);
+                        continue;
+                    }
+
+                    log.debug("{}: sync_request_tables: " ++
+                        "request address={} checksum={} snapshot_min={} ({}..{})", .{
+                        self.replica,
+                        table_info.address,
+                        table_info.checksum,
+                        table_info.snapshot_min,
+                        snapshot_from_commit(sync_op_min),
+                        snapshot_from_commit(sync_op_max),
+                    });
+
+                    const table = self.grid_repair_tables.acquire().?;
+                    table.* = .{ .replica = self, .table = undefined };
+
+                    self.grid.repair_queue.request_table(
+                        sync_request_table_callback,
+                        &table.table,
+                        table_info.address,
+                        table_info.checksum,
+                    );
+
+                    if (self.grid_repair_tables.available() == 0) break;
+                }
+            }
+
+            if (self.grid_repair_tables.executing() == 0) {
+                assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
+
+                log.debug("{}: sync_request_tables: all tables synced (commit={}..{})", .{
+                    self.replica,
+                    sync_op_min,
+                    sync_op_max,
+                });
+
+                self.sync_tables = null;
+            }
+        }
+
+        fn sync_request_table_callback(
+            queue_table: *Grid.RepairTable,
+            result: Grid.RepairTableResult,
+        ) void {
+            const table = @fieldParentPtr(RepairTable, "table", queue_table);
+            const self = table.replica;
+
+            log.debug("{}: sync_request_table_callback: address={} checksum={} result={s}", .{
+                self.replica,
+                queue_table.index_address,
+                queue_table.index_checksum,
+                @tagName(result),
+            });
+
+            self.grid_repair_tables.release(table);
+
+            if (self.sync_tables) |_| {
+                self.sync_request_tables();
             }
         }
 

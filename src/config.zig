@@ -241,6 +241,7 @@ pub const configs = struct {
             .grid_repair_request_max = 4,
             .grid_repair_reads_max = 4,
             .grid_repair_blocks_max = 3,
+            .grid_repair_tables_max = 2,
             .verify = true,
             // Set to a small value to ensure the multipart trailer sync is easily tested.
             .sync_trailer_message_body_size_max = 129,
