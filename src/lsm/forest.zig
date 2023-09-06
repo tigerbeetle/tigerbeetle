@@ -329,14 +329,17 @@ pub fn ForestType(comptime Storage: type, comptime groove_cfg: anytype) type {
                         @alignCast(@fieldParentPtr(Grooves, groove_field_name, groove));
                     const forest = @fieldParentPtr(Forest, "grooves", grooves);
 
-                    inline for (std.meta.fields(Grooves), 0..) |groove_field, i| {
-                        if (std.mem.eql(u8, groove_field.name, groove_field_name)) {
-                            assert(forest.progress.?.compact.pending.isSet(i));
-
-                            forest.progress.?.compact.pending.unset(i);
-                            break;
+                    const groove_index = comptime groove_index: {
+                        for (std.meta.fields(Grooves), 0..) |groove_field, i| {
+                            if (std.mem.eql(u8, groove_field.name, groove_field_name)) {
+                                break :groove_index i;
+                            }
                         }
-                    } else unreachable;
+                        unreachable;
+                    };
+
+                    assert(forest.progress.?.compact.pending.isSet(groove_index));
+                    forest.progress.?.compact.pending.unset(groove_index);
 
                     forest.compact_callback();
                 }
