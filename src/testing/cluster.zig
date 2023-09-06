@@ -218,8 +218,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             });
             errdefer state_checker.deinit();
 
-            var storage_checker = StorageChecker.init(allocator);
-            errdefer storage_checker.deinit();
+            var storage_checker = try StorageChecker.init(allocator);
+            errdefer storage_checker.deinit(allocator);
 
             var sync_checker = SyncChecker.init(allocator);
             errdefer sync_checker.deinit();
@@ -296,7 +296,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn deinit(cluster: *Self) void {
             cluster.sync_checker.deinit();
-            cluster.storage_checker.deinit();
+            cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
             cluster.network.deinit();
             for (cluster.clients) |*client| client.deinit(cluster.allocator);
@@ -348,6 +348,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// This simulates a storage determinism bug.
         ///
         /// (Replica must be running and also between compaction beats for this to run.)
+        // TODO Test the occasional divergence in the VOPR.
         pub fn diverge(cluster: *Self, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
