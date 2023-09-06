@@ -293,6 +293,15 @@ pub const grid_cache_size_default = config.process.grid_cache_size_default;
 /// - (Repair protocol is used to repair manifest log blocks immediately after state sync).
 pub const grid_repair_blocks_max = config.process.grid_repair_blocks_max;
 
+/// The number of tables that can be synced simultaneously.
+/// "Table" in this context is the number of table index blocks to hold in memory while syncing
+/// their content.
+///
+/// As this increases:
+/// - GridRepairQueue allocates more memory (~2 block for each).
+/// - Syncing is more efficient, as more blocks can be fetched concurrently.
+pub const grid_repair_tables_max = config.process.grid_repair_tables_max;
+
 comptime {
     assert(grid_repair_request_max > 0);
     assert(grid_repair_request_max <= @divFloor(message_body_size_max, @sizeOf(vsr.BlockRequest)));
@@ -302,6 +311,7 @@ comptime {
     assert(grid_repair_writes_max > 0);
 
     assert(grid_repair_blocks_max > 0);
+    assert(grid_repair_tables_max > 0);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.

@@ -26,7 +26,7 @@ pub fn StateMachineType(
             lsm_forest_node_count: u32,
         };
 
-        const Forest = ForestType(Storage, .{ .things = ThingGroove });
+        pub const Forest = ForestType(Storage, .{ .things = ThingGroove });
 
         const ThingGroove = GrooveType(
             Storage,

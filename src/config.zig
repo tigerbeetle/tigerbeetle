@@ -113,6 +113,7 @@ const ConfigProcess = struct {
     grid_repair_request_max: usize = 8,
     grid_repair_reads_max: usize = 8,
     grid_repair_blocks_max: usize = 30,
+    grid_repair_tables_max: usize = 3,
     aof_record: bool = false,
     aof_recovery: bool = false,
     /// When null, this defaults to message_body_size_max.
