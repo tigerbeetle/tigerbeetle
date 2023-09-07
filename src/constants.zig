@@ -298,7 +298,7 @@ pub const grid_repair_blocks_max = config.process.grid_repair_blocks_max;
 /// their content.
 ///
 /// As this increases:
-/// - GridRepairQueue allocates more memory (~2 block for each).
+/// - GridRepairQueue allocates more memory (~2 blocks for each).
 /// - Syncing is more efficient, as more blocks can be fetched concurrently.
 pub const grid_repair_tables_max = config.process.grid_repair_tables_max;
 

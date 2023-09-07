@@ -530,6 +530,7 @@ pub fn GridType(comptime Storage: type) type {
             const block_header = schema.header_from_block(block.*);
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
+            maybe(grid.checkpointing == null);
             assert(grid.writing(block_header.op, block.*) == .not_writing);
             assert(grid.repair_queue.repair_ready(block_header.op, block_header.checksum));
             assert(!grid.superblock.free_set.is_free(block_header.op));
@@ -549,6 +550,7 @@ pub fn GridType(comptime Storage: type) type {
             const block_header = schema.header_from_block(block.*);
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
+            assert(grid.checkpointing == null);
             assert(grid.writing(block_header.op, block.*) == .not_writing);
             assert(!grid.repair_queue.repair_ready(block_header.op, block_header.checksum));
             assert(!grid.superblock.free_set.is_free(block_header.op));
@@ -1038,12 +1040,12 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn block_requests(grid: *Grid, requests: []vsr.BlockRequest) usize {
+            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
+            // continue.
             const request_faults_count = @min(grid.read_global_queue.count, requests.len);
             const request_repairs_count =
                 grid.repair_queue.block_requests(requests[request_faults_count..]);
 
-            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
-            // continue.
             // (Note that many – but not all – of these blocks are also in the GridRepairQueue.
             // The `read_global_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
             for (requests[0..request_faults_count]) |*request| {

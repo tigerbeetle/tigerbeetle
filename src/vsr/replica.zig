@@ -8349,6 +8349,7 @@ pub fn ReplicaType(
                 vsr.BlockRequest,
                 message.buffer[@sizeOf(Header)..],
             )[0..constants.grid_repair_request_max];
+            assert(requests.len > 0);
 
             const requests_count: u32 = @intCast(self.grid.block_requests(requests));
             if (requests_count == 0) return;

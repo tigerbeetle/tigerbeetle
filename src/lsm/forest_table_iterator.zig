@@ -50,6 +50,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             .is_tuple = false,
         } });
     };
+    assert(std.meta.fields(TreeTableIterators).len > 0);
 
     return struct {
         const ForestTableIterator = @This();
@@ -120,6 +121,8 @@ fn TreeTableIteratorType(comptime Tree: type) type {
             assert(level < constants.lsm_levels);
 
             if (iterator.position) |position| {
+                assert(position.level < constants.lsm_levels);
+
                 if (position.level != level) {
                     assert(position.level + 1 == level);
 

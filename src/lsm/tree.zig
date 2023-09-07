@@ -90,7 +90,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     return struct {
         const Tree = @This();
 
-        // Expose the Table & hash for the Groove.
         pub const Table = TreeTable;
         pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
