@@ -22,11 +22,13 @@ pub const MessageBusReplica = MessageBusType(.replica);
 pub const MessageBusClient = MessageBusType(.client);
 
 fn MessageBusType(comptime process_type: vsr.ProcessType) type {
-    const SendQueue = RingBuffer(*Message, switch (process_type) {
-        .replica => constants.connection_send_queue_max_replica,
-        // A client has at most 1 in-flight request, plus pings.
-        .client => constants.connection_send_queue_max_client,
-    }, .array);
+    const SendQueue = RingBuffer(*Message, .{
+        .array = switch (process_type) {
+            .replica => constants.connection_send_queue_max_replica,
+            // A client has at most 1 in-flight request, plus pings.
+            .client => constants.connection_send_queue_max_client,
+        },
+    });
 
     const tcp_sndbuf = switch (process_type) {
         .replica => constants.tcp_sndbuf_replica,

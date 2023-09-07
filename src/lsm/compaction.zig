@@ -44,7 +44,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const TableInfoType = @import("manifest.zig").TableInfoType;
+const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
@@ -267,10 +267,11 @@ pub fn CompactionType(
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
-            compaction.manifest_entries.clear();
             if (compaction.grid_reservation) |grid_reservation| {
                 compaction.context.grid.forfeit(grid_reservation);
                 compaction.grid_reservation = null;
+            } else {
+                assert(compaction.move_table);
             }
         }
 
@@ -283,7 +284,6 @@ pub fn CompactionType(
         ) void {
             assert(compaction.state == .idle);
             assert(compaction.grid_reservation == null);
-            assert(compaction.manifest_entries.empty());
 
             tracer.start(
                 &compaction.tracer_slot,

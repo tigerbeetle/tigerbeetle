@@ -8,10 +8,9 @@ const mem = std.mem;
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 
-// TODO Compute & use the upper bound of manifest blocks (per tree) to size the trailer zone.
+// TODO Compute & use the upper bound of manifest blocks to size the trailer zone.
 
 /// SuperBlock.Manifest schema:
-/// │ [manifest.count]u128 │ Tree id (for the owner of the ManifestLog)
 /// │ [manifest.count]u128 │ ManifestLog block checksum
 /// │ [manifest.count]u64  │ ManifestLog block address
 /// Entries are ordered from oldest to newest.
@@ -19,7 +18,6 @@ pub const Manifest = struct {
     // This is a struct-of-arrays of `BlockReference`s.
     // Only the first `manifest.count` entries are valid.
     // Entries are ordered from oldest to newest.
-    trees: []u128,
     checksums: []u128,
     addresses: []u64,
 
@@ -37,12 +35,7 @@ pub const Manifest = struct {
     /// This enables us to track fragmentation even in unflushed blocks.
     compaction_set: std.AutoHashMapUnmanaged(u64, void),
 
-    pub const Tables = std.AutoHashMapUnmanaged(TableExtentKey, TableExtent);
-
-    pub const TableExtentKey = struct {
-        tree_hash: u128,
-        table: u64,
-    };
+    pub const Tables = std.AutoHashMapUnmanaged(u64, TableExtent);
 
     pub const TableExtent = struct {
         block: u64, // ManifestLog block address.
@@ -56,11 +49,6 @@ pub const Manifest = struct {
         // The same number is the limit for all tables across the forest since most trees are small.
         forest_table_count_max: u32,
     ) !Manifest {
-        // TODO Assert relation between manifest_block_count_max and forest_table_count_max.
-
-        const trees = try allocator.alloc(u128, manifest_block_count_max);
-        errdefer allocator.free(trees);
-
         const checksums = try allocator.alloc(u128, manifest_block_count_max);
         errdefer allocator.free(checksums);
 
@@ -75,12 +63,10 @@ pub const Manifest = struct {
         try compaction_set.ensureTotalCapacity(allocator, manifest_block_count_max);
         errdefer compaction_set.deinit(allocator);
 
-        @memset(trees, 0);
         @memset(checksums, 0);
         @memset(addresses, 0);
 
         return Manifest{
-            .trees = trees,
             .checksums = checksums,
             .addresses = addresses,
             .count = 0,
@@ -91,7 +77,6 @@ pub const Manifest = struct {
     }
 
     pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
-        allocator.free(manifest.trees);
         allocator.free(manifest.checksums);
         allocator.free(manifest.addresses);
         manifest.tables.deinit(allocator);
@@ -101,7 +86,6 @@ pub const Manifest = struct {
     }
 
     pub fn reset(manifest: *Manifest) void {
-        @memset(manifest.trees, 0);
         @memset(manifest.checksums, 0);
         @memset(manifest.addresses, 0);
 
@@ -117,15 +101,6 @@ pub const Manifest = struct {
         assert(target.len % @sizeOf(u128) == 0);
 
         var size: u64 = 0;
-
-        const trees = target[size..][0 .. manifest.count * @sizeOf(u128)];
-        stdx.copy_disjoint(
-            .exact,
-            u128,
-            @as([]u128, @alignCast(mem.bytesAsSlice(u128, trees))),
-            manifest.trees[0..manifest.count],
-        );
-        size += trees.len;
 
         const checksums = target[size..][0 .. manifest.count * @sizeOf(u128)];
         stdx.copy_disjoint(
@@ -147,7 +122,7 @@ pub const Manifest = struct {
 
         @memset(target[size..], 0);
 
-        assert(@divExact(size, BlockReferenceSize) == manifest.count);
+        assert(@divExact(size, BlockReference.size) == manifest.count);
 
         return size;
     }
@@ -157,19 +132,10 @@ pub const Manifest = struct {
         assert(manifest.tables.count() == 0);
         assert(manifest.compaction_set.count() == 0);
 
-        manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReferenceSize)));
+        manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReference.size)));
         assert(manifest.count <= manifest.count_max);
 
         var size: u64 = 0;
-
-        const trees = source[size..][0 .. manifest.count * @sizeOf(u128)];
-        stdx.copy_disjoint(
-            .exact,
-            u128,
-            manifest.trees[0..manifest.count],
-            @as([]const u128, @alignCast(mem.bytesAsSlice(u128, trees))),
-        );
-        size += trees.len;
 
         const checksums = source[size..][0 .. manifest.count * @sizeOf(u128)];
         stdx.copy_disjoint(
@@ -190,11 +156,7 @@ pub const Manifest = struct {
         size += addresses.len;
 
         assert(size == source.len);
-        assert(@divExact(size, BlockReferenceSize) == manifest.count);
-
-        @memset(manifest.trees[manifest.count..], 0);
-        @memset(manifest.checksums[manifest.count..], 0);
-        @memset(manifest.addresses[manifest.count..], 0);
+        assert(@divExact(size, BlockReference.size) == manifest.count);
 
         if (constants.verify) manifest.verify();
     }
@@ -202,7 +164,7 @@ pub const Manifest = struct {
     /// Addresses must be unique across all appends, or remove() must be called first.
     /// Warning: The caller is responsible for ensuring that concurrent tree compactions call
     /// append() in a deterministic order with respect to each other.
-    pub fn append(manifest: *Manifest, tree: u128, checksum: u128, address: u64) void {
+    pub fn append(manifest: *Manifest, checksum: u128, address: u64) void {
         assert(address > 0);
         assert(manifest.index_for_address(address) == null);
 
@@ -210,7 +172,6 @@ pub const Manifest = struct {
             @panic("superblock manifest: out of space");
         }
 
-        manifest.trees[manifest.count] = tree;
         manifest.checksums[manifest.count] = checksum;
         manifest.addresses[manifest.count] = address;
         manifest.count += 1;
@@ -219,8 +180,7 @@ pub const Manifest = struct {
         // For example, if a table is inserted and then removed before the block was flushed.
         // TODO Optimize ManifestLog.close_block() to compact blocks internally.
 
-        log.debug("append: tree={} checksum={} address={} manifest.blocks={}/{}", .{
-            tree,
+        log.debug("append: checksum={} address={} manifest.blocks={}/{}", .{
             checksum,
             address,
             manifest.count,
@@ -230,32 +190,40 @@ pub const Manifest = struct {
         if (constants.verify) {
             const index = manifest.index_for_address(address).?;
             assert(index == manifest.count - 1);
-            manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
+            manifest.verify_index_checksum_address(index, checksum, address);
             manifest.verify();
         }
     }
 
-    pub fn remove(manifest: *Manifest, tree: u128, checksum: u128, address: u64) void {
+    pub fn remove(manifest: *Manifest, checksum: u128, address: u64) void {
         assert(address > 0);
 
         const index = manifest.index_for_address(address).?;
         assert(index < manifest.count);
-        manifest.verify_index_tree_checksum_address(index, tree, checksum, address);
+        manifest.verify_index_checksum_address(index, checksum, address);
 
         const tail = manifest.count - (index + 1);
-        stdx.copy_left(.inexact, u128, manifest.trees[index..], manifest.trees[index + 1 ..][0..tail]);
-        stdx.copy_left(.inexact, u128, manifest.checksums[index..], manifest.checksums[index + 1 ..][0..tail]);
-        stdx.copy_left(.inexact, u64, manifest.addresses[index..], manifest.addresses[index + 1 ..][0..tail]);
-        manifest.count -= 1;
+        stdx.copy_left(
+            .inexact,
+            u128,
+            manifest.checksums[index..],
+            manifest.checksums[index + 1 ..][0..tail],
+        );
+        stdx.copy_left(
+            .inexact,
+            u64,
+            manifest.addresses[index..],
+            manifest.addresses[index + 1 ..][0..tail],
+        );
 
-        manifest.trees[manifest.count] = 0;
+        manifest.count -= 1;
         manifest.checksums[manifest.count] = 0;
         manifest.addresses[manifest.count] = 0;
 
-        _ = manifest.compaction_set.remove(address);
+        const address_removed = manifest.compaction_set.remove(address);
+        assert(address_removed);
 
-        log.debug("remove: tree={} checksum={} address={} manifest.blocks={}/{}", .{
-            tree,
+        log.debug("remove: checksum={} address={} manifest.blocks={}/{}", .{
             checksum,
             address,
             manifest.count,
@@ -291,17 +259,12 @@ pub const Manifest = struct {
         return manifest.compaction_set.contains(address);
     }
 
-    pub fn oldest_block_queued_for_compaction(
-        manifest: *const Manifest,
-        tree: u128,
-    ) ?BlockReference {
+    pub fn oldest_block_queued_for_compaction(manifest: *const Manifest) ?BlockReference {
         var index: u32 = 0;
         while (index < manifest.count) : (index += 1) {
-            if (manifest.trees[index] != tree) continue;
             if (!manifest.queued_for_compaction(manifest.addresses[index])) continue;
 
             return BlockReference{
-                .tree = manifest.trees[index],
                 .checksum = manifest.checksums[index],
                 .address = manifest.addresses[index],
             };
@@ -312,14 +275,16 @@ pub const Manifest = struct {
 
     /// Inserts the table extent if it does not yet exist, and returns true.
     /// Otherwise, returns false.
-    pub fn insert_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) bool {
+    pub fn insert_table_extent(
+        manifest: *Manifest,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) bool {
         assert(table > 0);
         assert(block > 0);
 
-        var extent = manifest.tables.getOrPutAssumeCapacity(.{
-            .tree_hash = tree_hash,
-            .table = table,
-        });
+        var extent = manifest.tables.getOrPutAssumeCapacity(table);
         if (extent.found_existing) return false;
 
         extent.value_ptr.* = .{
@@ -333,14 +298,16 @@ pub const Manifest = struct {
     /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) ?u64 {
+    pub fn update_table_extent(
+        manifest: *Manifest,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) ?u64 {
         assert(table > 0);
         assert(block > 0);
 
-        var extent = manifest.tables.getOrPutAssumeCapacity(.{
-            .tree_hash = tree_hash,
-            .table = table,
-        });
+        var extent = manifest.tables.getOrPutAssumeCapacity(table);
         const previous_block = if (extent.found_existing) extent.value_ptr.block else null;
 
         extent.value_ptr.* = .{
@@ -353,19 +320,18 @@ pub const Manifest = struct {
 
     /// Removes the table extent if { block, entry } is the latest version, and returns true.
     /// Otherwise, returns false.
-    pub fn remove_table_extent(manifest: *Manifest, tree_hash: u128, table: u64, block: u64, entry: u32) bool {
+    pub fn remove_table_extent(
+        manifest: *Manifest,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) bool {
         assert(table > 0);
         assert(block > 0);
 
-        const extent = manifest.tables.getPtr(.{
-            .tree_hash = tree_hash,
-            .table = table,
-        }).?;
+        const extent = manifest.tables.getPtr(table).?;
         if (extent.block == block and extent.entry == entry) {
-            assert(manifest.tables.remove(.{
-                .tree_hash = tree_hash,
-                .table = table,
-            }));
+            assert(manifest.tables.remove(table));
 
             return true;
         } else {
@@ -375,45 +341,43 @@ pub const Manifest = struct {
 
     /// Reference to a ManifestLog block.
     pub const BlockReference = struct {
-        tree: u128,
         checksum: u128,
         address: u64,
-    };
 
-    /// The size of an encoded BlockReference on disk, not the size of the BlockReference struct.
-    pub const BlockReferenceSize = @sizeOf(u128) + @sizeOf(u128) + @sizeOf(u64);
+        /// The size of an encoded BlockReference on disk, not the size of the BlockReference
+        /// struct.
+        pub const size = @sizeOf(u128) + @sizeOf(u64);
+
+        comptime {
+            assert(size <= @sizeOf(BlockReference));
+        }
+    };
 
     pub const IteratorReverse = struct {
         manifest: *const Manifest,
-        tree: u128,
         count: u32,
 
         pub fn next(it: *IteratorReverse) ?BlockReference {
             assert(it.count <= it.manifest.count);
 
-            while (it.count > 0) {
+            if (it.count > 0) {
                 it.count -= 1;
+                assert(it.manifest.addresses[it.count] > 0);
 
-                if (it.manifest.trees[it.count] == it.tree) {
-                    assert(it.manifest.addresses[it.count] > 0);
-
-                    return BlockReference{
-                        .tree = it.manifest.trees[it.count],
-                        .checksum = it.manifest.checksums[it.count],
-                        .address = it.manifest.addresses[it.count],
-                    };
-                }
+                return BlockReference{
+                    .checksum = it.manifest.checksums[it.count],
+                    .address = it.manifest.addresses[it.count],
+                };
             }
             return null;
         }
     };
 
-    /// Return all block references for a given tree in reverse order, latest-appended-first-out.
+    /// Return all block references in reverse order, latest-appended-first-out.
     /// Using a reverse iterator is an optimization to avoid redundant updates to tree manifests.
-    pub fn iterator_reverse(manifest: *const Manifest, tree: u128) IteratorReverse {
+    pub fn iterator_reverse(manifest: *const Manifest) IteratorReverse {
         return IteratorReverse{
             .manifest = manifest,
-            .tree = tree,
             .count = manifest.count,
         };
     }
@@ -421,28 +385,24 @@ pub const Manifest = struct {
     pub fn verify(manifest: *const Manifest) void {
         assert(manifest.count <= manifest.count_max);
 
-        assert(manifest.trees.len == manifest.count_max);
         assert(manifest.checksums.len == manifest.count_max);
         assert(manifest.addresses.len == manifest.count_max);
 
-        for (manifest.trees[manifest.count..]) |tree| assert(tree == 0);
         for (manifest.checksums[manifest.count..]) |checksum| assert(checksum == 0);
         for (manifest.addresses[manifest.count..]) |address| assert(address == 0);
 
         for (manifest.addresses[0..manifest.count]) |address| assert(address > 0);
     }
 
-    pub fn verify_index_tree_checksum_address(
+    fn verify_index_checksum_address(
         manifest: *const Manifest,
         index: u32,
-        tree: u128,
         checksum: u128,
         address: u64,
     ) void {
         assert(index < manifest.count);
         assert(address > 0);
 
-        assert(manifest.trees[index] == tree);
         assert(manifest.checksums[index] == checksum);
         assert(manifest.addresses[index] == address);
     }
@@ -450,7 +410,6 @@ pub const Manifest = struct {
 
 fn test_iterator_reverse(
     manifest: *Manifest,
-    tree: u128,
     expect: []const Manifest.BlockReference,
 ) !void {
     const expectEqualSlices = std.testing.expectEqualSlices;
@@ -458,7 +417,7 @@ fn test_iterator_reverse(
     var reverse: [3]Manifest.BlockReference = undefined;
     var reverse_count: usize = 0;
 
-    var it = manifest.iterator_reverse(tree);
+    var it = manifest.iterator_reverse();
     while (it.next()) |block| {
         reverse[reverse_count] = block;
         reverse_count += 1;
@@ -474,10 +433,7 @@ fn test_codec(manifest: *Manifest) !void {
 
     var target_a: [32]u128 = undefined;
     const size_a = manifest.encode(mem.sliceAsBytes(&target_a));
-    try expectEqual(
-        @as(u64, manifest.count * (@sizeOf(u128) + @sizeOf(u128) + @sizeOf(u64))),
-        size_a,
-    );
+    try expectEqual(@as(u64, manifest.count * (@sizeOf(u128) + @sizeOf(u64))), size_a);
 
     // The decoded instance must match the original instance:
     var decoded = try Manifest.init(testing.allocator, manifest.count_max, 8);
@@ -485,7 +441,6 @@ fn test_codec(manifest: *Manifest) !void {
 
     decoded.decode(mem.sliceAsBytes(&target_a)[0..size_a]);
 
-    try expectEqualSlices(u128, manifest.trees, decoded.trees);
     try expectEqualSlices(u128, manifest.checksums, decoded.checksums);
     try expectEqualSlices(u64, manifest.addresses, decoded.addresses);
     try expectEqual(manifest.count_max, decoded.count_max);
@@ -510,110 +465,88 @@ test "SuperBlockManifest" {
     var manifest = try Manifest.init(testing.allocator, 3, 8);
     defer manifest.deinit(testing.allocator);
 
-    for (manifest.trees) |tree| try expectEqual(@as(u128, 0), tree);
     for (manifest.checksums) |checksum| try expectEqual(@as(u128, 0), checksum);
     for (manifest.addresses) |address| try expectEqual(@as(u64, 0), address);
 
-    // The arguments to append()/remove() are: tree, checksum, address
+    // The arguments to append()/remove() are: checksum, address
     // These will be named variables and should be clear at call sites where they are used for real.
-    manifest.append(1, 2, 3);
+    manifest.append(2, 3);
     try expectEqual(@as(?u32, 0), manifest.index_for_address(3));
 
-    manifest.append(2, 3, 4);
+    manifest.append(3, 4);
     try expectEqual(@as(?u32, 1), manifest.index_for_address(4));
 
-    manifest.append(1, 4, 5);
+    manifest.append(4, 5);
     try expectEqual(@as(?u32, 2), manifest.index_for_address(5));
 
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(1));
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(2));
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction());
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction());
 
     manifest.queue_for_compaction(3);
     try expectEqual(true, manifest.queued_for_compaction(3));
     try expectEqual(
-        @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
-        manifest.oldest_block_queued_for_compaction(1),
+        @as(?BlockReference, BlockReference{ .checksum = 2, .address = 3 }),
+        manifest.oldest_block_queued_for_compaction(),
     );
 
     manifest.queue_for_compaction(4);
     try expectEqual(true, manifest.queued_for_compaction(4));
     try expectEqual(
-        @as(?BlockReference, BlockReference{ .tree = 2, .checksum = 3, .address = 4 }),
-        manifest.oldest_block_queued_for_compaction(2),
+        @as(?BlockReference, BlockReference{ .checksum = 2, .address = 3 }),
+        manifest.oldest_block_queued_for_compaction(),
     );
 
     manifest.queue_for_compaction(5);
     try expectEqual(true, manifest.queued_for_compaction(5));
     try expectEqual(
-        @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 2, .address = 3 }),
-        manifest.oldest_block_queued_for_compaction(1),
+        @as(?BlockReference, BlockReference{ .checksum = 2, .address = 3 }),
+        manifest.oldest_block_queued_for_compaction(),
     );
 
     try test_iterator_reverse(
         &manifest,
-        1,
         &[_]BlockReference{
-            .{
-                .tree = 1,
-                .checksum = 4,
-                .address = 5,
-            },
-            .{
-                .tree = 1,
-                .checksum = 2,
-                .address = 3,
-            },
-        },
-    );
-
-    try test_iterator_reverse(
-        &manifest,
-        2,
-        &[_]BlockReference{
-            .{
-                .tree = 2,
-                .checksum = 3,
-                .address = 4,
-            },
+            .{ .checksum = 4, .address = 5 },
+            .{ .checksum = 3, .address = 4 },
+            .{ .checksum = 2, .address = 3 },
         },
     );
 
     try test_codec(&manifest);
 
-    manifest.remove(1, 2, 3);
+    manifest.remove(2, 3);
     try expectEqual(false, manifest.queued_for_compaction(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(3));
     try expectEqual(@as(?u32, 0), manifest.index_for_address(4));
     try expectEqual(@as(?u32, 1), manifest.index_for_address(5));
     try expectEqual(
-        @as(?BlockReference, BlockReference{ .tree = 1, .checksum = 4, .address = 5 }),
-        manifest.oldest_block_queued_for_compaction(1),
+        @as(?BlockReference, BlockReference{ .checksum = 3, .address = 4 }),
+        manifest.oldest_block_queued_for_compaction(),
     );
 
-    try expectEqual(@as(u128, 0), manifest.trees[2]);
     try expectEqual(@as(u128, 0), manifest.checksums[2]);
     try expectEqual(@as(u64, 0), manifest.addresses[2]);
 
-    manifest.append(1, 2, 3);
+    manifest.append(2, 3);
     try expectEqual(@as(?u32, 2), manifest.index_for_address(3));
 
-    manifest.remove(1, 4, 5);
+    manifest.remove(4, 5);
     try expectEqual(false, manifest.queued_for_compaction(5));
     try expectEqual(@as(?u32, null), manifest.index_for_address(5));
     try expectEqual(@as(?u32, 1), manifest.index_for_address(3));
 
-    manifest.remove(2, 3, 4);
+    manifest.remove(3, 4);
     try expectEqual(false, manifest.queued_for_compaction(4));
     try expectEqual(@as(?u32, null), manifest.index_for_address(4));
     try expectEqual(@as(?u32, 0), manifest.index_for_address(3));
 
-    manifest.remove(1, 2, 3);
+    manifest.queue_for_compaction(3);
+    manifest.remove(2, 3);
     try expectEqual(false, manifest.queued_for_compaction(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(3));
     try expectEqual(@as(?u32, null), manifest.index_for_address(4));
     try expectEqual(@as(?u32, null), manifest.index_for_address(5));
 
-    for (manifest.trees) |tree| try expectEqual(@as(u128, 0), tree);
     for (manifest.checksums) |checksum| try expectEqual(@as(u128, 0), checksum);
     for (manifest.addresses) |address| try expectEqual(@as(u64, 0), address);
 
@@ -622,6 +555,5 @@ test "SuperBlockManifest" {
     try expectEqual(@as(u32, 0), manifest.count);
     try expectEqual(@as(u32, 3), manifest.count_max);
 
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(1));
-    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction(2));
+    try expectEqual(@as(?BlockReference, null), manifest.oldest_block_queued_for_compaction());
 }

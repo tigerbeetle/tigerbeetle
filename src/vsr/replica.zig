@@ -8949,8 +8949,8 @@ fn message_body_as_headers_unchecked(message: *const Message) []const Header {
 /// Note: The prepare queue may contain multiple prepares from a single client, but the request
 /// queue may not (see message_by_client()).
 const PipelineQueue = struct {
-    const PrepareQueue = RingBuffer(Prepare, constants.pipeline_prepare_queue_max, .array);
-    const RequestQueue = RingBuffer(Request, constants.pipeline_request_queue_max, .array);
+    const PrepareQueue = RingBuffer(Prepare, .{ .array = constants.pipeline_prepare_queue_max });
+    const RequestQueue = RingBuffer(Request, .{ .array = constants.pipeline_request_queue_max });
 
     /// Messages that are preparing (uncommitted, being written to the WAL (may already be written
     /// to the WAL) and replicated (may just be waiting for acks)).

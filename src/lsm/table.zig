@@ -14,7 +14,7 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 const key_fingerprint = @import("tree.zig").key_fingerprint;
 
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
-const TableInfoType = @import("manifest.zig").TableInfoType;
+const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;
 const schema = @import("schema.zig");
 
 pub const TableUsage = enum {
@@ -306,7 +306,7 @@ pub fn TableType(
         }
 
         pub const Builder = struct {
-            const TableInfo = TableInfoType(Table);
+            const TreeTableInfo = TreeTableInfoType(Table);
 
             key_min: Key = undefined, // Inclusive.
             key_max: Key = undefined, // Inclusive.
@@ -537,7 +537,10 @@ pub fn TableType(
                 tree_id: u16,
             };
 
-            pub fn index_block_finish(builder: *Builder, options: IndexFinishOptions) TableInfo {
+            pub fn index_block_finish(
+                builder: *Builder,
+                options: IndexFinishOptions,
+            ) TreeTableInfo {
                 assert(options.address > 0);
                 assert(builder.filter_block_empty());
                 assert(builder.data_block_empty());
@@ -572,7 +575,7 @@ pub fn TableType(
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
-                const info: TableInfo = .{
+                const info: TreeTableInfo = .{
                     .checksum = header.checksum,
                     .address = options.address,
                     .snapshot_min = options.snapshot_min,

@@ -74,6 +74,13 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 /// The maximum number of concurrent compactions (per tree).
 pub const compactions_max = div_ceil(constants.lsm_levels, 2);
 
+pub const TreeConfig = struct {
+    /// Unique (stable) identifier, across all trees in the forest.
+    id: u16,
+    /// Human-readable tree name for logging.
+    name: []const u8,
+};
+
 pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     const Key = TreeTable.Key;
     const Value = TreeTable.Value;
@@ -88,6 +95,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         const Grid = @import("../vsr/grid.zig").GridType(Storage);
         const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
+        const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
         const KeyRange = Manifest.KeyRange;
 
         pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
@@ -145,9 +153,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         } = .none,
         compaction_next_tick: Grid.NextTick = undefined,
 
-        checkpoint_callback: ?*const fn (*Tree) void = null,
-        open_callback: ?*const fn (*Tree) void = null,
-
         tracer_slot: ?tracer.SpanStart = null,
         filter_block_hits: u64 = 0,
         filter_block_misses: u64 = 0,
@@ -156,12 +161,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         key_range: ?KeyRange = null,
 
         /// (Constructed by the Forest.)
-        pub const Config = struct {
-            /// Unique (stable) identifier, across all trees in the forest.
-            id: u16,
-            /// Human-readable tree name for logging.
-            name: []const u8,
-        };
+        pub const Config = TreeConfig;
 
         /// (Constructed by the StateMachine.)
         pub const Options = struct {
@@ -203,7 +203,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             var table_immutable = try TableImmutable.init(allocator);
             errdefer table_immutable.deinit(allocator);
 
-            var manifest = try Manifest.init(allocator, node_pool, grid, config.id);
+            var manifest = try Manifest.init(allocator, node_pool, config);
             errdefer manifest.deinit(allocator);
 
             var compaction_table_immutable = try Compaction.init(allocator, config);
@@ -658,26 +658,32 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             return if (value == null or tombstone(value.?)) null else value.?;
         }
 
-        pub fn open(tree: *Tree, callback: *const fn (*Tree) void) void {
-            assert(tree.open_callback == null);
-            tree.open_callback = callback;
-            tree.compaction_op = tree.grid.superblock.working.vsr_state.commit_min;
+        pub fn open_commence(tree: *Tree, manifest_log: *ManifestLog) void {
+            assert(tree.compaction_op == null);
+            assert(tree.key_range == null);
 
-            tree.manifest.open(manifest_open_callback);
+            tree.manifest.open_commence(manifest_log);
         }
 
-        fn manifest_open_callback(manifest: *Manifest) void {
-            const tree = @fieldParentPtr(Tree, "manifest", manifest);
-            assert(tree.open_callback != null);
-
-            const callback = tree.open_callback.?;
-            tree.open_callback = null;
-
+        pub fn open_table(tree: *Tree, level: u8, table: *const schema.Manifest.TableInfo) void {
+            assert(tree.compaction_op == null);
             assert(tree.key_range == null);
-            tree.key_range = manifest.key_range();
-            maybe(tree.key_range == null);
 
-            callback(tree);
+            const tree_table = Manifest.TreeTableInfo.decode(table);
+            tree.manifest.levels[level].insert_table(tree.manifest.node_pool, &tree_table);
+        }
+
+        pub fn open_complete(tree: *Tree) void {
+            assert(tree.compaction_op == null);
+            assert(tree.key_range == null);
+
+            tree.compaction_op = tree.grid.superblock.working.vsr_state.commit_min;
+            tree.key_range = tree.manifest.key_range();
+
+            tree.manifest.verify(snapshot_latest);
+            assert(tree.compaction_op.? == 0 or
+                (tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
+            maybe(tree.key_range == null);
         }
 
         const CompactionTableContext = struct {
@@ -795,11 +801,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         tree.manifest.verify(tree.compaction_op.?);
                     }
 
-                    tree.manifest.reserve();
-
-                    // Compact the manifest.
+                    // Corresponds to compact_finish_join_next_tick() (during half_bar_end).
                     tree.compaction_io_pending += 1;
-                    tree.manifest.compact(compact_manifest_callback);
 
                     // Maybe start compacting the immutable table.
                     const even_levels = compaction_beat < half_bar_beat_count;
@@ -825,15 +828,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .half_bar_end => {
                     // At the end of a half-bar, we have to wait for all compactions to finish.
                     tree.compaction_callback = .{ .awaiting = callback };
-                    tree.compact_finish_join();
+                    tree.grid.on_next_tick(
+                        compact_finish_join_next_tick,
+                        &tree.compaction_next_tick,
+                    );
                 },
             }
-        }
-
-        fn compact_manifest_callback(manifest: *Manifest) void {
-            const tree = @fieldParentPtr(Tree, "manifest", manifest);
-            tree.compaction_io_pending -= 1;
-            tree.compact_finish_join();
         }
 
         fn compact_start_table_immutable(tree: *Tree, op_min: u64) void {
@@ -933,6 +933,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 });
             }
 
+            tree.compaction_io_pending -= 1;
+            tree.compact_finish_join();
+        }
+
+        fn compact_finish_join_next_tick(next_tick: *Grid.NextTick) void {
+            const tree = @fieldParentPtr(Tree, "compaction_next_tick", next_tick);
             tree.compaction_io_pending -= 1;
             tree.compact_finish_join();
         }
@@ -1063,7 +1069,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     else => unreachable,
                 }
             }
-            tree.manifest.forfeit();
 
             assert(tree.compaction_table_immutable.state == .idle);
             it = CompactionTableIterator{ .tree = tree };
@@ -1105,13 +1110,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(!tree.table_immutable.free);
         }
 
-        pub fn checkpoint(tree: *Tree, callback: *const fn (*Tree) void) void {
+        pub fn assert_between_bars(tree: *const Tree) void {
             // Assert no outstanding compact_tick() work.
             assert(tree.compaction_io_pending == 0);
             assert(tree.compaction_callback == .none);
             assert(tree.compaction_op.? > 0);
-            // Don't re-run the checkpoint we recovered from.
-            assert(!tree.grid.superblock.working.vsr_state.op_compacted(tree.compaction_op.?));
 
             // Assert that this is the last beat in the compaction bar.
             const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
@@ -1127,24 +1130,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             // Assert all manifest levels haven't overflowed their table counts.
             tree.manifest.assert_level_table_counts();
 
-            // Assert that we're checkpointing only after invisible tables have been removed.
             if (constants.verify) {
                 tree.manifest.assert_no_invisible_tables(compaction_op_min(tree.compaction_op.?));
             }
-
-            // Start an asynchronous checkpoint on the manifest.
-            assert(tree.checkpoint_callback == null);
-            tree.checkpoint_callback = callback;
-            tree.manifest.checkpoint(manifest_checkpoint_callback);
-        }
-
-        fn manifest_checkpoint_callback(manifest: *Manifest) void {
-            const tree = @fieldParentPtr(Tree, "manifest", manifest);
-            assert(tree.checkpoint_callback != null);
-
-            const callback = tree.checkpoint_callback.?;
-            tree.checkpoint_callback = null;
-            callback(tree);
         }
 
         pub const RangeQuery = union(enum) {
@@ -1180,6 +1168,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             _ = tree;
             _ = snapshot;
             _ = query;
+            @panic("unimplemented");
         }
     };
 }
@@ -1343,17 +1332,5 @@ test "TreeType" {
     );
 
     const Storage = @import("../storage.zig").Storage;
-    const Tree = TreeType(Table, Storage);
-
-    _ = Tree.init;
-    _ = Tree.deinit;
-    _ = Tree.reset;
-    _ = Tree.put;
-    _ = Tree.remove;
-    _ = Tree.lookup_from_memory;
-    _ = Tree.lookup_from_levels_storage;
-    _ = Tree.open;
-    _ = Tree.compact;
-    _ = Tree.compact_end;
-    _ = Tree.checkpoint;
+    std.testing.refAllDecls(TreeType(Table, Storage));
 }

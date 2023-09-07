@@ -146,21 +146,6 @@ pub const FreeSet = struct {
         return set.blocks.capacity() - set.blocks.count();
     }
 
-    /// Returns the number of free blocks in the reservation.
-    pub fn count_free_reserved(set: FreeSet, reservation: Reservation) usize {
-        assert(set.reservation_count > 0);
-        assert(reservation.block_count > 0);
-        assert(reservation.block_base < set.reservation_blocks);
-        assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
-
-        var count: u64 = 0;
-        var i: u64 = 0;
-        while (i < reservation.block_count) : (i += 1) {
-            if (!set.blocks.isSet(reservation.block_base + i)) count += 1;
-        }
-        return count;
-    }
-
     /// Returns the number of acquired blocks.
     pub fn count_acquired(set: FreeSet) usize {
         return set.blocks.count();
@@ -566,11 +551,8 @@ test "FreeSet.reserve/acquire" {
         const reservation = set.reserve(2).?;
         defer set.forfeit(reservation);
 
-        try std.testing.expectEqual(set.count_free_reserved(reservation), 2);
         try std.testing.expectEqual(set.acquire(reservation), address + 0);
-        try std.testing.expectEqual(set.count_free_reserved(reservation), 1);
         try std.testing.expectEqual(set.acquire(reservation), address + 1);
-        try std.testing.expectEqual(set.count_free_reserved(reservation), 0);
         try std.testing.expectEqual(set.acquire(reservation), null);
     }
     address += 2;
