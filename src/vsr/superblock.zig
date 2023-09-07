@@ -417,7 +417,7 @@ pub const superblock_trailer_size_max = blk: {
 
     assert(superblock_trailer_manifest_size_max > 0);
     assert(superblock_trailer_manifest_size_max % constants.sector_size == 0);
-    assert(superblock_trailer_manifest_size_max % SuperBlockManifest.BlockReferenceSize == 0);
+    assert(superblock_trailer_manifest_size_max % SuperBlockManifest.BlockReference.size == 0);
 
     assert(superblock_trailer_free_set_size_max > 0);
     assert(superblock_trailer_free_set_size_max % constants.sector_size == 0);
@@ -432,15 +432,15 @@ pub const superblock_trailer_size_max = blk: {
         superblock_trailer_client_sessions_size_max;
 };
 
-// A manifest block reference of 40 bytes contains a tree hash, checksum, and address.
+// A manifest block reference of 24 bytes contains a manifest block checksum and address.
 // These references are stored in struct-of-arrays layout in the trailer for the sake of alignment.
 const superblock_trailer_manifest_size_max = blk: {
-    assert(SuperBlockManifest.BlockReferenceSize == 16 + 16 + 8);
+    assert(SuperBlockManifest.BlockReference.size == 16 + 8);
 
     // Use a multiple of sector * reference so that the size is exactly divisible without padding:
     // For example, this 2.5 MiB manifest trailer == 65536 references == 65536 * 511 or 34m tables.
     // TODO Size this relative to the expected number of tables & fragmentation.
-    break :blk 16 * constants.sector_size * SuperBlockManifest.BlockReferenceSize;
+    break :blk 16 * constants.sector_size * SuperBlockManifest.BlockReference.size;
 };
 
 const superblock_trailer_free_set_size_max = blk: {
@@ -483,6 +483,10 @@ pub const grid_blocks_max = blk: {
     }
     break :blk shard_count * SuperBlockFreeSet.shard_bits;
 };
+
+/// The maximum number of ManifestLog blocks.
+pub const manifest_blocks_max =
+    @divExact(superblock_trailer_manifest_size_max, SuperBlockManifest.BlockReference.size);
 
 comptime {
     assert(grid_blocks_max > 0);
@@ -635,10 +639,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var manifest = try Manifest.init(
                 allocator,
-                @divExact(
-                    superblock_trailer_manifest_size_max,
-                    Manifest.BlockReferenceSize,
-                ),
+                manifest_blocks_max,
                 @import("../lsm/tree.zig").table_count_max,
             );
             errdefer manifest.deinit(allocator);
@@ -1077,7 +1078,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const trailer_checksum_ = superblock.staging.trailer_checksum(trailer);
 
             switch (trailer) {
-                .manifest => assert(trailer_size_ % SuperBlockManifest.BlockReferenceSize == 0),
+                .manifest => assert(trailer_size_ % SuperBlockManifest.BlockReference.size == 0),
                 .free_set => assert(trailer_size_ % @sizeOf(u64) == 0),
                 .client_sessions => assert(trailer_size_ % (@sizeOf(vsr.Header) + @sizeOf(u64)) == 0),
             }

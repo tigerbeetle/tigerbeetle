@@ -42,7 +42,13 @@
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
-//! TODO(Unified manifest) Import the manifest log block too.
+//! Manifest block schema:
+//! │ vsr.Header                  │ operation=BlockType.manifest
+//! │                             │ context: schema.Manifest.Context
+//! │ [entry_count]TableInfo      │
+//! │ [entry_count]Label          │ level index, insert|remove
+//! │ […]u8{0}                    │ padding (to end of block)
+//! Label and TableInfo entries correspond.
 const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -65,7 +71,8 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
     const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.op > 0);
-    assert(header.size >= @sizeOf(vsr.Header));
+    assert(header.size >= @sizeOf(vsr.Header)); // Every block has a header.
+    assert(header.size > @sizeOf(vsr.Header)); // Every block has a non-empty body.
     assert(header.size <= block.len);
     assert(BlockType.valid(header.operation));
     assert(BlockType.from(header.operation) != .reserved);
@@ -124,7 +131,7 @@ pub const TableIndex = struct {
 
     pub const Parent = extern struct {
         tree_id: u16,
-        padding: [14]u8 = [_]u8{0} ** 14,
+        reserved: [14]u8 = .{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -220,11 +227,13 @@ pub const TableIndex = struct {
         });
     }
 
-    pub fn tree_id(index_block: BlockPtrConst) u128 {
+    pub fn tree_id(index_block: BlockPtrConst) u16 {
         const header = header_from_block(index_block);
         assert(BlockType.from(header.operation) == .index);
 
-        return @as(Parent, @bitCast(header.parent)).tree_id;
+        const parent = @as(Parent, @bitCast(header.parent));
+        assert(stdx.zeroed(&parent.reserved));
+        return parent.tree_id;
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
@@ -337,7 +346,7 @@ pub const TableFilter = struct {
 
     pub const Parent = extern struct {
         tree_id: u16,
-        padding: [14]u8 = [_]u8{0} ** 14,
+        reserved: [14]u8 = .{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -384,11 +393,13 @@ pub const TableFilter = struct {
         return TableFilter.init(@as(Context, @bitCast(header.context)));
     }
 
-    pub fn tree_id(filter_block: BlockPtrConst) u128 {
+    pub fn tree_id(filter_block: BlockPtrConst) u16 {
         const header = header_from_block(filter_block);
         assert(BlockType.from(header.operation) == .filter);
 
-        return @as(Parent, @bitCast(header.parent)).tree_id;
+        const parent = @as(Parent, @bitCast(header.parent));
+        assert(stdx.zeroed(&parent.reserved));
+        return parent.tree_id;
     }
 
     pub inline fn block_filter(
@@ -421,7 +432,7 @@ pub const TableData = struct {
 
     pub const Parent = extern struct {
         tree_id: u16,
-        padding: [14]u8 = [_]u8{0} ** 14,
+        reserved: [14]u8 = .{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -473,11 +484,13 @@ pub const TableData = struct {
         return TableData.init(@as(Context, @bitCast(header.context)));
     }
 
-    pub fn tree_id(data_block: BlockPtrConst) u128 {
+    pub fn tree_id(data_block: BlockPtrConst) u16 {
         const header = header_from_block(data_block);
         assert(BlockType.from(header.operation) == .data);
 
-        return @as(Parent, @bitCast(header.parent)).tree_id;
+        const parent = @as(Parent, @bitCast(header.parent));
+        assert(stdx.zeroed(&parent.reserved));
+        return parent.tree_id;
     }
 
     pub inline fn block_values_bytes(
@@ -507,5 +520,140 @@ pub const TableData = struct {
         assert(@sizeOf(vsr.Header) + used_bytes == header.size);
         assert(header.size <= schema.padding_offset); // This is the maximum padding_offset
         return schema.block_values_bytes_const(data_block)[0..used_bytes];
+    }
+};
+
+/// A Manifest block's body is a SoA of Labels and TableInfos.
+/// Each Label/TableInfo pair is an "entry".
+// TODO Store timestamp (snapshot) in header.
+pub const Manifest = struct {
+    const entry_size = @sizeOf(TableInfo) + @sizeOf(Label);
+
+    pub const entry_count_max = @divFloor(block_body_size, entry_size);
+
+    const tables_size_max = entry_count_max * @sizeOf(TableInfo);
+    const labels_size_max = entry_count_max * @sizeOf(Label);
+
+    comptime {
+        assert(entry_count_max > 0);
+        assert(tables_size_max % @alignOf(Label) == 0);
+        assert(labels_size_max % @alignOf(Label) == 0);
+
+        // Bit 7 is reserved to indicate whether the event is an insert or remove.
+        assert(constants.lsm_levels <= std.math.maxInt(u7) + 1);
+
+        assert(@sizeOf(Label) == @sizeOf(u8));
+        assert(@alignOf(Label) == 1);
+
+        // All TableInfo's should already be 16-byte aligned because of the leading checksum.
+        const alignment = 16;
+        assert(alignment <= @sizeOf(vsr.Header));
+        assert(alignment == @alignOf(TableInfo));
+
+        // For keys { 8, 16, 24, 32 } all TableInfo's should be a multiple of the alignment.
+        // However, we still store Label ahead of TableInfo to save space on the network.
+        // This means we store fewer entries per manifest block, to gain less padding,
+        // since we must store entry_count_max of whichever array is first in the layout.
+        // For a better understanding of this decision, see schema.Manifest.size().
+        assert(@sizeOf(TableInfo) % alignment == 0);
+    }
+
+    /// Stored in every manifest block's header's `context` field.
+    pub const Context = extern struct {
+        entry_count: u32,
+        reserved: [12]u8 = .{0} ** 12,
+
+        comptime {
+            assert(@sizeOf(Context) == @sizeOf(u128));
+            assert(stdx.no_padding(Context));
+        }
+    };
+
+    /// See manifest.zig's TreeTableInfoType declaration for field documentation.
+    pub const TableInfo = extern struct {
+        /// All keys must fit within 32 bytes.
+        pub const KeyPadded = [32]u8;
+
+        checksum: u128,
+        address: u64,
+        tree_id: u16,
+        reserved: [6]u8 = .{0} ** 6,
+        snapshot_min: u64,
+        snapshot_max: u64,
+        key_min: KeyPadded,
+        key_max: KeyPadded,
+
+        comptime {
+            assert(@alignOf(TableInfo) == 16);
+            assert(stdx.no_padding(TableInfo));
+        }
+    };
+
+    pub const Label = packed struct(u8) {
+        level: u7,
+        event: enum(u1) { insert, remove },
+
+        comptime {
+            assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);
+        }
+    };
+
+    entry_count: u32,
+
+    pub fn from(manifest_block: BlockPtrConst) Manifest {
+        const header = header_from_block(manifest_block);
+        assert(header.command == .block);
+        assert(BlockType.from(header.operation) == .manifest);
+        assert(header.op > 0);
+
+        const context = @as(Context, @bitCast(header.context));
+        assert(context.entry_count > 0);
+        assert(context.entry_count <= entry_count_max);
+        assert(context.entry_count == @divExact(header.size - @sizeOf(vsr.Header), entry_size));
+        assert(stdx.zeroed(&context.reserved));
+
+        return .{ .entry_count = context.entry_count };
+    }
+
+    pub fn size(schema: *const Manifest) u32 {
+        assert(schema.entry_count > 0);
+        assert(schema.entry_count <= entry_count_max);
+
+        const tables_size = schema.entry_count * @sizeOf(TableInfo);
+        const labels_size = schema.entry_count * @sizeOf(Label);
+
+        return @sizeOf(vsr.Header) + tables_size + labels_size;
+    }
+
+    pub fn tables(schema: *const Manifest, block: BlockPtr) []TableInfo {
+        return mem.bytesAsSlice(
+            TableInfo,
+            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
+        );
+    }
+
+    pub fn tables_const(schema: *const Manifest, block: BlockPtrConst) []const TableInfo {
+        return mem.bytesAsSlice(
+            TableInfo,
+            block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
+        );
+    }
+
+    pub fn labels(schema: *const Manifest, block: BlockPtr) []Label {
+        const tables_size = schema.entry_count * @sizeOf(TableInfo);
+        const labels_size = schema.entry_count * @sizeOf(Label);
+        return mem.bytesAsSlice(
+            Label,
+            block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
+        );
+    }
+
+    pub fn labels_const(schema: *const Manifest, block: BlockPtrConst) []const Label {
+        const tables_size = schema.entry_count * @sizeOf(TableInfo);
+        const labels_size = schema.entry_count * @sizeOf(Label);
+        return mem.bytesAsSlice(
+            Label,
+            block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
+        );
     }
 };

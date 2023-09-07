@@ -32,7 +32,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message,
         };
 
-        const RequestQueue = RingBuffer(Request, constants.client_request_queue_max, .array);
+        const RequestQueue = RingBuffer(Request, .{ .array = constants.client_request_queue_max });
 
         allocator: mem.Allocator,
 
