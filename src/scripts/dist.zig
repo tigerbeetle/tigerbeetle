@@ -34,18 +34,17 @@ pub fn main() !void {
     const shell = try Shell.create(gpa);
     defer shell.destroy();
 
-    dist(shell);
-    publish(shell);
+    try build_dist(shell);
 }
 
-fn dist(shell: *Shell) !void {
+fn build_dist(shell: *Shell) !void {
     try shell.project_root.deleteTree("dist");
     var dist_dir = try shell.project_root.makeOpenPath("dist", .{});
     defer dist_dir.close();
 
     var timer_total = try std.time.Timer.start();
     log.info("building TigerBeetle distribution into {s}", .{
-        try dist_dir.realpathAlloc(shell.arena, "."),
+        try dist_dir.realpathAlloc(shell.arena.allocator(), "."),
     });
 
     var dist_dir_tigerbeetle = try dist_dir.makeOpenPath("tigerbeetle", .{});
@@ -65,19 +64,19 @@ fn dist(shell: *Shell) !void {
 
     var timer = try std.time.Timer.start();
 
-    try dist_tigerbeetle(shell, dist_dir_tigerbeetle);
+    try build_dist_tigerbeetle(shell, dist_dir_tigerbeetle);
     const elapsed_tigerbeetle_ns = timer.lap();
 
-    try dist_node(shell, dist_dir_node);
+    try build_dist_node(shell, dist_dir_node);
     const elapsed_node_ns = timer.lap();
 
-    try dist_java(shell, dist_dir_java);
+    try build_dist_java(shell, dist_dir_java);
     const elapsed_java_ns = timer.lap();
 
-    try dist_dotnet(shell, dist_dir_dotnet);
+    try build_dist_dotnet(shell, dist_dir_dotnet);
     const elapsed_dotnet_ns = timer.lap();
 
-    try dist_go(shell, dist_dir_go);
+    try build_dist_go(shell, dist_dir_go);
     const elapsed_go_ns = timer.lap();
 
     const elapsed_total_ns = timer_total.lap();
@@ -98,7 +97,7 @@ fn dist(shell: *Shell) !void {
     });
 }
 
-fn dist_tigerbeetle(shell: *Shell, dist_dir: std.fs.Dir) !void {
+fn build_dist_tigerbeetle(shell: *Shell, dist_dir: std.fs.Dir) !void {
     log.info("building tigerbeetle", .{});
 
     try shell.project_root.setAsCwd();
@@ -130,7 +129,7 @@ fn dist_tigerbeetle(shell: *Shell, dist_dir: std.fs.Dir) !void {
     }
 }
 
-fn dist_node(shell: *Shell, dist_dir: std.fs.Dir) !void {
+fn build_dist_node(shell: *Shell, dist_dir: std.fs.Dir) !void {
     log.info("building node client", .{});
     var client_src_dir = try shell.project_root.openDir("src/clients/node", .{});
     defer client_src_dir.close();
@@ -151,7 +150,7 @@ fn dist_node(shell: *Shell, dist_dir: std.fs.Dir) !void {
     );
 }
 
-fn dist_java(shell: *Shell, dist_dir: std.fs.Dir) !void {
+fn build_dist_java(shell: *Shell, dist_dir: std.fs.Dir) !void {
     log.info("building java client", .{});
     var client_src_dir = try shell.project_root.openDir("src/clients/java", .{});
     defer client_src_dir.close();
@@ -172,7 +171,7 @@ fn dist_java(shell: *Shell, dist_dir: std.fs.Dir) !void {
     );
 }
 
-fn dist_dotnet(shell: *Shell, dist_dir: std.fs.Dir) !void {
+fn build_dist_dotnet(shell: *Shell, dist_dir: std.fs.Dir) !void {
     log.info("building dotnet client", .{});
     var client_src_dir = try shell.project_root.openDir("src/clients/dotnet", .{});
     defer client_src_dir.close();
@@ -194,7 +193,7 @@ fn dist_dotnet(shell: *Shell, dist_dir: std.fs.Dir) !void {
     );
 }
 
-fn dist_go(shell: *Shell, dist_dir: std.fs.Dir) !void {
+fn build_dist_go(shell: *Shell, dist_dir: std.fs.Dir) !void {
     log.info("building go client", .{});
     var client_src_dir = try shell.project_root.openDir("src/clients/go", .{});
     defer client_src_dir.close();
@@ -229,30 +228,4 @@ fn dist_go(shell: *Shell, dist_dir: std.fs.Dir) !void {
         copied_count += 1;
     }
     assert(copied_count == 5);
-}
-
-fn publish(shell: *Shell) !void {
-    try shell.project_root.setAsCwd();
-    assert(shell.dir_exists("dist"));
-
-    try shell.exec(
-        \\hub release create
-        \\  --prerelease
-        \\  --draft
-        \\  --message {message}
-        \\  --commitish {sha}
-        \\  {version}
-    , .{});
-
-    for (.{}) |binary| {
-        try shell.exec("gh release upload {version} {binary}", .{
-            .binary = binary,
-        });
-    }
-
-    try shell.exec(
-        \\hub release edit
-        \\  --draft=false
-        \\  {version}
-    , .{});
 }
