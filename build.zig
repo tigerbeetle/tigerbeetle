@@ -613,6 +613,16 @@ pub fn build(b: *std.Build) !void {
         const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
         step.dependOn(&run_cmd.step);
     }
+
+    const dist_exe = b.addExecutable(.{
+        .name = "dist",
+        .root_source_file = .{ .path = "src/scripts/dist.zig" },
+        .target = target,
+        .main_pkg_path = .{ .path = "src" },
+    });
+    const dist_exe_run = b.addRunArtifact(dist_exe);
+    const dist_tls = b.step("dist", "build artifacts for publishing");
+    dist_tls.dependOn(&dist_exe_run.step);
 }
 
 fn link_tracer_backend(
@@ -1228,7 +1238,7 @@ const ShellcheckStep = struct {
 
         const scripts = try shell.find(.{
             .where = &.{ "src", "scripts", ".github" },
-            .ends_with = ".sh",
+            .extension = ".sh",
         });
 
         try shell.exec("shellcheck {scripts}", .{

@@ -114,13 +114,28 @@ fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
     return stat.kind == .directory;
 }
 
+const FindOptions = struct {
+    where: []const []const u8,
+    extension: ?[]const u8 = null,
+    extensions: ?[]const []const u8 = null,
+};
+
 /// Analogue of the `find` utility, returns a set of paths matching filtering criteria.
 ///
 /// Returned slice is stored in `Shell.arena`.
-pub fn find(shell: *Shell, options: struct {
-    where: []const []const u8,
-    ends_with: []const u8,
-}) ![]const []const u8 {
+pub fn find(shell: *Shell, options: FindOptions) ![]const []const u8 {
+    if (options.extension != null and options.extensions != null) {
+        @panic("conflicting extension filters");
+    }
+    if (options.extension) |extension| {
+        assert(extension[0] == '.');
+    }
+    if (options.extensions) |extensions| {
+        for (extensions) |extension| {
+            assert(extension[0] == '.');
+        }
+    }
+
     var result = std.ArrayList([]const u8).init(shell.arena.allocator());
 
     const cwd = std.fs.cwd();
@@ -132,7 +147,7 @@ pub fn find(shell: *Shell, options: struct {
         defer walker.deinit();
 
         while (try walker.next()) |entry| {
-            if (std.mem.endsWith(u8, entry.path, options.ends_with)) {
+            if (find_filter_path(entry.path, options)) {
                 const full_path =
                     try std.fs.path.join(shell.arena.allocator(), &.{ base_path, entry.path });
                 try result.append(full_path);
@@ -141,6 +156,37 @@ pub fn find(shell: *Shell, options: struct {
     }
 
     return result.items;
+}
+
+fn find_filter_path(path: []const u8, options: FindOptions) bool {
+    if (options.extension == null and options.extensions == null) return true;
+    if (options.extension != null and options.extensions != null) @panic("conflicting filters");
+
+    if (options.extension) |extension| {
+        return std.mem.endsWith(u8, path, extension);
+    }
+
+    if (options.extensions) |extensions| {
+        for (extensions) |extension| {
+            if (std.mem.endsWith(u8, path, extension)) return true;
+        }
+        return false;
+    }
+
+    unreachable;
+}
+
+/// Copy file, creating the destination directory as necessary.
+pub fn copy_path(
+    src_dir: std.fs.Dir,
+    src_path: []const u8,
+    dst_dir: std.fs.Dir,
+    dst_path: []const u8,
+) !void {
+    if (std.fs.path.dirname(dst_path)) |dir| {
+        try dst_dir.makePath(dir);
+    }
+    try src_dir.copyFile(src_path, dst_dir, dst_path, .{});
 }
 
 /// Runs the given command with inherited stdout and stderr.
