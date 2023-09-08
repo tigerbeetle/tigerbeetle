@@ -39,8 +39,7 @@
     <dependency>
       <groupId>com.tigerbeetle</groupId>
       <artifactId>tigerbeetle-java</artifactId>
-      <!-- Grab the latest commit from: https://repo1.maven.org/maven2/com/tigerbeetle/tigerbeetle-java/maven-metadata.xml -->
-      <version>0.0.1-3431</version>
+      <version>0.0.1-SNAPSHOT</version>
     </dependency>
   </dependencies>
-</project> 
+</project>
