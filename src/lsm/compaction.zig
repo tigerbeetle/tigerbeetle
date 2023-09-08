@@ -77,7 +77,7 @@ pub fn CompactionType(
         const TableInfoReference = Manifest.TableInfoReference;
 
         pub const TableInfoA = union(enum) {
-            immutable: []const Value,
+            immutable: []Value,
             disk: TableInfoReference,
         };
 
@@ -275,6 +275,38 @@ pub fn CompactionType(
             }
         }
 
+        // TODO: We need to reimplement the .secondary_index optimization for sort here.
+        fn fill_immutable_values(compaction: *Compaction) u32 {
+            var immutable_values_for_compaction =
+                Table.data_block_values(compaction.data_blocks[0]);
+            var table_immutable_values = compaction.context.table_info_a.immutable;
+            var input_index: u32 = 0;
+            var output_index: u32 = 0;
+
+            while (input_index < table_immutable_values.len) {
+                if (output_index > 0 and compare_keys(
+                    key_from_value(&immutable_values_for_compaction[output_index - 1]),
+                    key_from_value(&table_immutable_values[input_index]),
+                ) == .eq) {
+                    output_index -= 1;
+                }
+
+                immutable_values_for_compaction[output_index] =
+                    table_immutable_values[input_index];
+
+                if (output_index == immutable_values_for_compaction.len - 1) {
+                    break;
+                }
+
+                input_index += 1;
+                output_index += 1;
+            }
+            compaction.context.table_info_a.immutable =
+                compaction.context.table_info_a.immutable[input_index..];
+
+            return output_index;
+        }
+
         /// The compaction's input tables are:
         /// * `context.table_a_info` (which is `.immutable` when `context_level_b` is 0), and
         /// * Any level_b tables visible to `context.op_min` within `context.range_b`.
@@ -387,8 +419,7 @@ pub fn CompactionType(
                 });
 
                 switch (context.table_info_a) {
-                    .immutable => |values| {
-                        compaction.values_in[0] = values;
+                    .immutable => {
                         compaction.loop_start();
                     },
                     .disk => |table_ref| {
@@ -449,7 +480,16 @@ pub fn CompactionType(
                 // Still have values on this input_level, no need to refill.
                 compaction.iterator_check_finish(input_level);
             } else if (input_level == .a and compaction.context.table_info_a == .immutable) {
-                // No iterator to call next on.
+                // Potentially fill our immutable values from the immutable TableMemory.
+                // TODO: Currently, this copies the values to compaction.data_blocks[0], but in
+                // future we can make it use a KWayMergeIterator.
+                if (compaction.context.table_info_a.immutable.len > 0) {
+                    const filled = compaction.fill_immutable_values();
+
+                    // The immutable table is always considered `table a`, which maps to 0.
+                    compaction.values_in[0] = Table.data_block_values(compaction.data_blocks[0])[0..filled];
+                }
+
                 compaction.iterator_check_finish(input_level);
             } else {
                 compaction.state = .{ .iterator_next = input_level };
@@ -621,6 +661,7 @@ pub fn CompactionType(
                 values_out_index < values_out.len)
             {
                 const value_a = &values_in_a[values_in_a_index];
+
                 values_in_a_index += 1;
                 if (tombstone(value_a)) {
                     continue;
@@ -673,16 +714,11 @@ pub fn CompactionType(
                     .eq => {
                         values_in_a_index += 1;
                         values_in_b_index += 1;
-                        if (Table.usage == .secondary_index) {
-                            if (tombstone(value_a)) {
-                                assert(!tombstone(value_b));
-                                continue;
-                            }
-                            if (tombstone(value_b)) {
-                                assert(!tombstone(value_a));
-                                continue;
-                            }
-                        } else if (compaction.drop_tombstones) {
+
+                        // Due to our table_memory no longer performing the secondary_index
+                        // optimizations, we relax the assertions that were here about tombstones
+                        // alternating.
+                        if (compaction.drop_tombstones) {
                             if (tombstone(value_a)) {
                                 continue;
                             }

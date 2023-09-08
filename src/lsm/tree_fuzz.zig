@@ -89,10 +89,6 @@ const cluster = 32;
 const replica = 4;
 const replica_count = 6;
 const node_count = 1024;
-const tree_options = .{
-    // This is the smallest size that set_associative_cache will allow us.
-    .cache_entries_max = 2048,
-};
 
 // We must call compact after every 'batch'.
 // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values.
@@ -205,7 +201,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
-            }, tree_options);
+            }, .{});
             defer env.tree.deinit(allocator);
 
             env.change_state(.tree_init, .manifest_log_open);
@@ -321,24 +317,19 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.lookup_value = null;
 
             const fingerprint = key_fingerprint(key);
-            switch (env.tree.lookup_from_memory(snapshot_latest, key, fingerprint)) {
-                .negative => {
-                    get_callback(&env.lookup_context, null);
-                },
-                .positive => |value| {
-                    get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
-                },
-                .possible => |level_min| {
-                    env.tree.lookup_from_levels_storage(.{
-                        .callback = get_callback,
-                        .context = &env.lookup_context,
-                        .snapshot = snapshot_latest,
-                        .key = key,
-                        .fingerprint = fingerprint,
-                        .level_min = level_min,
-                    });
-                },
+            if (env.tree.lookup_from_memory(key)) |value| {
+                get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
+            } else {
+                env.tree.lookup_from_levels_storage(.{
+                    .callback = get_callback,
+                    .context = &env.lookup_context,
+                    .snapshot = snapshot_latest,
+                    .key = key,
+                    .fingerprint = fingerprint,
+                    .level_min = 0,
+                });
             }
+
             env.tick_until_state_change(.tree_lookup, .fuzzing);
             return env.lookup_value;
         }
@@ -431,10 +422,10 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
         //8
-        100 * constants.lsm_growth_factor * tree_options.cache_entries_max
+        100 * constants.lsm_growth_factor * 2048
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        constants.lsm_growth_factor * tree_options.cache_entries_max;
+        constants.lsm_growth_factor * 2048;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
