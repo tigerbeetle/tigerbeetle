@@ -227,12 +227,15 @@ pub fn SetAssociativeCache(
         }
 
         /// Remove a key from the set associative cache if present.
-        pub fn remove(self: *Self, key: Key) void {
+        pub fn remove(self: *Self, key: Key) ?Value {
             const set = self.associate(key);
-            const way = self.search(set, key) orelse return;
+            const way = self.search(set, key) orelse return null;
 
+            var removed: Value = set.values[way];
             self.counts.set(set.offset + way, 0);
             set.values[way] = undefined;
+
+            return removed;
         }
 
         /// Hint that the key is less likely to be accessed in the future, without actually removing
@@ -270,19 +273,16 @@ pub fn SetAssociativeCache(
             return @as(*const Ways, @ptrCast(&result)).*;
         }
 
-        /// Insert a value, evicting an older entry if needed.
-        pub fn insert(self: *Self, value: *const Value) void {
-            _ = self.insert_index(value);
-        }
-
-        /// Insert a value, evicting an older entry if needed.
+        /// Upsert a value, evicting an older entry if needed. The evicted value is made available
+        /// to the on_eviction callback, and is only valid for the lifetime of the callback.
         /// Return the index at which the value was inserted.
-        pub fn insert_index(self: *Self, value: *const Value) usize {
+        pub fn upsert_index(self: *Self, value: *const Value, on_eviction: *const fn (*Self, *const Value, bool) void) usize {
             const key = key_from_value(value);
             const set = self.associate(key);
             if (self.search(set, key)) |way| {
                 // Overwrite the old entry for this key.
                 self.counts.set(set.offset + way, 1);
+                on_eviction(self, &set.values[way], true);
                 set.values[way] = value.*;
                 return set.offset + way;
             }
@@ -308,7 +308,11 @@ pub fn SetAssociativeCache(
 
                 count -= 1;
                 self.counts.set(set.offset + way, count);
-                if (count == 0) break; // Way has become free.
+                if (count == 0) {
+                    // Way has become free.
+                    on_eviction(self, &set.values[way], false);
+                    break;
+                }
             } else {
                 unreachable;
             }
@@ -387,6 +391,13 @@ pub fn SetAssociativeCache(
                 clock_hands_per_line,
             });
         }
+
+        // No-op eviction handler for upsert_index.
+        pub fn noop_on_eviction(cache: *Self, value: *const Value, updated: bool) void {
+            _ = cache;
+            _ = value;
+            _ = updated;
+        }
     };
 }
 
@@ -430,7 +441,7 @@ fn set_associative_cache_test(
                     try expectEqual(i, sac.clocks.get(0));
 
                     const key = i * sac.sets;
-                    sac.insert(&key);
+                    _ = sac.upsert_index(&key, SAC.noop_on_eviction);
                     try expect(sac.counts.get(i) == 1);
                     try expectEqual(key, sac.get(key).?.*);
                     try expect(sac.counts.get(i) == 2);
@@ -441,9 +452,10 @@ fn set_associative_cache_test(
             if (log) sac.associate(0).inspect(sac);
 
             // Insert another element into the first set, causing key 0 to be evicted.
+            // TODO: Test this using on_evicted above.
             {
                 const key = layout.ways * sac.sets;
-                sac.insert(&key);
+                _ = sac.upsert_index(&key, SAC.noop_on_eviction);
                 try expect(sac.counts.get(0) == 1);
                 try expectEqual(key, sac.get(key).?.*);
                 try expect(sac.counts.get(0) == 2);
@@ -466,7 +478,7 @@ fn set_associative_cache_test(
                 assert(sac.get(key).?.* == key);
                 try expect(sac.counts.get(5) == 2);
 
-                sac.remove(key);
+                _ = sac.remove(key);
                 try expectEqual(@as(?*Value, null), sac.get(key));
                 try expect(sac.counts.get(5) == 0);
             }
@@ -484,7 +496,7 @@ fn set_associative_cache_test(
                     try expectEqual(i, sac.clocks.get(0));
 
                     const key = i * sac.sets;
-                    sac.insert(&key);
+                    _ = sac.upsert_index(&key, SAC.noop_on_eviction);
                     try expect(sac.counts.get(i) == 1);
                     var j: usize = 2;
                     while (j <= math.maxInt(SAC.Count)) : (j += 1) {
@@ -502,7 +514,7 @@ fn set_associative_cache_test(
             // Insert another element into the first set, causing key 0 to be evicted.
             {
                 const key = layout.ways * sac.sets;
-                sac.insert(&key);
+                _ = sac.upsert_index(&key, SAC.noop_on_eviction);
                 try expect(sac.counts.get(0) == 1);
                 try expectEqual(key, sac.get(key).?.*);
                 try expect(sac.counts.get(0) == 2);
