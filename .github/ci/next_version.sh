@@ -15,13 +15,13 @@ NUGET_VERSION=$(curl -s "${NUGET_INDEX}" | jq -r .versions[-1])
 MAVEN_VERSION=$(curl -s "${MAVEN_INDEX}" | xq -r .metadata.versioning.latest)
 NPM_VERSION=$(npm view tigerbeetle-node version)
 
-nuget_patch=$(echo "${NUGET_VERSION}" | grep $MAJOR.$MINOR | cut -d '.' -f 3)
-maven_patch=$(echo "${NUGET_VERSION}" | grep $MAJOR.$MINOR | cut -d '.' -f 3)
-npm_patch=$(echo "${NUGET_VERSION}" | grep $MAJOR.$MINOR | cut -d '.' -f 3)
+nuget_patch=$(echo "${NUGET_VERSION}" | grep "$MAJOR\.$MINOR" | cut -d '.' -f 3)
+maven_patch=$(echo "${NUGET_VERSION}" | grep "$MAJOR\.$MINOR" | cut -d '.' -f 3)
+npm_patch=$(echo "${NUGET_VERSION}" | grep "$MAJOR\.$MINOR" | cut -d '.' -f 3)
 
 git fetch --tags --all
 version="$MAJOR.$MINOR.0"
-git_patch="$(git tag | grep $MAJOR.$MINOR | cut -d '.' -f 3 | sort -nr | head -n1)"
+git_patch="$(git tag | grep "$MAJOR\.$MINOR" | cut -d '.' -f 3 | sort -nr | head -n1)"
 
 echo "Current Nuget version: ${NUGET_VERSION}" 1>&2
 echo "Current Maven version: ${MAVEN_VERSION}" 1>&2
