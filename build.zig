@@ -86,6 +86,10 @@ pub fn build(b: *std.Build) !void {
     tigerbeetle.omit_frame_pointer = false;
     link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target);
 
+    // tigerbeetle.build_id = true;
+    // tigerbeetle.trace_pc_guard = true;
+    link_voidstar(tigerbeetle);
+
     {
         const run_cmd = b.addRunArtifact(tigerbeetle);
         if (b.args) |args| run_cmd.addArgs(args);
@@ -613,6 +617,45 @@ pub fn build(b: *std.Build) !void {
         const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
         step.dependOn(&run_cmd.step);
     }
+
+    // Antithesis
+    {
+        const exe = b.addExecutable(.{
+            .name = "antithesis_api",
+            .root_source_file = .{ .path = "src/testing/antithesis/api.zig" },
+        });
+        exe.addModule("vsr", vsr_module);
+        exe.addModule("vsr_options", vsr_options_module);
+        // exe.setTarget(target);
+        // exe.setBuildMode(mode);
+        // exe.build_id = true;
+        // exe.trace_pc_guard = true;
+        link_voidstar(exe);
+
+        const install_step = b.addInstallArtifact(exe, .{});
+        const build_step = b.step("antithesis_api", "Antithesis API");
+        build_step.dependOn(&install_step.step);
+    }
+
+    {
+        const exe = b.addExecutable(.{
+            .name = "antithesis_workload",
+            .root_source_file = .{ .path = "src/testing/antithesis/workload.zig" },
+        });
+        exe.addModule("vsr", vsr_module);
+        exe.addModule("vsr_options", vsr_options_module);
+        // exe.setTarget(target);
+        // exe.setBuildMode(mode);
+        link_voidstar(exe);
+
+        const install_step = b.addInstallArtifact(exe, .{});
+        const build_step = b.step("antithesis_workload", "Antithesis Workload");
+        build_step.dependOn(&install_step.step);
+    }
+
+    // benchmark.addModule("vsr", vsr_module);
+    // benchmark.addModule("vsr_options", vsr_options_module);
+
 }
 
 fn link_tracer_backend(
@@ -657,6 +700,17 @@ fn link_tracer_backend(
             exe.step.dependOn(&git_clone_tracy.step);
         },
     }
+}
+
+/// Link the Antithesis instrumentation library.
+/// See: https://antithesis.com/docs/instrumentation/c_instrumentation.html
+fn link_voidstar(exe: *std.build.LibExeObjStep) void {
+    // To allow LLDB to step into libvoidstar: exe.force_pic = true;
+    exe.addIncludePath(.{ .path = "tools/antithesis/lib" });
+    exe.addLibraryPath(.{ .path = "tools/antithesis/lib" });
+
+    exe.linkLibC();
+    exe.linkSystemLibrary("voidstar");
 }
 
 // Zig cross-targets plus Dotnet RID (Runtime Identifier):
