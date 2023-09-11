@@ -1,10 +1,14 @@
 //! Track corrupt/missing grid blocks.
 //!
 //! - The GridRepairQueue is LSM-aware: it can repair entire tables.
+//! - The GridRepairQueue is shared by all Trees.
 //! - The GridRepairQueue is "coherent" – that is, all of the blocks in the queue belong in the
 //!   replica's current checkpoint:
 //!   - The GridRepairQueue will not repair freed blocks.
 //!   - The GridRepairQueue will repair released blocks, until they are freed at the checkpoint.
+//! - GridRepairQueue.enqueue_table() is called immediately after superblock sync.
+//! - GridRepairQueue.enqueue_block() is called by the grid when non-repair reads encounter corrupt
+//!   blocks.
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.grid_repair_queue);
@@ -15,33 +19,13 @@ const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
 const vsr = @import("../vsr.zig");
 
-const allocate_block = @import("./grid.zig").allocate_block;
 const GridType = @import("./grid.zig").GridType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
-/// Immediately after state sync we want access to all of the grid's write bandwidth to rapidly sync
-/// table blocks.
-const grid_repair_writes_max = constants.grid_iops_write_max;
-
-/// The maximum number of blocks that can possibly be referenced by any table index block.
-///
-/// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
-///   tree configuration. (To avoid prevent Grid from depending on StateMachine).
-/// - This counts filter and data blocks, but does not count the index block itself.
-const lsm_table_content_blocks_max = table_blocks_max: {
-    const checksum_size = @sizeOf(u128);
-    const address_size = @sizeOf(u64);
-    break :table_blocks_max @divFloor(
-        constants.block_size - @sizeOf(vsr.Header),
-        (checksum_size + address_size),
-    );
-};
-
 pub const GridRepairQueue = struct {
-    const WriteSet = std.StaticBitSet(grid_repair_writes_max);
-    const TableContentBlocksSet = std.StaticBitSet(lsm_table_content_blocks_max);
+    const TableContentBlocksSet = std.StaticBitSet(constants.lsm_table_content_blocks_max);
 
     /// A block is removed from the collection when:
     /// - the block's write completes, or
@@ -70,7 +54,7 @@ pub const GridRepairQueue = struct {
         table_content: TableContent,
 
         const TableIndex = struct { table: *RepairTable };
-        const TableContent = struct { table: *RepairTable, index: usize };
+        const TableContent = struct { table: *RepairTable, index: u32 };
     };
 
     pub const RepairTableResult = enum {
@@ -94,11 +78,11 @@ pub const GridRepairQueue = struct {
         /// This count includes the index block.
         /// Invariants:
         /// - table_blocks_written ≤ table_blocks_total
-        table_blocks_written: usize = 0,
+        table_blocks_written: u32 = 0,
         /// When null, the table is awaiting an index block.
         /// When non-null, the table is awaiting content blocks.
         /// This count includes the index block.
-        table_blocks_total: ?usize = null,
+        table_blocks_total: ?u32 = null,
 
         /// Invoked when the table index block and all content blocks have been written.
         callback: *const fn (*RepairTable, RepairTableResult) void,
@@ -107,9 +91,9 @@ pub const GridRepairQueue = struct {
     };
 
     pub const Options = struct {
-        /// Lower-bound for the limit of concurrent request_block()'s available.
+        /// Lower-bound for the limit of concurrent enqueue_block()'s available.
         blocks_max: usize,
-        /// Maximum number of concurrent request_table()'s.
+        /// Maximum number of concurrent enqueue_table()'s.
         tables_max: usize,
     };
 
@@ -124,6 +108,12 @@ pub const GridRepairQueue = struct {
     /// - faulty_blocks.count() > 0 implies faulty_blocks_repair_index < faulty_blocks.count()
     /// - faulty_blocks.count() = 0 implies faulty_blocks_repair_index = faulty_blocks.count()
     faulty_blocks_repair_index: usize = 0,
+
+    /// Invariants:
+    /// - enqueued_blocks_table + enqueued_blocks_single = faulty_blocks.count()
+    /// - enqueued_blocks_table ≤ options.tables_max * lsm_table_content_blocks_max
+    enqueued_blocks_single: usize = 0,
+    enqueued_blocks_table: usize = 0,
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
@@ -143,7 +133,7 @@ pub const GridRepairQueue = struct {
 
         try faulty_blocks.ensureTotalCapacity(
             allocator,
-            options.blocks_max + options.tables_max * lsm_table_content_blocks_max,
+            options.blocks_max + options.tables_max * constants.lsm_table_content_blocks_max,
         );
 
         return GridRepairQueue{
@@ -162,72 +152,80 @@ pub const GridRepairQueue = struct {
 
     /// When the queue wants more blocks than fit in a single request message, successive calls
     /// to this function cycle through the pending BlockRequests.
-    pub fn block_requests(queue: *GridRepairQueue, requests: []vsr.BlockRequest) usize {
+    pub fn next_batch_of_block_requests(
+        queue: *GridRepairQueue,
+        requests: []vsr.BlockRequest,
+    ) usize {
         assert(!queue.canceling);
+        assert(requests.len > 0);
 
         const faults_total = queue.faulty_blocks.count();
         if (faults_total == 0) return 0;
-        assert(faults_total > queue.faulty_blocks_repair_index);
+        assert(queue.faulty_blocks_repair_index < faults_total);
 
         const fault_addresses = queue.faulty_blocks.entries.items(.key);
         const fault_data = queue.faulty_blocks.entries.items(.value);
 
         var requests_count: usize = 0;
         var fault_offset: usize = 0;
-        while (requests_count < requests.len and
-            fault_offset < faults_total) : (fault_offset += 1)
-        {
+        while (fault_offset < faults_total) : (fault_offset += 1) {
             const fault_index =
                 (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
 
-            const fault = &fault_data[fault_index];
-            if (fault.state == .waiting) {
-                requests[requests_count] = .{
-                    .block_address = fault_addresses[fault_index],
-                    .block_checksum = fault_data[fault_index].checksum,
-                };
-                requests_count += 1;
+            switch (fault_data[fault_index].state) {
+                .waiting => {
+                    requests[requests_count] = .{
+                        .block_address = fault_addresses[fault_index],
+                        .block_checksum = fault_data[fault_index].checksum,
+                    };
+                    requests_count += 1;
+
+                    if (requests_count == requests.len) break;
+                },
+                .writing => {},
+                .aborting => assert(queue.checkpointing.?.aborting > 0),
             }
         }
 
         queue.faulty_blocks_repair_index =
             (queue.faulty_blocks_repair_index + fault_offset) % faults_total;
+
+        assert(requests_count <= requests.len);
+        assert(requests_count <= faults_total);
         return requests_count;
     }
 
     /// Count the number of *non-table* block repairs available.
-    pub fn request_blocks_available(queue: *const GridRepairQueue) usize {
+    pub fn enqueue_blocks_available(queue: *const GridRepairQueue) usize {
         assert(!queue.canceling);
         assert(queue.faulty_tables.count <= queue.options.tables_max);
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
+        assert(queue.enqueued_blocks_table <=
+            queue.options.tables_max * constants.lsm_table_content_blocks_max);
 
         const faulty_blocks_free =
             queue.faulty_blocks.capacity() -
-            queue.faulty_blocks.count() -
-            queue.options.tables_max * lsm_table_content_blocks_max;
+            queue.enqueued_blocks_single -
+            queue.options.tables_max * constants.lsm_table_content_blocks_max;
         return faulty_blocks_free;
     }
 
     /// Queue a faulty block to request from the cluster and repair.
-    pub fn request_block(queue: *GridRepairQueue, address: u64, checksum: u128) void {
+    pub fn enqueue_block(queue: *GridRepairQueue, address: u64, checksum: u128) void {
         assert(!queue.canceling);
-        assert(queue.request_blocks_available() > 0);
+        assert(queue.enqueue_blocks_available() > 0);
         assert(queue.faulty_tables.count <= queue.options.tables_max);
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
-        if (queue.faulty_blocks.getPtr(address)) |fault| {
-            assert(fault.checksum == checksum);
-            assert(fault.state != .aborting);
-            return;
-        }
-
-        queue.faulty_blocks.putAssumeCapacityNoClobber(address, .{
-            .checksum = checksum,
-            .progress = .block,
-        });
+        const enqueue = queue.enqueue_faulty_block(address, checksum, .block);
+        assert(enqueue == .insert or enqueue == .duplicate);
     }
 
-    pub fn request_table_queued(queue: *GridRepairQueue, address: u64, checksum: u128) bool {
+    pub fn enqueued_table(queue: *GridRepairQueue, address: u64, checksum: u128) bool {
         assert(!queue.canceling);
-        maybe(queue.request_blocks_available() == 0);
+        maybe(queue.enqueue_blocks_available() == 0);
         assert(queue.faulty_tables.count <= queue.options.tables_max);
 
         var tables = queue.faulty_tables.peek();
@@ -240,7 +238,7 @@ pub const GridRepairQueue = struct {
         return false;
     }
 
-    pub fn request_table(
+    pub fn enqueue_table(
         queue: *GridRepairQueue,
         callback: *const fn (*RepairTable, RepairTableResult) void,
         table: *RepairTable,
@@ -249,7 +247,9 @@ pub const GridRepairQueue = struct {
     ) void {
         assert(!queue.canceling);
         assert(queue.faulty_tables.count < queue.options.tables_max);
-        assert(!queue.request_table_queued(address, checksum));
+        assert(!queue.enqueued_table(address, checksum));
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
         var tables = queue.faulty_tables.peek();
         while (tables) |queue_table| : (tables = queue_table.next) assert(queue_table != table);
@@ -261,28 +261,75 @@ pub const GridRepairQueue = struct {
         };
         queue.faulty_tables.push(table);
 
-        if (queue.faulty_blocks.getPtr(address)) |fault| {
+        const enqueue =
+            queue.enqueue_faulty_block(address, checksum, .{ .table_index = .{ .table = table } });
+        assert(enqueue == .insert or enqueue == .replace);
+    }
+
+    fn enqueue_faulty_block(
+        queue: *GridRepairQueue,
+        address: u64,
+        checksum: u128,
+        progress: FaultProgress,
+    ) union(enum) {
+        insert,
+        replace: *FaultyBlock,
+        duplicate,
+    } {
+        assert(!queue.canceling);
+        assert(queue.faulty_tables.count <= queue.options.tables_max);
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
+
+        defer {
+            assert(queue.faulty_blocks.count() ==
+                queue.enqueued_blocks_single + queue.enqueued_blocks_table);
+        }
+
+        const fault_result = queue.faulty_blocks.getOrPutAssumeCapacity(address);
+        if (fault_result.found_existing) {
+            const fault = fault_result.value_ptr;
             assert(fault.checksum == checksum);
-            assert(fault.progress == .block);
             assert(fault.state != .aborting);
 
-            fault.progress = .{ .table_index = .{ .table = table } };
+            switch (progress) {
+                .block => return .duplicate,
+                .table_index,
+                .table_content,
+                => {
+                    // The content block may already have been queued by either the scrubber or a
+                    // commit/compaction grid read.
+                    assert(fault.progress == .block);
+
+                    queue.enqueued_blocks_single -= 1;
+                    queue.enqueued_blocks_table += 1;
+                    fault.progress = progress;
+                    return .{ .replace = fault };
+                },
+            }
         } else {
-            queue.faulty_blocks.putAssumeCapacityNoClobber(address, .{
+            switch (progress) {
+                .block => queue.enqueued_blocks_single += 1,
+                .table_index => queue.enqueued_blocks_table += 1,
+                .table_content => queue.enqueued_blocks_table += 1,
+            }
+
+            fault_result.value_ptr.* = .{
                 .checksum = checksum,
-                .progress = .{ .table_index = .{ .table = table } },
-            });
+                .progress = progress,
+            };
+            return .insert;
         }
     }
 
-    pub fn repair_ready(queue: *const GridRepairQueue, address: u64, checksum: u128) bool {
+    pub fn repair_waiting(queue: *const GridRepairQueue, address: u64, checksum: u128) bool {
         const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
         const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
         return fault.checksum == checksum and fault.state == .waiting;
     }
 
     pub fn repair_commence(queue: *const GridRepairQueue, address: u64, checksum: u128) void {
-        assert(queue.repair_ready(address, checksum));
+        assert(queue.repair_waiting(address, checksum));
 
         const fault_index = queue.faulty_blocks.getIndex(address).?;
         const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
@@ -317,11 +364,19 @@ pub const GridRepairQueue = struct {
             return;
         }
 
-        if (fault.progress == .table_index) {
-            // The reason that the content blocks are queued here (when the write ends) rather
-            // than when the write begins is so that a `request_block()` can be converted to a
-            // `request_table()` after the former's write is already in progress.
-            queue.request_table_content(fault.progress.table_index.table, block);
+        switch (fault.progress) {
+            .block => {},
+            .table_index => |progress| {
+                assert(progress.table.content_blocks_received.count() == 0);
+
+                // The reason that the content blocks are queued here (when the write ends) rather
+                // than when the write begins is so that a `enqueue_block()` can be converted to a
+                // `enqueue_table()` after the former's write is already in progress.
+                queue.enqueue_table_content(fault.progress.table_index.table, block);
+            },
+            .table_content => |progress| {
+                assert(progress.table.content_blocks_received.isSet(progress.index));
+            },
         }
 
         if (switch (fault.progress) {
@@ -341,12 +396,14 @@ pub const GridRepairQueue = struct {
         }
     }
 
-    fn request_table_content(
+    fn enqueue_table_content(
         queue: *GridRepairQueue,
         table: *RepairTable,
         index_block_data: BlockPtrConst,
     ) void {
         assert(!queue.canceling);
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
         assert(table.table_blocks_total == null);
         assert(table.table_blocks_written == 0);
         assert(table.content_blocks_received.count() == 0);
@@ -360,34 +417,22 @@ pub const GridRepairQueue = struct {
         const content_blocks_total = index_schema.content_blocks_used(index_block_data);
         table.table_blocks_total = 1 + content_blocks_total;
 
-        var content_block_index: usize = 0;
-        while (content_block_index < content_blocks_total) : (content_block_index += 1) {
+        for (0..content_blocks_total) |content_block_index_usize| {
+            const content_block_index: u32 = @intCast(content_block_index_usize);
             const block_id = index_schema.content_block(index_block_data, content_block_index);
 
-            const block_fault =
-                queue.faulty_blocks.getOrPutAssumeCapacity(block_id.block_address);
-            if (block_fault.found_existing) {
-                // The content block may already have been queued by either the scrubber or a
-                // commit/compaction grid read.
-                assert(block_fault.value_ptr.progress == .block);
-                assert(block_fault.value_ptr.checksum == block_id.block_checksum);
+            const enqueue = queue.enqueue_faulty_block(
+                block_id.block_address,
+                block_id.block_checksum,
+                .{ .table_content = .{ .table = table, .index = content_block_index } },
+            );
 
-                block_fault.value_ptr.progress = .{ .table_content = .{
-                    .table = table,
-                    .index = content_block_index,
-                } };
-
-                if (block_fault.value_ptr.state == .writing) {
+            if (enqueue == .replace) {
+                if (enqueue.replace.state == .writing) {
                     table.content_blocks_received.set(content_block_index);
                 }
             } else {
-                block_fault.value_ptr.* = .{
-                    .checksum = block_id.block_checksum,
-                    .progress = .{ .table_content = .{
-                        .table = table,
-                        .index = content_block_index,
-                    } },
-                };
+                assert(enqueue == .insert);
             }
         }
     }
@@ -396,14 +441,16 @@ pub const GridRepairQueue = struct {
         assert(!queue.canceling);
         assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
 
+        switch (queue.faulty_blocks.entries.items(.value)[fault_index].progress) {
+            .block => queue.enqueued_blocks_single -= 1,
+            .table_index => queue.enqueued_blocks_table -= 1,
+            .table_content => queue.enqueued_blocks_table -= 1,
+        }
+
         queue.faulty_blocks.swapRemoveAt(fault_index);
 
         if (queue.faulty_blocks_repair_index == queue.faulty_blocks.count()) {
             queue.faulty_blocks_repair_index = 0;
-        } else {
-            if (queue.faulty_blocks_repair_index > fault_index) {
-                queue.faulty_blocks_repair_index -= 1;
-            }
         }
     }
 
@@ -411,14 +458,16 @@ pub const GridRepairQueue = struct {
         assert(!queue.canceling);
         assert(queue.checkpointing == null);
 
-        queue.faulty_blocks.clearRetainingCapacity();
-        queue.faulty_blocks_repair_index = 0;
-
         queue.canceling = true;
         while (queue.faulty_tables.pop()) |table| {
             (table.callback)(table, .canceled);
         }
-        queue.canceling = false;
+
+        queue.faulty_blocks.clearRetainingCapacity();
+        queue.* = .{
+            .options = queue.options,
+            .faulty_blocks = queue.faulty_blocks,
+        };
     }
 
     pub fn checkpoint_commence(
@@ -427,6 +476,8 @@ pub const GridRepairQueue = struct {
     ) void {
         assert(!queue.canceling);
         assert(queue.checkpointing == null);
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
         var aborting: usize = 0;
 
@@ -472,6 +523,8 @@ pub const GridRepairQueue = struct {
     pub fn checkpoint_complete(queue: *GridRepairQueue) bool {
         assert(!queue.canceling);
         assert(queue.checkpointing != null);
+        assert(queue.faulty_blocks.count() ==
+            queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
         if (queue.checkpointing.?.aborting == 0) {
             queue.checkpointing = null;

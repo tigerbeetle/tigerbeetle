@@ -638,7 +638,7 @@ pub const Storage = struct {
         assert(schema.BlockType.from(index_block_header.operation) == .index);
 
         const content_blocks_used = index_schema.content_blocks_used(index_block);
-        var content_block_index: usize = 0;
+        var content_block_index: u32 = 0;
         while (content_block_index < content_blocks_used) : (content_block_index += 1) {
             const content_block_id = index_schema.content_block(index_block, content_block_index);
             const content_block = storage.grid_block(content_block_id.block_address).?;

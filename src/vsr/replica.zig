@@ -2342,11 +2342,12 @@ pub fn ReplicaType(
                 });
             }
 
-            if (self.grid.repair_block_ready(message.header.op, message.header.checksum)) {
+            if (self.grid.repair_block_waiting(message.header.op, message.header.checksum)) {
                 assert(!self.superblock.free_set.is_free(message.header.op));
 
                 if (self.grid_repair_writes.acquire()) |write| {
                     const write_index = self.grid_repair_writes.index(write);
+                    const write_block = &self.grid_repair_write_blocks[write_index];
 
                     log.debug("{}: on_block: repairing address={} checksum={}", .{
                         self.replica,
@@ -2357,16 +2358,13 @@ pub fn ReplicaType(
                     stdx.copy_disjoint(
                         .inexact,
                         u8,
-                        self.grid_repair_write_blocks[write_index],
+                        write_block.*,
                         message.buffer[0..message.header.size],
                     );
-                    write.* = .{ .replica = self };
+                    assert(stdx.zeroed(write_block.*[message.header.size..]));
 
-                    self.grid.repair_block(
-                        grid_repair_block_callback,
-                        &write.write,
-                        &self.grid_repair_write_blocks[write_index],
-                    );
+                    write.* = .{ .replica = self };
+                    self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
                 } else {
                     log.debug("{}: on_block: ignoring; no write available " ++
                         "(address={} checksum={})", .{
@@ -7878,7 +7876,7 @@ pub fn ReplicaType(
                 if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
                     table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
                 {
-                    if (self.grid.repair_queue.request_table_queued(
+                    if (self.grid.repair_queue.enqueued_table(
                         table_info.address,
                         table_info.checksum,
                     )) {
@@ -7899,7 +7897,7 @@ pub fn ReplicaType(
                     const table = self.grid_repair_tables.acquire().?;
                     table.* = .{ .replica = self, .table = undefined };
 
-                    self.grid.repair_queue.request_table(
+                    self.grid.repair_queue.enqueue_table(
                         sync_request_table_callback,
                         &table.table,
                         table_info.address,
@@ -7946,8 +7944,15 @@ pub fn ReplicaType(
 
             self.grid_repair_tables.release(table);
 
-            if (self.sync_tables) |_| {
-                self.sync_request_tables();
+            switch (result) {
+                .repaired,
+                .released,
+                => {
+                    if (self.sync_tables) |_| {
+                        self.sync_request_tables();
+                    }
+                },
+                .canceled => {},
             }
         }
 
@@ -8351,7 +8356,7 @@ pub fn ReplicaType(
             )[0..constants.grid_repair_request_max];
             assert(requests.len > 0);
 
-            const requests_count: u32 = @intCast(self.grid.block_requests(requests));
+            const requests_count: u32 = @intCast(self.grid.next_batch_of_block_requests(requests));
             if (requests_count == 0) return;
 
             for (requests[0..requests_count]) |*request| {
