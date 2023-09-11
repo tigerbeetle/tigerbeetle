@@ -9,26 +9,25 @@ usage() {
 	Required environment variables:
 	  CLUSTER
 	  REPLICA
+	  REPLICA_COUNT
 	  ADDRESSES
 	EOF
 }
 
-if [ $# -ne 0 ] || [ -z "$CLUSTER" ] || [ -z "$REPLICA" ] || [ -z "$ADDRESSES" ]; then
+if [ $# -ne 0 ] || [ -z "$CLUSTER" ] || [ -z "$REPLICA" ] || [ -z "$ADDRESSES" ] || [ -z "$REPLICA_COUNT" ]; then
 	usage >&2
 	exit 1
 fi
 
-directory='.'
-
 if ! find . -type f -name '*.tigerbeetle' | grep -q .
-then ./tigerbeetle init \
-	--directory="$directory" \
+then ./tigerbeetle format \
 	--cluster="$CLUSTER" \
-	--replica="$REPLICA"
+	--replica="$REPLICA" \
+	--replica-count="$REPLICA_COUNT" \
+	0_0.antithesis.tigerbeetle
 fi
 
 exec ./tigerbeetle start \
-	--directory="$directory" \
-	--cluster="$CLUSTER" \
-	--replica="$REPLICA" \
-	--addresses="$ADDRESSES"
+	--addresses="$ADDRESSES" \
+	0_0.antithesis.tigerbeetle
+

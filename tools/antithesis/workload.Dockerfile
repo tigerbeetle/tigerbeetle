@@ -1,8 +1,8 @@
 FROM debian:stable-slim
 WORKDIR /opt/tigerbeetle
 
-COPY lib/libvoidstar.so   /lib
-COPY zig-out/bin/workload ./workload
+COPY tools/antithesis/lib/libvoidstar.so /lib
+COPY zig-out/bin/antithesis_workload ./antithesis_workload
 
 
-ENTRYPOINT ["./workload"]
+ENTRYPOINT ["./antithesis_workload"]

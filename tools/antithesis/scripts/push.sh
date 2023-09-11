@@ -8,6 +8,8 @@ usage() {
 	EOF
 }
 
+echo "${ANTITHESIS_KEY}" | docker login -u _json_key https://us-central1-docker.pkg.dev/ --password-stdin
+
 if [ $# -ne 1 ] || [ "$1" = '-h' ]; then
 	usage >&2
 	exit 1

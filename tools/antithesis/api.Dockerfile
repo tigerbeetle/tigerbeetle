@@ -1,8 +1,8 @@
 FROM debian:stable-slim
 WORKDIR /opt/tigerbeetle
 
-COPY lib/libvoidstar.so /lib
-COPY zig-out/bin/api    ./api
+COPY tools/antithesis/lib/libvoidstar.so /lib
+COPY zig-out/bin/antithesis_api ./antithesis_api
 
 
-ENTRYPOINT ["./api"]
+ENTRYPOINT ["./antithesis_api"]

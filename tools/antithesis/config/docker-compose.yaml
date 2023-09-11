@@ -8,6 +8,7 @@ services:
     environment:
       - CLUSTER=1
       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+      - REPLICA_COUNT=3
       - REPLICA=0
     networks:
       antithesis-net:
@@ -19,6 +20,7 @@ services:
     environment:
       - CLUSTER=1
       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+      - REPLICA_COUNT=3
       - REPLICA=1
     networks:
       antithesis-net:
@@ -30,6 +32,7 @@ services:
     environment:
       - CLUSTER=1
       - ADDRESSES=10.20.20.10:3000,10.20.20.11:3000,10.20.20.12:3000
+      - REPLICA_COUNT=3
       - REPLICA=2
     networks:
       antithesis-net:

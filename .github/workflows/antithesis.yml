@@ -1,0 +1,12 @@
+name: Antithesis
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./tools/antithesis/scripts/build.sh ${{ github.sha }}
+      - run: ./tools/antithesis/scripts/push.sh ${{ github.sha }}
