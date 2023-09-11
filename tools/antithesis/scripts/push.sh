@@ -9,7 +9,7 @@ usage() {
 	EOF
 }
 
-echo -e "${ANTITHESIS_KEY}" | sudo docker login -u _json_key https://us-central1-docker.pkg.dev/ --password-stdin
+cat /tmp/key | sudo docker login -u _json_key https://us-central1-docker.pkg.dev/ --password-stdin
 
 if [ $# -ne 1 ] || [ "$1" = '-h' ]; then
 	usage >&2
