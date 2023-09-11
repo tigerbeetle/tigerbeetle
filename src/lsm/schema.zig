@@ -164,6 +164,8 @@ pub const TableIndex = struct {
         assert(parameters.key_size > 0);
         assert(parameters.filter_block_count_max > 0);
         assert(parameters.data_block_count_max > 0);
+        assert(parameters.data_block_count_max + parameters.filter_block_count_max <=
+            constants.lsm_table_content_blocks_max);
 
         const filter_checksums_offset = @sizeOf(vsr.Header);
         const filter_checksums_size = parameters.filter_block_count_max * checksum_size;
@@ -312,7 +314,7 @@ pub const TableIndex = struct {
     pub fn content_block(
         index: *const TableIndex,
         index_block: BlockPtrConst,
-        content_block_index: usize,
+        content_block_index: u32,
     ) struct {
         block_checksum: u128,
         block_address: u64,

@@ -517,6 +517,20 @@ comptime {
 
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 
+/// The maximum number of blocks that can possibly be referenced by any table index block.
+///
+/// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
+///   tree configuration. (To avoid prevent Grid from depending on StateMachine).
+/// - This counts filter and data blocks, but does not count the index block itself.
+pub const lsm_table_content_blocks_max = table_blocks_max: {
+    const checksum_size = @sizeOf(u128);
+    const address_size = @sizeOf(u64);
+    break :table_blocks_max @divFloor(
+        block_size - @sizeOf(vsr.Header),
+        (checksum_size + address_size),
+    );
+};
+
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = config.process.tick_ms;
