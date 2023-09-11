@@ -88,7 +88,6 @@ pub fn build(b: *std.Build) !void {
 
     // tigerbeetle.build_id = true;
     // tigerbeetle.trace_pc_guard = true;
-    link_voidstar(tigerbeetle);
 
     {
         const run_cmd = b.addRunArtifact(tigerbeetle);
@@ -630,7 +629,6 @@ pub fn build(b: *std.Build) !void {
         // exe.setBuildMode(mode);
         // exe.build_id = true;
         // exe.trace_pc_guard = true;
-        link_voidstar(exe);
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_api", "Antithesis API");
@@ -646,7 +644,6 @@ pub fn build(b: *std.Build) !void {
         exe.addModule("vsr_options", vsr_options_module);
         // exe.setTarget(target);
         // exe.setBuildMode(mode);
-        link_voidstar(exe);
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_workload", "Antithesis Workload");
@@ -700,17 +697,6 @@ fn link_tracer_backend(
             exe.step.dependOn(&git_clone_tracy.step);
         },
     }
-}
-
-/// Link the Antithesis instrumentation library.
-/// See: https://antithesis.com/docs/instrumentation/c_instrumentation.html
-fn link_voidstar(exe: *std.build.LibExeObjStep) void {
-    // To allow LLDB to step into libvoidstar: exe.force_pic = true;
-    exe.addIncludePath(.{ .path = "tools/antithesis/lib" });
-    exe.addLibraryPath(.{ .path = "tools/antithesis/lib" });
-
-    exe.linkLibC();
-    exe.linkSystemLibrary("voidstar");
 }
 
 // Zig cross-targets plus Dotnet RID (Runtime Identifier):

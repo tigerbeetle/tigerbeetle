@@ -20,17 +20,14 @@ const CreateAccountsResult = tigerbeetle.CreateAccountsResult;
 const CreateTransfersResult = tigerbeetle.CreateTransfersResult;
 const Operation = StateMachine.Operation;
 
-const antithesis = @cImport({
-    @cInclude("instrumentation.h");
-});
-
-// TODO link the stub libvoidstar.so (https://antithesis.com/docs/instrumentation/instrumentation_toc.html)
-// TODO documentation
-
 const send_message_retry_timeout = 200; // TODO what is a reasonable value?
 const requests_max = constants.journal_slot_count * 9 / 10;
 
 pub const log_level: std.log.Level = .debug;
+
+// Always use the OS's random calls directly; this allows Antithesis to fuzz them.
+// Applies to std.crypto.random
+pub const crypto_always_getrandom = true;
 
 pub fn main() anyerror!void {
     const ticks_max = 50_000_000;
@@ -40,8 +37,7 @@ pub fn main() anyerror!void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = general_purpose_allocator.allocator();
 
-    var random_antithesis = AntithesisRandom{};
-    const random = std.rand.Random.init(&random_antithesis, AntithesisRandom.bytes);
+    const random = std.crypto.random;
     var random_for_uuid = std.rand.DefaultPrng.init(123);
     const random_uuid = random_for_uuid.random();
 
@@ -79,7 +75,6 @@ pub fn main() anyerror!void {
 
     for (clients, 0..) |*client, i| {
         _ = i;
-        // TODO: The randomness for ths?
         const client_id = std.crypto.random.int(u128);
 
         client.* = try Client.init(
@@ -122,24 +117,6 @@ pub fn main() anyerror!void {
     } else fatal("tick == ticks_max", .{});
     log.info("workload done tick={}", .{tick});
 }
-
-const AntithesisRandom = struct {
-    /// Avoid a complaint from the compiler:
-    /// > '*AntithesisRandom' and '*anyopaque' do not have the same in-memory representation
-    _dummy: u64 = 0,
-
-    /// Use Antithesis' RNG to allow their fuzzer to easily explore branches by varying the return value.
-    fn bytes(ptr: *@This(), buf: []u8) void {
-        _ = ptr;
-
-        // Call the Antithesis exactly once per random number, regardless of what type of random number
-        // is required (e.g. UUID or coin flip).
-        const seed = antithesis.fuzz_get_random();
-        var rng = std.rand.DefaultPrng.init(seed);
-        const random = rng.random();
-        random.bytes(buf);
-    }
-};
 
 fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
