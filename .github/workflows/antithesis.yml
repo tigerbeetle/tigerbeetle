@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh && ./zig/zig build antithesis_workload antithesis_api
       - run: ./tools/antithesis/scripts/build.sh ${{ github.sha }}
       - run: ./tools/antithesis/scripts/push.sh ${{ github.sha }}
         env:

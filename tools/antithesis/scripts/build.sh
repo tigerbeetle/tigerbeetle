@@ -17,8 +17,6 @@ tag=$1
 # This tag is used in `config/docker-compose.yaml` to select the images to run.
 echo "TAG=$tag" > ./tools/antithesis/config/.env
 
-zig build antithesis_workload antithesis_api
-
 # XXX sudo
 sudo docker build --file=./tools/antithesis/api.Dockerfile           --tag="api:$tag"  .
 sudo docker build --file=./tools/antithesis/configuration.Dockerfile --tag="config:$tag"  .
