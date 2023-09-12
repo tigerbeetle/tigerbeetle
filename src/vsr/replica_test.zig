@@ -1145,7 +1145,7 @@ const TestContext = struct {
     }
 
     pub fn run(t: *TestContext) void {
-        const tick_max = 4_000;
+        const tick_max = 4_100;
         var tick_count: usize = 0;
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
