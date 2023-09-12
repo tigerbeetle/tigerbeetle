@@ -156,7 +156,7 @@ Beyond these rules:
   branches and cases clear. Again, consider whether a single `if` does not also need a matching
   `else` branch, to ensure that the positive and negative spaces are handled or asserted.
 
-* Negations are not easy! In the source code, state invariants positively. When
+* Negations are not easy! State invariants positively. When
   working with lengths and indexes, this form is easy to get right (and understand):
 
   ```zig
