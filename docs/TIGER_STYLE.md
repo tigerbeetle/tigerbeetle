@@ -157,7 +157,7 @@ Beyond these rules:
   `else` branch, to ensure that the positive and negative spaces are handled or asserted.
 
 * Negations are not easy! In the source code, state invariants positively. When
-  working with lengths and indexes, this form is easy to get right:
+  working with lengths and indexes, this form is easy to get right (and understand):
 
   ```zig
   if (index < length) {
@@ -167,7 +167,7 @@ Beyond these rules:
   }
   ```
 
-  This one is harder:
+  This form is harder, and also goes against the grain of how `index` would typically be compared to `length`, for example, in a loop condition:
 
   ```zig
   if (index >= length) {
