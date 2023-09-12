@@ -9,6 +9,7 @@ const stdx = @import("../stdx.zig");
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
+const GridChecker = @import("../testing/cluster/grid_checker.zig").GridChecker;
 const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -456,6 +457,7 @@ pub fn ReplicaType(
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
+            grid_checker: ?*GridChecker,
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -513,6 +515,7 @@ pub fn ReplicaType(
                 .state_machine_options = options.state_machine_options,
                 .message_bus_options = options.message_bus_options,
                 .grid_cache_blocks_count = options.grid_cache_blocks_count,
+                .grid_checker = options.grid_checker,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -727,6 +730,7 @@ pub fn ReplicaType(
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
             grid_cache_blocks_count: u32,
+            grid_checker: ?*GridChecker,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -814,6 +818,7 @@ pub fn ReplicaType(
 
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
+                .checker = options.grid_checker,
                 .cache_blocks_count = options.grid_cache_blocks_count,
                 .repair_queue_blocks_max = constants.grid_repair_blocks_max,
                 .repair_queue_tables_max = constants.grid_repair_tables_max,

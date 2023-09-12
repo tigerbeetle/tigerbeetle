@@ -52,6 +52,7 @@ const CheckpointArea = enum {
 
 const Checkpoint = std.enums.EnumArray(CheckpointArea, u128);
 
+// TODO not generic over Storage
 pub fn StorageCheckerType(comptime Storage: type) type {
     return struct {
         const Self = @This();
