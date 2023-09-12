@@ -14,6 +14,7 @@ const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
 const GridRepairQueue = @import("./grid_repair_queue.zig").GridRepairQueue;
+const GridChecker = @import("../testing/cluster/grid_checker.zig").GridChecker;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -162,6 +163,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
+        checker: ?*GridChecker,
         repair_queue: GridRepairQueue,
 
         cache: Cache,
@@ -198,6 +200,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
+            checker: ?*GridChecker = null,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             repair_queue_blocks_max: usize,
             repair_queue_tables_max: usize,
@@ -230,6 +233,7 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
+                .checker = options.checker,
                 .repair_queue = repair_queue,
                 .cache = cache,
                 .cache_blocks = cache_blocks,
@@ -575,6 +579,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .not_writing);
             assert(!grid.superblock.free_set.is_free(address));
+            grid.assert_coherent(address, header.checksum);
 
             if (constants.verify) {
                 for (grid.cache_blocks) |cache_block| {
@@ -645,6 +650,10 @@ pub fn GridType(comptime Storage: type) type {
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             @memset(completed_write.block.*, 0);
 
+            const cache_block_header = schema.header_from_block(cache_block.*);
+            assert(cache_block_header.op == completed_write.address);
+            grid.assert_coherent(completed_write.address, cache_block_header.checksum);
+
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(
                 &grid.write_iop_tracer_slots[write_iop_index],
@@ -694,6 +703,7 @@ pub fn GridType(comptime Storage: type) type {
             if (options.coherent) {
                 assert(grid.writing(address, null) != .create);
                 assert(!grid.superblock.free_set.is_free(address));
+                grid.assert_coherent(address, checksum);
             }
 
             assert(address > 0);
@@ -750,6 +760,7 @@ pub fn GridType(comptime Storage: type) type {
                     assert(grid.checkpointing == null);
                     assert(!grid.superblock.free_set.is_free(address));
                     assert(grid.writing(address, null) != .create);
+                    grid.assert_coherent(address, checksum);
                 },
             }
 
@@ -968,6 +979,7 @@ pub fn GridType(comptime Storage: type) type {
             if (read.coherent) {
                 assert(!grid.superblock.free_set.is_free(read.address));
                 assert(read.checkpoint_id == grid.superblock.working.checkpoint_id());
+                grid.assert_coherent(read.address, read.checksum);
             }
 
             if (result == .valid) {
@@ -1073,6 +1085,15 @@ pub fn GridType(comptime Storage: type) type {
             assert(address > 0);
 
             return (address - 1) * block_size;
+        }
+
+        fn assert_coherent(grid: *const Grid, address: u64, checksum: u128) void {
+            assert(!grid.superblock.free_set.is_free(address));
+
+            if (grid.checker) |checker| {
+                checker.assert_coherent(grid.superblock.working.checkpoint_id(), address, checksum);
+                checker.assert_coherent(grid.superblock.staging.checkpoint_id(), address, checksum);
+            }
         }
 
         fn verify_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {

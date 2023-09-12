@@ -198,6 +198,7 @@ const Command = struct {
                 .io = &command.io,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
+            .grid_checker = null,
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,

@@ -20,6 +20,7 @@ const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
 const StorageCheckerType = @import("cluster/storage_checker.zig").StorageCheckerType;
 const SyncCheckerType = @import("cluster/sync_checker.zig").SyncCheckerType;
+const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
 
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
@@ -98,6 +99,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         state_checker: StateChecker,
         storage_checker: StorageChecker,
         sync_checker: SyncChecker,
+        grid_checker: GridChecker,
 
         context: ?*anyopaque = null,
 
@@ -224,6 +226,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var sync_checker = SyncChecker.init(allocator);
             errdefer sync_checker.deinit();
 
+            var grid_checker = GridChecker.init(allocator);
+            errdefer grid_checker.deinit();
+
             // Format each replica's storage (equivalent to "tigerbeetle format ...").
             for (storages, 0..) |*storage, replica_index| {
                 var superblock = try SuperBlock.init(allocator, .{
@@ -269,6 +274,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
                 .sync_checker = sync_checker,
+                .grid_checker = grid_checker,
             };
 
             for (cluster.replicas, 0..) |_, replica_index| {
@@ -310,6 +316,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
             for (cluster.aofs) |*aof| aof.deinit(cluster.allocator);
+
+            cluster.grid_checker.deinit(); // (After Replica, since Replica.Grid references this.)
 
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_pools);
@@ -360,6 +368,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const reservation = replica.superblock.free_set.reserve(1).?;
             defer replica.superblock.free_set.forfeit(reservation);
 
+            replica.grid.checker = null;
+
             // We don't need to actually use the block for the storage to diverge —
             // it is marked as acquired in the superblock free set.
             _ = replica.superblock.free_set.acquire(reservation).?;
@@ -404,6 +414,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn open_replica(cluster: *Self, replica_index: u8, nonce: u128, time: Time) !void {
+            const replica_diverged = cluster.replica_diverged.isSet(replica_index);
+
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
@@ -418,6 +430,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .time = time,
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
+                    .grid_checker = if (replica_diverged) null else &cluster.grid_checker,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
