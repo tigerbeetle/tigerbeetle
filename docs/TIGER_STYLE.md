@@ -156,6 +156,25 @@ Beyond these rules:
   branches and cases clear. Again, consider whether a single `if` does not also need a matching
   `else` branch, to ensure that the positive and negative spaces are handled or asserted.
 
+* Negations are not easy! In the source code, state invariants positively. When
+  working with lengths and indexes, this form is easy to get right:
+
+  ```zig
+  if (index < length) {
+    // The invariant holds.
+  } else {
+    // The invariant doesn't hold.
+  }
+  ```
+
+  This one is harder:
+
+  ```zig
+  if (index >= length) {
+    // It's not true that the invariant holds.
+  }
+  ```
+
 * All errors must be handled. An [analysis of production failures in distributed data-intensive
   systems](https://www.usenix.org/system/files/conference/osdi14/osdi14-paper-yuan.pdf) found that
   the majority of catastrophic failures could have been prevented by simple testing of error
