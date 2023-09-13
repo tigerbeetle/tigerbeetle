@@ -18,7 +18,7 @@ The data file is divided into several zones, with the main ones being:
 - superblock
 - grid
 
-The grid forms the bulk of the data file (up to several terabytes). It is an array of 64KiB blocks:
+The grid forms the bulk of the data file (up to several terabytes). It is an elastic array of 64KiB blocks:
 
 ```zig
 pub const Block = [constants.block_size]u8;
@@ -39,13 +39,13 @@ pub const BlockReference = struct {
 };
 ```
 
-Block checksum is stored outside of the block itself, to protect from misdirected writes. So, to
-read a block, you need to know block's index and checksum from "elsewhere", where "elsewhere" is
+The block checksum is stored outside of the block itself, to protect from misdirected writes. So, to
+read a block, you need to know the block's index and checksum from "elsewhere", where "elsewhere" is
 either a different block, or the superblock. Overall, the grid is used to implement a purely
 functional, persistent (in both senses), garbage collected data structure which is updated
-atomically by swapping the pointer to the root node.
+atomically by swapping the pointer to the root node. This is the classic copy-on-write technique commonly used in filesystems. In fact, you can think of TigerBeetle's data file as a filesystem.
 
-Superblock is what holds this logical "root pointer". Physically, the "root pointer" is comprised
+The superblock is what holds this logical "root pointer". Physically, the "root pointer" is comprised
 from many block references. These blocks, taken together, specify the manifests of all LSM trees.
 
 Superblock is located at a fixed position in the data file, so, when a replica starts up, it can
