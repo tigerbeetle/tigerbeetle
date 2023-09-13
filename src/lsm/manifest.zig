@@ -169,7 +169,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         node_pool: *NodePool,
         config: TreeConfig,
-        /// manifest_log is lazily initialized rather thank passed into init() because the Forest
+        /// manifest_log is lazily initialized rather than passed into init() because the Forest
         /// needs it for @fieldParentPtr().
         manifest_log: ?*ManifestLog = null,
 
