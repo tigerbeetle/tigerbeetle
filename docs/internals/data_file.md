@@ -18,7 +18,8 @@ The data file is divided into several zones, with the main ones being:
 - superblock
 - grid
 
-The grid forms the bulk of the data file (up to several terabytes). It is an elastic array of 64KiB blocks:
+The grid forms the bulk of the data file (up to several terabytes). It is an elastic array of 64KiB
+blocks:
 
 ```zig
 pub const Block = [constants.block_size]u8;
@@ -26,9 +27,9 @@ pub const BlockPtr = *align(constants.sector_size) Block;
 ```
 
 The grid serves as a raw storage layer. Higher level data structures (notably, the LSM tree) are
-mapped to physical grid blocks. Because TigerBeetle is deterministic, the contents of the grid is
-identical across up-to-date replicas. This storage determinism is exploited to implement state sync
-and repair on the level of grid blocks, see [the repair protocol](./vsr.md#protocol-repair-grid).
+mapped to physical grid blocks. Because TigerBeetle is deterministic, the used portion of the grid
+is identical across up-to-date replicas. This storage determinism is exploited to implement state
+sync and repair on the level of grid blocks, see [the repair protocol](./vsr.md#protocol-repair-grid).
 
 A grid block is identified by a pair of a `u64` index and `u128` checksum:
 
@@ -43,7 +44,8 @@ The block checksum is stored outside of the block itself, to protect from misdir
 read a block, you need to know the block's index and checksum from "elsewhere", where "elsewhere" is
 either a different block, or the superblock. Overall, the grid is used to implement a purely
 functional, persistent (in both senses), garbage collected data structure which is updated
-atomically by swapping the pointer to the root node. This is the classic copy-on-write technique commonly used in filesystems. In fact, you can think of TigerBeetle's data file as a filesystem.
+atomically by swapping the pointer to the root node. This is the classic copy-on-write technique
+commonly used in filesystems. In fact, you can think of TigerBeetle's data file as a filesystem.
 
 The superblock is what holds this logical "root pointer". Physically, the "root pointer" is comprised
 from many block references. These blocks, taken together, specify the manifests of all LSM trees.
@@ -101,7 +103,7 @@ described [in a separate document](./lsm.md), here only high level on-disk layou
 
 Each LSM tree stores a set of values. Values are:
 
-* fixed in size,
+* uniform in size,
 * small (hundreds of bytes),
 * sorted by key,
 * which is embedded in the value itself (e.g, an `Account` value uses `timestamp` as a unique key).
