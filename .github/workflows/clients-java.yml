@@ -270,10 +270,11 @@ jobs:
         ./zig/zig build client_docs -- --language=java
 
     - if: matrix.os == 'windows-latest'
+      #  Flag --validate=aggregate disables the tests for Windows because of OOM during CI.
       run: |
         $env:PATH += "$(pwd)/apache-maven-3.9.3/bin"
         .\zig\zig build client_docs
-        .\zig-out\bin\client_docs --language=java
+        .\zig-out\bin\client_docs --language=java --validate=aggregate
 
     - if: matrix.os == 'ubuntu-latest'
       run: ./.github/ci/fail_on_diff.sh

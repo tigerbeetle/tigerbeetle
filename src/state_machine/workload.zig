@@ -449,7 +449,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             // Checksum transfers only after the whole batch is ready.
             // The opportunistic linking backtracks to modify transfers.
             for (transfers[0..transfers_count]) |*transfer| {
-                transfer.user_data = vsr.checksum(std.mem.asBytes(transfer));
+                transfer.user_data_128 = vsr.checksum(std.mem.asBytes(transfer));
             }
             assert(transfers_count == i);
             assert(transfers_count <= transfers.len);
@@ -558,16 +558,17 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .id = transfer_id,
                 .debit_account_id = debit_account.id,
                 .credit_account_id = credit_account.id,
-                // "user_data" will be set to a checksum of the Transfer.
-                .user_data = 0,
-                .reserved = 0,
+                // "user_data_128" will be set to a checksum of the Transfer.
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
                 .pending_id = 0,
                 .timeout = 0,
                 .ledger = transfer_template.ledger,
                 .code = 123,
                 .flags = .{},
                 // +1 to avoid `.amount_must_not_be_zero`.
-                .amount = 1 + @as(u64, self.random.int(u8)),
+                .amount = 1 + @as(u128, self.random.int(u8)),
             };
 
             switch (method) {
@@ -575,11 +576,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .pending => {
                     transfer.flags = .{ .pending = true };
                     // Bound the timeout to ensure we never hit `overflows_timeout`.
-                    transfer.timeout = 1 + @as(u64, @min(
-                        std.math.maxInt(u64) / 2,
+                    transfer.timeout = 1 + @as(u32, @min(
+                        std.math.maxInt(u32) / 2,
                         fuzz.random_int_exponential(
                             self.random,
-                            u64,
+                            u32,
                             self.options.pending_timeout_mean,
                         ),
                     ));
@@ -609,8 +610,11 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     transfer.debit_account_id = self.auditor.account_index_to_id(dr);
                     transfer.credit_account_id = self.auditor.account_index_to_id(cr);
                     if (method == .post_pending) {
+                        // TODO(zig): random.uintLessThanBiased does not support u128.
+                        const amount: u64 = @truncate(pending_transfer.amount);
+
                         // 1+rng for minimum amount of 1. This also makes the pending amount inclusive.
-                        transfer.amount = 1 + self.random.uintLessThanBiased(u64, pending_transfer.amount);
+                        transfer.amount = 1 + self.random.uintLessThanBiased(u64, amount);
                     } else {
                         transfer.amount = pending_transfer.amount;
                     }
@@ -726,9 +730,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                 if (result) |transfer| {
                     // The transfer exists; verify its integrity.
-                    const checksum_actual = transfer.user_data;
+                    const checksum_actual = transfer.user_data_128;
                     var check = transfer.*;
-                    check.user_data = 0;
+                    check.user_data_128 = 0;
                     check.timestamp = 0;
                     const checksum_expect = vsr.checksum(std.mem.asBytes(&check));
                     assert(checksum_expect == checksum_actual);
@@ -804,7 +808,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         /// This probability is only checked for consecutive invalid transfers.
         linked_invalid_probability: u8,
 
-        pending_timeout_mean: u64,
+        pending_timeout_mean: u32,
 
         accounts_batch_size_min: usize,
         accounts_batch_size_span: usize, // inclusive
@@ -848,7 +852,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .linked_invalid_probability = 100,
                 // TODO(Timeouts): When timeouts are implemented in the StateMachine, change this to the
                 // (commented out) value so that timeouts can actually trigger.
-                .pending_timeout_mean = std.math.maxInt(u64) / 2,
+                .pending_timeout_mean = std.math.maxInt(u32) / 2,
                 // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
                 .accounts_batch_size_min = 0,
                 .accounts_batch_size_span = 1 + random.uintLessThan(

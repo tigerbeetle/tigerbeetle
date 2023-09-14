@@ -12,14 +12,15 @@ pub fn main() !void {
             .id = 2003,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .user_data = 0,
-            .reserved = 0,
+            .amount = 0,
             .pending_id = 1003,
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
             .timeout = 0,
             .ledger = 0,
             .code = 0,
             .flags = .{ .void_pending_transfer = true },
-            .amount = 0,
         },
     };
 

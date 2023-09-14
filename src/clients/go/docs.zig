@@ -120,6 +120,7 @@ pub const GoDocs = Docs{
     \\package main
     \\
     \\import _ "github.com/tigerbeetle/tigerbeetle-go"
+    \\import _ "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
     \\import "fmt"
     \\
     \\func main() {
@@ -145,31 +146,14 @@ pub const GoDocs = Docs{
 
     .install_documentation = "",
 
-    .examples =
-    \\### Sidenote: `uint128`
-    \\
-    \\Throughout this README there will be a reference to a
-    \\helper, `uint128`, that converts a string to TigerBeetle's
-    \\representation of a 128-bit integer. That helper can be
-    \\defined like so:
-    \\
-    \\```go
-    \\func uint128(value string) tb_types.Uint128 {
-    \\	x, err := tb_types.HexStringToUint128(value)
-    \\	if err != nil {
-    \\		panic(err)
-    \\	}
-    \\	return x
-    \\}
-    \\```
-    ,
+    .examples = "",
 
     .client_object_example =
     \\tbAddress := os.Getenv("TB_ADDRESS")
     \\if len(tbAddress) == 0 {
     \\  tbAddress = "3000"
     \\}
-    \\client, err := tb.NewClient(0, []string{tbAddress}, 32)
+    \\client, err := NewClient(0, []string{tbAddress}, 32)
     \\if err != nil {
     \\	log.Printf("Error creating client: %s", err)
     \\	return
@@ -184,19 +168,21 @@ pub const GoDocs = Docs{
     ,
 
     .create_accounts_example =
-    \\accountsRes, err := client.CreateAccounts([]tb_types.Account{
+    \\accountsRes, err := client.CreateAccounts([]Account{
     \\	{
-    \\		ID:     	uint128("137"),
-    \\		UserData:	tb_types.Uint128{},
-    \\		Reserved:   	[48]uint8{},
-    \\		Ledger:		1,
-    \\		Code:   	718,
-    \\		Flags:   	0,
-    \\		DebitsPending: 	0,
-    \\		DebitsPosted: 	0,
-    \\		CreditsPending:	0,
-    \\		CreditsPosted: 	0,
-    \\		Timestamp: 	0,
+    \\		ID:             ToUint128(137),
+    \\		DebitsPending:  ToUint128(0),
+    \\		DebitsPosted:   ToUint128(0),
+    \\		CreditsPending: ToUint128(0),
+    \\		CreditsPosted:  ToUint128(0),
+    \\		UserData128:    ToUint128(0),
+    \\		UserData64:     0,
+    \\		UserData32:     0,
+    \\		Reserved:       0,
+    \\		Ledger:         1,
+    \\		Code:           718,
+    \\		Flags:          0,
+    \\		Timestamp:      0,
     \\	},
     \\})
     \\if err != nil {
@@ -211,24 +197,29 @@ pub const GoDocs = Docs{
     ,
 
     .create_accounts_documentation =
-    \\The `tb_types` package can be imported from `"github.com/tigerbeetle/tigerbeetle-go/pkg/types"`.
+    \\The `Uint128` fields like `ID`, `UserData128`, `Amount` and
+    \\account balances have a few helper functions to make it easier
+    \\to convert 128-bit little-endian unsigned integers between
+    \\`string`, `math/big.Int`, and `[]byte`.
+    \\
+    \\See the type [Uint128](https://pkg.go.dev/github.com/tigerbeetle/tigerbeetle-go/pkg/types#Uint128) for more details.
     ,
 
     .account_flags_documentation =
-    \\To toggle behavior for an account, use the `tb_types.AccountFlags` struct
+    \\To toggle behavior for an account, use the `types.AccountFlags` struct
     \\to combine enum values and generate a `uint16`. Here are a
     \\few examples:
     \\
-    \\* `tb_types.AccountFlags{Linked: true}.ToUint16()`
-    \\* `tb_types.AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
-    \\* `tb_types.AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
+    \\* `AccountFlags{Linked: true}.ToUint16()`
+    \\* `AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
+    \\* `AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
     ,
     .account_flags_example =
-    \\account0 := tb_types.Account{ /* ... account values ... */ }
-    \\account1 := tb_types.Account{ /* ... account values ... */ }
-    \\account0.Flags = tb_types.AccountFlags{Linked: true}.ToUint16()
+    \\account0 := Account{ /* ... account values ... */ }
+    \\account1 := Account{ /* ... account values ... */ }
+    \\account0.Flags = AccountFlags{Linked: true}.ToUint16()
     \\
-    \\accountErrors, err := client.CreateAccounts([]tb_types.Account{account0, account1})
+    \\accountErrors, err := client.CreateAccounts([]Account{account0, account1})
     \\if err != nil {
     \\	log.Printf("Error creating accounts: %s", err)
     \\	return
@@ -236,11 +227,11 @@ pub const GoDocs = Docs{
     ,
 
     .create_accounts_errors_example =
-    \\account2 := tb_types.Account{ /* ... account values ... */ }
-    \\account3 := tb_types.Account{ /* ... account values ... */ }
-    \\account4 := tb_types.Account{ /* ... account values ... */ }
+    \\account2 := Account{ /* ... account values ... */ }
+    \\account3 := Account{ /* ... account values ... */ }
+    \\account4 := Account{ /* ... account values ... */ }
     \\
-    \\accountErrors, err = client.CreateAccounts([]tb_types.Account{account2, account3, account4})
+    \\accountErrors, err = client.CreateAccounts([]Account{account2, account3, account4})
     \\if err != nil {
     \\	log.Printf("Error creating accounts: %s", err)
     \\	return
@@ -258,7 +249,7 @@ pub const GoDocs = Docs{
     \\the `CreateAccountError` object for a human-readable string.
     ,
     .lookup_accounts_example =
-    \\accounts, err := client.LookupAccounts([]tb_types.Uint128{uint128("137"), uint128("138")})
+    \\accounts, err := client.LookupAccounts([]Uint128{ToUint128(137), ToUint128(138)})
     \\if err != nil {
     \\	log.Printf("Could not fetch accounts: %s", err)
     \\	return
@@ -267,22 +258,23 @@ pub const GoDocs = Docs{
     ,
 
     .create_transfers_example =
-    \\transfer := tb_types.Transfer{
-    \\	ID:			uint128("1"),
-    \\	PendingID:		tb_types.Uint128{},
-    \\	DebitAccountID:		uint128("1"),
-    \\	CreditAccountID:	uint128("2"),
-    \\	UserData:		uint128("2"),
-    \\	Reserved:		tb_types.Uint128{},
-    \\	Timeout:		0,
-    \\	Ledger:			1,
-    \\	Code:			1,
-    \\	Flags:			0,
-    \\	Amount:			10,
-    \\	Timestamp:		0,
+    \\transfer := Transfer{
+    \\	ID:              ToUint128(1),
+    \\	DebitAccountID:  ToUint128(1),
+    \\	CreditAccountID: ToUint128(2),
+    \\	Amount:          ToUint128(10),
+    \\	PendingID:       ToUint128(0),
+    \\	UserData128:     ToUint128(2),
+    \\	UserData64:      0,
+    \\	UserData32:      0,
+    \\	Timeout:         0,
+    \\	Ledger:          1,
+    \\	Code:            1,
+    \\	Flags:           0,
+    \\	Timestamp:       0,
     \\}
     \\
-    \\transfersRes, err := client.CreateTransfers([]tb_types.Transfer{transfer})
+    \\transfersRes, err := client.CreateTransfers([]Transfer{transfer})
     \\if err != nil {
     \\	log.Printf("Error creating transfer batch: %s", err)
     \\	return
@@ -299,7 +291,7 @@ pub const GoDocs = Docs{
 
     .no_batch_example =
     \\for i := 0; i < len(transfers); i++ {
-    \\	transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfers[i]})
+    \\	transfersRes, err = client.CreateTransfers([]Transfer{transfers[i]})
     \\	// error handling omitted
     \\}
     ,
@@ -317,46 +309,46 @@ pub const GoDocs = Docs{
     ,
 
     .transfer_flags_documentation =
-    \\To toggle behavior for an account, use the `tb_types.TransferFlags` struct
+    \\To toggle behavior for an account, use the `types.TransferFlags` struct
     \\to combine enum values and generate a `uint16`. Here are a
     \\few examples:
     \\
-    \\* `tb_types.TransferFlags{Linked: true}.ToUint16()`
-    \\* `tb_types.TransferFlags{Pending: true}.ToUint16()`
-    \\* `tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16()`
-    \\* `tb_types.TransferFlags{VoidPendingTransfer: true}.ToUint16()`
+    \\* `TransferFlags{Linked: true}.ToUint16()`
+    \\* `TransferFlags{Pending: true}.ToUint16()`
+    \\* `TransferFlags{PostPendingTransfer: true}.ToUint16()`
+    \\* `TransferFlags{VoidPendingTransfer: true}.ToUint16()`
     ,
 
     .transfer_flags_link_example =
-    \\transfer0 := tb_types.Transfer{ /* ... account values ... */ }
-    \\transfer1 := tb_types.Transfer{ /* ... account values ... */ }
-    \\transfer0.Flags = tb_types.TransferFlags{Linked: true}.ToUint16()
-    \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer0, transfer1})
+    \\transfer0 := Transfer{ /* ... account values ... */ }
+    \\transfer1 := Transfer{ /* ... account values ... */ }
+    \\transfer0.Flags = TransferFlags{Linked: true}.ToUint16()
+    \\transfersRes, err = client.CreateTransfers([]Transfer{transfer0, transfer1})
     \\// error handling omitted
     ,
     .transfer_flags_post_example =
-    \\transfer = tb_types.Transfer{
-    \\	ID:		uint128("2"),
-    \\	PendingID:	uint128("1"),
-    \\	Flags:		tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16(),
-    \\	Timestamp:	0,
+    \\transfer = Transfer{
+    \\	ID:         ToUint128(2),
+    \\	PendingID:  ToUint128(1),
+    \\	Flags:      TransferFlags{PostPendingTransfer: true}.ToUint16(),
+    \\	Timestamp:  0,
     \\}
-    \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+    \\transfersRes, err = client.CreateTransfers([]Transfer{transfer})
     \\// error handling omitted
     ,
     .transfer_flags_void_example =
-    \\transfer = tb_types.Transfer{
-    \\	ID:		uint128("2"),
-    \\	PendingID:	uint128("1"),
-    \\	Flags:		tb_types.TransferFlags{VoidPendingTransfer: true}.ToUint16(),
-    \\	Timestamp:	0,
+    \\transfer = Transfer{
+    \\	ID:         ToUint128(2),
+    \\	PendingID:  ToUint128(1),
+    \\	Flags:      TransferFlags{VoidPendingTransfer: true}.ToUint16(),
+    \\	Timestamp:  0,
     \\}
-    \\transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+    \\transfersRes, err = client.CreateTransfers([]Transfer{transfer})
     \\// error handling omitted
     ,
 
     .lookup_transfers_example =
-    \\transfers, err := client.LookupTransfers([]tb_types.Uint128{uint128("1"), uint128("2")})
+    \\transfers, err := client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
     \\if err != nil {
     \\	log.Printf("Could not fetch transfers: %s", err)
     \\	return
@@ -365,29 +357,29 @@ pub const GoDocs = Docs{
     ,
 
     .linked_events_example =
-    \\batch := []tb_types.Transfer{}
-    \\linkedFlag := tb_types.TransferFlags{Linked: true}.ToUint16()
+    \\batch := []Transfer{}
+    \\linkedFlag := TransferFlags{Linked: true}.ToUint16()
     \\
     \\// An individual transfer (successful):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("1"), /* ... rest of transfer ... */ })
+    \\batch = append(batch, Transfer{ID: ToUint128(1), /* ... rest of transfer ... */ })
     \\
     \\// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... , */ Flags: linkedFlag }) // Fail with exists
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... , */ }) // Fail without committing
+    \\batch = append(batch, Transfer{ID: ToUint128(2), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
+    \\batch = append(batch, Transfer{ID: ToUint128(3), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
+    \\batch = append(batch, Transfer{ID: ToUint128(2), /* ... , */ Flags: linkedFlag }) // Fail with exists
+    \\batch = append(batch, Transfer{ID: ToUint128(4), /* ... , */ }) // Fail without committing
     \\
     \\// An individual transfer (successful):
     \\// This should not see any effect from the failed chain above.
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ })
+    \\batch = append(batch, Transfer{ID: ToUint128(2), /* ... rest of transfer ... */ })
     \\
     \\// A chain of 2 transfers (the first transfer fails the chain):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ Flags: linkedFlag })
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ })
+    \\batch = append(batch, Transfer{ID: ToUint128(2), /* ... rest of transfer ... */ Flags: linkedFlag })
+    \\batch = append(batch, Transfer{ID: ToUint128(3), /* ... rest of transfer ... */ })
     \\
     \\// A chain of 2 transfers (successful):
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ Flags: linkedFlag })
-    \\batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... rest of transfer ... */ })
+    \\batch = append(batch, Transfer{ID: ToUint128(3), /* ... rest of transfer ... */ Flags: linkedFlag })
+    \\batch = append(batch, Transfer{ID: ToUint128(4), /* ... rest of transfer ... */ })
     \\
     \\transfersRes, err = client.CreateTransfers(batch)
     ,
@@ -419,16 +411,8 @@ pub const GoDocs = Docs{
     \\import "log"
     \\import "os"
     \\
-    \\import tb "github.com/tigerbeetle/tigerbeetle-go"
-    \\import tb_types "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
-    \\
-    \\func uint128(value string) tb_types.Uint128 {
-    \\	x, err := tb_types.HexStringToUint128(value)
-    \\	if err != nil {
-    \\		panic(err)
-    \\	}
-    \\	return x
-    \\}
+    \\import . "github.com/tigerbeetle/tigerbeetle-go"
+    \\import . "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
     \\
     \\func main() {
     ,

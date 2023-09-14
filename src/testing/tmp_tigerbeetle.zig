@@ -68,7 +68,7 @@ pub fn init(
 
     // Pass `--addresses=0` to let the OS pick a port for us.
     var process = try shell.spawn(
-        "{tigerbeetle} start --cache-grid=128MB --addresses=0 {data_file}",
+        "{tigerbeetle} start --cache-grid=256MB --addresses=0 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );
     errdefer {

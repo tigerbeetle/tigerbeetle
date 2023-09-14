@@ -6,6 +6,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+import java.math.BigInteger;
 
 public final class AccountBatch extends Batch {
 
@@ -13,15 +14,17 @@ public final class AccountBatch extends Batch {
         int SIZE = 128;
 
         int Id = 0;
-        int UserData = 16;
-        int Reserved = 32;
-        int Ledger = 80;
-        int Code = 84;
-        int Flags = 86;
-        int DebitsPending = 88;
-        int DebitsPosted = 96;
-        int CreditsPending = 104;
-        int CreditsPosted = 112;
+        int DebitsPending = 16;
+        int DebitsPosted = 32;
+        int CreditsPending = 48;
+        int CreditsPosted = 64;
+        int UserData128 = 80;
+        int UserData64 = 96;
+        int UserData32 = 104;
+        int Reserved = 108;
+        int Ledger = 112;
+        int Code = 116;
+        int Flags = 118;
         int Timestamp = 120;
     }
 
@@ -98,12 +101,15 @@ public final class AccountBatch extends Batch {
     }
 
     /**
-     * @return an array of 16 bytes representing the 128-bit value.
+     * @return a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
      */
-    public byte[] getUserData() {
-        return getUInt128(at(Struct.UserData));
+    public BigInteger getDebitsPending() {
+        final var index = at(Struct.DebitsPending);
+        return UInt128.asBigInteger(
+            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.MostSignificant));
     }
 
     /**
@@ -112,21 +118,20 @@ public final class AccountBatch extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
      */
-    public long getUserData(final UInt128 part) {
-        return getUInt128(at(Struct.UserData), part);
+    public long getDebitsPending(final UInt128 part) {
+        return getUInt128(at(Struct.DebitsPending), part);
     }
 
     /**
-     * @param userData an array of 16 bytes representing the 128-bit value.
-     * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
+     * @param debitsPending a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
      */
-    public void setUserData(final byte[] userData) {
-        putUInt128(at(Struct.UserData), userData);
+    void setDebitsPending(final BigInteger debitsPending) {
+        putUInt128(at(Struct.DebitsPending), UInt128.asBytes(debitsPending));
     }
 
     /**
@@ -134,28 +139,285 @@ public final class AccountBatch extends Batch {
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
      */
-    public void setUserData(final long leastSignificant, final long mostSignificant) {
-        putUInt128(at(Struct.UserData), leastSignificant, mostSignificant);
+    void setDebitsPending(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.DebitsPending), leastSignificant, mostSignificant);
     }
 
     /**
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
      */
-    public void setUserData(final long leastSignificant) {
-        putUInt128(at(Struct.UserData), leastSignificant, 0);
+    void setDebitsPending(final long leastSignificant) {
+        putUInt128(at(Struct.DebitsPending), leastSignificant, 0);
+    }
+
+    /**
+     * @return a {@link java.math.BigInteger} representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
+     */
+    public BigInteger getDebitsPosted() {
+        final var index = at(Struct.DebitsPosted);
+        return UInt128.asBigInteger(
+            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.MostSignificant));
+    }
+
+    /**
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
+     */
+    public long getDebitsPosted(final UInt128 part) {
+        return getUInt128(at(Struct.DebitsPosted), part);
+    }
+
+    /**
+     * @param debitsPosted a {@link java.math.BigInteger} representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
+     */
+    void setDebitsPosted(final BigInteger debitsPosted) {
+        putUInt128(at(Struct.DebitsPosted), UInt128.asBytes(debitsPosted));
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
+     */
+    void setDebitsPosted(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.DebitsPosted), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
+     */
+    void setDebitsPosted(final long leastSignificant) {
+        putUInt128(at(Struct.DebitsPosted), leastSignificant, 0);
+    }
+
+    /**
+     * @return a {@link java.math.BigInteger} representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
+     */
+    public BigInteger getCreditsPending() {
+        final var index = at(Struct.CreditsPending);
+        return UInt128.asBigInteger(
+            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.MostSignificant));
+    }
+
+    /**
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
+     */
+    public long getCreditsPending(final UInt128 part) {
+        return getUInt128(at(Struct.CreditsPending), part);
+    }
+
+    /**
+     * @param creditsPending a {@link java.math.BigInteger} representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
+     */
+    void setCreditsPending(final BigInteger creditsPending) {
+        putUInt128(at(Struct.CreditsPending), UInt128.asBytes(creditsPending));
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
+     */
+    void setCreditsPending(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.CreditsPending), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
+     */
+    void setCreditsPending(final long leastSignificant) {
+        putUInt128(at(Struct.CreditsPending), leastSignificant, 0);
+    }
+
+    /**
+     * @return a {@link java.math.BigInteger} representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
+     */
+    public BigInteger getCreditsPosted() {
+        final var index = at(Struct.CreditsPosted);
+        return UInt128.asBigInteger(
+            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.MostSignificant));
+    }
+
+    /**
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
+     */
+    public long getCreditsPosted(final UInt128 part) {
+        return getUInt128(at(Struct.CreditsPosted), part);
+    }
+
+    /**
+     * @param creditsPosted a {@link java.math.BigInteger} representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
+     */
+    void setCreditsPosted(final BigInteger creditsPosted) {
+        putUInt128(at(Struct.CreditsPosted), UInt128.asBytes(creditsPosted));
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
+     */
+    void setCreditsPosted(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.CreditsPosted), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
+     */
+    void setCreditsPosted(final long leastSignificant) {
+        putUInt128(at(Struct.CreditsPosted), leastSignificant, 0);
+    }
+
+    /**
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_128">user_data_128</a>
+     */
+    public byte[] getUserData128() {
+        return getUInt128(at(Struct.UserData128));
+    }
+
+    /**
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_128">user_data_128</a>
+     */
+    public long getUserData128(final UInt128 part) {
+        return getUInt128(at(Struct.UserData128), part);
+    }
+
+    /**
+     * @param userData128 an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalArgumentException if {@code userData128} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_128">user_data_128</a>
+     */
+    public void setUserData128(final byte[] userData128) {
+        putUInt128(at(Struct.UserData128), userData128);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_128">user_data_128</a>
+     */
+    public void setUserData128(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.UserData128), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_128">user_data_128</a>
+     */
+    public void setUserData128(final long leastSignificant) {
+        putUInt128(at(Struct.UserData128), leastSignificant, 0);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_64">user_data_64</a>
+     */
+    public long getUserData64() {
+        final var value = getUInt64(at(Struct.UserData64));
+        return value;
+    }
+
+    /**
+     * @param userData64
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_64">user_data_64</a>
+     */
+    public void setUserData64(final long userData64) {
+        putUInt64(at(Struct.UserData64), userData64);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_32">user_data_32</a>
+     */
+    public int getUserData32() {
+        final var value = getUInt32(at(Struct.UserData32));
+        return value;
+    }
+
+    /**
+     * @param userData32
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#user_data_32">user_data_32</a>
+     */
+    public void setUserData32(final int userData32) {
+        putUInt32(at(Struct.UserData32), userData32);
     }
 
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#reserved">reserved</a>
      */
-    byte[] getReserved() {
-        return getArray(at(Struct.Reserved), 48);
+    int getReserved() {
+        final var value = getUInt32(at(Struct.Reserved));
+        return value;
     }
 
     /**
@@ -164,12 +426,8 @@ public final class AccountBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#reserved">reserved</a>
      */
-    void setReserved(byte[] reserved) {
-        if (reserved == null)
-            reserved = new byte[48];
-        if (reserved.length != 48)
-            throw new IllegalArgumentException("Reserved must be 48 bytes long");
-        putArray(at(Struct.Reserved), reserved);
+    void setReserved(final int reserved) {
+        putUInt32(at(Struct.Reserved), reserved);
     }
 
     /**
@@ -227,82 +485,6 @@ public final class AccountBatch extends Batch {
      */
     public void setFlags(final int flags) {
         putUInt16(at(Struct.Flags), flags);
-    }
-
-    /**
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
-     */
-    public long getDebitsPending() {
-        final var value = getUInt64(at(Struct.DebitsPending));
-        return value;
-    }
-
-    /**
-     * @param debitsPending
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_pending">debits_pending</a>
-     */
-    void setDebitsPending(final long debitsPending) {
-        putUInt64(at(Struct.DebitsPending), debitsPending);
-    }
-
-    /**
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
-     */
-    public long getDebitsPosted() {
-        final var value = getUInt64(at(Struct.DebitsPosted));
-        return value;
-    }
-
-    /**
-     * @param debitsPosted
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#debits_posted">debits_posted</a>
-     */
-    void setDebitsPosted(final long debitsPosted) {
-        putUInt64(at(Struct.DebitsPosted), debitsPosted);
-    }
-
-    /**
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
-     */
-    public long getCreditsPending() {
-        final var value = getUInt64(at(Struct.CreditsPending));
-        return value;
-    }
-
-    /**
-     * @param creditsPending
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_pending">credits_pending</a>
-     */
-    void setCreditsPending(final long creditsPending) {
-        putUInt64(at(Struct.CreditsPending), creditsPending);
-    }
-
-    /**
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
-     */
-    public long getCreditsPosted() {
-        final var value = getUInt64(at(Struct.CreditsPosted));
-        return value;
-    }
-
-    /**
-     * @param creditsPosted
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/accounts/#credits_posted">credits_posted</a>
-     */
-    void setCreditsPosted(final long creditsPosted) {
-        putUInt64(at(Struct.CreditsPosted), creditsPosted);
     }
 
     /**

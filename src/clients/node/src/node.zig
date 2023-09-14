@@ -184,27 +184,30 @@ fn decode_from_object(comptime T: type, env: c.napi_env, object: c.napi_value) !
             .id = try translate.u128_from_object(env, object, "id"),
             .debit_account_id = try translate.u128_from_object(env, object, "debit_account_id"),
             .credit_account_id = try translate.u128_from_object(env, object, "credit_account_id"),
-            .user_data = try translate.u128_from_object(env, object, "user_data"),
-            .reserved = try translate.u128_from_object(env, object, "reserved"),
+            .amount = try translate.u128_from_object(env, object, "amount"),
             .pending_id = try translate.u128_from_object(env, object, "pending_id"),
-            .timeout = try translate.u64_from_object(env, object, "timeout"),
+            .user_data_128 = try translate.u128_from_object(env, object, "user_data_128"),
+            .user_data_64 = try translate.u64_from_object(env, object, "user_data_64"),
+            .user_data_32 = try translate.u32_from_object(env, object, "user_data_32"),
+            .timeout = try translate.u32_from_object(env, object, "timeout"),
             .ledger = try translate.u32_from_object(env, object, "ledger"),
             .code = try translate.u16_from_object(env, object, "code"),
             .flags = @as(TransferFlags, @bitCast(try translate.u16_from_object(env, object, "flags"))),
-            .amount = try translate.u64_from_object(env, object, "amount"),
             .timestamp = try validate_timestamp(env, object),
         },
         Account => Account{
             .id = try translate.u128_from_object(env, object, "id"),
-            .user_data = try translate.u128_from_object(env, object, "user_data"),
-            .reserved = try translate.bytes_from_object(env, object, 48, "reserved"),
+            .debits_pending = try translate.u128_from_object(env, object, "debits_pending"),
+            .debits_posted = try translate.u128_from_object(env, object, "debits_posted"),
+            .credits_pending = try translate.u128_from_object(env, object, "credits_pending"),
+            .credits_posted = try translate.u128_from_object(env, object, "credits_posted"),
+            .user_data_128 = try translate.u128_from_object(env, object, "user_data_128"),
+            .user_data_64 = try translate.u64_from_object(env, object, "user_data_64"),
+            .user_data_32 = try translate.u32_from_object(env, object, "user_data_32"),
+            .reserved = try translate.u32_from_object(env, object, "reserved"),
             .ledger = try translate.u32_from_object(env, object, "ledger"),
             .code = try translate.u16_from_object(env, object, "code"),
-            .flags = @as(AccountFlags, @bitCast(try translate.u16_from_object(env, object, "flags"))),
-            .debits_pending = try translate.u64_from_object(env, object, "debits_pending"),
-            .debits_posted = try translate.u64_from_object(env, object, "debits_posted"),
-            .credits_pending = try translate.u64_from_object(env, object, "credits_pending"),
-            .credits_posted = try translate.u64_from_object(env, object, "credits_posted"),
+            .flags = @bitCast(try translate.u16_from_object(env, object, "flags")),
             .timestamp = try validate_timestamp(env, object),
         },
         u128 => try translate.u128_from_value(env, object, "lookup"),
@@ -320,16 +323,64 @@ fn encode_napi_results_array(
                 try translate.u128_into_object(
                     env,
                     napi_object,
-                    "user_data",
-                    result.user_data,
-                    "Failed to set property \"user_data\" of account lookup result.",
+                    "debits_pending",
+                    result.debits_pending,
+                    "Failed to set property \"debits_pending\" of account lookup result.",
                 );
 
-                try translate.byte_slice_into_object(
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "debits_posted",
+                    result.debits_posted,
+                    "Failed to set property \"debits_posted\" of account lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "credits_pending",
+                    result.credits_pending,
+                    "Failed to set property \"credits_pending\" of account lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "credits_posted",
+                    result.credits_posted,
+                    "Failed to set property \"credits_posted\" of account lookup result.",
+                );
+
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "user_data_128",
+                    result.user_data_128,
+                    "Failed to set property \"user_data_128\" of account lookup result.",
+                );
+
+                try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "user_data_64",
+                    result.user_data_64,
+                    "Failed to set property \"user_data_64\" of account lookup result.",
+                );
+
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "user_data_32",
+                    result.user_data_32,
+                    "Failed to set property \"user_data_32\" of account lookup result.",
+                );
+
+                try translate.u32_into_object(
                     env,
                     napi_object,
                     "reserved",
-                    &result.reserved,
+                    result.reserved,
                     "Failed to set property \"reserved\" of account lookup result.",
                 );
 
@@ -355,38 +406,6 @@ fn encode_napi_results_array(
                     "flags",
                     @as(u16, @bitCast(result.flags)),
                     "Failed to set property \"flags\" of account lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "debits_pending",
-                    result.debits_pending,
-                    "Failed to set property \"debits_pending\" of account lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "debits_posted",
-                    result.debits_posted,
-                    "Failed to set property \"debits_posted\" of account lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "credits_pending",
-                    result.credits_pending,
-                    "Failed to set property \"credits_pending\" of account lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "credits_posted",
-                    result.credits_posted,
-                    "Failed to set property \"credits_posted\" of account lookup result.",
                 );
 
                 try translate.u64_into_object(
@@ -442,17 +461,9 @@ fn encode_napi_results_array(
                 try translate.u128_into_object(
                     env,
                     napi_object,
-                    "user_data",
-                    result.user_data,
-                    "Failed to set property \"user_data\" of transfer lookup result.",
-                );
-
-                try translate.u128_into_object(
-                    env,
-                    napi_object,
-                    "reserved",
-                    result.reserved,
-                    "Failed to set property \"reserved\" of transfer lookup result.",
+                    "amount",
+                    result.amount,
+                    "Failed to set property \"amount\" of transfer lookup result.",
                 );
 
                 try translate.u128_into_object(
@@ -463,7 +474,31 @@ fn encode_napi_results_array(
                     "Failed to set property \"pending_id\" of transfer lookup result.",
                 );
 
+                try translate.u128_into_object(
+                    env,
+                    napi_object,
+                    "user_data_128",
+                    result.user_data_128,
+                    "Failed to set property \"user_data_128\" of transfer lookup result.",
+                );
+
                 try translate.u64_into_object(
+                    env,
+                    napi_object,
+                    "user_data_64",
+                    result.user_data_64,
+                    "Failed to set property \"user_data_64\" of transfer lookup result.",
+                );
+
+                try translate.u32_into_object(
+                    env,
+                    napi_object,
+                    "user_data_32",
+                    result.user_data_32,
+                    "Failed to set property \"user_data_32\" of transfer lookup result.",
+                );
+
+                try translate.u32_into_object(
                     env,
                     napi_object,
                     "timeout",
@@ -493,14 +528,6 @@ fn encode_napi_results_array(
                     "flags",
                     @as(u16, @bitCast(result.flags)),
                     "Failed to set property \"flags\" of transfer lookup result.",
-                );
-
-                try translate.u64_into_object(
-                    env,
-                    napi_object,
-                    "amount",
-                    result.amount,
-                    "Failed to set property \"amount\" of transfer lookup result.",
                 );
 
                 try translate.u64_into_object(

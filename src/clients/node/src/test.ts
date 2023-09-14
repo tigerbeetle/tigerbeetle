@@ -18,28 +18,32 @@ const Zeroed32Bytes = Buffer.alloc(32, 0)
 const Zeroed48Bytes = Buffer.alloc(48, 0)
 const accountA: Account = {
   id: 17n,
-  user_data: 0n,
-  reserved: Zeroed48Bytes,
-  ledger: 1,
-  code: 718,
-  flags: 0,
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,
+  credits_posted: 0n,  
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 718,
+  flags: 0,
   timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
 const accountB: Account = {
   id: 19n,
-  user_data: 0n,
-  reserved: Zeroed48Bytes,
-  ledger: 1,
-  code: 719,
-  flags: 0,
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,
+  credits_posted: 0n,  
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 719,
+  flags: 0,
   timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
 
@@ -85,28 +89,30 @@ test('can lookup accounts', async (): Promise<void> => {
   assert.strictEqual(accounts.length, 2)
   const account1 = accounts[0]
   assert.strictEqual(account1.id, 17n)
-  assert.ok(account1.reserved.equals(Zeroed48Bytes))
-  assert.strictEqual(account1.user_data, 0n)
-  assert.strictEqual(account1.code, 718)
-  assert.strictEqual(account1.ledger, 1)
-  assert.strictEqual(account1.flags, 0)
   assert.strictEqual(account1.credits_posted, 0n)
   assert.strictEqual(account1.credits_pending, 0n)
   assert.strictEqual(account1.debits_posted, 0n)
-  assert.strictEqual(account1.debits_pending, 0n)
+  assert.strictEqual(account1.debits_pending, 0n)  
+  assert.strictEqual(account1.user_data_128, 0n)
+  assert.strictEqual(account1.user_data_64, 0n)
+  assert.strictEqual(account1.user_data_32, 0)
+  assert.strictEqual(account1.code, 718)
+  assert.strictEqual(account1.ledger, 1)
+  assert.strictEqual(account1.flags, 0)
   assert.ok(account1.timestamp > 0n)
 
   const account2 = accounts[1]
   assert.strictEqual(account2.id, 19n)
-  assert.ok(account2.reserved.equals(Zeroed48Bytes))
-  assert.strictEqual(account2.user_data, 0n)
-  assert.strictEqual(account2.code, 719)
-  assert.strictEqual(account2.ledger, 1)
-  assert.strictEqual(account2.flags, 0)
   assert.strictEqual(account2.credits_posted, 0n)
   assert.strictEqual(account2.credits_pending, 0n)
   assert.strictEqual(account2.debits_posted, 0n)
   assert.strictEqual(account2.debits_pending, 0n)
+  assert.strictEqual(account2.user_data_128, 0n)
+  assert.strictEqual(account2.user_data_64, 0n)
+  assert.strictEqual(account2.user_data_32, 0)
+  assert.strictEqual(account2.code, 719)
+  assert.strictEqual(account2.ledger, 1)
+  assert.strictEqual(account2.flags, 0)
   assert.ok(account2.timestamp > 0n)
 })
 
@@ -115,14 +121,15 @@ test('can create a transfer', async (): Promise<void> => {
     id: 1n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
-    user_data: 0n,
-    reserved: 0n,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 0n,
-    timeout: 0n,
+    timeout: 0,
     ledger: 1,
     code: 1,
     flags: 0,
-    amount: 100n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
@@ -149,14 +156,15 @@ test('can create a two-phase transfer', async (): Promise<void> => {
     id: 2n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
-    user_data: 0n,
-    reserved: 0n,
+    amount: 50n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 0n,
-    timeout: BigInt(2e9),
+    timeout: 2e9,
     ledger: 1,
     code: 1,
     flags,
-    amount: 50n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
@@ -181,12 +189,13 @@ test('can create a two-phase transfer', async (): Promise<void> => {
   assert.strictEqual(transfers[0].id, 2n)
   assert.strictEqual(transfers[0].debit_account_id, accountB.id)
   assert.strictEqual(transfers[0].credit_account_id, accountA.id)
-  assert.strictEqual(transfers[0].user_data, 0n)
-  assert.notStrictEqual(transfers[0].reserved, Zeroed32Bytes)
+  assert.strictEqual(transfers[0].amount, 50n)
+  assert.strictEqual(transfers[0].user_data_128, 0n)
+  assert.strictEqual(transfers[0].user_data_64, 0n)
+  assert.strictEqual(transfers[0].user_data_32, 0)
   assert.strictEqual(transfers[0].timeout > 0, true)
   assert.strictEqual(transfers[0].code, 1)
   assert.strictEqual(transfers[0].flags, 2)
-  assert.strictEqual(transfers[0].amount, 50n)
   assert.strictEqual(transfers[0].timestamp > 0, true)
 })
 
@@ -198,14 +207,15 @@ test('can post a two-phase transfer', async (): Promise<void> => {
     id: 3n,
     debit_account_id: BigInt(0),
     credit_account_id: BigInt(0),
-    user_data: 0n,
-    reserved: 0n,
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 2n,// must match the id of the pending transfer
-    timeout: 0n,
+    timeout: 0,
     ledger: 1,
     code: 1,
     flags: flags,
-    amount: 0n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
@@ -231,14 +241,15 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
     id: 4n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
-    user_data: 0n,
-    reserved: 0n,
+    amount: 50n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 0n,
-    timeout: BigInt(1e9),
+    timeout: 1e9,
     ledger: 1,
     code: 1,
     flags: TransferFlags.pending,
-    amount: 50n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
   const transferErrors = await client.createTransfers([transfer])
@@ -249,14 +260,15 @@ test('can reject a two-phase transfer', async (): Promise<void> => {
     id: 5n,
     debit_account_id: BigInt(0),
     credit_account_id: BigInt(0),
-    user_data: 0n,
-    reserved: 0n,
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 4n, // must match the id of the pending transfer
-    timeout: 0n,
+    timeout: 0,
     ledger: 1,
     code: 1,
     flags: TransferFlags.void_pending_transfer,
-    amount: 0n,
     timestamp: 0n, // this will be set correctly by the TigerBeetle server
   }
 
@@ -281,30 +293,32 @@ test('can link transfers', async (): Promise<void> => {
     id: 6n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
-    user_data: 0n,
-    reserved: 0n,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 0n,
-    timeout: 0n,
+    timeout: 0,
     ledger: 1,
     code: 1,
     flags: TransferFlags.linked, // points to transfer2
-    amount: 100n,
     timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
   const transfer2: Transfer = {
     id: 6n,
     debit_account_id: accountB.id,
     credit_account_id: accountA.id,
-    user_data: 0n,
-    reserved: 0n,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
     pending_id: 0n,
-    timeout: 0n,
+    timeout: 0,
     ledger: 1,
     code: 1,
     // Does not have linked flag as it is the end of the chain.
     // This will also cause it to fail as this is now a duplicate with different flags
     flags: 0,
-    amount: 100n,
     timestamp: 0n, // will be set correctly by the TigerBeetle server
   }
 

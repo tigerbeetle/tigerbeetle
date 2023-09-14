@@ -20,7 +20,7 @@ namespace TigerBeetle.Benchmarks
         {
             Console.WriteLine($"Benchmarking dotnet");
 
-            using var client = new Client(0, new string[] { "3000" });
+            using var client = new Client(0, new string[] { "3001" });
 
             var accounts = new[] {
                 new Account
@@ -45,12 +45,12 @@ namespace TigerBeetle.Benchmarks
                 {
                     transfers[i][j] = new Transfer
                     {
-                        Id = new UInt128(j + 1, i),
+                        Id = new UInt128((ulong)i, (ulong)j + 1),
                         DebitAccountId = accounts[0].Id,
                         CreditAccountId = accounts[1].Id,
-                        Code = 1,
+						Amount = 1,
+						Code = 1,
                         Ledger = 777,
-                        Amount = 1,
                     };
                 }
             }

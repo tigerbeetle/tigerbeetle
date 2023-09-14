@@ -40,7 +40,6 @@ public enum UInt128 {
         return buffer.getLong();
     }
 
-
     /**
      * Gets an array of 16 bytes representing the 128-bit value.
      *

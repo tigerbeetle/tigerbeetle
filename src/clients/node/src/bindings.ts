@@ -76,31 +76,6 @@ export type Account = {
   id: bigint
 
   /**
-  * See [user_data](https://docs.tigerbeetle.com/reference/accounts/#user_data)
-  */
-  user_data: bigint
-
-  /**
-  * See [reserved](https://docs.tigerbeetle.com/reference/accounts/#reserved)
-  */
-  reserved: Buffer
-
-  /**
-  * See [ledger](https://docs.tigerbeetle.com/reference/accounts/#ledger)
-  */
-  ledger: number
-
-  /**
-  * See [code](https://docs.tigerbeetle.com/reference/accounts/#code)
-  */
-  code: number
-
-  /**
-  * See [flags](https://docs.tigerbeetle.com/reference/accounts/#flags)
-  */
-  flags: number
-
-  /**
   * See [debits_pending](https://docs.tigerbeetle.com/reference/accounts/#debits_pending)
   */
   debits_pending: bigint
@@ -119,6 +94,41 @@ export type Account = {
   * See [credits_posted](https://docs.tigerbeetle.com/reference/accounts/#credits_posted)
   */
   credits_posted: bigint
+
+  /**
+  * See [user_data_128](https://docs.tigerbeetle.com/reference/accounts/#user_data_128)
+  */
+  user_data_128: bigint
+
+  /**
+  * See [user_data_64](https://docs.tigerbeetle.com/reference/accounts/#user_data_64)
+  */
+  user_data_64: bigint
+
+  /**
+  * See [user_data_32](https://docs.tigerbeetle.com/reference/accounts/#user_data_32)
+  */
+  user_data_32: number
+
+  /**
+  * See [reserved](https://docs.tigerbeetle.com/reference/accounts/#reserved)
+  */
+  reserved: number
+
+  /**
+  * See [ledger](https://docs.tigerbeetle.com/reference/accounts/#ledger)
+  */
+  ledger: number
+
+  /**
+  * See [code](https://docs.tigerbeetle.com/reference/accounts/#code)
+  */
+  code: number
+
+  /**
+  * See [flags](https://docs.tigerbeetle.com/reference/accounts/#flags)
+  */
+  flags: number
 
   /**
   * See [timestamp](https://docs.tigerbeetle.com/reference/accounts/#timestamp)
@@ -148,14 +158,9 @@ export type Transfer = {
   credit_account_id: bigint
 
   /**
-  * See [user_data](https://docs.tigerbeetle.com/reference/transfers/#user_data)
+  * See [amount](https://docs.tigerbeetle.com/reference/transfers/#amount)
   */
-  user_data: bigint
-
-  /**
-  * See [reserved](https://docs.tigerbeetle.com/reference/transfers/#reserved)
-  */
-  reserved: bigint
+  amount: bigint
 
   /**
   * See [pending_id](https://docs.tigerbeetle.com/reference/transfers/#pending_id)
@@ -163,9 +168,24 @@ export type Transfer = {
   pending_id: bigint
 
   /**
+  * See [user_data_128](https://docs.tigerbeetle.com/reference/transfers/#user_data_128)
+  */
+  user_data_128: bigint
+
+  /**
+  * See [user_data_64](https://docs.tigerbeetle.com/reference/transfers/#user_data_64)
+  */
+  user_data_64: bigint
+
+  /**
+  * See [user_data_32](https://docs.tigerbeetle.com/reference/transfers/#user_data_32)
+  */
+  user_data_32: number
+
+  /**
   * See [timeout](https://docs.tigerbeetle.com/reference/transfers/#timeout)
   */
-  timeout: bigint
+  timeout: number
 
   /**
   * See [ledger](https://docs.tigerbeetle.com/reference/transfers/#ledger)
@@ -181,11 +201,6 @@ export type Transfer = {
   * See [flags](https://docs.tigerbeetle.com/reference/transfers/#flags)
   */
   flags: number
-
-  /**
-  * See [amount](https://docs.tigerbeetle.com/reference/transfers/#amount)
-  */
-  amount: bigint
 
   /**
   * See [timestamp](https://docs.tigerbeetle.com/reference/transfers/#timestamp)
@@ -220,14 +235,14 @@ export enum CreateAccountError {
   timestamp_must_be_zero = 3,
 
   /**
-  * See [reserved_flag](https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_flag)
-  */
-  reserved_flag = 4,
-
-  /**
   * See [reserved_field](https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_field)
   */
-  reserved_field = 5,
+  reserved_field = 4,
+
+  /**
+  * See [reserved_flag](https://docs.tigerbeetle.com/reference/operations/create_accounts#reserved_flag)
+  */
+  reserved_flag = 5,
 
   /**
   * See [id_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#id_must_not_be_zero)
@@ -245,34 +260,34 @@ export enum CreateAccountError {
   flags_are_mutually_exclusive = 8,
 
   /**
-  * See [ledger_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero)
-  */
-  ledger_must_not_be_zero = 9,
-
-  /**
-  * See [code_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero)
-  */
-  code_must_not_be_zero = 10,
-
-  /**
   * See [debits_pending_must_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_pending_must_be_zero)
   */
-  debits_pending_must_be_zero = 11,
+  debits_pending_must_be_zero = 9,
 
   /**
   * See [debits_posted_must_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#debits_posted_must_be_zero)
   */
-  debits_posted_must_be_zero = 12,
+  debits_posted_must_be_zero = 10,
 
   /**
   * See [credits_pending_must_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_pending_must_be_zero)
   */
-  credits_pending_must_be_zero = 13,
+  credits_pending_must_be_zero = 11,
 
   /**
   * See [credits_posted_must_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#credits_posted_must_be_zero)
   */
-  credits_posted_must_be_zero = 14,
+  credits_posted_must_be_zero = 12,
+
+  /**
+  * See [ledger_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#ledger_must_not_be_zero)
+  */
+  ledger_must_not_be_zero = 13,
+
+  /**
+  * See [code_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_accounts#code_must_not_be_zero)
+  */
+  code_must_not_be_zero = 14,
 
   /**
   * See [exists_with_different_flags](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_flags)
@@ -280,24 +295,34 @@ export enum CreateAccountError {
   exists_with_different_flags = 15,
 
   /**
-  * See [exists_with_different_user_data](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data)
+  * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data_128)
   */
-  exists_with_different_user_data = 16,
+  exists_with_different_user_data_128 = 16,
+
+  /**
+  * See [exists_with_different_user_data_64](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data_64)
+  */
+  exists_with_different_user_data_64 = 17,
+
+  /**
+  * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_user_data_32)
+  */
+  exists_with_different_user_data_32 = 18,
 
   /**
   * See [exists_with_different_ledger](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_ledger)
   */
-  exists_with_different_ledger = 17,
+  exists_with_different_ledger = 19,
 
   /**
   * See [exists_with_different_code](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists_with_different_code)
   */
-  exists_with_different_code = 18,
+  exists_with_different_code = 20,
 
   /**
   * See [exists](https://docs.tigerbeetle.com/reference/operations/create_accounts#exists)
   */
-  exists = 19,
+  exists = 21,
 }
 
 
@@ -332,74 +357,74 @@ export enum CreateTransferError {
   reserved_flag = 4,
 
   /**
-  * See [reserved_field](https://docs.tigerbeetle.com/reference/operations/create_transfers#reserved_field)
-  */
-  reserved_field = 5,
-
-  /**
   * See [id_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_zero)
   */
-  id_must_not_be_zero = 6,
+  id_must_not_be_zero = 5,
 
   /**
   * See [id_must_not_be_int_max](https://docs.tigerbeetle.com/reference/operations/create_transfers#id_must_not_be_int_max)
   */
-  id_must_not_be_int_max = 7,
+  id_must_not_be_int_max = 6,
 
   /**
   * See [flags_are_mutually_exclusive](https://docs.tigerbeetle.com/reference/operations/create_transfers#flags_are_mutually_exclusive)
   */
-  flags_are_mutually_exclusive = 8,
+  flags_are_mutually_exclusive = 7,
 
   /**
   * See [debit_account_id_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_zero)
   */
-  debit_account_id_must_not_be_zero = 9,
+  debit_account_id_must_not_be_zero = 8,
 
   /**
   * See [debit_account_id_must_not_be_int_max](https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_id_must_not_be_int_max)
   */
-  debit_account_id_must_not_be_int_max = 10,
+  debit_account_id_must_not_be_int_max = 9,
 
   /**
   * See [credit_account_id_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_zero)
   */
-  credit_account_id_must_not_be_zero = 11,
+  credit_account_id_must_not_be_zero = 10,
 
   /**
   * See [credit_account_id_must_not_be_int_max](https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_id_must_not_be_int_max)
   */
-  credit_account_id_must_not_be_int_max = 12,
+  credit_account_id_must_not_be_int_max = 11,
 
   /**
   * See [accounts_must_be_different](https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_be_different)
   */
-  accounts_must_be_different = 13,
+  accounts_must_be_different = 12,
 
   /**
   * See [pending_id_must_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_zero)
   */
-  pending_id_must_be_zero = 14,
+  pending_id_must_be_zero = 13,
 
   /**
   * See [pending_id_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_zero)
   */
-  pending_id_must_not_be_zero = 15,
+  pending_id_must_not_be_zero = 14,
 
   /**
   * See [pending_id_must_not_be_int_max](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_not_be_int_max)
   */
-  pending_id_must_not_be_int_max = 16,
+  pending_id_must_not_be_int_max = 15,
 
   /**
   * See [pending_id_must_be_different](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_id_must_be_different)
   */
-  pending_id_must_be_different = 17,
+  pending_id_must_be_different = 16,
 
   /**
   * See [timeout_reserved_for_pending_transfer](https://docs.tigerbeetle.com/reference/operations/create_transfers#timeout_reserved_for_pending_transfer)
   */
-  timeout_reserved_for_pending_transfer = 18,
+  timeout_reserved_for_pending_transfer = 17,
+
+  /**
+  * See [amount_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero)
+  */
+  amount_must_not_be_zero = 18,
 
   /**
   * See [ledger_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#ledger_must_not_be_zero)
@@ -412,99 +437,99 @@ export enum CreateTransferError {
   code_must_not_be_zero = 20,
 
   /**
-  * See [amount_must_not_be_zero](https://docs.tigerbeetle.com/reference/operations/create_transfers#amount_must_not_be_zero)
-  */
-  amount_must_not_be_zero = 21,
-
-  /**
   * See [debit_account_not_found](https://docs.tigerbeetle.com/reference/operations/create_transfers#debit_account_not_found)
   */
-  debit_account_not_found = 22,
+  debit_account_not_found = 21,
 
   /**
   * See [credit_account_not_found](https://docs.tigerbeetle.com/reference/operations/create_transfers#credit_account_not_found)
   */
-  credit_account_not_found = 23,
+  credit_account_not_found = 22,
 
   /**
   * See [accounts_must_have_the_same_ledger](https://docs.tigerbeetle.com/reference/operations/create_transfers#accounts_must_have_the_same_ledger)
   */
-  accounts_must_have_the_same_ledger = 24,
+  accounts_must_have_the_same_ledger = 23,
 
   /**
   * See [transfer_must_have_the_same_ledger_as_accounts](https://docs.tigerbeetle.com/reference/operations/create_transfers#transfer_must_have_the_same_ledger_as_accounts)
   */
-  transfer_must_have_the_same_ledger_as_accounts = 25,
+  transfer_must_have_the_same_ledger_as_accounts = 24,
 
   /**
   * See [pending_transfer_not_found](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_found)
   */
-  pending_transfer_not_found = 26,
+  pending_transfer_not_found = 25,
 
   /**
   * See [pending_transfer_not_pending](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_not_pending)
   */
-  pending_transfer_not_pending = 27,
+  pending_transfer_not_pending = 26,
 
   /**
   * See [pending_transfer_has_different_debit_account_id](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_debit_account_id)
   */
-  pending_transfer_has_different_debit_account_id = 28,
+  pending_transfer_has_different_debit_account_id = 27,
 
   /**
   * See [pending_transfer_has_different_credit_account_id](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_credit_account_id)
   */
-  pending_transfer_has_different_credit_account_id = 29,
+  pending_transfer_has_different_credit_account_id = 28,
 
   /**
   * See [pending_transfer_has_different_ledger](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_ledger)
   */
-  pending_transfer_has_different_ledger = 30,
+  pending_transfer_has_different_ledger = 29,
 
   /**
   * See [pending_transfer_has_different_code](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_code)
   */
-  pending_transfer_has_different_code = 31,
+  pending_transfer_has_different_code = 30,
 
   /**
   * See [exceeds_pending_transfer_amount](https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_pending_transfer_amount)
   */
-  exceeds_pending_transfer_amount = 32,
+  exceeds_pending_transfer_amount = 31,
 
   /**
   * See [pending_transfer_has_different_amount](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_has_different_amount)
   */
-  pending_transfer_has_different_amount = 33,
+  pending_transfer_has_different_amount = 32,
 
   /**
   * See [pending_transfer_already_posted](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_posted)
   */
-  pending_transfer_already_posted = 34,
+  pending_transfer_already_posted = 33,
 
   /**
   * See [pending_transfer_already_voided](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_already_voided)
   */
-  pending_transfer_already_voided = 35,
+  pending_transfer_already_voided = 34,
 
   /**
   * See [pending_transfer_expired](https://docs.tigerbeetle.com/reference/operations/create_transfers#pending_transfer_expired)
   */
-  pending_transfer_expired = 36,
+  pending_transfer_expired = 35,
 
   /**
   * See [exists_with_different_flags](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_flags)
   */
-  exists_with_different_flags = 37,
+  exists_with_different_flags = 36,
 
   /**
   * See [exists_with_different_debit_account_id](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_debit_account_id)
   */
-  exists_with_different_debit_account_id = 38,
+  exists_with_different_debit_account_id = 37,
 
   /**
   * See [exists_with_different_credit_account_id](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_credit_account_id)
   */
-  exists_with_different_credit_account_id = 39,
+  exists_with_different_credit_account_id = 38,
+
+  /**
+  * See [exists_with_different_amount](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount)
+  */
+  exists_with_different_amount = 39,
 
   /**
   * See [exists_with_different_pending_id](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_pending_id)
@@ -512,74 +537,79 @@ export enum CreateTransferError {
   exists_with_different_pending_id = 40,
 
   /**
-  * See [exists_with_different_user_data](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data)
+  * See [exists_with_different_user_data_128](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data_128)
   */
-  exists_with_different_user_data = 41,
+  exists_with_different_user_data_128 = 41,
+
+  /**
+  * See [exists_with_different_user_data_64](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data_64)
+  */
+  exists_with_different_user_data_64 = 42,
+
+  /**
+  * See [exists_with_different_user_data_32](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_user_data_32)
+  */
+  exists_with_different_user_data_32 = 43,
 
   /**
   * See [exists_with_different_timeout](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_timeout)
   */
-  exists_with_different_timeout = 42,
+  exists_with_different_timeout = 44,
 
   /**
   * See [exists_with_different_code](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_code)
   */
-  exists_with_different_code = 43,
-
-  /**
-  * See [exists_with_different_amount](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists_with_different_amount)
-  */
-  exists_with_different_amount = 44,
+  exists_with_different_code = 45,
 
   /**
   * See [exists](https://docs.tigerbeetle.com/reference/operations/create_transfers#exists)
   */
-  exists = 45,
+  exists = 46,
 
   /**
   * See [overflows_debits_pending](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_pending)
   */
-  overflows_debits_pending = 46,
+  overflows_debits_pending = 47,
 
   /**
   * See [overflows_credits_pending](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_pending)
   */
-  overflows_credits_pending = 47,
+  overflows_credits_pending = 48,
 
   /**
   * See [overflows_debits_posted](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits_posted)
   */
-  overflows_debits_posted = 48,
+  overflows_debits_posted = 49,
 
   /**
   * See [overflows_credits_posted](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits_posted)
   */
-  overflows_credits_posted = 49,
+  overflows_credits_posted = 50,
 
   /**
   * See [overflows_debits](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_debits)
   */
-  overflows_debits = 50,
+  overflows_debits = 51,
 
   /**
   * See [overflows_credits](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_credits)
   */
-  overflows_credits = 51,
+  overflows_credits = 52,
 
   /**
   * See [overflows_timeout](https://docs.tigerbeetle.com/reference/operations/create_transfers#overflows_timeout)
   */
-  overflows_timeout = 52,
+  overflows_timeout = 53,
 
   /**
   * See [exceeds_credits](https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_credits)
   */
-  exceeds_credits = 53,
+  exceeds_credits = 54,
 
   /**
   * See [exceeds_debits](https://docs.tigerbeetle.com/reference/operations/create_transfers#exceeds_debits)
   */
-  exceeds_debits = 54,
+  exceeds_debits = 55,
 }
 
 export type CreateAccountsError = {
