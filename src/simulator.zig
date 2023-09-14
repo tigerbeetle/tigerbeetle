@@ -542,7 +542,11 @@ pub const Simulator = struct {
     pub fn core_missing_blocks(simulator: *const Simulator) error{OutOfMemory}!?usize {
         assert(simulator.core.count() > 0);
 
-        var blocks_missing = std.AutoHashMap(u128, u64).init(simulator.allocator);
+        var blocks_missing = std.ArrayList(struct {
+            replica: u8,
+            address: u64,
+            checksum: u128,
+        }).init(simulator.allocator);
         defer blocks_missing.deinit();
 
         // Find all blocks that any replica in the core is missing.
@@ -552,7 +556,11 @@ pub const Simulator = struct {
             const storage = &simulator.cluster.storages[replica.replica];
             var fault_iterator = replica.grid.read_global_queue.peek();
             while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
-                try blocks_missing.put(faulty_read.checksum, faulty_read.address);
+                try blocks_missing.append(.{
+                    .replica = replica.replica,
+                    .address = faulty_read.address,
+                    .checksum = faulty_read.checksum,
+                });
 
                 log.debug("{}: core_missing_blocks: " ++
                     "missing address={} checksum={} corrupt={} (remote read)", .{
@@ -565,7 +573,12 @@ pub const Simulator = struct {
 
             var repair_iterator = replica.grid.repair_queue.faulty_blocks.iterator();
             while (repair_iterator.next()) |fault| {
-                try blocks_missing.put(fault.value_ptr.checksum, fault.key_ptr.*);
+                try blocks_missing.append(.{
+                    .replica = replica.replica,
+                    .address = fault.key_ptr.*,
+                    .checksum = fault.value_ptr.checksum,
+                });
+
 
                 log.debug("{}: core_missing_blocks: " ++
                     "missing address={} checksum={} corrupt={} (repair queue)", .{
@@ -579,35 +592,38 @@ pub const Simulator = struct {
 
         // Check whether every replica in the core is missing the blocks.
         // (If any core replica has the block, then that is a bug, since it should have repaired.)
-        var blocks_missing_iterator = blocks_missing.iterator();
-        while (blocks_missing_iterator.next()) |block_missing| {
-            const block_checksum = block_missing.key_ptr.*;
-            const block_address = block_missing.value_ptr.*;
-
+        for (blocks_missing.items) |block_missing| {
             for (simulator.cluster.replicas) |replica| {
                 const storage = &simulator.cluster.storages[replica.replica];
 
+                // A replica might actually have the block that it is requesting, but not know.
+                // This can occur after state sync: if we compact and create a table, but then skip
+                // over that table via state sync, we will try to sync the table anyway.
+                if (replica.replica == block_missing.replica) continue;
+
                 if (!simulator.core.isSet(replica.replica)) continue;
                 if (replica.standby()) continue;
-                if (storage.area_faulty(.{ .grid = .{ .address = block_address } })) continue;
+                if (storage.area_faulty(.{
+                    .grid = .{ .address = block_missing.address },
+                })) continue;
 
-                const block = storage.grid_block(block_address) orelse continue;
+                const block = storage.grid_block(block_missing.address) orelse continue;
                 const block_header = schema.header_from_block(block);
-                if (block_header.checksum == block_checksum) {
+                if (block_header.checksum == block_missing.checksum) {
                     log.err("{}: core_missing_blocks: found address={} checksum={}", .{
                         replica.replica,
-                        block_address,
-                        block_checksum,
+                        block_missing.address,
+                        block_missing.checksum,
                     });
                     @panic("block found in core");
                 }
             }
         }
 
-        if (blocks_missing.count() == 0) {
+        if (blocks_missing.items.len == 0) {
             return null;
         } else {
-            return blocks_missing.count();
+            return blocks_missing.items.len;
         }
     }
 
