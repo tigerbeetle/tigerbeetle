@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.ProcessBuilder.Redirect;
+import java.math.BigInteger;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -45,13 +46,17 @@ public class IntegrationTest {
 
         accounts.add();
         accounts.setId(account1Id);
-        accounts.setUserData(100, 0);
+        accounts.setUserData128(100, 0);
+        accounts.setUserData64(101);
+        accounts.setUserData32(102);
         accounts.setLedger(720);
         accounts.setCode(1);
 
         accounts.add();
         accounts.setId(account2Id);
-        accounts.setUserData(100, 0);
+        accounts.setUserData128(200, 0);
+        accounts.setUserData64(201);
+        accounts.setUserData32(202);
         accounts.setLedger(720);
         accounts.setCode(2);
 
@@ -288,21 +293,20 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(100L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Asserting the second account for the debit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(100L, lookupAccounts.getDebitsPosted());
-
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPosted());
 
                 // Looking up and asserting the transfer.
                 var ids = new IdBatch(1);
@@ -368,20 +372,20 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(100L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Asserting the second account for the debit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(100L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPosted());
 
                 // Looking up and asserting the transfer.
                 var ids = new IdBatch(1);
@@ -397,7 +401,7 @@ public class IntegrationTest {
                 assertTrue(transfers.next());
                 assertTrue(lookupTransfers.next());
                 assertTransfers(transfers, lookupTransfers);
-                assertNotEquals(0L, lookupTransfers.getTimestamp());
+                assertNotEquals(BigInteger.ZERO, lookupTransfers.getTimestamp());
 
             } catch (Throwable any) {
                 throw any;
@@ -474,20 +478,20 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(100L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Asserting the second account for the pending debit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(100L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
 
                 // Looking up and asserting the pending transfer.
                 var ids = new IdBatch(1);
@@ -528,21 +532,19 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(100L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
-
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Asserting the pending debit was posted for the second account.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(100L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPosted());
 
                 // Looking up and asserting the post_pending transfer.
                 ids = new IdBatch(1);
@@ -603,20 +605,20 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(100L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Asserting the second account for the pending credit.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(100L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
 
                 // Looking up and asserting the pending transfer.
                 var ids = new IdBatch(1);
@@ -657,21 +659,20 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
-
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Asserting the pending debit was voided for the second account.
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 // Looking up and asserting the void_pending transfer.
                 ids = new IdBatch(1);
@@ -735,20 +736,19 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(100L, lookupAccounts.getCreditsPosted());
-                assertEquals(49L, lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(49), lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals(49L, lookupAccounts.getCreditsPosted());
-                assertEquals(100L, lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPending());
-                assertEquals(0L, lookupAccounts.getDebitsPending());
-
+                assertEquals(BigInteger.valueOf(49), lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
 
                 var lookupIds = new IdBatch(2);
                 lookupIds.add(transfer1Id);
@@ -981,15 +981,16 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * tasks_qty), lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.valueOf(100 * tasks_qty),
+                        lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * tasks_qty), lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100 * tasks_qty), lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
 
             } catch (Throwable any) {
                 throw any;
@@ -1056,15 +1057,17 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * succeededCount), lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.valueOf(100 * succeededCount),
+                        lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * succeededCount), lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100 * succeededCount),
+                        lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
 
             } catch (Throwable any) {
                 throw any;
@@ -1146,7 +1149,6 @@ public class IntegrationTest {
 
                 assertTrue(succeededCount + failedCount == tasks_qty);
 
-
             } catch (Throwable any) {
                 throw any;
             }
@@ -1155,7 +1157,6 @@ public class IntegrationTest {
             throw any;
         }
     }
-
 
     /**
      * This test asserts that submit a request after the client was closed will fail with
@@ -1195,7 +1196,6 @@ public class IntegrationTest {
             assertEquals(IllegalStateException.class, any.getClass());
         }
     }
-
 
     /**
      * This test asserts that async tasks will respect client's concurrencyMax.
@@ -1249,15 +1249,16 @@ public class IntegrationTest {
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * tasks_qty), lookupAccounts.getCreditsPosted());
-                assertEquals(0L, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.valueOf(100 * tasks_qty),
+                        lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
                 assertTrue(accounts.next());
                 assertTrue(lookupAccounts.next());
                 assertAccounts(accounts, lookupAccounts);
 
-                assertEquals((long) (100 * tasks_qty), lookupAccounts.getDebitsPosted());
-                assertEquals(0L, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.valueOf(100 * tasks_qty), lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
 
             } catch (Throwable any) {
                 throw any;
@@ -1270,7 +1271,9 @@ public class IntegrationTest {
 
     private static void assertAccounts(AccountBatch account1, AccountBatch account2) {
         assertArrayEquals(account1.getId(), account2.getId());
-        assertArrayEquals(account1.getUserData(), account2.getUserData());
+        assertArrayEquals(account1.getUserData128(), account2.getUserData128());
+        assertEquals(account1.getUserData64(), account2.getUserData64());
+        assertEquals(account1.getUserData32(), account2.getUserData32());
         assertEquals(account1.getLedger(), account2.getLedger());
         assertEquals(account1.getCode(), account2.getCode());
         assertEquals(account1.getFlags(), account2.getFlags());
@@ -1278,15 +1281,18 @@ public class IntegrationTest {
 
     private static void assertTransfers(TransferBatch transfer1, TransferBatch transfer2) {
         assertArrayEquals(transfer1.getId(), transfer2.getId());
-        assertArrayEquals(transfer1.getCreditAccountId(), transfer2.getCreditAccountId());
         assertArrayEquals(transfer1.getDebitAccountId(), transfer2.getDebitAccountId());
-        assertArrayEquals(transfer1.getUserData(), transfer2.getUserData());
+        assertArrayEquals(transfer1.getCreditAccountId(), transfer2.getCreditAccountId());
+        assertEquals(transfer1.getAmount(), transfer2.getAmount());
+        assertArrayEquals(transfer1.getPendingId(), transfer2.getPendingId());
+        assertArrayEquals(transfer1.getUserData128(), transfer2.getUserData128());
+        assertEquals(transfer1.getUserData64(), transfer2.getUserData64());
+        assertEquals(transfer1.getUserData32(), transfer2.getUserData32());
+        assertEquals(transfer1.getTimeout(), transfer2.getTimeout());
         assertEquals(transfer1.getLedger(), transfer2.getLedger());
         assertEquals(transfer1.getCode(), transfer2.getCode());
         assertEquals(transfer1.getFlags(), transfer2.getFlags());
-        assertEquals(transfer1.getAmount(), transfer2.getAmount());
-        assertEquals(transfer1.getTimeout(), transfer2.getTimeout());
-        assertArrayEquals(transfer1.getPendingId(), transfer2.getPendingId());
+
     }
 
     private static class TransferTask extends Thread {
@@ -1361,7 +1367,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder().command(new String[] {exe, "start",
-                    "--addresses=" + TB_PORT, TB_FILE, "--cache-grid=128MB"})
+                    "--addresses=" + TB_PORT, TB_FILE, "--cache-grid=256MB"})
                     .redirectError(Redirect.PIPE).start();
 
             if (process.waitFor(100, TimeUnit.MILLISECONDS))

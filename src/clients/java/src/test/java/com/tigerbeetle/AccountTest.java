@@ -2,6 +2,9 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+
+import java.math.BigInteger;
+
 import org.junit.Test;
 
 public class AccountTest {
@@ -13,15 +16,17 @@ public class AccountTest {
 
         assertEquals(0L, accounts.getId(UInt128.LeastSignificant));
         assertEquals(0L, accounts.getId(UInt128.MostSignificant));
-        assertEquals(0L, accounts.getUserData(UInt128.LeastSignificant));
-        assertEquals(0L, accounts.getUserData(UInt128.MostSignificant));
+        assertEquals(BigInteger.ZERO, accounts.getDebitsPosted());
+        assertEquals(BigInteger.ZERO, accounts.getDebitsPending());
+        assertEquals(BigInteger.ZERO, accounts.getCreditsPosted());
+        assertEquals(BigInteger.ZERO, accounts.getCreditsPending());
+        assertEquals(0L, accounts.getUserData128(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getUserData128(UInt128.MostSignificant));
+        assertEquals(0L, accounts.getUserData64());
+        assertEquals(0, accounts.getUserData32());
         assertEquals(0, accounts.getLedger());
         assertEquals(AccountFlags.NONE, accounts.getFlags());
-        assertEquals((long) 0, accounts.getDebitsPosted());
-        assertEquals((long) 0, accounts.getDebitsPending());
-        assertEquals((long) 0, accounts.getCreditsPosted());
-        assertEquals((long) 0, accounts.getCreditsPending());
-        assertEquals((long) 0, accounts.getTimestamp());
+        assertEquals(0L, accounts.getTimestamp());
     }
 
     @Test
@@ -75,54 +80,149 @@ public class AccountTest {
     }
 
     @Test
-    public void testUserDataLong() {
-        var accounts = new AccountBatch(2);
+    public void testCreditsPending() {
+        var accounts = new AccountBatch(1);
         accounts.add();
 
-        accounts.setUserData(100);
-        assertEquals(100L, accounts.getUserData(UInt128.LeastSignificant));
-        assertEquals(0L, accounts.getUserData(UInt128.MostSignificant));
+        final var value = new BigInteger("123456789012345678901234567890");
+        accounts.setCreditsPending(value);
+        assertEquals(value, accounts.getCreditsPending());
+    }
+
+
+    @Test
+    public void testCreditsPendingLong() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setCreditsPending(999);
+        assertEquals(BigInteger.valueOf(999), accounts.getCreditsPending());
     }
 
     @Test
-    public void testUserData() {
-        var accounts = new AccountBatch(2);
+    public void testCreditsPosted() {
+        var accounts = new AccountBatch(1);
         accounts.add();
 
-        accounts.setUserData(100, 200);
-        assertEquals(100L, accounts.getUserData(UInt128.LeastSignificant));
-        assertEquals(200L, accounts.getUserData(UInt128.MostSignificant));
+        final var value = new BigInteger("123456789012345678901234567890");
+        accounts.setCreditsPosted(value);
+        assertEquals(value, accounts.getCreditsPosted());
     }
 
     @Test
-    public void testUserDataAsBytes() {
+    public void testCreditsPostedLong() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setCreditsPosted(999);
+        assertEquals(BigInteger.valueOf(999), accounts.getCreditsPosted());
+    }
+
+    @Test
+    public void testDebitsPosted() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        final var value = new BigInteger("123456789012345678901234567890");
+        accounts.setDebitsPosted(value);
+        assertEquals(value, accounts.getDebitsPosted());
+    }
+
+    @Test
+    public void testDebitsPostedLong() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setDebitsPosted(999);
+        assertEquals(BigInteger.valueOf(999), accounts.getDebitsPosted());
+    }
+
+    @Test
+    public void testDebitsPending() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        final var value = new BigInteger("123456789012345678901234567890");
+        accounts.setDebitsPending(value);
+        assertEquals(value, accounts.getDebitsPending());
+    }
+
+    @Test
+    public void testDebitsPendingLong() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setDebitsPending(999);
+        assertEquals(BigInteger.valueOf(999), accounts.getDebitsPending());
+    }
+
+    @Test
+    public void testUserData128Long() {
+        var accounts = new AccountBatch(2);
+        accounts.add();
+
+        accounts.setUserData128(100);
+        assertEquals(100L, accounts.getUserData128(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getUserData128(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testUserData128() {
+        var accounts = new AccountBatch(2);
+        accounts.add();
+
+        accounts.setUserData128(100, 200);
+        assertEquals(100L, accounts.getUserData128(UInt128.LeastSignificant));
+        assertEquals(200L, accounts.getUserData128(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testUserData128AsBytes() {
         var accounts = new AccountBatch(1);
         accounts.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
-        accounts.setUserData(id);
-        assertArrayEquals(id, accounts.getUserData());
+        accounts.setUserData128(id);
+        assertArrayEquals(id, accounts.getUserData128());
     }
 
     @Test
-    public void testUserDataNull() {
+    public void testUserData128Null() {
         var accounts = new AccountBatch(1);
         accounts.add();
 
         byte[] userData = null;
-        accounts.setUserData(userData);
-        assertEquals(0L, accounts.getUserData(UInt128.LeastSignificant));
-        assertEquals(0L, accounts.getUserData(UInt128.MostSignificant));
+        accounts.setUserData128(userData);
+        assertEquals(0L, accounts.getUserData128(UInt128.LeastSignificant));
+        assertEquals(0L, accounts.getUserData128(UInt128.MostSignificant));
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testUserDataInvalid() {
+    public void testUserData128Invalid() {
         var accounts = new AccountBatch(1);
         accounts.add();
 
         var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
-        accounts.setUserData(id);
+        accounts.setUserData128(id);
         assert false;
+    }
+
+    @Test
+    public void testUserData64() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setUserData64(1000L);
+        assertEquals(1000L, accounts.getUserData64());
+    }
+
+    @Test
+    public void testUserData32() {
+        var accounts = new AccountBatch(1);
+        accounts.add();
+
+        accounts.setUserData32(100);
+        assertEquals(100, accounts.getUserData32());
     }
 
     @Test
@@ -173,31 +273,8 @@ public class AccountTest {
         var accounts = new AccountBatch(1);
         accounts.add();
 
-        var reserved = new byte[48];
-        reserved[0] = 100;
-        reserved[47] = 101;
-        accounts.setReserved(reserved);
-        assertArrayEquals(reserved, accounts.getReserved());
-    }
-
-    @Test
-    public void testReservedNull() {
-        var accounts = new AccountBatch(1);
-        accounts.add();
-
-        byte[] reserved = null;
-        accounts.setReserved(reserved);
-        assertArrayEquals(new byte[48], accounts.getReserved());
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testReservedInvalid() {
-        var accounts = new AccountBatch(1);
-        accounts.add();
-
-        var reserved = new byte[49];
-        accounts.setReserved(reserved);
-        assert false;
+        accounts.setReserved(0);
+        assertEquals(0, accounts.getReserved());
     }
 
     @Test
@@ -233,42 +310,6 @@ public class AccountTest {
         accounts.add();
 
         accounts.setFlags(Integer.MAX_VALUE);
-    }
-
-    @Test
-    public void testCreditsPending() {
-        var accounts = new AccountBatch(1);
-        accounts.add();
-
-        accounts.setCreditsPending(999);
-        assertEquals((long) 999, accounts.getCreditsPending());
-    }
-
-    @Test
-    public void testCreditsPosted() {
-        var accounts = new AccountBatch(1);
-        accounts.add();
-
-        accounts.setCreditsPosted(999);
-        assertEquals((long) 999, accounts.getCreditsPosted());
-    }
-
-    @Test
-    public void testDebitsPosted() {
-        var accounts = new AccountBatch(1);
-        accounts.add();
-
-        accounts.setDebitsPosted(999);
-        assertEquals((long) 999, accounts.getDebitsPosted());
-    }
-
-    @Test
-    public void testDebitsPending() {
-        var accounts = new AccountBatch(1);
-        accounts.add();
-
-        accounts.setDebitsPending(999);
-        assertEquals((long) 999, accounts.getDebitsPending());
     }
 
     @Test

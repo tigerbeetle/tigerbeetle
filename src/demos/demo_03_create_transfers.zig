@@ -12,27 +12,29 @@ pub fn main() !void {
             .id = 1,
             .debit_account_id = 2,
             .credit_account_id = 1,
-            .user_data = 0,
-            .reserved = 0,
+            .amount = 10000, // Let's start with some liquidity in account 1.
             .pending_id = 0,
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
             .timeout = 0,
             .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
             .code = 1,
             .flags = .{},
-            .amount = 10000, // Let's start with some liquidity in account 1.
         },
         Transfer{
             .id = 2,
             .debit_account_id = 1,
             .credit_account_id = 2,
-            .user_data = 0,
-            .reserved = 0,
+            .amount = 1000,
             .pending_id = 0,
+            .user_data_128 = 0,
+            .user_data_64 = 0,
+            .user_data_32 = 0,
             .timeout = 0,
             .ledger = 710, // Let's use the ISO-4217 Code Number for ZAR
             .code = 1,
             .flags = .{},
-            .amount = 1000,
         },
     };
 

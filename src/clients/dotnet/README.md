@@ -12,7 +12,9 @@ The TigerBeetle client for .NET.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* .NET >= 2.1
+* Any runtime compatible with [.NET Standard 2.1](https://learn.microsoft.com/en-us/dotnet/standard/net-standard?tabs=net-standard-2-1#select-net-standard-version).
+* Optimized for .NET >= 7.0.
+
 And if you do not already have NuGet.org as a package
 source, make sure to add it:
 
@@ -39,7 +41,6 @@ using System;
 using TigerBeetle;
 
 // Validate import works.
-var id = new TigerBeetle.UInt128(1);
 Console.WriteLine("SUCCESS");
 ```
 
@@ -117,7 +118,9 @@ var accounts = new[] {
   new Account
   {
     Id = 137,
-    UserData = Guid.NewGuid(),
+    UserData128 = Guid.NewGuid().ToUInt128(),
+    UserData64 = 1000,
+    UserData32 = 100,
     Ledger = 1,
     Code = 718,
     Flags = AccountFlags.None,
@@ -127,9 +130,12 @@ var accounts = new[] {
 var createAccountsError = client.CreateAccounts(accounts);
 ```
 
-All TigerBeetle's IDs are 128-bit integers, and the .NET client
-accepts a wide range of values: `int`, `uint`, `long`, `ulong`,
-`Guid`, `byte[]` and `TigerBeetle.UInt128`.
+The `UInt128` fields like `ID`, `UserData128`, `Amount` and
+account balances have a few extension methods to make it easier
+to convert 128-bit little-endian unsigned integers between
+`BigInteger`, `byte[]`, and `Guid`.
+
+See the class [UInt128Extensions](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/dotnet/TigerBeetle/UInt128.cs) for more details.
 
 ### Account Flags
 
@@ -192,7 +198,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```cs
-accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 137, 138 });
+accounts = client.LookupAccounts(new UInt128[] { 137, 138 });
 ```
 
 ## Create Transfers
@@ -209,12 +215,14 @@ var transfers = new[] {
     Id = 1,
     DebitAccountId = 1,
     CreditAccountId = 2,
+    Amount = 10,
+    UserData128 = 2000,
+    UserData64 = 200,
+    UserData32 = 2,
     Timeout = 0,
-    UserData = 2,
     Ledger = 1,
     Code = 1,
-    Flags = 0,
-    Amount = 10,
+    Flags = TransferFlags.None,
   }
 };
 
@@ -365,7 +373,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```cs
-transfers = client.LookupTransfers(new TigerBeetle.UInt128[] {1, 2});
+transfers = client.LookupTransfers(new UInt128[] {1, 2});
 ```
 
 ## Linked Events

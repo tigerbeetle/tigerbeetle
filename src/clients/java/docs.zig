@@ -246,7 +246,9 @@ pub const JavaDocs = Docs{
     \\AccountBatch accounts = new AccountBatch(1);
     \\accounts.add();
     \\accounts.setId(137);
-    \\accounts.setUserData(UInt128.asBytes(new java.math.BigInteger("92233720368547758070")));
+    \\accounts.setUserData128(UInt128.asBytes(java.util.UUID.randomUUID()));
+    \\accounts.setUserData64(1234567890);
+    \\accounts.setUserData32(42);
     \\accounts.setLedger(1);
     \\accounts.setCode(718);
     \\accounts.setFlags(0);
@@ -255,14 +257,17 @@ pub const JavaDocs = Docs{
     ,
 
     .create_accounts_documentation =
-    \\The 128-bit fields like `id` and `user_data` have a few
+    \\The 128-bit fields like `id` and `user_data_128` have a few
     \\overrides to make it easier to integrate. You can either
     \\pass in a long, a pair of longs (least and most
     \\significant bits), or a `byte[]`.
     \\
     \\There is also a `com.tigerbeetle.UInt128` helper with static
     \\methods for converting 128-bit little-endian unsigned integers
-    \\between instances of `long`, `UUID`, `BigInteger` and `byte[]`.
+    \\between instances of `long`, `java.util.UUID`, `java.math.BigInteger` and `byte[]`.
+    \\
+    \\The fields for transfer amounts and account balances are also 128-bit,
+    \\but they are always represented as a `java.math.BigInteger`.
     ,
 
     .account_flags_documentation =
@@ -336,12 +341,14 @@ pub const JavaDocs = Docs{
     \\transfers.setId(1);
     \\transfers.setDebitAccountId(1);
     \\transfers.setCreditAccountId(2);
-    \\transfers.setUserData(2);
+    \\transfers.setAmount(10);
+    \\transfers.setUserData128(UInt128.asBytes(java.util.UUID.randomUUID()));
+    \\transfers.setUserData64(1234567890);
+    \\transfers.setUserData32(42);
     \\transfers.setTimeout(0);
     \\transfers.setLedger(1);
     \\transfers.setCode(1);
     \\transfers.setFlags(0);
-    \\transfers.setAmount(10);
     \\
     \\CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
     ,
@@ -513,6 +520,8 @@ pub const JavaDocs = Docs{
     .developer_setup_pwsh_commands =
     \\cd src/clients/java
     \\.\scripts\install.bat
+    // Note: -Xms and -Xmx define the initial and max memory a JVM heap can have.
+    // It's needed as a workaround for Windows workers.
     \\if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
     ,
 

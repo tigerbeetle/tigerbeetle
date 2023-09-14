@@ -41,6 +41,7 @@ Now, create `main.go` and copy this into it:
 package main
 
 import _ "github.com/tigerbeetle/tigerbeetle-go"
+import _ "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 import "fmt"
 
 func main() {
@@ -68,23 +69,6 @@ features of TigerBeetle.
 them, then post the transfer.
 * [Many Two-Phase Transfers](/src/clients/go/samples/two-phase-many/): Create two accounts and start a number of pending transfer
 between them, posting and voiding alternating transfers.
-### Sidenote: `uint128`
-
-Throughout this README there will be a reference to a
-helper, `uint128`, that converts a string to TigerBeetle's
-representation of a 128-bit integer. That helper can be
-defined like so:
-
-```go
-func uint128(value string) tb_types.Uint128 {
-	x, err := tb_types.HexStringToUint128(value)
-	if err != nil {
-		panic(err)
-	}
-	return x
-}
-```
-
 ## Creating a Client
 
 A client is created with a cluster ID and replica
@@ -107,7 +91,7 @@ tbAddress := os.Getenv("TB_ADDRESS")
 if len(tbAddress) == 0 {
   tbAddress = "3000"
 }
-client, err := tb.NewClient(0, []string{tbAddress}, 32)
+client, err := NewClient(0, []string{tbAddress}, 32)
 if err != nil {
 	log.Printf("Error creating client: %s", err)
 	return
@@ -130,19 +114,21 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/accounts).
 
 ```go
-accountsRes, err := client.CreateAccounts([]tb_types.Account{
+accountsRes, err := client.CreateAccounts([]Account{
 	{
-		ID:     	uint128("137"),
-		UserData:	tb_types.Uint128{},
-		Reserved:   	[48]uint8{},
-		Ledger:		1,
-		Code:   	718,
-		Flags:   	0,
-		DebitsPending: 	0,
-		DebitsPosted: 	0,
-		CreditsPending:	0,
-		CreditsPosted: 	0,
-		Timestamp: 	0,
+		ID:             ToUint128(137),
+		DebitsPending:  ToUint128(0),
+		DebitsPosted:   ToUint128(0),
+		CreditsPending: ToUint128(0),
+		CreditsPosted:  ToUint128(0),
+		UserData128:    ToUint128(0),
+		UserData64:     0,
+		UserData32:     0,
+		Reserved:       0,
+		Ledger:         1,
+		Code:           718,
+		Flags:          0,
+		Timestamp:      0,
 	},
 })
 if err != nil {
@@ -156,7 +142,12 @@ for _, err := range accountsRes {
 }
 ```
 
-The `tb_types` package can be imported from `"github.com/tigerbeetle/tigerbeetle-go/pkg/types"`.
+The `Uint128` fields like `ID`, `UserData128`, `Amount` and
+account balances have a few helper functions to make it easier
+to convert 128-bit little-endian unsigned integers between
+`string`, `math/big.Int`, and `[]byte`.
+
+See the type [Uint128](https://pkg.go.dev/github.com/tigerbeetle/tigerbeetle-go/pkg/types#Uint128) for more details.
 
 ### Account Flags
 
@@ -164,23 +155,23 @@ The account flags value is a bitfield. See details for
 these flags in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/accounts#flags).
 
-To toggle behavior for an account, use the `tb_types.AccountFlags` struct
+To toggle behavior for an account, use the `types.AccountFlags` struct
 to combine enum values and generate a `uint16`. Here are a
 few examples:
 
-* `tb_types.AccountFlags{Linked: true}.ToUint16()`
-* `tb_types.AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
-* `tb_types.AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
+* `AccountFlags{Linked: true}.ToUint16()`
+* `AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
+* `AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
 
 For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```go
-account0 := tb_types.Account{ /* ... account values ... */ }
-account1 := tb_types.Account{ /* ... account values ... */ }
-account0.Flags = tb_types.AccountFlags{Linked: true}.ToUint16()
+account0 := Account{ /* ... account values ... */ }
+account1 := Account{ /* ... account values ... */ }
+account0.Flags = AccountFlags{Linked: true}.ToUint16()
 
-accountErrors, err := client.CreateAccounts([]tb_types.Account{account0, account1})
+accountErrors, err := client.CreateAccounts([]Account{account0, account1})
 if err != nil {
 	log.Printf("Error creating accounts: %s", err)
 	return
@@ -200,11 +191,11 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
 
 ```go
-account2 := tb_types.Account{ /* ... account values ... */ }
-account3 := tb_types.Account{ /* ... account values ... */ }
-account4 := tb_types.Account{ /* ... account values ... */ }
+account2 := Account{ /* ... account values ... */ }
+account3 := Account{ /* ... account values ... */ }
+account4 := Account{ /* ... account values ... */ }
 
-accountErrors, err = client.CreateAccounts([]tb_types.Account{account2, account3, account4})
+accountErrors, err = client.CreateAccounts([]Account{account2, account3, account4})
 if err != nil {
 	log.Printf("Error creating accounts: %s", err)
 	return
@@ -232,7 +223,7 @@ request. You can refer to the ID field in the response to
 distinguish accounts.
 
 ```go
-accounts, err := client.LookupAccounts([]tb_types.Uint128{uint128("137"), uint128("138")})
+accounts, err := client.LookupAccounts([]Uint128{ToUint128(137), ToUint128(138)})
 if err != nil {
 	log.Printf("Could not fetch accounts: %s", err)
 	return
@@ -248,22 +239,23 @@ See details for transfer fields in the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfers).
 
 ```go
-transfer := tb_types.Transfer{
-	ID:			uint128("1"),
-	PendingID:		tb_types.Uint128{},
-	DebitAccountID:		uint128("1"),
-	CreditAccountID:	uint128("2"),
-	UserData:		uint128("2"),
-	Reserved:		tb_types.Uint128{},
-	Timeout:		0,
-	Ledger:			1,
-	Code:			1,
-	Flags:			0,
-	Amount:			10,
-	Timestamp:		0,
+transfer := Transfer{
+	ID:              ToUint128(1),
+	DebitAccountID:  ToUint128(1),
+	CreditAccountID: ToUint128(2),
+	Amount:          ToUint128(10),
+	PendingID:       ToUint128(0),
+	UserData128:     ToUint128(2),
+	UserData64:      0,
+	UserData32:      0,
+	Timeout:         0,
+	Ledger:          1,
+	Code:            1,
+	Flags:           0,
+	Timestamp:       0,
 }
 
-transfersRes, err := client.CreateTransfers([]tb_types.Transfer{transfer})
+transfersRes, err := client.CreateTransfers([]Transfer{transfer})
 if err != nil {
 	log.Printf("Error creating transfer batch: %s", err)
 	return
@@ -297,7 +289,7 @@ one at a time like so:
 
 ```go
 for i := 0; i < len(transfers); i++ {
-	transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfers[i]})
+	transfersRes, err = client.CreateTransfers([]Transfer{transfers[i]})
 	// error handling omitted
 }
 ```
@@ -334,22 +326,22 @@ The transfer `flags` value is a bitfield. See details for these flags in
 the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfers#flags).
 
-To toggle behavior for an account, use the `tb_types.TransferFlags` struct
+To toggle behavior for an account, use the `types.TransferFlags` struct
 to combine enum values and generate a `uint16`. Here are a
 few examples:
 
-* `tb_types.TransferFlags{Linked: true}.ToUint16()`
-* `tb_types.TransferFlags{Pending: true}.ToUint16()`
-* `tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16()`
-* `tb_types.TransferFlags{VoidPendingTransfer: true}.ToUint16()`
+* `TransferFlags{Linked: true}.ToUint16()`
+* `TransferFlags{Pending: true}.ToUint16()`
+* `TransferFlags{PostPendingTransfer: true}.ToUint16()`
+* `TransferFlags{VoidPendingTransfer: true}.ToUint16()`
 
 For example, to link `transfer0` and `transfer1`:
 
 ```go
-transfer0 := tb_types.Transfer{ /* ... account values ... */ }
-transfer1 := tb_types.Transfer{ /* ... account values ... */ }
-transfer0.Flags = tb_types.TransferFlags{Linked: true}.ToUint16()
-transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer0, transfer1})
+transfer0 := Transfer{ /* ... account values ... */ }
+transfer1 := Transfer{ /* ... account values ... */ }
+transfer0.Flags = TransferFlags{Linked: true}.ToUint16()
+transfersRes, err = client.CreateTransfers([]Transfer{transfer0, transfer1})
 // error handling omitted
 ```
 
@@ -370,13 +362,13 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```go
-transfer = tb_types.Transfer{
-	ID:		uint128("2"),
-	PendingID:	uint128("1"),
-	Flags:		tb_types.TransferFlags{PostPendingTransfer: true}.ToUint16(),
-	Timestamp:	0,
+transfer = Transfer{
+	ID:         ToUint128(2),
+	PendingID:  ToUint128(1),
+	Flags:      TransferFlags{PostPendingTransfer: true}.ToUint16(),
+	Timestamp:  0,
 }
-transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+transfersRes, err = client.CreateTransfers([]Transfer{transfer})
 // error handling omitted
 ```
 
@@ -389,13 +381,13 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```go
-transfer = tb_types.Transfer{
-	ID:		uint128("2"),
-	PendingID:	uint128("1"),
-	Flags:		tb_types.TransferFlags{VoidPendingTransfer: true}.ToUint16(),
-	Timestamp:	0,
+transfer = Transfer{
+	ID:         ToUint128(2),
+	PendingID:  ToUint128(1),
+	Flags:      TransferFlags{VoidPendingTransfer: true}.ToUint16(),
+	Timestamp:  0,
 }
-transfersRes, err = client.CreateTransfers([]tb_types.Transfer{transfer})
+transfersRes, err = client.CreateTransfers([]Transfer{transfer})
 // error handling omitted
 ```
 
@@ -414,7 +406,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```go
-transfers, err := client.LookupTransfers([]tb_types.Uint128{uint128("1"), uint128("2")})
+transfers, err := client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
 if err != nil {
 	log.Printf("Could not fetch transfers: %s", err)
 	return
@@ -441,29 +433,29 @@ break the chain will have a unique error result. Other events in the
 chain will have their error result set to `linked_event_failed`.
 
 ```go
-batch := []tb_types.Transfer{}
-linkedFlag := tb_types.TransferFlags{Linked: true}.ToUint16()
+batch := []Transfer{}
+linkedFlag := TransferFlags{Linked: true}.ToUint16()
 
 // An individual transfer (successful):
-batch = append(batch, tb_types.Transfer{ID: uint128("1"), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(1), /* ... rest of transfer ... */ })
 
 // A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
-batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
-batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
-batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... , */ Flags: linkedFlag }) // Fail with exists
-batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... , */ }) // Fail without committing
+batch = append(batch, Transfer{ID: ToUint128(2), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
+batch = append(batch, Transfer{ID: ToUint128(3), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
+batch = append(batch, Transfer{ID: ToUint128(2), /* ... , */ Flags: linkedFlag }) // Fail with exists
+batch = append(batch, Transfer{ID: ToUint128(4), /* ... , */ }) // Fail without committing
 
 // An individual transfer (successful):
 // This should not see any effect from the failed chain above.
-batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(2), /* ... rest of transfer ... */ })
 
 // A chain of 2 transfers (the first transfer fails the chain):
-batch = append(batch, tb_types.Transfer{ID: uint128("2"), /* ... rest of transfer ... */ Flags: linkedFlag })
-batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(2), /* ... rest of transfer ... */ Flags: linkedFlag })
+batch = append(batch, Transfer{ID: ToUint128(3), /* ... rest of transfer ... */ })
 
 // A chain of 2 transfers (successful):
-batch = append(batch, tb_types.Transfer{ID: uint128("3"), /* ... rest of transfer ... */ Flags: linkedFlag })
-batch = append(batch, tb_types.Transfer{ID: uint128("4"), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(3), /* ... rest of transfer ... */ Flags: linkedFlag })
+batch = append(batch, Transfer{ID: ToUint128(4), /* ... rest of transfer ... */ })
 
 transfersRes, err = client.CreateTransfers(batch)
 ```
