@@ -1048,6 +1048,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn next_batch_of_block_requests(grid: *Grid, requests: []vsr.BlockRequest) usize {
+            assert(grid.canceling == null);
             assert(requests.len > 0);
 
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can

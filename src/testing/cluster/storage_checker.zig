@@ -210,6 +210,8 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                 assert(block_header.op == block_address);
 
                 checksum ^= vsr.checksum(block[0..block_header.size]);
+                // Extra guard against identical blocks:
+                checksum ^= vsr.checksum(std.mem.asBytes(&block_address));
             }
             assert(blocks_missing == 0);
 
