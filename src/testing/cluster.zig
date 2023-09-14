@@ -651,7 +651,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
                     .grid_blocks_global = replica.grid.read_global_queue.count,
-                    .grid_blocks_repair = replica.grid.repair_queue.faulty_blocks.count(),
+                    .grid_blocks_repair = replica.grid.blocks_missing.faulty_blocks.count(),
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {

@@ -13,7 +13,7 @@ const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
-const GridRepairQueue = @import("./grid_repair_queue.zig").GridRepairQueue;
+const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -41,8 +41,8 @@ pub fn GridType(comptime Storage: type) type {
         pub const read_iops_max = constants.grid_iops_read_max;
         pub const write_iops_max = constants.grid_iops_write_max;
 
-        pub const RepairTable = GridRepairQueue.RepairTable;
-        pub const RepairTableResult = GridRepairQueue.RepairTableResult;
+        pub const RepairTable = GridBlocksMissing.RepairTable;
+        pub const RepairTableResult = GridBlocksMissing.RepairTableResult;
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = free_set.Reservation;
@@ -162,7 +162,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
-        repair_queue: GridRepairQueue,
+        blocks_missing: GridBlocksMissing,
 
         cache: Cache,
         /// Each entry in cache has a corresponding block.
@@ -199,14 +199,14 @@ pub fn GridType(comptime Storage: type) type {
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
-            repair_queue_blocks_max: usize,
-            repair_queue_tables_max: usize,
+            missing_blocks_max: usize,
+            missing_tables_max: usize,
         }) !Grid {
-            var repair_queue = try GridRepairQueue.init(allocator, .{
-                .blocks_max = options.repair_queue_blocks_max,
-                .tables_max = options.repair_queue_tables_max,
+            var blocks_missing = try GridBlocksMissing.init(allocator, .{
+                .blocks_max = options.missing_blocks_max,
+                .tables_max = options.missing_tables_max,
             });
-            errdefer repair_queue.deinit(allocator);
+            errdefer blocks_missing.deinit(allocator);
 
             const cache_blocks = try allocator.alloc(BlockPtr, options.cache_blocks_count);
             errdefer allocator.free(cache_blocks);
@@ -230,7 +230,7 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
-                .repair_queue = repair_queue,
+                .blocks_missing = blocks_missing,
                 .cache = cache,
                 .cache_blocks = cache_blocks,
                 .read_iop_blocks = read_iop_blocks,
@@ -247,7 +247,7 @@ pub fn GridType(comptime Storage: type) type {
             allocator.free(grid.cache_blocks);
 
             grid.cache.deinit(allocator);
-            grid.repair_queue.deinit(allocator);
+            grid.blocks_missing.deinit(allocator);
 
             grid.* = undefined;
         }
@@ -261,7 +261,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.read_global_queue.empty());
             grid.assert_only_repairing();
 
-            grid.repair_queue.checkpoint_commence(&grid.superblock.free_set);
+            grid.blocks_missing.checkpoint_commence(&grid.superblock.free_set);
 
             grid.checkpointing = .{ .callback = callback };
             grid.on_next_tick(checkpoint_tick_callback, &grid.checkpointing_tick_context);
@@ -280,7 +280,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.assert_only_repairing();
 
             // We are still repairing some blocks that were released at the checkpoint.
-            if (!grid.repair_queue.checkpoint_complete()) {
+            if (!grid.blocks_missing.checkpoint_complete()) {
                 assert(grid.write_iops.executing() > 0);
                 return;
             }
@@ -310,7 +310,7 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.canceling = .{ .callback = callback };
 
-            grid.repair_queue.cancel();
+            grid.blocks_missing.cancel();
             grid.read_queue.reset();
             grid.read_pending_queue.reset();
             grid.read_global_queue.reset();
@@ -513,7 +513,7 @@ pub fn GridType(comptime Storage: type) type {
         pub fn repair_block_waiting(grid: *Grid, address: u64, checksum: u128) bool {
             assert(grid.superblock.opened);
             assert(grid.canceling == null);
-            return grid.repair_queue.repair_waiting(address, checksum);
+            return grid.blocks_missing.repair_waiting(address, checksum);
         }
 
         /// Write a block that should already exist but (maybe) doesn't because of:
@@ -532,10 +532,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             maybe(grid.checkpointing == null);
             assert(grid.writing(block_header.op, block.*) == .not_writing);
-            assert(grid.repair_queue.repair_waiting(block_header.op, block_header.checksum));
+            assert(grid.blocks_missing.repair_waiting(block_header.op, block_header.checksum));
             assert(!grid.superblock.free_set.is_free(block_header.op));
 
-            grid.repair_queue.repair_commence(block_header.op, block_header.checksum);
+            grid.blocks_missing.repair_commence(block_header.op, block_header.checksum);
             grid.write_block(callback, write, block, .repair);
         }
 
@@ -552,7 +552,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.canceling == null);
             assert(grid.checkpointing == null);
             assert(grid.writing(block_header.op, block.*) == .not_writing);
-            assert(!grid.repair_queue.repair_waiting(block_header.op, block_header.checksum));
+            assert(!grid.blocks_missing.repair_waiting(block_header.op, block_header.checksum));
             assert(!grid.superblock.free_set.is_free(block_header.op));
             grid.assert_not_reading(block_header.op, block.*);
 
@@ -678,7 +678,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Precede the write's callback, since the callback takes back ownership of the block.
-            if (completed_write.repair) grid.repair_queue.repair_complete(cache_block.*);
+            if (completed_write.repair) grid.blocks_missing.repair_complete(cache_block.*);
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
@@ -1038,8 +1038,8 @@ pub fn GridType(comptime Storage: type) type {
                 read_remote_head.resolves = read_remote_resolves;
                 grid.read_global_queue.push(read_remote_head);
 
-                if (grid.repair_queue.enqueue_blocks_available() > 0) {
-                    grid.repair_queue.enqueue_block(
+                if (grid.blocks_missing.enqueue_blocks_available() > 0) {
+                    grid.blocks_missing.enqueue_block(
                         read_remote_head.address,
                         read_remote_head.checksum,
                     );
@@ -1054,8 +1054,9 @@ pub fn GridType(comptime Storage: type) type {
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
             // continue.
             const request_faults_count = @min(grid.read_global_queue.count, requests.len);
-            // (Note that many – but not all – of these blocks are also in the GridRepairQueue.
-            // The `read_global_queue` is a FIFO, whereas the GridRepairQueue has a fixed capacity.)
+            // (Note that many – but not all – of these blocks are also in the GridBlocksMissing.
+            // The `read_global_queue` is a FIFO, whereas the GridBlocksMissing has a fixed
+            // capacity.)
             for (requests[0..request_faults_count]) |*request| {
                 // Pop-push the FIFO to cycle the faulty queue so that successive requests
                 // rotate through all stalled blocks (approximately) evenly.
@@ -1071,7 +1072,7 @@ pub fn GridType(comptime Storage: type) type {
             if (request_faults_count == requests.len) {
                 return request_faults_count;
             } else {
-                const request_repairs_count = grid.repair_queue.next_batch_of_block_requests(
+                const request_repairs_count = grid.blocks_missing.next_batch_of_block_requests(
                     requests[request_faults_count..],
                 );
                 return request_faults_count + request_repairs_count;

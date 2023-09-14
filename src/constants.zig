@@ -284,23 +284,24 @@ pub const grid_repair_writes_max = grid_iops_write_max;
 /// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
 pub const grid_cache_size_default = config.process.grid_cache_size_default;
 
-/// The maximum capacity (in blocks) of the GridRepairQueue.
+/// The maximum capacity (in *single* blocks – not counting syncing tables) of the
+/// GridBlocksMissing.
 ///
 /// As this increases:
-/// - GridRepairQueue allocates more memory.
-/// - The "period" of GridRepairQueue's requests increases.
+/// - GridBlocksMissing allocates more memory.
+/// - The "period" of GridBlocksMissing's requests increases.
 ///   This makes the repair protocol more tolerant of network latency.
 /// - (Repair protocol is used to repair manifest log blocks immediately after state sync).
-pub const grid_repair_blocks_max = config.process.grid_repair_blocks_max;
+pub const grid_missing_blocks_max = config.process.grid_missing_blocks_max;
 
 /// The number of tables that can be synced simultaneously.
 /// "Table" in this context is the number of table index blocks to hold in memory while syncing
 /// their content.
 ///
 /// As this increases:
-/// - GridRepairQueue allocates more memory (~2 blocks for each).
+/// - GridBlocksMissing allocates more memory (~2 blocks for each).
 /// - Syncing is more efficient, as more blocks can be fetched concurrently.
-pub const grid_repair_tables_max = config.process.grid_repair_tables_max;
+pub const grid_missing_tables_max = config.process.grid_missing_tables_max;
 
 comptime {
     assert(grid_repair_request_max > 0);
@@ -310,10 +311,10 @@ comptime {
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
     assert(grid_repair_writes_max <=
-        grid_repair_blocks_max + grid_repair_tables_max * lsm_table_content_blocks_max);
+        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_content_blocks_max);
 
-    assert(grid_repair_blocks_max > 0);
-    assert(grid_repair_tables_max > 0);
+    assert(grid_missing_blocks_max > 0);
+    assert(grid_missing_tables_max > 0);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.

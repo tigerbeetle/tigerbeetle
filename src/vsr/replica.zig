@@ -222,7 +222,7 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
-        grid_repair_tables: IOPS(RepairTable, constants.grid_repair_tables_max) = .{},
+        grid_repair_tables: IOPS(RepairTable, constants.grid_missing_tables_max) = .{},
         grid_repair_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]Grid.BlockPtr,
 
@@ -679,7 +679,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.available() == constants.grid_repair_tables_max);
+            assert(self.grid_repair_tables.executing() == 0);
 
             log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
                 self.replica,
@@ -816,8 +816,8 @@ pub fn ReplicaType(
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .cache_blocks_count = options.grid_cache_blocks_count,
-                .repair_queue_blocks_max = constants.grid_repair_blocks_max,
-                .repair_queue_tables_max = constants.grid_repair_tables_max,
+                .missing_blocks_max = constants.grid_missing_blocks_max,
+                .missing_tables_max = constants.grid_missing_tables_max,
             });
             errdefer self.grid.deinit(allocator);
 
@@ -3509,7 +3509,6 @@ pub fn ReplicaType(
             const vsr_state_sync_op: struct { min: u64, max: u64 } = sync: {
                 if (self.sync_content_done()) {
                     assert(self.sync_tables == null);
-                    assert(self.grid_repair_tables.available() == constants.grid_repair_tables_max);
                     assert(self.grid_repair_tables.executing() == 0);
 
                     break :sync .{ .min = 0, .max = 0 };
@@ -7522,7 +7521,7 @@ pub fn ReplicaType(
             assert(self.status != .recovering);
             assert(self.syncing != .idle);
             assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.available() == constants.grid_repair_tables_max);
+            assert(self.grid_repair_tables.executing() == 0);
 
             log.debug("{}: sync_start_from_sync " ++
                 "(checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -7625,7 +7624,7 @@ pub fn ReplicaType(
                     self.grid.cancel(sync_cancel_grid_callback);
                     self.sync_reclaim_tables();
 
-                    assert(self.grid_repair_tables.available() == constants.grid_repair_tables_max);
+                    assert(self.grid_repair_tables.executing() == 0);
                     assert(self.grid.read_global_queue.empty());
                 },
                 .requesting_target => {}, // Waiting for a usable sync target.
@@ -7666,7 +7665,7 @@ pub fn ReplicaType(
             assert(self.syncing == .canceling_grid);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
-            assert(self.grid.repair_queue.faulty_blocks.count() == 0);
+            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -7706,7 +7705,7 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
-            assert(self.grid.repair_queue.faulty_blocks.count() == 0);
+            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             if (self.status == .normal) assert(!self.primary());
 
             const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
@@ -7753,7 +7752,7 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
-            assert(self.grid.repair_queue.faulty_blocks.count() == 0);
+            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             maybe(self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
@@ -7813,7 +7812,7 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             assert(self.grid_repair_tables.executing() == 0);
             assert(self.grid_repair_writes.executing() == 0);
-            assert(self.grid.repair_queue.faulty_blocks.count() == 0);
+            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             assert(self.syncing == .updating_superblock);
             assert(!self.state_machine_opened);
 
@@ -7848,7 +7847,7 @@ pub fn ReplicaType(
             assert(self.state_machine_opened);
             assert(self.superblock.working.vsr_state.sync_op_max > 0);
             assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.available() == constants.grid_repair_tables_max);
+            assert(self.grid_repair_tables.executing() == 0);
 
             self.sync_tables = .{};
             if (self.grid_repair_tables.available() > 0) {
@@ -7918,7 +7917,7 @@ pub fn ReplicaType(
                     const table = self.grid_repair_tables.acquire().?;
                     table.* = .{ .replica = self, .table = undefined };
 
-                    self.grid.repair_queue.enqueue_table(
+                    self.grid.blocks_missing.enqueue_table(
                         &table.table,
                         table_info.address,
                         table_info.checksum,
@@ -7949,11 +7948,11 @@ pub fn ReplicaType(
         }
 
         fn sync_reclaim_tables(self: *Self) void {
-            while (self.grid.repair_queue.reclaim_table()) |queue_table| {
+            while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
                 const table = @fieldParentPtr(RepairTable, "table", queue_table);
                 self.grid_repair_tables.release(table);
             }
-            assert(self.grid_repair_tables.available() <= constants.grid_repair_tables_max);
+            assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);
 
             if (self.sync_tables) |_| {
                 assert(self.syncing == .idle);
