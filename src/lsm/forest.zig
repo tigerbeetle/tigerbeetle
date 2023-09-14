@@ -120,7 +120,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         break :tree_infos tree_infos;
     };
 
-    const tree_id_range = comptime tree_id_range: {
+    const _tree_id_range = comptime tree_id_range: {
         var tree_id_min: u16 = 1;
         var tree_id_max: u16 = 0;
         for (_tree_infos) |tree_info| {
@@ -146,6 +146,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;
         pub const tree_infos = _tree_infos;
+        pub const tree_id_range = _tree_id_range;
 
         progress: ?union(enum) {
             open: struct { callback: Callback },
