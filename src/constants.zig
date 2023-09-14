@@ -309,6 +309,8 @@ comptime {
 
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
+    assert(grid_repair_writes_max <=
+        grid_repair_blocks_max + grid_repair_tables_max * lsm_table_content_blocks_max);
 
     assert(grid_repair_blocks_max > 0);
     assert(grid_repair_tables_max > 0);

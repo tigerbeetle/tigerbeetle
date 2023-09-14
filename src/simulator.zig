@@ -297,7 +297,7 @@ pub fn main() !void {
             output.warn("no liveness, core replicas cannot view-change", .{});
         } else if (simulator.core_missing_prepare()) |header| {
             output.warn("no liveness, op={} is not available in core", .{header.op});
-        } else if (try simulator.core_missing_blocks()) |blocks| {
+        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
         } else {
             output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
@@ -331,7 +331,6 @@ pub const Simulator = struct {
         request_idle_off_probability: u8, // percent
     };
 
-    allocator: std.mem.Allocator,
     random: std.rand.Random,
     options: Options,
     cluster: *Cluster,
@@ -376,7 +375,6 @@ pub const Simulator = struct {
         errdefer reply_sequence.deinit(allocator);
 
         return Simulator{
-            .allocator = allocator,
             .random = random,
             .options = options,
             .cluster = cluster,
@@ -539,14 +537,17 @@ pub const Simulator = struct {
     }
 
     /// Check whether the cluster is stuck because the entire core is missing the same block[s].
-    pub fn core_missing_blocks(simulator: *const Simulator) error{OutOfMemory}!?usize {
+    pub fn core_missing_blocks(
+        simulator: *const Simulator,
+        allocator: std.mem.Allocator,
+    ) error{OutOfMemory}!?usize {
         assert(simulator.core.count() > 0);
 
         var blocks_missing = std.ArrayList(struct {
             replica: u8,
             address: u64,
             checksum: u128,
-        }).init(simulator.allocator);
+        }).init(allocator);
         defer blocks_missing.deinit();
 
         // Find all blocks that any replica in the core is missing.

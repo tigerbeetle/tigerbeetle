@@ -307,10 +307,12 @@ pub const TableIndex = struct {
         return @alignCast(slice[0..index.filter_blocks_used(index_block)]);
     }
 
+    // TODO: After filter blocks are removed, remove this function.
     pub fn content_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
         return index.filter_blocks_used(index_block) + index.data_blocks_used(index_block);
     }
 
+    // TODO: After filter blocks are removed, remove this function.
     pub fn content_block(
         index: *const TableIndex,
         index_block: BlockPtrConst,
