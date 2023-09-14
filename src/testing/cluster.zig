@@ -99,7 +99,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         state_checker: StateChecker,
         storage_checker: StorageChecker,
         sync_checker: SyncChecker,
-        grid_checker: GridChecker,
+        grid_checker: *GridChecker,
 
         context: ?*anyopaque = null,
 
@@ -147,6 +147,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 options.storage_fault_atlas,
             );
 
+            var grid_checker = try allocator.create(GridChecker);
+            errdefer allocator.destroy(grid_checker);
+
+            grid_checker.* = GridChecker.init(allocator);
+            errdefer grid_checker.deinit();
+
             const storages = try allocator.alloc(Storage, node_count);
             errdefer allocator.free(storages);
 
@@ -155,6 +161,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var storage_options = options.storage;
                 storage_options.replica_index = @as(u8, @intCast(replica_index));
                 storage_options.fault_atlas = storage_fault_atlas;
+                storage_options.grid_checker = grid_checker;
                 storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
                 // Disable most faults at startup, so that the replicas don't get stuck recovering_head.
                 storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
@@ -225,9 +232,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             var sync_checker = SyncChecker.init(allocator);
             errdefer sync_checker.deinit();
-
-            var grid_checker = GridChecker.init(allocator);
-            errdefer grid_checker.deinit();
 
             // Format each replica's storage (equivalent to "tigerbeetle format ...").
             for (storages, 0..) |*storage, replica_index| {
@@ -317,7 +321,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
             for (cluster.aofs) |*aof| aof.deinit(cluster.allocator);
 
-            cluster.grid_checker.deinit(); // (After Replica, since Replica.Grid references this.)
+            cluster.grid_checker.deinit(); // (Storage references this.)
 
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_pools);
@@ -326,6 +330,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
             cluster.allocator.free(cluster.aofs);
+            cluster.allocator.destroy(cluster.grid_checker);
             cluster.allocator.destroy(cluster.storage_fault_atlas);
             cluster.allocator.destroy(cluster.network);
             cluster.allocator.destroy(cluster);
@@ -368,7 +373,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const reservation = replica.superblock.free_set.reserve(1).?;
             defer replica.superblock.free_set.forfeit(reservation);
 
-            replica.grid.checker = null;
+            cluster.storages[replica_index].options.grid_checker = null;
 
             // We don't need to actually use the block for the storage to diverge —
             // it is marked as acquired in the superblock free set.
@@ -414,8 +419,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn open_replica(cluster: *Self, replica_index: u8, nonce: u128, time: Time) !void {
-            const replica_diverged = cluster.replica_diverged.isSet(replica_index);
-
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
@@ -430,7 +433,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .time = time,
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
-                    .grid_checker = if (replica_diverged) null else &cluster.grid_checker,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);

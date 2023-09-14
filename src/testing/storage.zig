@@ -38,6 +38,7 @@ const stdx = @import("../stdx.zig");
 const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
 const hash_log = @import("./hash_log.zig");
+const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);
 
@@ -82,6 +83,9 @@ pub const Storage = struct {
         /// Enable/disable automatic read/write faults.
         /// Does not impact crash faults or manual faults.
         fault_atlas: ?*const ClusterFaultAtlas = null,
+
+        /// Accessed by the Grid for extra verification of grid coherence.
+        grid_checker: ?*GridChecker = null,
     };
 
     /// See usage in Journal.write_sectors() for details.
