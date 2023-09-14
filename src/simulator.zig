@@ -572,7 +572,7 @@ pub const Simulator = struct {
                 });
             }
 
-            var repair_iterator = replica.grid.repair_queue.faulty_blocks.iterator();
+            var repair_iterator = replica.grid.blocks_missing.faulty_blocks.iterator();
             while (repair_iterator.next()) |fault| {
                 try blocks_missing.append(.{
                     .replica = replica.replica,
@@ -580,9 +580,8 @@ pub const Simulator = struct {
                     .checksum = fault.value_ptr.checksum,
                 });
 
-
                 log.debug("{}: core_missing_blocks: " ++
-                    "missing address={} checksum={} corrupt={} (repair queue)", .{
+                    "missing address={} checksum={} corrupt={} (GridBlocksMissing)", .{
                     replica.replica,
                     fault.key_ptr.*,
                     fault.value_ptr.checksum,

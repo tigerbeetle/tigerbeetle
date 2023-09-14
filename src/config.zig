@@ -112,8 +112,8 @@ const ConfigProcess = struct {
     grid_cache_size_default: u64 = 1024 * 1024 * 1024,
     grid_repair_request_max: usize = 8,
     grid_repair_reads_max: usize = 8,
-    grid_repair_blocks_max: usize = 30,
-    grid_repair_tables_max: usize = 3,
+    grid_missing_blocks_max: usize = 30,
+    grid_missing_tables_max: usize = 3,
     aof_record: bool = false,
     aof_recovery: bool = false,
     /// When null, this defaults to message_body_size_max.
@@ -240,8 +240,8 @@ pub const configs = struct {
             .cache_transfers_posted_size_default = @sizeOf(u256) * 2048,
             .grid_repair_request_max = 4,
             .grid_repair_reads_max = 4,
-            .grid_repair_blocks_max = 3,
-            .grid_repair_tables_max = 2,
+            .grid_missing_blocks_max = 3,
+            .grid_missing_tables_max = 2,
             .verify = true,
             // Set to a small value to ensure the multipart trailer sync is easily tested.
             .sync_trailer_message_body_size_max = 129,

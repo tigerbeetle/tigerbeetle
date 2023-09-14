@@ -1,17 +1,17 @@
 //! Track corrupt/missing grid blocks.
 //!
-//! - The GridRepairQueue is LSM-aware: it can repair entire tables.
-//! - The GridRepairQueue is shared by all Trees.
-//! - The GridRepairQueue is "coherent" – that is, all of the blocks in the queue belong in the
+//! - The GridBlocksMissing is LSM-aware: it can repair entire tables.
+//! - The GridBlocksMissing is shared by all Trees.
+//! - The GridBlocksMissing is "coherent" – that is, all of the blocks in the queue belong in the
 //!   replica's current checkpoint:
-//!   - The GridRepairQueue will not repair freed blocks.
-//!   - The GridRepairQueue will repair released blocks, until they are freed at the checkpoint.
-//! - GridRepairQueue.enqueue_table() is called immediately after superblock sync.
-//! - GridRepairQueue.enqueue_block() is called by the grid when non-repair reads encounter corrupt
-//!   blocks.
+//!   - The GridBlocksMissing will not repair freed blocks.
+//!   - The GridBlocksMissing will repair released blocks, until they are freed at the checkpoint.
+//! - GridBlocksMissing.enqueue_table() is called immediately after superblock sync.
+//! - GridBlocksMissing.enqueue_block() is called by the grid when non-repair reads encounter
+//!   corrupt blocks.
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.grid_repair_queue);
+const log = std.log.scoped(.grid_blocks_missing);
 const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
@@ -24,7 +24,7 @@ const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
-pub const GridRepairQueue = struct {
+pub const GridBlocksMissing = struct {
     const TableContentBlocksSet = std.StaticBitSet(constants.lsm_table_content_blocks_max);
 
     /// A block is removed from the collection when:
@@ -105,15 +105,18 @@ pub const GridRepairQueue = struct {
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
-    faulty_tables: FIFO(RepairTable) = .{ .name = "grid_repair_queue_tables" },
-    faulty_tables_free: FIFO(RepairTable) = .{ .name = "grid_repair_queue_tables_free" },
+    faulty_tables: FIFO(RepairTable) = .{ .name = "grid_missing_blocks_tables" },
+    faulty_tables_free: FIFO(RepairTable) = .{ .name = "grid_missing_blocks_tables_free" },
 
     checkpointing: ?struct {
         /// The number of faulty_blocks with state=aborting.
         aborting: usize,
     } = null,
 
-    pub fn init(allocator: std.mem.Allocator, options: Options) error{OutOfMemory}!GridRepairQueue {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        options: Options,
+    ) error{OutOfMemory}!GridBlocksMissing {
         var faulty_blocks = FaultyBlocks{};
         errdefer faulty_blocks.deinit(allocator);
 
@@ -122,13 +125,13 @@ pub const GridRepairQueue = struct {
             options.blocks_max + options.tables_max * constants.lsm_table_content_blocks_max,
         );
 
-        return GridRepairQueue{
+        return GridBlocksMissing{
             .options = options,
             .faulty_blocks = faulty_blocks,
         };
     }
 
-    pub fn deinit(queue: *GridRepairQueue, allocator: std.mem.Allocator) void {
+    pub fn deinit(queue: *GridBlocksMissing, allocator: std.mem.Allocator) void {
         queue.faulty_blocks.deinit(allocator);
 
         queue.* = undefined;
@@ -137,7 +140,7 @@ pub const GridRepairQueue = struct {
     /// When the queue wants more blocks than fit in a single request message, successive calls
     /// to this function cycle through the pending BlockRequests.
     pub fn next_batch_of_block_requests(
-        queue: *GridRepairQueue,
+        queue: *GridBlocksMissing,
         requests: []vsr.BlockRequest,
     ) usize {
         assert(requests.len > 0);
@@ -178,12 +181,12 @@ pub const GridRepairQueue = struct {
         return requests_count;
     }
 
-    pub fn reclaim_table(queue: *GridRepairQueue) ?*RepairTable {
+    pub fn reclaim_table(queue: *GridBlocksMissing) ?*RepairTable {
         return queue.faulty_tables_free.pop();
     }
 
     /// Count the number of *non-table* block repairs available.
-    pub fn enqueue_blocks_available(queue: *const GridRepairQueue) usize {
+    pub fn enqueue_blocks_available(queue: *const GridBlocksMissing) usize {
         assert(queue.faulty_tables.count <= queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
@@ -198,7 +201,7 @@ pub const GridRepairQueue = struct {
     }
 
     /// Queue a faulty block to request from the cluster and repair.
-    pub fn enqueue_block(queue: *GridRepairQueue, address: u64, checksum: u128) void {
+    pub fn enqueue_block(queue: *GridBlocksMissing, address: u64, checksum: u128) void {
         assert(queue.enqueue_blocks_available() > 0);
         assert(queue.faulty_tables.count <= queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
@@ -209,7 +212,7 @@ pub const GridRepairQueue = struct {
     }
 
     pub fn enqueue_table(
-        queue: *GridRepairQueue,
+        queue: *GridBlocksMissing,
         table: *RepairTable,
         address: u64,
         checksum: u128,
@@ -236,7 +239,7 @@ pub const GridRepairQueue = struct {
     }
 
     fn enqueue_faulty_block(
-        queue: *GridRepairQueue,
+        queue: *GridBlocksMissing,
         address: u64,
         checksum: u128,
         progress: FaultProgress,
@@ -290,13 +293,13 @@ pub const GridRepairQueue = struct {
         }
     }
 
-    pub fn repair_waiting(queue: *const GridRepairQueue, address: u64, checksum: u128) bool {
+    pub fn repair_waiting(queue: *const GridBlocksMissing, address: u64, checksum: u128) bool {
         const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
         const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
         return fault.checksum == checksum and fault.state == .waiting;
     }
 
-    pub fn repair_commence(queue: *const GridRepairQueue, address: u64, checksum: u128) void {
+    pub fn repair_commence(queue: *const GridBlocksMissing, address: u64, checksum: u128) void {
         assert(queue.repair_waiting(address, checksum));
 
         const fault_index = queue.faulty_blocks.getIndex(address).?;
@@ -315,7 +318,7 @@ pub const GridRepairQueue = struct {
         fault.state = .writing;
     }
 
-    pub fn repair_complete(queue: *GridRepairQueue, block: BlockPtrConst) void {
+    pub fn repair_complete(queue: *GridBlocksMissing, block: BlockPtrConst) void {
         const block_header = schema.header_from_block(block);
         const fault_index = queue.faulty_blocks.getIndex(block_header.op).?;
         const fault_address = queue.faulty_blocks.entries.items(.key)[fault_index];
@@ -364,7 +367,7 @@ pub const GridRepairQueue = struct {
     }
 
     fn enqueue_table_content(
-        queue: *GridRepairQueue,
+        queue: *GridBlocksMissing,
         table: *RepairTable,
         index_block_data: BlockPtrConst,
     ) void {
@@ -403,7 +406,7 @@ pub const GridRepairQueue = struct {
         }
     }
 
-    fn release_fault(queue: *GridRepairQueue, fault_index: usize) void {
+    fn release_fault(queue: *GridBlocksMissing, fault_index: usize) void {
         assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
 
         switch (queue.faulty_blocks.entries.items(.value)[fault_index].progress) {
@@ -419,7 +422,7 @@ pub const GridRepairQueue = struct {
         }
     }
 
-    pub fn cancel(queue: *GridRepairQueue) void {
+    pub fn cancel(queue: *GridBlocksMissing) void {
         assert(queue.checkpointing == null);
 
         queue.faulty_blocks.clearRetainingCapacity();
@@ -435,7 +438,7 @@ pub const GridRepairQueue = struct {
     }
 
     pub fn checkpoint_commence(
-        queue: *GridRepairQueue,
+        queue: *GridBlocksMissing,
         free_set: *const vsr.superblock.SuperBlockFreeSet,
     ) void {
         assert(queue.checkpointing == null);
@@ -483,7 +486,7 @@ pub const GridRepairQueue = struct {
 
     /// Returns `true` when the `state≠waiting` faults for blocks that are staged to be
     /// released have finished. (All other writes can safely complete after the checkpoint.)
-    pub fn checkpoint_complete(queue: *GridRepairQueue) bool {
+    pub fn checkpoint_complete(queue: *GridBlocksMissing) bool {
         assert(queue.checkpointing != null);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);

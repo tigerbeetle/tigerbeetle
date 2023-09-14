@@ -41,7 +41,7 @@ Documentation for (roughly) code in the `src/testing` directory.
 10. Syncing ops: e.g. `<0:123>` indicates that `vsr_state.sync_op_min=0` and `vsr_state.sync_op_max=123`.
 11. Grid blocks free: e.g. `122695Gf` indicates that the grid has `122695` blocks free.
 12. Grid blocks queued `grid.read_remote_queue`: e.g. `0G!` indicates that there are `0` reads awaiting remote fulfillment.
-13. Grid blocks queued `grid_repair_queue`: e.g. `0G?` indicates that there are `0` blocks awaiting remote repair.
+13. Grid blocks queued `grid_blocks_missing`: e.g. `0G?` indicates that there are `0` blocks awaiting remote repair.
 14. Pipeline prepares (primary-only): e.g. `1/4Pp` indicates that the primary's pipeline has 2 prepares queued, out of a capacity of 4.
 15. Pipeline requests (primary-only): e.g. `0/3Pq` indicates that the primary's pipeline has 0 requests queued, out of a capacity of 3.
 

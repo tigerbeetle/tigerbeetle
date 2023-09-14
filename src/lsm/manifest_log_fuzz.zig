@@ -91,15 +91,15 @@ fn run_fuzz(
 
     var grid = try Grid.init(allocator, .{
         .superblock = &superblock,
-        .repair_queue_blocks_max = 0,
-        .repair_queue_tables_max = 0,
+        .missing_blocks_max = 0,
+        .missing_tables_max = 0,
     });
     defer grid.deinit(allocator);
 
     var grid_verify = try Grid.init(allocator, .{
         .superblock = &superblock_verify,
-        .repair_queue_blocks_max = 0,
-        .repair_queue_tables_max = 0,
+        .missing_blocks_max = 0,
+        .missing_tables_max = 0,
     });
     defer grid_verify.deinit(allocator);
 
