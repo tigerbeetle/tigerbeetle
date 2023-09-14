@@ -64,18 +64,43 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             break :default iterators;
         },
 
+        tree_id: ?u16 = null,
+
         pub fn next(iterator: *ForestTableIterator, forest: *Forest) ?TableInfo {
             while (iterator.level < constants.lsm_levels) : (iterator.level += 1) {
-                inline for (Forest.tree_infos) |tree_info| {
-                    if (iterator.next_from_tree(
-                        tree_info.tree_name,
-                        tree_info.Tree,
-                        forest.tree_for_id(tree_info.tree_id),
-                    )) |block| {
-                        return block;
+                var tree_id_iterator: ?u16 = iterator.tree_id orelse Forest.tree_infos[0].tree_id;
+                while (tree_id_iterator) |tree_id_runtime| {
+                    switch (tree_id_runtime) {
+                        inline Forest.tree_id_range.min...Forest.tree_id_range.max => |tree_id| {
+                            const tree_info_index = comptime tree_info: {
+                                inline for (Forest.tree_infos, 0..) |tree_info, i| {
+                                    if (tree_info.tree_id == tree_id) break :tree_info i;
+                                } else unreachable;
+                            };
+
+                            const tree_info = Forest.tree_infos[tree_info_index];
+
+                            if (iterator.next_from_tree(
+                                tree_info.tree_name,
+                                tree_info.Tree,
+                                forest.tree_for_id(tree_id),
+                            )) |block| {
+                                return block;
+                            }
+
+                            if (tree_info_index + 1 == Forest.tree_infos.len) {
+                                tree_id_iterator = null;
+                            } else {
+                                tree_id_iterator = Forest.tree_infos[tree_info_index + 1].tree_id;
+                            }
+                            iterator.tree_id = tree_id_iterator;
+                        },
+                        else => unreachable,
                     }
                 }
             }
+            assert(iterator.tree_id == null);
+
             return null;
         }
 
@@ -143,6 +168,7 @@ fn TreeTableIteratorType(comptime Tree: type) type {
                             manifest_level.tables.search(.{
                                 .key_max = position.previous.key_max,
                                 // +1 to skip past the previous table.
+                                // (The tables are ordered by (key_max,snapshot_min).)
                                 .snapshot_min = position.previous.snapshot_min + 1,
                             }),
                             .ascending,
@@ -157,6 +183,16 @@ fn TreeTableIteratorType(comptime Tree: type) type {
             };
 
             const table = table_iterator.next() orelse return null;
+
+            if (iterator.position) |position| {
+                const table_order =
+                    Tree.Table.compare_keys(position.previous.key_max, table.key_max);
+                assert(table_order.compare(.lte));
+
+                if (table_order == .eq) {
+                    assert(position.previous.snapshot_min < table.snapshot_min);
+                }
+            }
 
             iterator.position = .{
                 .level = level,
