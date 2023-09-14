@@ -14,7 +14,6 @@ const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
 const GridRepairQueue = @import("./grid_repair_queue.zig").GridRepairQueue;
-const GridChecker = @import("../testing/cluster/grid_checker.zig").GridChecker;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -163,7 +162,6 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
-        checker: ?*GridChecker,
         repair_queue: GridRepairQueue,
 
         cache: Cache,
@@ -200,7 +198,6 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
-            checker: ?*GridChecker = null,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             repair_queue_blocks_max: usize,
             repair_queue_tables_max: usize,
@@ -233,7 +230,6 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
-                .checker = options.checker,
                 .repair_queue = repair_queue,
                 .cache = cache,
                 .cache_blocks = cache_blocks,
@@ -1090,7 +1086,10 @@ pub fn GridType(comptime Storage: type) type {
         fn assert_coherent(grid: *const Grid, address: u64, checksum: u128) void {
             assert(!grid.superblock.free_set.is_free(address));
 
-            if (grid.checker) |checker| {
+            const TestStorage = @import("../testing/storage.zig").Storage;
+            if (Storage != TestStorage) return;
+
+            if (grid.superblock.storage.options.grid_checker) |checker| {
                 checker.assert_coherent(grid.superblock.working.checkpoint_id(), address, checksum);
                 checker.assert_coherent(grid.superblock.staging.checkpoint_id(), address, checksum);
             }
