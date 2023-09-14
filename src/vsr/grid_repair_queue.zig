@@ -208,20 +208,6 @@ pub const GridRepairQueue = struct {
         assert(enqueue == .insert or enqueue == .duplicate);
     }
 
-    pub fn enqueued_table(queue: *GridRepairQueue, address: u64, checksum: u128) bool {
-        maybe(queue.enqueue_blocks_available() == 0);
-        assert(queue.faulty_tables.count <= queue.options.tables_max);
-
-        var tables = queue.faulty_tables.peek();
-        while (tables) |queue_table| : (tables = queue_table.next) {
-            if (queue_table.index_address == address) {
-                assert(queue_table.index_checksum == checksum);
-                return true;
-            }
-        }
-        return false;
-    }
-
     pub fn enqueue_table(
         queue: *GridRepairQueue,
         table: *RepairTable,
@@ -229,12 +215,14 @@ pub const GridRepairQueue = struct {
         checksum: u128,
     ) void {
         assert(queue.faulty_tables.count < queue.options.tables_max);
-        assert(!queue.enqueued_table(address, checksum));
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
         var tables = queue.faulty_tables.peek();
-        while (tables) |queue_table| : (tables = queue_table.next) assert(queue_table != table);
+        while (tables) |queue_table| : (tables = queue_table.next) {
+            assert(queue_table != table);
+            assert(queue_table.index_address != address);
+        }
 
         table.* = .{
             .index_address = address,

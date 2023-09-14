@@ -7844,7 +7844,7 @@ pub fn ReplicaType(
 
             self.sync_tables = .{};
             if (self.grid_repair_tables.available() > 0) {
-                self.sync_request_tables();
+                self.sync_enqueue_tables();
             }
 
             for (0..constants.clients_max) |entry_slot| {
@@ -7881,7 +7881,7 @@ pub fn ReplicaType(
         }
 
         /// State sync finished, and we must repair all of the tables we missed.
-        fn sync_request_tables(self: *Self) void {
+        fn sync_enqueue_tables(self: *Self) void {
             assert(self.syncing == .idle);
             assert(self.sync_tables != null);
             assert(self.state_machine_opened);
@@ -7895,15 +7895,7 @@ pub fn ReplicaType(
                 if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
                     table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
                 {
-                    if (self.grid.repair_queue.enqueued_table(
-                        table_info.address,
-                        table_info.checksum,
-                    )) {
-                        assert(self.grid_repair_tables.executing() > 0);
-                        continue;
-                    }
-
-                    log.debug("{}: sync_request_tables: " ++
+                    log.debug("{}: sync_enqueue_tables: " ++
                         "request address={} checksum={} snapshot_min={} ({}..{})", .{
                         self.replica,
                         table_info.address,
@@ -7936,7 +7928,7 @@ pub fn ReplicaType(
             if (self.grid_repair_tables.executing() == 0) {
                 assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
 
-                log.debug("{}: sync_request_tables: all tables synced (commit={}..{})", .{
+                log.debug("{}: sync_enqueue_tables: all tables synced (commit={}..{})", .{
                     self.replica,
                     sync_op_min,
                     sync_op_max,
@@ -7958,7 +7950,7 @@ pub fn ReplicaType(
                 assert(self.grid.canceling == null);
 
                 if (self.grid_repair_tables.available() > 0) {
-                    self.sync_request_tables();
+                    self.sync_enqueue_tables();
                 }
             }
         }
