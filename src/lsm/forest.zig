@@ -83,6 +83,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         groove_tree: union(enum) { objects, ids, indexes: []const u8 },
     };
 
+    // Invariants:
+    // - tree_infos[tree_id - tree_id_range.min].tree_id == tree_id
+    // - tree_infos.len == tree_id_range.max - tree_id_range.min
     const _tree_infos: []const TreeInfo = tree_infos: {
         var tree_infos: []const TreeInfo = &[_]TreeInfo{};
         for (std.meta.fields(_Grooves)) |groove_field| {
@@ -117,19 +120,23 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
         }
 
-        break :tree_infos tree_infos;
-    };
+        var tree_id_min = std.math.maxInt(u16);
+        for (tree_infos) |tree_info| tree_id_min = @min(tree_id_min, tree_info.tree_id);
 
-    const _tree_id_range = comptime tree_id_range: {
-        var tree_id_min: u16 = 1;
-        var tree_id_max: u16 = 0;
-        for (_tree_infos) |tree_info| {
-            tree_id_min = @min(tree_id_min, tree_info.tree_id);
-            tree_id_max = @max(tree_id_max, tree_info.tree_id);
+        var tree_infos_sorted: [tree_infos.len]TreeInfo = undefined;
+        var tree_infos_set = std.StaticBitSet(tree_infos.len).initEmpty();
+        for (tree_infos) |tree_info| {
+            const tree_index = tree_info.tree_id - tree_id_min;
+            assert(!tree_infos_set.isSet(tree_index));
+
+            tree_infos_sorted[tree_index] = tree_info;
+            tree_infos_set.set(tree_index);
         }
+
         // There are no gaps in the tree ids.
-        assert((tree_id_max - tree_id_min + 1) == _tree_infos.len);
-        break :tree_id_range .{ .min = tree_id_min, .max = tree_id_max };
+        assert(tree_infos_set.count() == tree_infos.len);
+
+        break :tree_infos tree_infos_sorted[0..];
     };
 
     return struct {
@@ -146,7 +153,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;
         pub const tree_infos = _tree_infos;
-        pub const tree_id_range = _tree_id_range;
+        pub const tree_id_range = .{
+            .min = tree_infos[0].tree_id,
+            .max = tree_infos[tree_infos.len - 1].tree_id,
+        };
 
         progress: ?union(enum) {
             open: struct { callback: Callback },
@@ -411,25 +421,23 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn TreeForIdType(comptime tree_id: u16) type {
-            for (tree_infos) |tree_info| {
-                if (tree_info.tree_id == tree_id) return tree_info.Tree;
-            }
-            unreachable;
+            const tree_info = tree_infos[tree_id - tree_id_range.min];
+            assert(tree_info.tree_id == tree_id);
+
+            return tree_info.Tree;
         }
 
         pub fn tree_for_id(forest: *Forest, comptime tree_id: u16) *TreeForIdType(tree_id) {
-            inline for (tree_infos) |tree_info| {
-                if (tree_info.tree_id == tree_id) {
-                    var groove = &@field(forest.grooves, tree_info.groove_name);
+            const tree_info = tree_infos[tree_id - tree_id_range.min];
+            assert(tree_info.tree_id == tree_id);
 
-                    switch (tree_info.groove_tree) {
-                        .objects => return &groove.objects,
-                        .ids => return &groove.ids,
-                        .indexes => |index_name| return &@field(groove.indexes, index_name),
-                    }
-                }
+            var groove = &@field(forest.grooves, tree_info.groove_name);
+
+            switch (tree_info.groove_tree) {
+                .objects => return &groove.objects,
+                .ids => return &groove.ids,
+                .indexes => |index_name| return &@field(groove.indexes, index_name),
             }
-            unreachable;
         }
     };
 }
