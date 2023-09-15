@@ -120,9 +120,11 @@ namespace TigerBeetle.Tests
                     new Account
                     {
                         Id = 1,
-                        UserData = 2,
-                        Code = 3,
-                        Ledger = 4,
+                        UserData128 = 2,
+						UserData64 = 3,
+						UserData32 = 4,
+						Code = 5,
+                        Ledger = 6,
                         Flags = AccountFlags.Linked,
                     }
                 }).ToArray();
@@ -142,9 +144,11 @@ namespace TigerBeetle.Tests
                 var accounts = await task;
                 Assert.IsTrue(accounts.Length == 1);
                 Assert.IsTrue(accounts[0].Id == 1);
-                Assert.IsTrue(accounts[0].UserData == 2);
-                Assert.IsTrue(accounts[0].Code == 3);
-                Assert.IsTrue(accounts[0].Ledger == 4);
+                Assert.IsTrue(accounts[0].UserData128 == 2);
+				Assert.IsTrue(accounts[0].UserData64 == 3);
+				Assert.IsTrue(accounts[0].UserData32 == 4);
+				Assert.IsTrue(accounts[0].Code == 5);
+                Assert.IsTrue(accounts[0].Ledger == 6);
                 Assert.IsTrue(accounts[0].Flags == AccountFlags.Linked);
             }
         }

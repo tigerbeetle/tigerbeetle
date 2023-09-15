@@ -67,7 +67,7 @@ const Environment = struct {
     // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values per index.
     // Every `FuzzOp.put_account` issues one remove and one put per index.
     const puts_since_compact_max = @divTrunc(
-        Forest.groove_config.accounts_mutable.ObjectTree.Table.value_count_max,
+        Forest.groove_config.accounts.ObjectTree.Table.value_count_max,
         2 * constants.lsm_batch_multiple,
     );
 
@@ -244,41 +244,26 @@ const Environment = struct {
     }
 
     fn prefetch_account(env: *Environment, id: u128) !void {
-        const groove_immutable = &env.forest.grooves.accounts_immutable;
-        const groove_mutable = &env.forest.grooves.accounts_mutable;
+        const groove_accounts = &env.forest.grooves.accounts;
 
-        const GrooveImmutable = @TypeOf(groove_immutable.*);
-        const GrooveMutable = @TypeOf(groove_mutable.*);
+        const GrooveAccounts = @TypeOf(groove_accounts.*);
+
         const Getter = struct {
             _id: u128,
-            _groove_mutable: *GrooveMutable,
-            _groove_immutable: *GrooveImmutable,
+            _groove_accounts: *GrooveAccounts,
 
             finished: bool = false,
-            prefetch_context_mutable: GrooveMutable.PrefetchContext = undefined,
-            prefetch_context_immutable: GrooveImmutable.PrefetchContext = undefined,
+            prefetch_context: GrooveAccounts.PrefetchContext = undefined,
 
             fn prefetch_start(getter: *@This()) void {
-                const groove = getter._groove_immutable;
+                const groove = getter._groove_accounts;
                 groove.prefetch_setup(null);
                 groove.prefetch_enqueue(getter._id);
-                groove.prefetch(@This().prefetch_callback_immuttable, &getter.prefetch_context_immutable);
+                groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 
-            fn prefetch_callback_immuttable(prefetch_context: *GrooveImmutable.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context_immutable", prefetch_context);
-                const groove = getter._groove_mutable;
-                groove.prefetch_setup(null);
-
-                if (getter._groove_immutable.get(getter._id)) |immut| {
-                    groove.prefetch_enqueue(immut.timestamp);
-                }
-
-                groove.prefetch(@This().prefetch_callback_mutable, &getter.prefetch_context_mutable);
-            }
-
-            fn prefetch_callback_mutable(prefetch_context: *GrooveMutable.PrefetchContext) void {
-                const getter = @fieldParentPtr(@This(), "prefetch_context_mutable", prefetch_context);
+            fn prefetch_callback(prefetch_context: *GrooveAccounts.PrefetchContext) void {
+                const getter = @fieldParentPtr(@This(), "prefetch_context", prefetch_context);
                 assert(!getter.finished);
                 getter.finished = true;
             }
@@ -286,8 +271,7 @@ const Environment = struct {
 
         var getter = Getter{
             ._id = id,
-            ._groove_mutable = groove_mutable,
-            ._groove_immutable = groove_immutable,
+            ._groove_accounts = groove_accounts,
         };
         getter.prefetch_start();
         while (!getter.finished) {
@@ -298,14 +282,12 @@ const Environment = struct {
     }
 
     fn put_account(env: *Environment, a: *const Account) void {
-        env.forest.grooves.accounts_immutable.put(&StateMachine.AccountImmutable.from_account(a));
-        env.forest.grooves.accounts_mutable.put(&StateMachine.AccountMutable.from_account(a));
+        env.forest.grooves.accounts.put(a);
     }
 
     fn get_account(env: *Environment, id: u128) ?Account {
-        const immut = env.forest.grooves.accounts_immutable.get(id) orelse return null;
-        const mut = env.forest.grooves.accounts_mutable.get(immut.timestamp).?;
-        return StateMachine.into_account(immut, mut);
+        const account = env.forest.grooves.accounts.get(id) orelse return null;
+        return account.*;
     }
 
     // The forest should behave like a simple key-value data-structure.
@@ -576,8 +558,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     .id = id,
                     // `timestamp` must be unique.
                     .timestamp = fuzz_op_index,
-                    .user_data = random_id(random, u128),
-                    .reserved = [_]u8{0} ** 48,
+                    .user_data_128 = random_id(random, u128),
+                    .user_data_64 = random_id(random, u64),
+                    .user_data_32 = random_id(random, u32),
+                    .reserved = 0,
                     .ledger = random_id(random, u32),
                     .code = random_id(random, u16),
                     .flags = .{

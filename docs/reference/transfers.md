@@ -164,28 +164,39 @@ Constraints:
   - If `credit_account_id` is nonzero, it must match the corresponding pending transfer's
     `credit_account_id`.
 
-### `user_data`
+### `amount`
 
-This is an optional secondary identifier to link this transfer to an
-external entity.
+This is how much should be debited from the `debit_account_id` account
+and credited to the `credit_account_id` account.
 
-As an example, you might use a [random id](../design/data-modeling.md#random-identifier) that ties
-together a group of transfers.
-
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
-
-Constraints:
-
-* Type is 128-bit unsigned integer (16 bytes)
-
-### `reserved`
-
-This space may be used for additional data in the future.
+- When `flags.balancing_debit` is set, this is the maximum amount that will be debited/credited,
+  where the actual transfer amount is determined by the debit account's constraints.
+- When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
+  where the actual transfer amount is determined by the credit account's constraints.
 
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
-* Must be zero
+* When `flags.post_pending_transfer` is set:
+  * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
+  * If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
+* When `flags.void_pending_transfer` is set:
+  * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
+  * If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
+* When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero,
+  it will automatically be set to the maximum amount that does not violate the corresponding
+  account limits. (Equivalent to setting `amount = 2^128 - 1`).
+* When all of the following flags are not set, `amount` must be nonzero:
+  * `flags.post_pending_transfer`
+  * `flags.void_pending_transfer`
+  * `flags.balancing_debit`
+  * `flags.balancing_credit`
+
+#### Examples
+
+- For representing fractional amounts (e.g. `$12.34`), see
+  [Fractional Amounts](../recipes/fractional-amounts.md).
+- For balancing transfers, see [Close Account](../recipes/close-account.md).
 
 ### `pending_id`
 
@@ -204,9 +215,49 @@ Constraints:
 * Must be zero if neither void nor pending transfer flag is set
 * Must match an existing transfer's [`id`](#id) if non-zero
 
+### `user_data_128`
+
+This is an optional 128-bit secondary identifier to link this transfer to an
+external entity or event.
+
+As an example, you might use a [random id](../design/data-modeling.md#random-identifier)
+that ties together a group of transfers.
+
+For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+
+Constraints:
+
+* Type is 128-bit unsigned integer (16 bytes)
+
+### `user_data_64`
+
+This is an optional 64-bit secondary identifier to link this transfer to an
+external entity or event.
+
+As an example, you might use this field store an external timestamp.
+
+For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+
+Constraints:
+
+* Type is 64-bit unsigned integer (8 bytes)
+
+### `user_data_32`
+
+This is an optional 32-bit secondary identifier to link this transfer to an
+external entity or event.
+
+As an example, you might use this field to store a timezone or locale.
+
+For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+
+Constraints:
+
+* Type is 32-bit unsigned integer (4 bytes)
+
 ### `timeout`
 
-This is the interval (in nanoseconds) after a
+This is the interval in seconds after a
 [`pending`](#flagspending) transfer's [arrival at the cluster](#timestamp)
 that it may be posted or voided. Zero denotes absence of timeout.
 
@@ -217,10 +268,8 @@ Non-pending transfers cannot have a timeout.
 
 Constraints:
 
-* Type is 64-bit unsigned integer (8 bytes)
+* Type is 32-bit unsigned integer (4 bytes)
 * Must be zero if `flags.pending` is *not* set
-* Must not overflow a 64-bit unsigned integer when summed with the transfer's timestamp
-  (`error.overflows_timeout`)
 
 ### `ledger`
 
@@ -373,40 +422,6 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 ##### Examples
 
 - [Close Account](../recipes/close-account.md)
-
-### `amount`
-
-This is how much should be debited from the `debit_account_id` account
-and credited to the `credit_account_id` account.
-
-- When `flags.balancing_debit` is set, this is the maximum amount that will be debited/credited,
-  where the actual transfer amount is determined by the debit account's constraints.
-- When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,
-  where the actual transfer amount is determined by the credit account's constraints.
-
-Constraints:
-
-* Type is 64-bit unsigned integer (8 bytes)
-* When `flags.post_pending_transfer` is set:
-  * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
-  * If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
-* When `flags.void_pending_transfer` is set:
-  * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
-  * If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
-* When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero,
-  it will automatically be set to the maximum amount that does not violate the corresponding
-  account limits. (Equivalent to setting `amount = 2^64 - 1`).
-* When all of the following flags are not set, `amount` must be nonzero:
-  * `flags.post_pending_transfer`
-  * `flags.void_pending_transfer`
-  * `flags.balancing_debit`
-  * `flags.balancing_credit`
-
-#### Examples
-
-- For representing fractional amounts (e.g. `$12.34`), see
-  [Fractional Amounts](../recipes/fractional-amounts.md).
-- For balancing transfers, see [Close Account](../recipes/close-account.md).
 
 ### `timestamp`
 

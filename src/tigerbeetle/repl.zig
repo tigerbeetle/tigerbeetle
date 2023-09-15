@@ -120,10 +120,16 @@ pub const Parser = struct {
         parser.eat_whitespace();
         const after_whitespace = parser.offset;
 
-        while (parser.offset < parser.input.len and
-            (std.ascii.isAlphabetic(parser.input[parser.offset]) or
-            parser.input[parser.offset] == '_'))
-        {
+        while (parser.offset < parser.input.len) {
+            const char_is_valid = switch (parser.input[parser.offset]) {
+                // Identifiers can contain any letter and `_`.
+                'A'...'Z', 'a'...'z', '_' => true,
+                // It also may contain numbers, but not start with a number.
+                '0'...'9' => parser.offset > after_whitespace,
+                else => false,
+            };
+
+            if (!char_is_valid) break;
             parser.offset += 1;
         }
 

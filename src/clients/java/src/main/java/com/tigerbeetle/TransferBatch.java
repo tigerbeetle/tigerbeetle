@@ -6,6 +6,7 @@
 package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
+import java.math.BigInteger;
 
 public final class TransferBatch extends Batch {
 
@@ -15,14 +16,15 @@ public final class TransferBatch extends Batch {
         int Id = 0;
         int DebitAccountId = 16;
         int CreditAccountId = 32;
-        int UserData = 48;
-        int Reserved = 64;
-        int PendingId = 80;
-        int Timeout = 96;
-        int Ledger = 104;
-        int Code = 108;
-        int Flags = 110;
-        int Amount = 112;
+        int Amount = 48;
+        int PendingId = 64;
+        int UserData128 = 80;
+        int UserData64 = 96;
+        int UserData32 = 104;
+        int Timeout = 108;
+        int Ledger = 112;
+        int Code = 116;
+        int Flags = 118;
         int Timestamp = 120;
     }
 
@@ -205,12 +207,15 @@ public final class TransferBatch extends Batch {
     }
 
     /**
-     * @return an array of 16 bytes representing the 128-bit value.
+     * @return a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
      */
-    public byte[] getUserData() {
-        return getUInt128(at(Struct.UserData));
+    public BigInteger getAmount() {
+        final var index = at(Struct.Amount);
+        return UInt128.asBigInteger(
+            getUInt128(index, UInt128.LeastSignificant), 
+            getUInt128(index, UInt128.MostSignificant));
     }
 
     /**
@@ -219,21 +224,20 @@ public final class TransferBatch extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
      */
-    public long getUserData(final UInt128 part) {
-        return getUInt128(at(Struct.UserData), part);
+    public long getAmount(final UInt128 part) {
+        return getUInt128(at(Struct.Amount), part);
     }
 
     /**
-     * @param userData an array of 16 bytes representing the 128-bit value.
-     * @throws IllegalArgumentException if {@code userData} is not 16 bytes long.
+     * @param amount a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
      */
-    public void setUserData(final byte[] userData) {
-        putUInt128(at(Struct.UserData), userData);
+    public void setAmount(final BigInteger amount) {
+        putUInt128(at(Struct.Amount), UInt128.asBytes(amount));
     }
 
     /**
@@ -241,73 +245,20 @@ public final class TransferBatch extends Batch {
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
      */
-    public void setUserData(final long leastSignificant, final long mostSignificant) {
-        putUInt128(at(Struct.UserData), leastSignificant, mostSignificant);
+    public void setAmount(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.Amount), leastSignificant, mostSignificant);
     }
 
     /**
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data">user_data</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
      */
-    public void setUserData(final long leastSignificant) {
-        putUInt128(at(Struct.UserData), leastSignificant, 0);
-    }
-
-    /**
-     * @return an array of 16 bytes representing the 128-bit value.
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#reserved">reserved</a>
-     */
-    byte[] getReserved() {
-        return getUInt128(at(Struct.Reserved));
-    }
-
-    /**
-     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
-     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
-     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
-     *         {@link UInt128#MostSignificant}.
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#reserved">reserved</a>
-     */
-    long getReserved(final UInt128 part) {
-        return getUInt128(at(Struct.Reserved), part);
-    }
-
-    /**
-     * @param reserved an array of 16 bytes representing the 128-bit value.
-     * @throws IllegalArgumentException if {@code reserved} is not 16 bytes long.
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#reserved">reserved</a>
-     */
-    void setReserved(final byte[] reserved) {
-        putUInt128(at(Struct.Reserved), reserved);
-    }
-
-    /**
-     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
-     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#reserved">reserved</a>
-     */
-    void setReserved(final long leastSignificant, final long mostSignificant) {
-        putUInt128(at(Struct.Reserved), leastSignificant, mostSignificant);
-    }
-
-    /**
-     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#reserved">reserved</a>
-     */
-    void setReserved(final long leastSignificant) {
-        putUInt128(at(Struct.Reserved), leastSignificant, 0);
+    public void setAmount(final long leastSignificant) {
+        putUInt128(at(Struct.Amount), leastSignificant, 0);
     }
 
     /**
@@ -364,11 +315,102 @@ public final class TransferBatch extends Batch {
     }
 
     /**
+     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_128">user_data_128</a>
+     */
+    public byte[] getUserData128() {
+        return getUInt128(at(Struct.UserData128));
+    }
+
+    /**
+     * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be retrieved.
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
+     *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
+     *         {@link UInt128#MostSignificant}.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_128">user_data_128</a>
+     */
+    public long getUserData128(final UInt128 part) {
+        return getUInt128(at(Struct.UserData128), part);
+    }
+
+    /**
+     * @param userData128 an array of 16 bytes representing the 128-bit value.
+     * @throws IllegalArgumentException if {@code userData128} is not 16 bytes long.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_128">user_data_128</a>
+     */
+    public void setUserData128(final byte[] userData128) {
+        putUInt128(at(Struct.UserData128), userData128);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_128">user_data_128</a>
+     */
+    public void setUserData128(final long leastSignificant, final long mostSignificant) {
+        putUInt128(at(Struct.UserData128), leastSignificant, mostSignificant);
+    }
+
+    /**
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_128">user_data_128</a>
+     */
+    public void setUserData128(final long leastSignificant) {
+        putUInt128(at(Struct.UserData128), leastSignificant, 0);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_64">user_data_64</a>
+     */
+    public long getUserData64() {
+        final var value = getUInt64(at(Struct.UserData64));
+        return value;
+    }
+
+    /**
+     * @param userData64
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_64">user_data_64</a>
+     */
+    public void setUserData64(final long userData64) {
+        putUInt64(at(Struct.UserData64), userData64);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_32">user_data_32</a>
+     */
+    public int getUserData32() {
+        final var value = getUInt32(at(Struct.UserData32));
+        return value;
+    }
+
+    /**
+     * @param userData32
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#user_data_32">user_data_32</a>
+     */
+    public void setUserData32(final int userData32) {
+        putUInt32(at(Struct.UserData32), userData32);
+    }
+
+    /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#timeout">timeout</a>
      */
-    public long getTimeout() {
-        final var value = getUInt64(at(Struct.Timeout));
+    public int getTimeout() {
+        final var value = getUInt32(at(Struct.Timeout));
         return value;
     }
 
@@ -378,8 +420,8 @@ public final class TransferBatch extends Batch {
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#timeout">timeout</a>
      */
-    public void setTimeout(final long timeout) {
-        putUInt64(at(Struct.Timeout), timeout);
+    public void setTimeout(final int timeout) {
+        putUInt32(at(Struct.Timeout), timeout);
     }
 
     /**
@@ -437,25 +479,6 @@ public final class TransferBatch extends Batch {
      */
     public void setFlags(final int flags) {
         putUInt16(at(Struct.Flags), flags);
-    }
-
-    /**
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
-     */
-    public long getAmount() {
-        final var value = getUInt64(at(Struct.Amount));
-        return value;
-    }
-
-    /**
-     * @param amount
-     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/transfers/#amount">amount</a>
-     */
-    public void setAmount(final long amount) {
-        putUInt64(at(Struct.Amount), amount);
     }
 
     /**

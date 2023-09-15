@@ -7,6 +7,7 @@ package com.tigerbeetle;
 
 import java.nio.ByteBuffer;
 
+
 public final class CreateAccountResultBatch extends Batch {
 
     interface Struct {

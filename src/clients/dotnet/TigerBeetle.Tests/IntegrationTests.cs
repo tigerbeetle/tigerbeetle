@@ -18,16 +18,20 @@ namespace TigerBeetle.Tests
             new Account
             {
                 Id = 100,
-                UserData = 1000,
-                Flags = AccountFlags.None,
+                UserData128 = 1000,
+				UserData64 = 1001,
+				UserData32 = 1002,
+				Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 1,
             },
             new Account
             {
                 Id = 101,
-                UserData = 1001,
-                Flags = AccountFlags.None,
+				UserData128 = 1000,
+				UserData64 = 1001,
+				UserData32 = 1002,
+				Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 2,
             }
@@ -214,9 +218,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
             };
 
             var transferResults = client.CreateTransfers(new Transfer[] { transfer });
@@ -230,9 +234,9 @@ namespace TigerBeetle.Tests
             AssertTransfer(transfer, lookupTransfers[0]);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
         }
 
@@ -251,9 +255,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
             };
 
             var transferResults = await client.CreateTransfersAsync(new Transfer[] { transfer });
@@ -267,9 +271,9 @@ namespace TigerBeetle.Tests
             AssertTransfer(transfer, lookupTransfers[0]);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
         }
 
@@ -288,9 +292,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
             };
 
             var successResult = client.CreateTransfer(transfer);
@@ -319,9 +323,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
             };
 
             var successResult = await client.CreateTransferAsync(transfer);
@@ -350,11 +354,11 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Timeout = uint.MaxValue,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.Pending,
-                Timeout = int.MaxValue,
             };
 
             var result = client.CreateTransfer(transfer);
@@ -364,25 +368,25 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
             var postTransfer = new Transfer
             {
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				PendingId = transfer.Id,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.PostPendingTransfer,
-                PendingId = transfer.Id,
             };
 
             var postResult = client.CreateTransfer(postTransfer);
@@ -392,14 +396,14 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
         }
 
         [TestMethod]
@@ -417,11 +421,11 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Timeout = uint.MaxValue,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.Pending,
-                Timeout = int.MaxValue,
             };
 
             var result = await client.CreateTransferAsync(transfer);
@@ -431,25 +435,25 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
             var postTransfer = new Transfer
             {
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				PendingId = transfer.Id,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.PostPendingTransfer,
-                PendingId = transfer.Id,
             };
 
             var postResult = await client.CreateTransferAsync(postTransfer);
@@ -459,14 +463,14 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
         }
 
         [TestMethod]
@@ -484,11 +488,11 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Timeout = uint.MaxValue,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.Pending,
-                Timeout = int.MaxValue,
             };
 
             var result = client.CreateTransfer(transfer);
@@ -498,23 +502,23 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
             var postTransfer = new Transfer
             {
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.VoidPendingTransfer,
                 PendingId = transfer.Id,
             };
@@ -525,15 +529,15 @@ namespace TigerBeetle.Tests
             lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
 
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
         }
 
         [TestMethod]
@@ -551,11 +555,11 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Timeout = uint.MaxValue,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.Pending,
-                Timeout = int.MaxValue,
             };
 
             var result = await client.CreateTransferAsync(transfer);
@@ -565,25 +569,25 @@ namespace TigerBeetle.Tests
             AssertAccounts(lookupAccounts);
 
             Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
             var postTransfer = new Transfer
             {
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				PendingId = transfer.Id,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.VoidPendingTransfer,
-                PendingId = transfer.Id,
             };
 
             var postResult = await client.CreateTransferAsync(postTransfer);
@@ -592,15 +596,15 @@ namespace TigerBeetle.Tests
             lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
             AssertAccounts(lookupAccounts);
 
-            Assert.AreEqual(lookupAccounts[0].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
-            Assert.AreEqual(lookupAccounts[1].DebitsPosted, 0u);
-            Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
+            Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
         }
 
         [TestMethod]
@@ -618,9 +622,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.Linked,
             };
 
@@ -629,9 +633,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
-                Ledger = 1,
+				Amount = 49,
+				Ledger = 1,
                 Code = 1,
-                Amount = 49,
                 Flags = TransferFlags.None,
             };
 
@@ -646,14 +650,14 @@ namespace TigerBeetle.Tests
             AssertTransfer(transfer1, lookupTransfers[0]);
             AssertTransfer(transfer2, lookupTransfers[1]);
 
-            Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfer2.Amount);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
         }
 
@@ -672,9 +676,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
                 Flags = TransferFlags.Linked,
             };
 
@@ -683,9 +687,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
-                Ledger = 1,
+				Amount = 49,
+				Ledger = 1,
                 Code = 1,
-                Amount = 49,
                 Flags = TransferFlags.None,
             };
 
@@ -700,14 +704,14 @@ namespace TigerBeetle.Tests
             AssertTransfer(transfer1, lookupTransfers[0]);
             AssertTransfer(transfer2, lookupTransfers[1]);
 
-            Assert.AreEqual(lookupAccounts[0].CreditsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfer1.Amount);
-            Assert.AreEqual(lookupAccounts[0].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfer2.Amount);
 
-            Assert.AreEqual(lookupAccounts[1].CreditsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
-            Assert.AreEqual(lookupAccounts[1].DebitsPending, 0u);
+            Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
         }
 
@@ -740,12 +744,12 @@ namespace TigerBeetle.Tests
             {
                 var transfer = new Transfer
                 {
-                    Id = i + 1,
+                    Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
-                    Ledger = 1,
+					Amount = 100,
+					Ledger = 1,
                     Code = 1,
-                    Amount = 100,
                 };
 
                 /// Starts multiple tasks.
@@ -799,7 +803,7 @@ namespace TigerBeetle.Tests
             {
                 var transfer = new Transfer
                 {
-                    Id = i + 1,
+                    Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
                     Ledger = 1,
@@ -872,12 +876,12 @@ namespace TigerBeetle.Tests
             {
                 var transfer = new Transfer
                 {
-                    Id = i + 1,
+                    Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
-                    Ledger = 1,
+					Amount = 100,
+					Ledger = 1,
                     Code = 1,
-                    Amount = 100,
                 };
 
                 /// Starts multiple tasks.
@@ -922,9 +926,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Ledger = 1,
+				Amount = 100,
+				Ledger = 1,
                 Code = 1,
-                Amount = 100,
             };
 
             _ = client.CreateTransfers(new Transfer[] { transfer });
@@ -944,8 +948,10 @@ namespace TigerBeetle.Tests
         private static void AssertAccount(Account a, Account b)
         {
             Assert.AreEqual(a.Id, b.Id);
-            Assert.AreEqual(a.UserData, b.UserData);
-            Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.UserData128, b.UserData128);
+			Assert.AreEqual(a.UserData64, b.UserData64);
+			Assert.AreEqual(a.UserData32, b.UserData32);
+			Assert.AreEqual(a.Flags, b.Flags);
             Assert.AreEqual(a.Code, b.Code);
             Assert.AreEqual(a.Ledger, b.Ledger);
         }
@@ -955,13 +961,15 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(a.Id, b.Id);
             Assert.AreEqual(a.DebitAccountId, b.DebitAccountId);
             Assert.AreEqual(a.CreditAccountId, b.CreditAccountId);
-            Assert.AreEqual(a.UserData, b.UserData);
-            Assert.AreEqual(a.Flags, b.Flags);
+			Assert.AreEqual(a.Amount, b.Amount);
+			Assert.AreEqual(a.PendingId, b.PendingId);
+			Assert.AreEqual(a.UserData128, b.UserData128);
+			Assert.AreEqual(a.UserData64, b.UserData64);
+			Assert.AreEqual(a.UserData32, b.UserData32);
+			Assert.AreEqual(a.Timeout, b.Timeout);
+			Assert.AreEqual(a.Flags, b.Flags);
             Assert.AreEqual(a.Code, b.Code);
             Assert.AreEqual(a.Ledger, b.Ledger);
-            Assert.AreEqual(a.Amount, b.Amount);
-            Assert.AreEqual(a.PendingId, b.PendingId);
-            Assert.AreEqual(a.Timeout, b.Timeout);
         }
 
         private static bool AssertException<T>(Exception exception) where T : Exception
@@ -986,7 +994,7 @@ namespace TigerBeetle.Tests
         private const string TB_FILE = "dotnet-tests.tigerbeetle";
         private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
         private const string FORMAT = $"format --cluster=0 --replica=0 --replica-count=1 ./" + TB_FILE;
-        private const string START = $"start --addresses=" + TB_PORT + " --cache-grid=128MB ./" + TB_FILE;
+        private const string START = $"start --addresses=" + TB_PORT + " --cache-grid=256MB ./" + TB_FILE;
 
         private readonly Process process;
 
