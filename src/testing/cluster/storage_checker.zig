@@ -191,7 +191,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             checker.free_set.decode(@alignCast(free_set_buffer));
             defer checker.free_set.reset();
 
-            var checksum: u128 = 0;
+            var stream = vsr.ChecksumStream.init();
             var blocks_missing: usize = 0;
             var blocks_acquired = checker.free_set.blocks.iterator(.{});
             while (blocks_acquired.next()) |block_address_index| {
@@ -209,13 +209,13 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                 const block_header = schema.header_from_block(block);
                 assert(block_header.op == block_address);
 
-                checksum ^= vsr.checksum(block[0..block_header.size]);
+                stream.add(block[0..block_header.size]);
                 // Extra guard against identical blocks:
-                checksum ^= vsr.checksum(std.mem.asBytes(&block_address));
+                stream.add(std.mem.asBytes(&block_address));
             }
             assert(blocks_missing == 0);
 
-            return checksum;
+            return stream.checksum();
         }
     };
 }
