@@ -1218,51 +1218,6 @@ fn sum_overflows(comptime Int: type, a: Int, b: Int) bool {
     return false;
 }
 
-/// Optimizes for the common case, where the array is zeroed. Completely branchless.
-inline fn zeroed_16_bytes(a: [16]u8) bool {
-    const x: [2]u64 = @bitCast(a);
-    return (x[0] | x[1]) == 0;
-}
-
-inline fn zeroed_32_bytes(a: [32]u8) bool {
-    const x: [4]u64 = @bitCast(a);
-    return (x[0] | x[1] | x[2] | x[3]) == 0;
-}
-
-inline fn zeroed_48_bytes(a: [48]u8) bool {
-    const x: [6]u64 = @bitCast(a);
-    return (x[0] | x[1] | x[2] | x[3] | x[4] | x[5]) == 0;
-}
-
-/// Optimizes for the common case, where the arrays are equal. Completely branchless.
-inline fn equal_4_bytes(a: [4]u8, b: [4]u8) bool {
-    const x: u32 = @bitCast(a);
-    const y: u32 = @bitCast(b);
-    return x == y;
-}
-
-/// Optimizes for the common case, where the arrays are equal. Completely branchless.
-fn equal_32_bytes(a: [32]u8, b: [32]u8) bool {
-    const x: [4]u64 = @bitCast(a);
-    const y: [4]u64 = @bitCast(b);
-
-    const c = (x[0] ^ y[0]) | (x[1] ^ y[1]);
-    const d = (x[2] ^ y[2]) | (x[3] ^ y[3]);
-
-    return (c | d) == 0;
-}
-
-fn equal_48_bytes(a: [48]u8, b: [48]u8) bool {
-    const x: [6]u64 = @bitCast(a);
-    const y: [6]u64 = @bitCast(b);
-
-    const c = (x[0] ^ y[0]) | (x[1] ^ y[1]);
-    const d = (x[2] ^ y[2]) | (x[3] ^ y[3]);
-    const e = (x[4] ^ y[4]) | (x[5] ^ y[5]);
-
-    return (c | d | e) == 0;
-}
-
 const testing = std.testing;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
@@ -2176,59 +2131,6 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\ lookup_transfer T4 amount  5
         \\ commit lookup_transfers
     );
-}
-
-test "zeroed_32_bytes" {
-    try test_zeroed_n_bytes(32);
-}
-
-test "zeroed_48_bytes" {
-    try test_zeroed_n_bytes(48);
-}
-
-fn test_zeroed_n_bytes(comptime n: usize) !void {
-    const routine = switch (n) {
-        32 => zeroed_32_bytes,
-        48 => zeroed_48_bytes,
-        else => unreachable,
-    };
-    var a = [_]u8{0} ** n;
-    var i: usize = 0;
-    while (i < a.len) : (i += 1) {
-        a[i] = 1;
-        try expectEqual(false, routine(a));
-        a[i] = 0;
-    }
-    try expectEqual(true, routine(a));
-}
-
-test "equal_32_bytes" {
-    try test_equal_n_bytes(32);
-}
-
-test "equal_48_bytes" {
-    try test_equal_n_bytes(48);
-}
-
-fn test_equal_n_bytes(comptime n: usize) !void {
-    const routine = switch (n) {
-        32 => equal_32_bytes,
-        48 => equal_48_bytes,
-        else => unreachable,
-    };
-    var a = [_]u8{0} ** n;
-    var b = [_]u8{0} ** n;
-    var i: usize = 0;
-    while (i < a.len) : (i += 1) {
-        a[i] = 1;
-        try expectEqual(false, routine(a, b));
-        a[i] = 0;
-
-        b[i] = 1;
-        try expectEqual(false, routine(a, b));
-        b[i] = 0;
-    }
-    try expectEqual(true, routine(a, b));
 }
 
 test "StateMachine: ref all decls" {
