@@ -57,6 +57,8 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
 
         /// The level we are currently pulling tables from.
         level: u8 = 0,
+        /// The tree we are currently pulling tables from.
+        tree_id: u16 = Forest.tree_id_range.min,
 
         trees: TreeTableIterators = default: {
             var iterators: TreeTableIterators = undefined;
@@ -64,21 +66,15 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             break :default iterators;
         },
 
-        tree_id: ?u16 = null,
-
         pub fn next(iterator: *ForestTableIterator, forest: *Forest) ?TableInfo {
             while (iterator.level < constants.lsm_levels) : (iterator.level += 1) {
-                var tree_id_iterator: ?u16 = iterator.tree_id orelse Forest.tree_infos[0].tree_id;
-                while (tree_id_iterator) |tree_id_runtime| {
+                for (iterator.tree_id..Forest.tree_id_range.max + 1) |tree_id_runtime| {
+                    iterator.tree_id = @intCast(tree_id_runtime);
+
                     switch (tree_id_runtime) {
                         inline Forest.tree_id_range.min...Forest.tree_id_range.max => |tree_id| {
-                            const tree_info_index = comptime tree_info: {
-                                inline for (Forest.tree_infos, 0..) |tree_info, i| {
-                                    if (tree_info.tree_id == tree_id) break :tree_info i;
-                                } else unreachable;
-                            };
-
-                            const tree_info = Forest.tree_infos[tree_info_index];
+                            const tree_info = Forest.tree_infos[tree_id - Forest.tree_id_range.min];
+                            assert(tree_info.tree_id == tree_id);
 
                             if (iterator.next_from_tree(
                                 tree_info.tree_name,
@@ -87,19 +83,15 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                             )) |block| {
                                 return block;
                             }
-
-                            if (tree_info_index + 1 == Forest.tree_infos.len) {
-                                tree_id_iterator = null;
-                            } else {
-                                tree_id_iterator = Forest.tree_infos[tree_info_index + 1].tree_id;
-                            }
-                            iterator.tree_id = tree_id_iterator;
                         },
                         else => unreachable,
                     }
                 }
+                assert(iterator.tree_id == Forest.tree_id_range.max);
+
+                iterator.tree_id = Forest.tree_id_range.min;
             }
-            assert(iterator.tree_id == null);
+            assert(iterator.tree_id == Forest.tree_id_range.min);
 
             return null;
         }
