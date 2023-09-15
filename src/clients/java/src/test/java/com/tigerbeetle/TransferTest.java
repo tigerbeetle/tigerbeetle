@@ -17,16 +17,18 @@ public class TransferTest {
         assertEquals(0L, transfers.getDebitAccountId(UInt128.MostSignificant));
         assertEquals(0L, transfers.getCreditAccountId(UInt128.LeastSignificant));
         assertEquals(0L, transfers.getCreditAccountId(UInt128.MostSignificant));
-        assertEquals(0L, transfers.getUserData(UInt128.LeastSignificant));
-        assertEquals(0L, transfers.getUserData(UInt128.MostSignificant));
+        assertEquals(BigInteger.ZERO, transfers.getAmount());
         assertEquals(0L, transfers.getPendingId(UInt128.LeastSignificant));
         assertEquals(0L, transfers.getPendingId(UInt128.MostSignificant));
-        assertEquals((long) 0, transfers.getTimeout());
+        assertEquals(0L, transfers.getUserData128(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getUserData128(UInt128.MostSignificant));
+        assertEquals(0L, transfers.getUserData64());
+        assertEquals(0, transfers.getUserData32());
+        assertEquals(0, transfers.getTimeout());
         assertEquals(0, transfers.getLedger());
         assertEquals(0, transfers.getCode());
-        assertEquals((int) TransferFlags.NONE, transfers.getFlags());
-        assertEquals((long) 0, transfers.getAmount());
-        assertEquals((long) 0, transfers.getTimestamp());
+        assertEquals(TransferFlags.NONE, transfers.getFlags());
+        assertEquals(0L, transfers.getTimestamp());
     }
 
     @Test
@@ -183,105 +185,22 @@ public class TransferTest {
     }
 
     @Test
-    public void testUserData() {
+    public void testAmount() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
-        transfers.setUserData(100, 200);
-        assertEquals(100L, transfers.getUserData(UInt128.LeastSignificant));
-        assertEquals(200L, transfers.getUserData(UInt128.MostSignificant));
+        final var value = new BigInteger("123456789012345678901234567890");
+        transfers.setAmount(value);
+        assertEquals(value, transfers.getAmount());
     }
 
     @Test
-    public void testUserDataLong() {
+    public void testAmountLong() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
-        transfers.setUserData(100);
-        assertEquals(100L, transfers.getUserData(UInt128.LeastSignificant));
-        assertEquals(0L, transfers.getUserData(UInt128.MostSignificant));
-    }
-
-    @Test
-    public void testUserDataAsBytes() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        var userData = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
-        transfers.setUserData(userData);
-        assertArrayEquals(userData, transfers.getUserData());
-    }
-
-    @Test
-    public void testUserDataNull() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        byte[] userData = null;
-        transfers.setUserData(userData);
-        assertEquals(0L, transfers.getUserData(UInt128.LeastSignificant));
-        assertEquals(0L, transfers.getUserData(UInt128.MostSignificant));
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testUserDataInvalid() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
-        transfers.setUserData(id);
-        assert false;
-    }
-
-    @Test
-    public void testReserved() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        transfers.setReserved(100, 200);
-        assertEquals(100L, transfers.getReserved(UInt128.LeastSignificant));
-        assertEquals(200L, transfers.getReserved(UInt128.MostSignificant));
-    }
-
-    @Test
-    public void testReservedLong() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        transfers.setReserved(100);
-        assertEquals(100L, transfers.getReserved(UInt128.LeastSignificant));
-        assertEquals(0L, transfers.getReserved(UInt128.MostSignificant));
-    }
-
-    @Test
-    public void testReservedAsBytes() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        var reserved = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
-        transfers.setReserved(reserved);
-        assertArrayEquals(reserved, transfers.getReserved());
-    }
-
-    @Test
-    public void testReservedNull() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        byte[] reserved = null;
-        transfers.setReserved(reserved);
-        assertEquals(0L, transfers.getReserved(UInt128.LeastSignificant));
-        assertEquals(0L, transfers.getReserved(UInt128.MostSignificant));
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testReservedInvalid() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
-        transfers.setReserved(id);
-        assert false;
+        transfers.setAmount(999);
+        assertEquals(BigInteger.valueOf(999), transfers.getAmount());
     }
 
     @Test
@@ -336,12 +255,81 @@ public class TransferTest {
     }
 
     @Test
+    public void testUserData128Long() {
+        var transfers = new TransferBatch(2);
+        transfers.add();
+
+        transfers.setUserData128(100);
+        assertEquals(100L, transfers.getUserData128(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getUserData128(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testUserData128() {
+        var transfers = new TransferBatch(2);
+        transfers.add();
+
+        transfers.setUserData128(100, 200);
+        assertEquals(100L, transfers.getUserData128(UInt128.LeastSignificant));
+        assertEquals(200L, transfers.getUserData128(UInt128.MostSignificant));
+    }
+
+    @Test
+    public void testUserData128AsBytes() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6};
+        transfers.setUserData128(id);
+        assertArrayEquals(id, transfers.getUserData128());
+    }
+
+    @Test
+    public void testUserData128Null() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        byte[] userData = null;
+        transfers.setUserData128(userData);
+        assertEquals(0L, transfers.getUserData128(UInt128.LeastSignificant));
+        assertEquals(0L, transfers.getUserData128(UInt128.MostSignificant));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testUserData128Invalid() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        var id = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 0};
+        transfers.setUserData128(id);
+        assert false;
+    }
+
+    @Test
+    public void testUserData64() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setUserData64(1000L);
+        assertEquals(1000L, transfers.getUserData64());
+    }
+
+    @Test
+    public void testUserData32() {
+        var transfers = new TransferBatch(1);
+        transfers.add();
+
+        transfers.setUserData32(100);
+        assertEquals(100, transfers.getUserData32());
+    }
+
+    @Test
     public void testTimeout() {
         var transfers = new TransferBatch(1);
         transfers.add();
 
         transfers.setTimeout(9999);
-        assertEquals((long) 9999, transfers.getTimeout());
+        assertEquals(9999, transfers.getTimeout());
     }
 
     @Test
@@ -420,33 +408,6 @@ public class TransferTest {
 
         transfers.setFlags(60000);
         assertEquals(60000, transfers.getFlags());
-    }
-
-    @Test
-    public void testAmount() {
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        transfers.setAmount(999);
-        assertEquals((long) 999, transfers.getAmount());
-    }
-
-    @Test
-    public void testAmountOverflow() {
-
-        // Java long is always signed
-        // Larger values must be reinterpreted as signed BigIntegers
-
-        final BigInteger UNSIGNED_LONG_MASK =
-                BigInteger.ONE.shiftLeft(Long.SIZE).subtract(BigInteger.ONE);
-        BigInteger largeAmount = BigInteger.valueOf(Long.MAX_VALUE + 999).and(UNSIGNED_LONG_MASK);
-
-        var transfers = new TransferBatch(1);
-        transfers.add();
-
-        transfers.setAmount(largeAmount.longValue());
-        assertEquals(largeAmount,
-                BigInteger.valueOf(transfers.getAmount()).and(UNSIGNED_LONG_MASK));
     }
 
     @Test

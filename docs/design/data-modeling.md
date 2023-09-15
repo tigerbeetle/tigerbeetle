@@ -47,19 +47,19 @@ ledger might look something like this:
 
 ## `user_data`
 
-`user_data` is the most flexible field in the schema (for both
-[accounts](../reference/accounts.md#user_data) and [transfers](../reference/transfers.md#user_data)).
-`user_data`'s contents are arbitrary, interpreted only by the application.
+`user_data_128`, `user_data_64` and `user_data_32` are the most flexible fields in the schema (for both
+[accounts](../reference/accounts.md) and [transfers](../reference/transfers.md)).
+Each `user_data` field's contents are arbitrary, interpreted only by the application.
 
-`user_data` is indexed for efficient point and range queries.
+Each `user_data` field is indexed for efficient point and range queries.
 
 Example uses:
 
-- Set `user_data` to a "foreign key" — that is, an identifier of a corresponding object within
-  another database.
-- Set `user_data` to a group identifier for objects that will be queried together.
-- Set `user_data` to a transfer or account `id`.
-  (TODO: Can we use this for join queries via the query API, or must the application implement them?)
+- Set `user_data_128` or `user_data_64` to a "foreign key" — that is, the identifier of a corresponding object within
+  a [control plane](https://en.wikipedia.org/wiki/Control_plane) database.
+- Set `user_data_64` to an external timestamp if you need to model [bitemporality](https://en.wikipedia.org/wiki/Bitemporal_modeling).
+- Set `user_data_32` to the identifier of a timezone or locale where the event originated.
+- Set `user_data_128`, `user_data_64` or `user_data_32` to a group identifier for objects that will be queried together.
 
 ## `id`
 

@@ -31,6 +31,30 @@ const TypeMapping = struct {
     }
 };
 
+/// Some 128-bit fields are better represented as `java.math.BigInteger`,
+/// otherwise they are considered IDs and exposed as an array of bytes.
+const big_integer = struct {
+    const fields = .{
+        "credits_posted",
+        "credits_pending",
+        "debits_posted",
+        "debits_pending",
+        "amount",
+    };
+
+    fn contains(comptime field: []const u8) bool {
+        return comptime blk: for (fields) |value| {
+            if (std.mem.eql(u8, field, value)) break :blk true;
+        } else false;
+    }
+
+    fn contains_any(comptime type_info: anytype) bool {
+        return comptime blk: for (type_info.fields) |field| {
+            if (contains(field.name)) break :blk true;
+        } else false;
+    }
+};
+
 const type_mappings = .{
     .{ tb.AccountFlags, TypeMapping{
         .name = "AccountFlags",
@@ -170,7 +194,7 @@ fn emit_enum(
         \\{[visibility]s}enum {[name]s} {{
         \\
     , .{
-        .visibility = if (mapping.visibility == .internal) @as([]const u8, "") else "public ",
+        .visibility = if (mapping.visibility == .internal) "" else "public ",
         .notice = auto_generated_code_notice,
         .name = mapping.name,
     });
@@ -242,7 +266,7 @@ fn emit_packed_enum(
         \\    {[int_type]s} NONE = ({[int_type]s}) 0;
         \\
     , .{
-        .visibility = if (mapping.visibility == .internal) @as([]const u8, "") else "public ",
+        .visibility = if (mapping.visibility == .internal) "" else "public ",
         .notice = auto_generated_code_notice,
         .name = mapping.name,
         .int_type = int_type,
@@ -331,6 +355,7 @@ fn emit_batch(
         \\package com.tigerbeetle;
         \\
         \\import java.nio.ByteBuffer;
+        \\{[big_integer_import]s}
         \\
         \\{[visibility]s}final class {[name]s} extends Batch {{
         \\
@@ -339,10 +364,14 @@ fn emit_batch(
         \\
         \\
     , .{
-        .visibility = if (mapping.visibility == .internal) @as([]const u8, "") else "public ",
+        .visibility = if (mapping.visibility == .internal) "" else "public ",
         .notice = auto_generated_code_notice,
         .name = mapping.name,
         .size = size,
+        .big_integer_import = if (big_integer.contains_any(type_info))
+            "import java.math.BigInteger;"
+        else
+            "",
     });
 
     // Fields offset:
@@ -443,7 +472,7 @@ fn emit_batch_accessors(
             \\
             \\
         , .{
-            .visibility = if (is_private) @as([]const u8, "") else "public ",
+            .visibility = if (is_private) "" else "public ",
             .property = to_case(field.name, .pascal),
             .array_len = @typeInfo(field.type).Array.len,
         });
@@ -456,12 +485,12 @@ fn emit_batch_accessors(
             \\
             \\
         , .{
-            .visibility = if (is_private) @as([]const u8, "") else "public ",
+            .visibility = if (is_private) "" else "public ",
             .java_type = java_type(field.type),
             .property = to_case(field.name, .pascal),
             .batch_type = batch_type(field.type),
             .return_expression = comptime if (trait.is(.Enum)(field.type))
-                @as([]const u8, get_mapped_type_name(field.type).? ++ ".fromValue(value)")
+                get_mapped_type_name(field.type).? ++ ".fromValue(value)"
             else
                 "value",
         });
@@ -508,7 +537,7 @@ fn emit_batch_accessors(
         , .{
             .property = to_case(field.name, .pascal),
             .param_name = to_case(field.name, .camel),
-            .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
+            .visibility = if (is_private or is_read_only) "" else "public ",
             .array_len = @typeInfo(field.type).Array.len,
         });
     } else {
@@ -521,20 +550,21 @@ fn emit_batch_accessors(
         , .{
             .property = to_case(field.name, .pascal),
             .param_name = to_case(field.name, .camel),
-            .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
+            .visibility = if (is_private or is_read_only) "" else "public ",
             .batch_type = batch_type(field.type),
             .java_type = java_type(field.type),
             .value_expression = if (comptime trait.is(.Enum)(field.type))
-                @as([]const u8, ".value")
+                ".value"
             else
                 "",
         });
     }
 }
 
-// We offer 2 APIs for dealing with Uint128 in Java:
-// - A byte array, heap-allocated;
-// - Two 64-bit integers (long), stack-allocated;
+// We offer multiple APIs for dealing with Uint128 in Java:
+// - A byte array, heap-allocated, for ids and user_data;
+// - A BigInteger, heap-allocated, for balances and amounts;
+// - Two 64-bit integers (long), stack-allocated, for both cases;
 fn emit_u128_batch_accessors(
     buffer: *std.ArrayList(u8),
     comptime mapping: TypeMapping,
@@ -544,40 +574,80 @@ fn emit_u128_batch_accessors(
     const is_private = comptime mapping.is_private(field.name);
     const is_read_only = comptime mapping.is_read_only(field.name);
 
-    // Get array:
-    try buffer.writer().print(
-        \\    /**
-        \\     * @return an array of 16 bytes representing the 128-bit value.
-        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
-        \\
-    , .{});
-
-    if (mapping.docs_link) |docs_link| {
+    if (big_integer.contains(field.name)) {
+        // Get BigInteger:
         try buffer.writer().print(
-            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
-            \\     */
-            \\
-        , .{
-            .docs_link = docs_link,
-            .field_name = field.name,
-        });
-    } else {
-        try buffer.writer().print(
-            \\     */
+            \\    /**
+            \\     * @return a {{@link java.math.BigInteger}} representing the 128-bit value.
+            \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
             \\
         , .{});
-    }
 
-    try buffer.writer().print(
-        \\    {[visibility]s}byte[] get{[property]s}() {{
-        \\        return getUInt128(at(Struct.{[property]s}));
-        \\    }}
-        \\
-        \\
-    , .{
-        .visibility = if (is_private) @as([]const u8, "") else "public ",
-        .property = to_case(field.name, .pascal),
-    });
+        if (mapping.docs_link) |docs_link| {
+            try buffer.writer().print(
+                \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
+                \\     */
+                \\
+            , .{
+                .docs_link = docs_link,
+                .field_name = field.name,
+            });
+        } else {
+            try buffer.writer().print(
+                \\     */
+                \\
+            , .{});
+        }
+
+        try buffer.writer().print(
+            \\    {[visibility]s}BigInteger get{[property]s}() {{
+            \\        final var index = at(Struct.{[property]s});
+            \\        return UInt128.asBigInteger(
+            \\            getUInt128(index, UInt128.LeastSignificant), 
+            \\            getUInt128(index, UInt128.MostSignificant));
+            \\    }}
+            \\
+            \\
+        , .{
+            .visibility = if (is_private) "" else "public ",
+            .property = to_case(field.name, .pascal),
+        });
+    } else {
+        // Get array:
+        try buffer.writer().print(
+            \\    /**
+            \\     * @return an array of 16 bytes representing the 128-bit value.
+            \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+            \\
+        , .{});
+
+        if (mapping.docs_link) |docs_link| {
+            try buffer.writer().print(
+                \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
+                \\     */
+                \\
+            , .{
+                .docs_link = docs_link,
+                .field_name = field.name,
+            });
+        } else {
+            try buffer.writer().print(
+                \\     */
+                \\
+            , .{});
+        }
+
+        try buffer.writer().print(
+            \\    {[visibility]s}byte[] get{[property]s}() {{
+            \\        return getUInt128(at(Struct.{[property]s}));
+            \\    }}
+            \\
+            \\
+        , .{
+            .visibility = if (is_private) "" else "public ",
+            .property = to_case(field.name, .pascal),
+        });
+    }
 
     // Get long:
     try buffer.writer().print(
@@ -613,49 +683,90 @@ fn emit_u128_batch_accessors(
         \\
         \\
     , .{
-        .visibility = if (is_private) @as([]const u8, "") else "public ",
+        .visibility = if (is_private) "" else "public ",
         .property = to_case(field.name, .pascal),
     });
 
-    // Set array:
-    try buffer.writer().print(
-        \\    /**
-        \\     * @param {[param_name]s} an array of 16 bytes representing the 128-bit value.
-        \\     * @throws IllegalArgumentException if {{@code {[param_name]s}}} is not 16 bytes long.
-        \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
-        \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
-        \\
-    , .{
-        .param_name = to_case(field.name, .camel),
-    });
-
-    if (mapping.docs_link) |docs_link| {
+    if (big_integer.contains(field.name)) {
+        // Set BigInteger:
         try buffer.writer().print(
-            \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
-            \\     */
+            \\    /**
+            \\     * @param {[param_name]s} a {{@link java.math.BigInteger}} representing the 128-bit value.
+            \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+            \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
             \\
         , .{
-            .docs_link = docs_link,
-            .field_name = field.name,
+            .param_name = to_case(field.name, .camel),
+        });
+
+        if (mapping.docs_link) |docs_link| {
+            try buffer.writer().print(
+                \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
+                \\     */
+                \\
+            , .{
+                .docs_link = docs_link,
+                .field_name = field.name,
+            });
+        } else {
+            try buffer.writer().print(
+                \\     */
+                \\
+            , .{});
+        }
+
+        try buffer.writer().print(
+            \\    {[visibility]s}void set{[property]s}(final BigInteger {[param_name]s}) {{
+            \\        putUInt128(at(Struct.{[property]s}), UInt128.asBytes({[param_name]s}));
+            \\    }}
+            \\
+            \\
+        , .{
+            .visibility = if (is_private or is_read_only) "" else "public ",
+            .property = to_case(field.name, .pascal),
+            .param_name = to_case(field.name, .camel),
         });
     } else {
+        // Set array:
         try buffer.writer().print(
-            \\     */
+            \\    /**
+            \\     * @param {[param_name]s} an array of 16 bytes representing the 128-bit value.
+            \\     * @throws IllegalArgumentException if {{@code {[param_name]s}}} is not 16 bytes long.
+            \\     * @throws IllegalStateException if not at a {{@link #isValidPosition valid position}}.
+            \\     * @throws IllegalStateException if a {{@link #isReadOnly() read-only}} batch.
             \\
-        , .{});
-    }
+        , .{
+            .param_name = to_case(field.name, .camel),
+        });
 
-    try buffer.writer().print(
-        \\    {[visibility]s}void set{[property]s}(final byte[] {[param_name]s}) {{
-        \\        putUInt128(at(Struct.{[property]s}), {[param_name]s});
-        \\    }}
-        \\
-        \\
-    , .{
-        .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
-        .property = to_case(field.name, .pascal),
-        .param_name = to_case(field.name, .camel),
-    });
+        if (mapping.docs_link) |docs_link| {
+            try buffer.writer().print(
+                \\     * @see <a href="https://docs.tigerbeetle.com/{[docs_link]s}{[field_name]s}">{[field_name]s}</a>
+                \\     */
+                \\
+            , .{
+                .docs_link = docs_link,
+                .field_name = field.name,
+            });
+        } else {
+            try buffer.writer().print(
+                \\     */
+                \\
+            , .{});
+        }
+
+        try buffer.writer().print(
+            \\    {[visibility]s}void set{[property]s}(final byte[] {[param_name]s}) {{
+            \\        putUInt128(at(Struct.{[property]s}), {[param_name]s});
+            \\    }}
+            \\
+            \\
+        , .{
+            .visibility = if (is_private or is_read_only) "" else "public ",
+            .property = to_case(field.name, .pascal),
+            .param_name = to_case(field.name, .camel),
+        });
+    }
 
     // Set long:
     try buffer.writer().print(
@@ -690,7 +801,7 @@ fn emit_u128_batch_accessors(
         \\
         \\
     , .{
-        .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
+        .visibility = if (is_private or is_read_only) "" else "public ",
         .property = to_case(field.name, .pascal),
     });
 
@@ -726,7 +837,7 @@ fn emit_u128_batch_accessors(
         \\
         \\
     , .{
-        .visibility = if (is_private or is_read_only) @as([]const u8, "") else "public ",
+        .visibility = if (is_private or is_read_only) "" else "public ",
         .property = to_case(field.name, .pascal),
     });
 }

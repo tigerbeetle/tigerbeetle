@@ -19,9 +19,10 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: |
+          # Min supported and latest versions.
+          dotnet-version:
             3.1.x
-            6.0.x
+            7.0.x
 
       - name: Install zig
         run: ./scripts/install_zig.sh
@@ -87,6 +88,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ macos-latest, windows-latest]
+        # Min supported, LTS and latest versions.
         dotnet: [ 7.0.x, 6.0.x, 3.1.x]
     runs-on: ${{ matrix.os }}
     steps:
@@ -118,6 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Min supported, LTS and latest versions, gnu and musl.
         tag:
           - "7.0"
           - "6.0"
@@ -183,9 +186,10 @@ jobs:
 
       - uses: actions/setup-dotnet@v3
         with:
+          # Min supported and latest versions.
           dotnet-version: |
             3.1.x
-            6.0.x
+            7.0.x
 
       - uses: actions/download-artifact@v3
         with:
@@ -217,9 +221,10 @@ jobs:
 
       - uses: actions/setup-dotnet@v3
         with:
+          # Min supported and latest versions.
           dotnet-version: |
             3.1.x
-            6.0.x
+            7.0.x
 
       # Override Zig cache so jobs don't compete.
       - if: matrix.os != 'windows-latest'

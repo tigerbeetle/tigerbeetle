@@ -7,6 +7,7 @@ import "C"
 import (
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"unsafe"
 )
 
@@ -32,6 +33,13 @@ func (value Uint128) String() string {
 		lastNonZero++
 	}
 	return s[lastNonZero:]
+}
+
+func (value Uint128) BigInt() big.Int {
+	ret := big.Int{}
+	bytes := value.Bytes()
+	ret.SetBytes(bytes[:])
+	return ret
 }
 
 // BytesToUint128 converts a raw [16]byte value to Uint128.
@@ -61,4 +69,16 @@ func HexStringToUint128(value string) (Uint128, error) {
 	}
 
 	return BytesToUint128(bytes), nil
+}
+
+// BigIntToUint128 converts a [math/big.Int] to a Uint128.
+func BigIntToUint128(value big.Int) Uint128 {
+	bytes := value.Bytes()
+	return BytesToUint128(*(*[16]byte)(bytes))
+}
+
+// ToUint128 converts a integer to a Uint128.
+func ToUint128(value int) Uint128 {
+	values := [2]uint64{uint64(value), 0}
+	return *(*Uint128)(unsafe.Pointer(&values[0]))
 }

@@ -40,9 +40,9 @@ using (var client = new Client(
         Id = 1,
         DebitAccountId = 1,
         CreditAccountId = 2,
+        Amount = 500,
         Ledger = 1,
         Code = 1,
-        Amount = 500,
         Flags = TransferFlags.Pending,
     }
     });
@@ -53,7 +53,7 @@ using (var client = new Client(
     }
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
@@ -98,7 +98,7 @@ using (var client = new Client(
     }
 
     // Validate the contents of all transfers
-    var transfers = client.LookupTransfers(new TigerBeetle.UInt128[] { 1, 2 });
+    var transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
     Debug.Assert(transfers.Length == 2);
     foreach (var transfer in transfers)
     {
@@ -117,7 +117,7 @@ using (var client = new Client(
     }
 
     // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {

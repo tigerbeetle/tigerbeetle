@@ -23,32 +23,35 @@ const client = createClient({
 })
 
 const TRANSFER_SIZE = 128
-const Zeroed48Bytes = Buffer.alloc(48, 0)
 const accountA: Account = {
   id: 137n,
-  user_data: 0n,
-  reserved: Zeroed48Bytes,
-  ledger: 1,
-  code: 1,
-  flags: 0,
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,
+  credits_posted: 0n,  
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 1,
+  flags: 0,
   timestamp: 0n,
 }
 
 const accountB: Account = {
   id: 138n,
-  user_data: 0n,
-  reserved: Zeroed48Bytes,
-  ledger: 1,
-  code: 1,
-  flags: 0,
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,
+  credits_posted: 0n,  
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  reserved: 0,
+  ledger: 1,
+  code: 1,
+  flags: 0,
   timestamp: 0n,
 }
 
@@ -74,17 +77,18 @@ const rawCreateTransfers = async (batch: Buffer): Promise<CreateTransfersError[]
  * This encoding function is only for this benchmark script.
  * 
  * ID_OFFSET                    = 0                 (0   -> 16)
- * DEBIT_ACCOUNT_ID_OFFSET      = 0   + 16 = 16     (16  -> 32)
- * CREDIT_ACCOUNT_ID_OFFSET     = 16  + 16 = 32     (32  -> 48)
- * USER_DATA_OFFSET             = 32  + 16 = 48     (48  -> 64)
- * RESERVED_OFFSET              = 48  + 16 = 64     (64  -> 80)
- * PENDING_ID_OFFSET            = 64  + 16 = 80     (80  -> 96)
- * TIMEOUT_OFFSET               = 96  + 8  = 104    (96  -> 104)
- * LEDGER_OFFSET                = 104 + 4  = 108    (104 -> 108)
- * CODE_OFFSET                  = 108 + 2  = 110    (108 -> 110)
- * FLAGS_OFFSET                 = 110 + 2  = 112    (110 -> 112)
- * AMOUNT_OFFSET                = 112 + 8  = 120    (112 -> 120)
- * TIMESTAMP                    = 120 + 8  = 128    (120 -> 128)
+ * DEBIT_ACCOUNT_ID_OFFSET      = 0   + 16 =  16    (16  -> 32)
+ * CREDIT_ACCOUNT_ID_OFFSET     = 16  + 16 =  32    (32  -> 48)
+ * AMOUNT_OFFSET                = 48  + 16 =  64    (48  -> 64)
+ * PENDING_ID_OFFSET            = 64  + 16 =  80    (64  -> 80)
+ * USER_DATA_128_OFFSET         = 80  + 16 =  96    (80  -> 96)
+ * USER_DATA_64_OFFSET          = 96  +  8 = 104    (96  -> 104)
+ * USER_DATA_32_OFFSET          = 104 +  4 = 108    (104 -> 108)
+ * TIMEOUT_OFFSET               = 108 +  4 = 112    (108 -> 112)
+ * LEDGER_OFFSET                = 112 +  4 = 116    (112 -> 116)
+ * CODE_OFFSET                  = 116 +  2 = 118    (116 -> 118)
+ * FLAGS_OFFSET                 = 118 +  2 = 120    (118 -> 120)
+ * TIMESTAMP                    = 120 +  8 = 128    (120 -> 128)
  */ 
 const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): void => {
   assert(BigInt((offset + TRANSFER_SIZE)) <= BigInt(output.length), `Transfer ${transfer} exceeds buffer of ${output}!`)
@@ -92,14 +96,15 @@ const encodeTransfer = (transfer: Transfer, offset: number, output: Buffer): voi
   output.writeBigUInt64LE(transfer.id, offset)
   output.writeBigUInt64LE(transfer.debit_account_id, offset + 16)
   output.writeBigUInt64LE(transfer.credit_account_id, offset + 32)
-  output.writeBigUInt64LE(transfer.user_data, offset + 48)
-  output.writeBigUInt64LE(transfer.reserved, offset + 64)
-  output.writeBigUInt64LE(transfer.pending_id, offset + 80)
-  output.writeBigUInt64LE(transfer.timeout, offset + 96)
-  output.writeUInt32LE(transfer.ledger, offset + 104)
-  output.writeUInt32LE(transfer.code, offset + 108)
-  output.writeUInt32LE(transfer.flags, offset + 110)
-  output.writeBigUInt64LE(transfer.amount, offset + 112)
+  output.writeBigUInt64LE(transfer.amount, offset + 48)
+  output.writeBigUInt64LE(transfer.pending_id, offset + 64)
+  output.writeBigUInt64LE(transfer.user_data_128, offset + 80)
+  output.writeBigUInt64LE(transfer.user_data_64, offset + 96)
+  output.writeInt32LE(transfer.user_data_32, offset + 104)  
+  output.writeInt32LE(transfer.timeout, offset + 108)
+  output.writeUInt32LE(transfer.ledger, offset + 112)
+  output.writeUInt32LE(transfer.code, offset + 116)
+  output.writeUInt32LE(transfer.flags, offset + 118)
   output.writeBigUInt64LE(transfer.timestamp, offset + 120)
 }
 
@@ -125,14 +130,15 @@ const runBenchmarkRawRequest = async () => {
           id: BigInt(count),
           debit_account_id: accountA.id,
           credit_account_id: accountB.id,
-          user_data: 0n,
-          reserved: 0n,
+          amount: 1n,
           pending_id: 0n,
-          timeout: IS_TWO_PHASE_TRANSFER ? BigInt(2e9) : 0n,
+          user_data_128: 0n,
+          user_data_64: 0n,
+          user_data_32: 0,
+          timeout: IS_TWO_PHASE_TRANSFER ? 2 : 0,
           ledger: 1,
           code: 1,
           flags: IS_TWO_PHASE_TRANSFER ? TransferFlags.pending : 0,
-          amount: 1n,
           timestamp: 0n,
         },
         i * TRANSFER_SIZE,
@@ -145,14 +151,15 @@ const runBenchmarkRawRequest = async () => {
             id: BigInt((MAX_TRANSFERS + count)),
             debit_account_id: accountA.id,
             credit_account_id: accountB.id,
-            user_data: 0n,
-            reserved: 0n,
+            amount: 1n,
             pending_id: BigInt(count),
-            timeout: 0n,
+            user_data_128: 0n,
+            user_data_64: 0n,
+            user_data_32: 0,
+            timeout: 0,
             ledger: 1,
             code: 1,
             flags: TransferFlags.post_pending_transfer,
-            amount: 1n,
             timestamp: 0n,
           },
           i * TRANSFER_SIZE,
@@ -222,14 +229,15 @@ const runBenchmark = async () => {
         id: BigInt(count),
         debit_account_id: accountA.id,
         credit_account_id: accountB.id,
+        amount: 1n,        
         pending_id: 0n,
+        user_data_128: 0n,
+        user_data_64: 0n,
+        user_data_32: 0,
+        timeout: IS_TWO_PHASE_TRANSFER ? 2 : 0,
         code: 1,
         ledger: 1,
-        reserved: 0n,
-        user_data: 0n,
         flags: IS_TWO_PHASE_TRANSFER ? TransferFlags.pending : 0,
-        amount: 1n,
-        timeout: IS_TWO_PHASE_TRANSFER ? BigInt(2e9) : 0n,
         timestamp: 0n,
       })
     
@@ -238,14 +246,15 @@ const runBenchmark = async () => {
           id: BigInt(MAX_TRANSFERS + count),
           debit_account_id: accountA.id,
           credit_account_id: accountB.id,
+          amount: 1n,
           pending_id: BigInt(count),
+          user_data_128: 0n,
+          user_data_64: 0n,
+          user_data_32: 0,
+          timeout: 0,
           code: 1,
           ledger: 1,
-          reserved: 0n,
-          user_data: 0n,
           flags: IS_TWO_PHASE_TRANSFER ? TransferFlags.post_pending_transfer : 0,
-          amount: 1n,
-          timeout: 0n,
           timestamp: 0n,
         })
       }

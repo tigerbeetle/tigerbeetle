@@ -2,7 +2,6 @@ package tigerbeetle_go
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,11 +20,12 @@ const (
 	TIGERBEETLE_REPLICA_COUNT uint32 = 1
 )
 
-func toU128(value string) *types.Uint128 {
-	src := []byte(value)
-	dst := make([]byte, unsafe.Sizeof(types.Uint128{}))
-	hex.Encode(dst[:], src)
-	return (*types.Uint128)(unsafe.Pointer(&dst[0]))
+func HexStringToUint128(value string) types.Uint128 {
+	number, err := types.HexStringToUint128(value)
+	if err != nil {
+		panic(err)
+	}
+	return number
 }
 
 func WithClient(s testing.TB, withClient func(Client)) {
@@ -37,7 +37,7 @@ func WithClient(s testing.TB, withClient func(Client)) {
 	}
 
 	addressArg := "--addresses=" + TIGERBEETLE_PORT
-	cacheSizeArg := "--cache-grid=128MB"
+	cacheSizeArg := "--cache-grid=256MB"
 	replicaArg := fmt.Sprintf("--replica=%d", TIGERBEETLE_REPLICA_ID)
 	replicaCountArg := fmt.Sprintf("--replica-count=%d", TIGERBEETLE_REPLICA_COUNT)
 	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)
@@ -91,12 +91,12 @@ func TestClient(s *testing.T) {
 
 func doTestClient(s *testing.T, client Client) {
 	accountA := types.Account{
-		ID:     *toU128("a"),
+		ID:     HexStringToUint128("a"),
 		Ledger: 1,
 		Code:   1,
 	}
 	accountB := types.Account{
-		ID:     *toU128("b"),
+		ID:     HexStringToUint128("b"),
 		Ledger: 1,
 		Code:   2,
 	}
@@ -127,10 +127,10 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, uint32(1), accA.Ledger)
 		assert.Equal(t, uint16(1), accA.Code)
 		assert.Equal(t, uint16(0), accA.Flags)
-		assert.Equal(t, uint64(0), accA.DebitsPending)
-		assert.Equal(t, uint64(0), accA.DebitsPosted)
-		assert.Equal(t, uint64(0), accA.CreditsPending)
-		assert.Equal(t, uint64(0), accA.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accA.DebitsPending)
+		assert.Equal(t, types.ToUint128(0), accA.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accA.CreditsPending)
+		assert.Equal(t, types.ToUint128(0), accA.CreditsPosted)
 		assert.NotEqual(t, uint64(0), accA.Timestamp)
 		assert.Equal(t, unsafe.Sizeof(accA), 128)
 
@@ -138,20 +138,20 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Equal(t, uint32(1), accB.Ledger)
 		assert.Equal(t, uint16(2), accB.Code)
 		assert.Equal(t, uint16(0), accB.Flags)
-		assert.Equal(t, uint64(0), accB.DebitsPending)
-		assert.Equal(t, uint64(0), accB.DebitsPosted)
-		assert.Equal(t, uint64(0), accB.CreditsPending)
-		assert.Equal(t, uint64(0), accB.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accB.DebitsPending)
+		assert.Equal(t, types.ToUint128(0), accB.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accB.CreditsPending)
+		assert.Equal(t, types.ToUint128(0), accB.CreditsPosted)
 		assert.NotEqual(t, uint64(0), accB.Timestamp)
 	})
 
 	s.Run("can create a transfer", func(t *testing.T) {
 		results, err := client.CreateTransfers([]types.Transfer{
 			{
-				ID:              *toU128("a"),
+				ID:              HexStringToUint128("a"),
 				CreditAccountID: accountA.ID,
 				DebitAccountID:  accountB.ID,
-				Amount:          100,
+				Amount:          types.ToUint128(100),
 				Ledger:          1,
 				Code:            1,
 			},
@@ -169,33 +169,33 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, uint64(0), accountA.DebitsPending)
-		assert.Equal(t, uint64(0), accountA.DebitsPosted)
-		assert.Equal(t, uint64(0), accountA.CreditsPending)
-		assert.Equal(t, uint64(100), accountA.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accountA.DebitsPending)
+		assert.Equal(t, types.ToUint128(0), accountA.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accountA.CreditsPending)
+		assert.Equal(t, types.ToUint128(100), accountA.CreditsPosted)
 
 		accountB = accounts[1]
-		assert.Equal(t, uint64(0), accountB.DebitsPending)
-		assert.Equal(t, uint64(100), accountB.DebitsPosted)
-		assert.Equal(t, uint64(0), accountB.CreditsPending)
-		assert.Equal(t, uint64(0), accountB.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
+		assert.Equal(t, types.ToUint128(100), accountB.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
+		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
 	})
 
 	s.Run("can create linked transfers", func(t *testing.T) {
 		transfer1 := types.Transfer{
-			ID:              *toU128("d"),
+			ID:              HexStringToUint128("d"),
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
-			Amount:          50,
+			Amount:          types.ToUint128(50),
 			Flags:           types.TransferFlags{Linked: true}.ToUint16(), // points to transfer 2
 			Code:            1,
 			Ledger:          1,
 		}
 		transfer2 := types.Transfer{
-			ID:              *toU128("d"),
+			ID:              HexStringToUint128("d"),
 			CreditAccountID: accountA.ID,
 			DebitAccountID:  accountB.ID,
-			Amount:          50,
+			Amount:          types.ToUint128(50),
 			// Does not have linked flag as it is the end of the chain.
 			// This will also cause it to fail as this is now a duplicate with different flags
 			Flags:  0,
@@ -218,16 +218,16 @@ func doTestClient(s *testing.T, client Client) {
 		assert.Len(t, accounts, 2)
 
 		accountA = accounts[0]
-		assert.Equal(t, uint64(100), accountA.CreditsPosted)
-		assert.Equal(t, uint64(0), accountA.CreditsPending)
-		assert.Equal(t, uint64(0), accountA.DebitsPosted)
-		assert.Equal(t, uint64(0), accountA.DebitsPending)
+		assert.Equal(t, types.ToUint128(100), accountA.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accountA.CreditsPending)
+		assert.Equal(t, types.ToUint128(0), accountA.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accountA.DebitsPending)
 
 		accountB = accounts[1]
-		assert.Equal(t, uint64(0), accountB.CreditsPosted)
-		assert.Equal(t, uint64(0), accountB.CreditsPending)
-		assert.Equal(t, uint64(100), accountB.DebitsPosted)
-		assert.Equal(t, uint64(0), accountB.DebitsPending)
+		assert.Equal(t, types.ToUint128(0), accountB.CreditsPosted)
+		assert.Equal(t, types.ToUint128(0), accountB.CreditsPending)
+		assert.Equal(t, types.ToUint128(100), accountB.DebitsPosted)
+		assert.Equal(t, types.ToUint128(0), accountB.DebitsPending)
 	})
 }
 

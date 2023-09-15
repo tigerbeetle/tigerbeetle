@@ -6,6 +6,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.math.BigInteger;
 import org.junit.Test;
 
 /**
@@ -694,29 +695,36 @@ public class BatchTest {
 
     private static void setAccount(AccountBatch batch, DummyAccountDto account) {
         batch.setId(account.idLeastSignificant, account.idMostSignificant);
-        batch.setUserData(account.userDataLeastSignificant, account.userDataMostSignificant);
-        batch.setLedger(account.ledger);
-        batch.setCode(account.code);
-        batch.setFlags(account.flags);
         batch.setDebitsPending(account.debitsPending);
         batch.setDebitsPosted(account.debitsPosted);
         batch.setCreditsPending(account.creditsPending);
         batch.setCreditsPosted(account.creditsPosted);
+        batch.setUserData128(account.userData128LeastSignificant,
+                account.userData128MostSignificant);
+        batch.setUserData64(account.userData64);
+        batch.setUserData32(account.userData32);
+        batch.setLedger(account.ledger);
+        batch.setCode(account.code);
+        batch.setFlags(account.flags);
         batch.setTimestamp(account.timestamp);
     }
 
     private static void assertAccounts(DummyAccountDto account, AccountBatch batch) {
         assertEquals(account.idLeastSignificant, batch.getId(UInt128.LeastSignificant));
         assertEquals(account.idMostSignificant, batch.getId(UInt128.MostSignificant));
-        assertEquals(account.userDataLeastSignificant, batch.getUserData(UInt128.LeastSignificant));
-        assertEquals(account.userDataMostSignificant, batch.getUserData(UInt128.MostSignificant));
-        assertEquals(account.ledger, batch.getLedger());
-        assertEquals(account.code, (short) batch.getCode());
-        assertEquals(account.flags, (short) batch.getFlags());
         assertEquals(account.debitsPending, batch.getDebitsPending());
         assertEquals(account.debitsPosted, batch.getDebitsPosted());
         assertEquals(account.creditsPending, batch.getCreditsPending());
         assertEquals(account.creditsPosted, batch.getCreditsPosted());
+        assertEquals(account.userData128LeastSignificant,
+                batch.getUserData128(UInt128.LeastSignificant));
+        assertEquals(account.userData128MostSignificant,
+                batch.getUserData128(UInt128.MostSignificant));
+        assertEquals(account.userData64, batch.getUserData64());
+        assertEquals(account.userData32, batch.getUserData32());
+        assertEquals(account.ledger, batch.getLedger());
+        assertEquals(account.code, (short) batch.getCode());
+        assertEquals(account.flags, (short) batch.getFlags());
         assertEquals(account.timestamp, batch.getTimestamp());
     }
 
@@ -731,18 +739,21 @@ public class BatchTest {
                 batch.getDebitAccountId(UInt128.LeastSignificant));
         assertEquals(transfer.debitAccountIdMostSignificant,
                 batch.getDebitAccountId(UInt128.MostSignificant));
-        assertEquals(transfer.userDataLeastSignificant,
-                batch.getUserData(UInt128.LeastSignificant));
-        assertEquals(transfer.userDataMostSignificant, batch.getUserData(UInt128.MostSignificant));
-        assertEquals(transfer.ledger, batch.getLedger());
-        assertEquals(transfer.code, (short) batch.getCode());
-        assertEquals(transfer.flags, (short) batch.getFlags());
         assertEquals(transfer.amount, batch.getAmount());
-        assertEquals(transfer.timeout, batch.getTimeout());
         assertEquals(transfer.pendingIdLeastSignificant,
                 batch.getPendingId(UInt128.LeastSignificant));
         assertEquals(transfer.pendingIdMostSignificant,
                 batch.getPendingId(UInt128.MostSignificant));
+        assertEquals(transfer.userData128LeastSignificant,
+                batch.getUserData128(UInt128.LeastSignificant));
+        assertEquals(transfer.userData128MostSignificant,
+                batch.getUserData128(UInt128.MostSignificant));
+        assertEquals(transfer.userData64, batch.getUserData64());
+        assertEquals(transfer.userData32, batch.getUserData32());
+        assertEquals(transfer.ledger, batch.getLedger());
+        assertEquals(transfer.code, (short) batch.getCode());
+        assertEquals(transfer.flags, (short) batch.getFlags());
+        assertEquals(transfer.timeout, batch.getTimeout());
         assertEquals(transfer.timestamp, batch.getTimestamp());
     }
 
@@ -752,13 +763,16 @@ public class BatchTest {
                 transfer.debitAccountIdMostSignificant);
         batch.setCreditAccountId(transfer.creditAccountIdLeastSignificant,
                 transfer.creditAccountIdMostSignificant);
-        batch.setUserData(transfer.userDataLeastSignificant, transfer.userDataMostSignificant);
+        batch.setAmount(transfer.amount);
+        batch.setPendingId(transfer.pendingIdLeastSignificant, transfer.pendingIdMostSignificant);
+        batch.setUserData128(transfer.userData128LeastSignificant,
+                transfer.userData128MostSignificant);
+        batch.setUserData64(transfer.userData64);
+        batch.setUserData32(transfer.userData32);
         batch.setLedger(transfer.ledger);
         batch.setCode(transfer.code);
         batch.setFlags(transfer.flags);
-        batch.setAmount(transfer.amount);
         batch.setTimeout(transfer.timeout);
-        batch.setPendingId(transfer.pendingIdLeastSignificant, transfer.pendingIdMostSignificant);
         batch.setTimestamp(transfer.timestamp);
     }
 
@@ -772,15 +786,17 @@ public class BatchTest {
     private static final class DummyAccountDto {
         public long idLeastSignificant;
         public long idMostSignificant;
-        public long userDataLeastSignificant;
-        public long userDataMostSignificant;
+        public BigInteger creditsPosted;
+        public BigInteger creditsPending;
+        public BigInteger debitsPosted;
+        public BigInteger debitsPending;
+        public long userData128LeastSignificant;
+        public long userData128MostSignificant;
+        public long userData64;
+        public int userData32;
         public int ledger;
         public short code;
         public short flags;
-        public long creditsPosted;
-        public long creditsPending;
-        public long debitsPosted;
-        public long debitsPending;
         public long timestamp;
     }
 
@@ -791,15 +807,17 @@ public class BatchTest {
         private long debitAccountIdMostSignificant;
         private long creditAccountIdLeastSignificant;
         private long creditAccountIdMostSignificant;
-        private long userDataLeastSignificant;
-        private long userDataMostSignificant;
+        private BigInteger amount;
         private long pendingIdLeastSignificant;
         private long pendingIdMostSignificant;
-        private long timeout;
+        private long userData128LeastSignificant;
+        private long userData128MostSignificant;
+        private long userData64;
+        private int userData32;
+        private int timeout;
         private int ledger;
         private short code;
         private short flags;
-        private long amount = 0;
         private long timestamp;
     }
 
@@ -808,29 +826,33 @@ public class BatchTest {
         account1 = new DummyAccountDto();
         account1.idLeastSignificant = 10;
         account1.idMostSignificant = 100;
-        account1.userDataLeastSignificant = 1000;
-        account1.userDataMostSignificant = 1100;
+        account1.debitsPending = BigInteger.valueOf(100);
+        account1.debitsPosted = BigInteger.valueOf(200);
+        account1.creditsPending = BigInteger.valueOf(300);
+        account1.creditsPosted = BigInteger.valueOf(400);
+        account1.userData128LeastSignificant = 1000;
+        account1.userData128MostSignificant = 1100;
+        account1.userData64 = 2000;
+        account1.userData32 = 3000;
         account1.ledger = 720;
         account1.code = 1;
         account1.flags = AccountFlags.LINKED;
-        account1.debitsPending = 100;
-        account1.debitsPosted = 200;
-        account1.creditsPending = 300;
-        account1.creditsPosted = 400;
         account1.timestamp = 999;
 
         account2 = new DummyAccountDto();
         account2.idLeastSignificant = 20;
         account2.idMostSignificant = 200;
-        account2.userDataLeastSignificant = 2000;
-        account2.userDataMostSignificant = 2200;
+        account2.debitsPending = BigInteger.valueOf(10);
+        account2.debitsPosted = BigInteger.valueOf(20);
+        account2.creditsPending = BigInteger.valueOf(30);
+        account2.creditsPosted = BigInteger.valueOf(40);
+        account2.userData128LeastSignificant = 2000;
+        account2.userData128MostSignificant = 2200;
+        account2.userData64 = 4000;
+        account2.userData32 = 5000;
         account2.ledger = 730;
         account2.code = 2;
         account2.flags = AccountFlags.LINKED | AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS;
-        account2.debitsPending = 10;
-        account2.debitsPosted = 20;
-        account2.creditsPending = 30;
-        account2.creditsPosted = 40;
         account2.timestamp = 99;
 
         // Mimic the the binary response
@@ -838,30 +860,33 @@ public class BatchTest {
 
         // Item 1
         dummyAccountsStream.putLong(10).putLong(100); // Id
-        dummyAccountsStream.putLong(1000).putLong(1100); // UserData
-        dummyAccountsStream.put(new byte[48]); // Reserved
+        dummyAccountsStream.putLong(100).putLong(0); // DebitsPending
+        dummyAccountsStream.putLong(200).putLong(0); // DebitsPosted
+        dummyAccountsStream.putLong(300).putLong(0); // CreditPending
+        dummyAccountsStream.putLong(400).putLong(0); // CreditsPosted
+        dummyAccountsStream.putLong(1000).putLong(1100); // UserData128
+        dummyAccountsStream.putLong(2000); // UserData64
+        dummyAccountsStream.putInt(3000); // UserData32
+        dummyAccountsStream.putInt(0); // Reserved
         dummyAccountsStream.putInt(720); // Ledger
         dummyAccountsStream.putShort((short) 1); // Code
         dummyAccountsStream.putShort((short) 1); // Flags
-        dummyAccountsStream.putLong(100); // DebitsPending
-        dummyAccountsStream.putLong(200); // DebitsPosted
-        dummyAccountsStream.putLong(300); // CreditPending
-        dummyAccountsStream.putLong(400); // CreditsPosted
         dummyAccountsStream.putLong(999); // Timestamp
 
         // Item 2
         dummyAccountsStream.putLong(20).putLong(200); // Id
-        dummyAccountsStream.putLong(2000).putLong(2200); // UserData
-        dummyAccountsStream.put(new byte[48]); // Reserved
+        dummyAccountsStream.putLong(10).putLong(0); // DebitsPending
+        dummyAccountsStream.putLong(20).putLong(0);; // DebitsPosted
+        dummyAccountsStream.putLong(30).putLong(0);; // CreditPending
+        dummyAccountsStream.putLong(40).putLong(0);; // CreditsPosted
+        dummyAccountsStream.putLong(2000).putLong(2200); // UserData128
+        dummyAccountsStream.putLong(4000); // UserData64
+        dummyAccountsStream.putInt(5000); // UserData32
+        dummyAccountsStream.putInt(0); // Reserved
         dummyAccountsStream.putInt(730); // Ledger
         dummyAccountsStream.putShort((short) 2); // Code
         dummyAccountsStream.putShort((short) 5); // Flags
-        dummyAccountsStream.putLong(10); // DebitsPending
-        dummyAccountsStream.putLong(20); // DebitsPosted
-        dummyAccountsStream.putLong(30); // CreditPending
-        dummyAccountsStream.putLong(40); // CreditsPosted
         dummyAccountsStream.putLong(99); // Timestamp
-
 
         transfer1 = new DummyTransferDto();
         transfer1.idLeastSignificant = 5000;
@@ -870,9 +895,11 @@ public class BatchTest {
         transfer1.debitAccountIdMostSignificant = 100;
         transfer1.creditAccountIdLeastSignificant = 2000;
         transfer1.creditAccountIdMostSignificant = 200;
-        transfer1.userDataLeastSignificant = 3000;
-        transfer1.userDataMostSignificant = 300;
-        transfer1.amount = 1000;
+        transfer1.amount = BigInteger.valueOf(1000);
+        transfer1.userData128LeastSignificant = 3000;
+        transfer1.userData128MostSignificant = 300;
+        transfer1.userData64 = 6000;
+        transfer1.userData32 = 7000;
         transfer1.code = 10;
         transfer1.ledger = 720;
 
@@ -883,15 +910,17 @@ public class BatchTest {
         transfer2.debitAccountIdMostSignificant = 101;
         transfer2.creditAccountIdLeastSignificant = 2001;
         transfer2.creditAccountIdMostSignificant = 201;
-        transfer2.userDataLeastSignificant = 3001;
-        transfer2.userDataMostSignificant = 301;
-        transfer2.amount = 200;
+        transfer2.amount = BigInteger.valueOf(200);
+        transfer2.pendingIdLeastSignificant = transfer1.idLeastSignificant;
+        transfer2.pendingIdMostSignificant = transfer1.idMostSignificant;
+        transfer2.userData128LeastSignificant = 3001;
+        transfer2.userData128MostSignificant = 301;
+        transfer2.userData64 = 8000;
+        transfer2.userData32 = 9000;
+        transfer2.timeout = 2500;
         transfer2.code = 20;
         transfer2.ledger = 100;
         transfer2.flags = TransferFlags.PENDING | TransferFlags.LINKED;
-        transfer2.pendingIdLeastSignificant = transfer1.idLeastSignificant;
-        transfer2.pendingIdMostSignificant = transfer1.idMostSignificant;
-        transfer2.timeout = 2500;
         transfer2.timestamp = 900;
 
         // Mimic the the binary response
@@ -901,28 +930,30 @@ public class BatchTest {
         dummyTransfersStream.putLong(5000).putLong(500); // Id
         dummyTransfersStream.putLong(1000).putLong(100); // CreditAccountId
         dummyTransfersStream.putLong(2000).putLong(200); // DebitAccountId
-        dummyTransfersStream.putLong(3000).putLong(300); // UserData
-        dummyTransfersStream.put(new byte[16]); // Reserved
+        dummyTransfersStream.putLong(1000).putLong(0); // Amount
         dummyTransfersStream.putLong(0).putLong(0); // PendingId
-        dummyTransfersStream.putLong(0); // Timeout
+        dummyTransfersStream.putLong(3000).putLong(300); // UserData128
+        dummyTransfersStream.putLong(6000); // UserData64
+        dummyTransfersStream.putInt(7000); // UserData32
+        dummyTransfersStream.putInt(0); // Timeout
         dummyTransfersStream.putInt(720); // Ledger
         dummyTransfersStream.putShort((short) 10); // Code
         dummyTransfersStream.putShort((short) 0); // Flags
-        dummyTransfersStream.putLong(1000); // Amount
         dummyTransfersStream.putLong(0); // Timestamp
 
         // Item 2
         dummyTransfersStream.putLong(5001).putLong(501); // Id
         dummyTransfersStream.putLong(1001).putLong(101); // CreditAccountId
         dummyTransfersStream.putLong(2001).putLong(201); // DebitAccountId
-        dummyTransfersStream.putLong(3001).putLong(301); // UserData
-        dummyTransfersStream.put(new byte[16]); // Reserved
+        dummyTransfersStream.putLong(200).putLong(0); // Amount
         dummyTransfersStream.putLong(5000).putLong(500); // PendingId
-        dummyTransfersStream.putLong(2500); // Timeout
+        dummyTransfersStream.putLong(3001).putLong(301); // UserData128
+        dummyTransfersStream.putLong(8000); // UserData64
+        dummyTransfersStream.putInt(9000); // UserData32
+        dummyTransfersStream.putInt(2500); // Timeout
         dummyTransfersStream.putInt(100); // Ledger
         dummyTransfersStream.putShort((short) 20); // Code
         dummyTransfersStream.putShort((short) 3); // Flags
-        dummyTransfersStream.putLong(200); // Amount
         dummyTransfersStream.putLong(900); // Timestamp
 
         createAccountResult1 = CreateAccountResult.Ok;

@@ -269,8 +269,10 @@ const Benchmark = struct {
         {
             b.batch_accounts.appendAssumeCapacity(.{
                 .id = @bitReverse(@as(u128, b.account_index + 1)),
-                .user_data = 0,
-                .reserved = [_]u8{0} ** 48,
+                .user_data_128 = 0,
+                .user_data_64 = 0,
+                .user_data_32 = 0,
+                .reserved = 0,
                 .ledger = 2,
                 .code = 1,
                 .flags = .{},
@@ -327,8 +329,9 @@ const Benchmark = struct {
                 .id = @bitReverse(@as(u128, b.transfer_index + 1)),
                 .debit_account_id = @bitReverse(@as(u128, debit_account_index + 1)),
                 .credit_account_id = @bitReverse(@as(u128, credit_account_index + 1)),
-                .user_data = random.int(u128),
-                .reserved = 0,
+                .user_data_128 = random.int(u128),
+                .user_data_64 = random.int(u64),
+                .user_data_32 = random.int(u32),
                 // TODO Benchmark posting/voiding pending transfers.
                 .pending_id = 0,
                 .timeout = 0,

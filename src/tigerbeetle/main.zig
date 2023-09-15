@@ -26,6 +26,7 @@ const AOF = vsr.aof.AOF;
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+const Grid = vsr.GridType(vsr.storage.Storage);
 
 const AOFType = if (constants.aof_record) AOF else void;
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOFType);
@@ -154,8 +155,20 @@ const Command = struct {
         }
 
         const grid_cache_size = @as(u64, args.cache_grid_blocks) * constants.block_size;
+        const grid_cache_size_min = constants.block_size * Grid.Cache.value_count_max_multiple;
+
+        // The amount of bytes in `--cache-grid` must be a multiple of
+        // `constants.block_size` and `SetAssociativeCache.value_count_max_multiple`,
+        // and it may have been converted to zero if a smaller value is passed in.
+        if (grid_cache_size == 0) {
+            fatal("Grid cache must be greater than {}MB. See --cache-grid", .{
+                @divExact(grid_cache_size_min, 1024 * 1024),
+            });
+        }
+        assert(grid_cache_size >= grid_cache_size_min);
+
         const grid_cache_size_warn = 1024 * 1024 * 1024;
-        if (grid_cache_size <= grid_cache_size_warn) {
+        if (grid_cache_size < grid_cache_size_warn) {
             log_main.warn("Grid cache size of {}MB is small. See --cache-grid", .{
                 @divExact(grid_cache_size, 1024 * 1024),
             });
