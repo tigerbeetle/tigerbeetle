@@ -85,9 +85,7 @@ pub fn build(b: *std.Build) !void {
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
     link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target);
-
-    // tigerbeetle.build_id = true;
-    // tigerbeetle.trace_pc_guard = true;
+    link_voidstar(tigerbeetle);
 
     {
         const run_cmd = b.addRunArtifact(tigerbeetle);
@@ -625,10 +623,8 @@ pub fn build(b: *std.Build) !void {
         });
         exe.addModule("vsr", vsr_module);
         exe.addModule("vsr_options", vsr_options_module);
-        // exe.setTarget(target);
-        // exe.setBuildMode(mode);
-        // exe.build_id = true;
-        // exe.trace_pc_guard = true;
+
+        link_voidstar(exe);
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_api", "Antithesis API");
@@ -642,8 +638,8 @@ pub fn build(b: *std.Build) !void {
         });
         exe.addModule("vsr", vsr_module);
         exe.addModule("vsr_options", vsr_options_module);
-        // exe.setTarget(target);
-        // exe.setBuildMode(mode);
+
+        link_voidstar(exe);
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_workload", "Antithesis Workload");
@@ -653,6 +649,14 @@ pub fn build(b: *std.Build) !void {
     // benchmark.addModule("vsr", vsr_module);
     // benchmark.addModule("vsr_options", vsr_options_module);
 
+}
+
+fn link_voidstar(exe: *std.Build.LibExeObjStep) void {
+    exe.trace_pc_guard = true;
+    exe.build_id = .fast;
+    exe.linkLibC();
+    exe.linkSystemLibrary("voidstar");
+    exe.addLibraryPath(.{ .path = "tools/antithesis/lib" });
 }
 
 fn link_tracer_backend(
