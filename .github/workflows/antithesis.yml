@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - run: sudo apt-get -y update && sudo apt-get -y install clang lldb lld
       - run: cd /tmp && wget https://ziglang.org/download/0.11.0/zig-0.11.0.tar.xz && tar -xf zig-0.11.0.tar.xz && cd zig-0.11.0 && mkdir build && cd build && cmake .. && make -j4
       - run: /tmp/zig-0.11.0/build/stage3/bin/zig build antithesis_workload antithesis_api install
       - run: ./tools/antithesis/scripts/build.sh ${{ github.sha }}
