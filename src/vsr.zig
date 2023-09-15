@@ -48,6 +48,7 @@ pub const SuperBlockType = superblock.SuperBlockType;
 pub const SuperBlockTrailer = superblock.Trailer;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
+pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
