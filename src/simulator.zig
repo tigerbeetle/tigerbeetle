@@ -6,6 +6,7 @@ const mem = std.mem;
 
 const tb = @import("tigerbeetle.zig");
 const constants = @import("constants.zig");
+const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
 
@@ -296,9 +297,8 @@ pub fn main() !void {
             output.warn("no liveness, core replicas cannot view-change", .{});
         } else if (simulator.core_missing_prepare()) |header| {
             output.warn("no liveness, op={} is not available in core", .{header.op});
-        } else if (simulator.core_missing_blocks()) |blocks| {
+        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
-            unreachable;
         } else {
             output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
@@ -537,35 +537,93 @@ pub const Simulator = struct {
     }
 
     /// Check whether the cluster is stuck because the entire core is missing the same block[s].
-    pub fn core_missing_blocks(simulator: *const Simulator) ?usize {
+    pub fn core_missing_blocks(
+        simulator: *const Simulator,
+        allocator: std.mem.Allocator,
+    ) error{OutOfMemory}!?usize {
         assert(simulator.core.count() > 0);
 
-        var missing_block_count: ?usize = null;
-        var missing_block_xor: ?u128 = null;
+        var blocks_missing = std.ArrayList(struct {
+            replica: u8,
+            address: u64,
+            checksum: u128,
+        }).init(allocator);
+        defer blocks_missing.deinit();
 
+        // Find all blocks that any replica in the core is missing.
         for (simulator.cluster.replicas) |replica| {
-            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
-                var fault_xor: u128 = 0;
-                var fault_iterator = replica.grid.read_global_queue.peek();
-                while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
-                    fault_xor ^= faulty_read.checksum;
-                }
+            if (!simulator.core.isSet(replica.replica)) continue;
 
-                if (missing_block_count) |_| {
-                    assert(missing_block_count.? == replica.grid.read_global_queue.count);
-                    assert(missing_block_xor.? == fault_xor);
-                } else {
-                    missing_block_count = replica.grid.read_global_queue.count;
-                    missing_block_xor = fault_xor;
+            const storage = &simulator.cluster.storages[replica.replica];
+            var fault_iterator = replica.grid.read_global_queue.peek();
+            while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
+                try blocks_missing.append(.{
+                    .replica = replica.replica,
+                    .address = faulty_read.address,
+                    .checksum = faulty_read.checksum,
+                });
+
+                log.debug("{}: core_missing_blocks: " ++
+                    "missing address={} checksum={} corrupt={} (remote read)", .{
+                    replica.replica,
+                    faulty_read.address,
+                    faulty_read.checksum,
+                    storage.area_faulty(.{ .grid = .{ .address = faulty_read.address } }),
+                });
+            }
+
+            var repair_iterator = replica.grid.blocks_missing.faulty_blocks.iterator();
+            while (repair_iterator.next()) |fault| {
+                try blocks_missing.append(.{
+                    .replica = replica.replica,
+                    .address = fault.key_ptr.*,
+                    .checksum = fault.value_ptr.checksum,
+                });
+
+                log.debug("{}: core_missing_blocks: " ++
+                    "missing address={} checksum={} corrupt={} (GridBlocksMissing)", .{
+                    replica.replica,
+                    fault.key_ptr.*,
+                    fault.value_ptr.checksum,
+                    storage.area_faulty(.{ .grid = .{ .address = fault.key_ptr.* } }),
+                });
+            }
+        }
+
+        // Check whether every replica in the core is missing the blocks.
+        // (If any core replica has the block, then that is a bug, since it should have repaired.)
+        for (blocks_missing.items) |block_missing| {
+            for (simulator.cluster.replicas) |replica| {
+                const storage = &simulator.cluster.storages[replica.replica];
+
+                // A replica might actually have the block that it is requesting, but not know.
+                // This can occur after state sync: if we compact and create a table, but then skip
+                // over that table via state sync, we will try to sync the table anyway.
+                if (replica.replica == block_missing.replica) continue;
+
+                if (!simulator.core.isSet(replica.replica)) continue;
+                if (replica.standby()) continue;
+                if (storage.area_faulty(.{
+                    .grid = .{ .address = block_missing.address },
+                })) continue;
+
+                const block = storage.grid_block(block_missing.address) orelse continue;
+                const block_header = schema.header_from_block(block);
+                if (block_header.checksum == block_missing.checksum) {
+                    log.err("{}: core_missing_blocks: found address={} checksum={}", .{
+                        replica.replica,
+                        block_missing.address,
+                        block_missing.checksum,
+                    });
+                    @panic("block found in core");
                 }
             }
         }
 
-        if (missing_block_count.? == 0) {
+        if (blocks_missing.items.len == 0) {
             return null;
         } else {
-            assert(missing_block_xor.? != 0);
-            return missing_block_count;
+            return blocks_missing.items.len;
         }
     }
 

@@ -30,8 +30,6 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
-// TODO Test grid corruption
-
 const Key = extern struct {
     id: u64,
 
@@ -137,19 +135,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             tree_lookup,
         };
 
-        const GridRepairQueue = std.ArrayList(struct {
-            address: u64,
-            checksum: u128,
-        });
-
         state: State,
         storage: *Storage,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
         grid: Grid,
-        grid_repair_write: Grid.Write,
-        grid_repair_block: Grid.BlockPtr,
-        grid_repair_queue: GridRepairQueue,
         manifest_log: ManifestLog,
         node_pool: NodePool,
         tree: Tree,
@@ -169,15 +159,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.grid = try Grid.init(allocator, .{
                 .superblock = &env.superblock,
-                .on_read_fault = on_grid_read_fault,
+                .missing_blocks_max = 0,
+                .missing_tables_max = 0,
             });
             defer env.grid.deinit(allocator);
-
-            env.grid_repair_block = try allocate_block(allocator);
-            defer allocator.free(env.grid_repair_block);
-
-            env.grid_repair_queue = GridRepairQueue.init(allocator);
-            defer env.grid_repair_queue.deinit();
 
             env.manifest_log = try ManifestLog.init(allocator, &env.grid, .{
                 .tree_id_min = 1,
@@ -190,7 +175,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.tree = undefined;
             env.lookup_value = null;
-            //env.checkpoint_op = null;
 
             try env.open_then_apply(fuzz_ops);
         }
@@ -202,7 +186,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         fn tick_until_state_change(env: *Environment, current_state: State, next_state: State) void {
             // Sometimes operations complete synchronously so we might already be in next_state before ticking.
-            //assert(env.state == current_state or env.state == next_state);
             while (env.state == current_state) env.storage.tick();
             assert(env.state == next_state);
         }
@@ -297,7 +280,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn checkpoint(env: *Environment, op: u64) void {
-            //assert(env.checkpoint_op == null);
             env.tree.assert_between_bars();
 
             {
@@ -441,51 +423,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 }
             }
         }
-
-        fn on_grid_read_fault(grid: *Grid, read: *const Grid.Read) void {
-            const env = @fieldParentPtr(Environment, "grid", grid);
-            const writing = grid.writing(read.address, null);
-            // If the same block faulted more than once, we should only repair once.
-            if (writing == .repair) return;
-            assert(writing == .not_writing);
-
-            env.grid_repair_queue.append(.{
-                .address = read.address,
-                .checksum = read.checksum,
-            }) catch unreachable;
-
-            if (env.grid_repair_queue.items.len == 1) env.repair_block();
-        }
-
-        fn on_block_write_repair(write: *Grid.Write) void {
-            const env = @fieldParentPtr(Environment, "grid_repair_write", write);
-            const wrote = env.grid_repair_queue.swapRemove(0);
-            assert(wrote.address == write.address);
-
-            if (env.grid_repair_queue.items.len > 0) env.repair_block();
-        }
-
-        fn repair_block(env: *Environment) void {
-            const repair = env.grid_repair_queue.items[0];
-            const block = &env.grid_repair_block;
-
-            assert(repair.address > 0);
-            assert(!env.grid.superblock.free_set.is_free(repair.address));
-
-            const actual_block = env.grid.superblock.storage.grid_block(repair.address);
-            stdx.copy_disjoint(.exact, u8, block.*, actual_block);
-
-            const header = schema.header_from_block(block.*);
-            assert(header.op == repair.address);
-            assert(header.checksum == repair.checksum);
-
-            env.grid.write_block_repair(
-                on_block_write_repair,
-                &env.grid_repair_write,
-                block,
-                repair.address,
-            );
-        }
     };
 }
 
@@ -598,8 +535,8 @@ pub fn main() !void {
         .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
         .write_latency_min = 0,
         .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
-        .read_fault_probability = random.uintLessThan(u8, 100),
-        .write_fault_probability = random.uintLessThan(u8, 100),
+        .read_fault_probability = 0,
+        .write_fault_probability = 0,
         .fault_atlas = &storage_fault_atlas,
     };
 

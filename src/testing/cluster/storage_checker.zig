@@ -26,6 +26,7 @@ const log = std.log.scoped(.storage_checker);
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
+const schema = @import("../../lsm/schema.zig");
 
 /// After each compaction half measure, save the cumulative hash of all acquired grid blocks.
 ///
@@ -51,32 +52,38 @@ const CheckpointArea = enum {
 
 const Checkpoint = std.enums.EnumArray(CheckpointArea, u128);
 
+// TODO not generic over Storage
 pub fn StorageCheckerType(comptime Storage: type) type {
     return struct {
         const Self = @This();
         const SuperBlock = vsr.SuperBlockType(Storage);
 
-        allocator: std.mem.Allocator,
         compactions: Compactions,
         checkpoints: Checkpoints,
 
-        pub fn init(allocator: std.mem.Allocator) Self {
+        free_set: SuperBlock.FreeSet,
+
+        pub fn init(allocator: std.mem.Allocator) !Self {
             var compactions = Compactions.init(allocator);
             errdefer compactions.deinit();
 
             var checkpoints = Checkpoints.init(allocator);
             errdefer checkpoints.deinit();
 
+            var free_set = try SuperBlock.FreeSet.init(allocator, vsr.superblock.grid_blocks_max);
+            errdefer free_set.deinit(allocator);
+
             return Self{
-                .allocator = allocator,
                 .compactions = compactions,
                 .checkpoints = checkpoints,
+                .free_set = free_set,
             };
         }
 
-        pub fn deinit(checker: *Self) void {
-            checker.compactions.deinit();
+        pub fn deinit(checker: *Self, allocator: std.mem.Allocator) void {
+            checker.free_set.deinit(allocator);
             checker.checkpoints.deinit();
+            checker.compactions.deinit();
         }
 
         pub fn replica_checkpoint(checker: *Self, superblock: *const SuperBlock) !void {
@@ -91,7 +98,7 @@ pub fn StorageCheckerType(comptime Storage: type) type {
             const syncing = superblock.working.vsr_state.sync_op_max > 0;
             if (!syncing) {
                 checkpoint_actual.put(.client_replies, checksum_client_replies(superblock));
-                checkpoint_actual.put(.grid, 0);
+                checkpoint_actual.put(.grid, checker.checksum_grid(superblock));
             }
 
             for (std.enums.values(CheckpointArea)) |area| {
@@ -170,6 +177,45 @@ pub fn StorageCheckerType(comptime Storage: type) type {
                 }
             }
             return checksum;
+        }
+
+        fn checksum_grid(checker: *Self, superblock: *const SuperBlock) u128 {
+            assert(superblock.working.vsr_state.sync_op_max == 0);
+
+            const free_set_zone = vsr.SuperBlockTrailer.free_set.zone();
+            const free_set_offset = vsr.Zone.superblock.offset(free_set_zone.start_for_copy(0));
+            const free_set_size = superblock.working.free_set_size;
+            const free_set_buffer = superblock.storage.memory[free_set_offset..][0..free_set_size];
+            assert(vsr.checksum(free_set_buffer) == superblock.working.free_set_checksum);
+
+            checker.free_set.decode(@alignCast(free_set_buffer));
+            defer checker.free_set.reset();
+
+            var stream = vsr.ChecksumStream.init();
+            var blocks_missing: usize = 0;
+            var blocks_acquired = checker.free_set.blocks.iterator(.{});
+            while (blocks_acquired.next()) |block_address_index| {
+                const block_address: u64 = block_address_index + 1;
+                const block = superblock.storage.grid_block(block_address) orelse {
+                    log.err("{}: checksum_grid: missing block_address={}", .{
+                        superblock.replica_index.?,
+                        block_address,
+                    });
+
+                    blocks_missing += 1;
+                    continue;
+                };
+
+                const block_header = schema.header_from_block(block);
+                assert(block_header.op == block_address);
+
+                stream.add(block[0..block_header.size]);
+                // Extra guard against identical blocks:
+                stream.add(std.mem.asBytes(&block_address));
+            }
+            assert(blocks_missing == 0);
+
+            return stream.checksum();
         }
     };
 }

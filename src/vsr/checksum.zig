@@ -48,13 +48,30 @@ fn seed_init() void {
 // Lazily initialize the Aegis State instead of recomputing it on each call to checksum().
 // Then, make a copy of the state and use that to hash the source input bytes.
 pub fn checksum(source: []const u8) u128 {
-    seed_once.call();
-    var state_copy = seed_state;
-    state_copy.update(source);
-    var result: u128 = undefined;
-    state_copy.final(mem.asBytes(&result));
-    return result;
+    var stream = ChecksumStream.init();
+    stream.add(source);
+    return stream.checksum();
 }
+
+pub const ChecksumStream = struct {
+    state: Aegis128LMac_128,
+
+    pub fn init() ChecksumStream {
+        seed_once.call();
+        return ChecksumStream{ .state = seed_state };
+    }
+
+    pub fn add(stream: *ChecksumStream, bytes: []const u8) void {
+        stream.state.update(bytes);
+    }
+
+    pub fn checksum(stream: *ChecksumStream) u128 {
+        var result: u128 = undefined;
+        stream.state.final(mem.asBytes(&result));
+        stream.* = undefined;
+        return result;
+    }
+};
 
 // Note: these test vectors are not independent --- there are test vectors in AEAD papers, but they
 // don't zero all of (nonce, key, secret message). However, the as underlying AEAD implementation

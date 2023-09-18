@@ -17,13 +17,14 @@ In the context of state sync, "state" refers to:
 3. the superblock client sessions
 4. the superblock `vsr_state.commit_min`
 5. the superblock `vsr_state.commit_min_checksum`
-6. the grid (LSM data; acquired blocks only)
-7. client replies
+6. the grid (manifest blocks)
+7. the grid (LSM table data; acquired blocks only)
+8. client replies
 
 State sync consists of three protocols:
-- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
-- [Sync Grid](./vsr.md#protocol-sync-grid) (syncs 6)
-- [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 7)
+- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-6)
+- [Sync Tables](./vsr.md#protocol-sync-tables) (syncs 7)
+- [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 8)
 
 The target of superblock-sync is the latest checkpoint of the healthy cluster.
 When we catch up to the latest checkpoint (or very close to it), then we can transition back to a healthy state.
@@ -61,7 +62,7 @@ Checkpoints:
     - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
     - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
 10. Sync-superblock protocol is done.
-11. Repair [replies](./vsr.md#protocol-sync-client-replies) and [tables](./vsr.md#protocol-sync-grid) that were created within the `sync_op_{min,max}` range.
+11. Repair [replies](./vsr.md#protocol-sync-client-replies) and [tables](./vsr.md#protocol-sync-tables) that were created within the `sync_op_{min,max}` range.
 12. Update the superblock with:
     - Set `vsr_state.sync_op_min = 0`
     - Set `vsr_state.sync_op_max = 0`

@@ -49,8 +49,8 @@ Storage:
 |                `request_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                      `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |                     `eviction` | primary |       client | [Client](#protocol-client)                                                       |
-|               `request_blocks` | replica |      replica | [Sync Grid](#protocol-sync-grid), [Repair Grid](#protocol-repair-grid)           |
-|                        `block` | replica |      replica | [Sync Grid](#protocol-sync-grid), [Repair Grid](#protocol-repair-grid)           |
+|               `request_blocks` | replica |      replica | [Sync Tables](#protocol-sync-tables), [Repair Grid](#protocol-repair-grid)       |
+|                        `block` | replica |      replica | [Sync Tables](#protocol-sync-tables), [Repair Grid](#protocol-repair-grid)       |
 |        `request_sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 |        `request_sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 | `request_sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
@@ -271,7 +271,7 @@ Sync missed client replies using [Protocol: Repair Grid](#protocol-repair-client
 (Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
 See [State Sync](./sync.md) for details.
 
-## Protocol: Sync Grid
+## Protocol: Sync Tables
 
 Sync missed LSM table blocks using [Protocol: Repair Grid](#protocol-repair-grid).
 
