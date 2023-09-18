@@ -657,10 +657,6 @@ pub fn build(b: *std.Build) !void {
         const build_step = b.step("antithesis_workload", "Antithesis Workload");
         build_step.dependOn(&install_step.step);
     }
-
-    // benchmark.addModule("vsr", vsr_module);
-    // benchmark.addModule("vsr_options", vsr_options_module);
-
 }
 
 /// Sets up build options needed for running inside Antithesis.

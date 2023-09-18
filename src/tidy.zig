@@ -179,6 +179,8 @@ const naughty_list = [_][]const u8{
     "test/priority_queue.zig",
     "test/storage.zig",
     "test/time.zig",
+    "testing/antithesis/api.zig",
+    "testing/antithesis/workload.zig",
     "testing/aof.zig",
     "testing/cluster.zig",
     "testing/cluster/network.zig",

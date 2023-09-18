@@ -396,7 +396,7 @@ const Workload = struct {
             .id = self.random_uuid.int(u128),
             .debit_account_id = index_to_id(account_src),
             .credit_account_id = index_to_id(account_dst),
-            .user_data = 0,
+            .user_data_128 = 0,
             .reserved = 0,
             .pending_id = 0,
             .timeout = 0,
@@ -474,7 +474,7 @@ const Workload = struct {
             log.info("on_lookup_accounts actual {}", .{account_actual});
 
             assert(account_expect.id == account_actual.id);
-            assert(account_expect.user_data == account_actual.user_data);
+            assert(account_expect.user_data_128 == account_actual.user_data_128);
             assert(account_expect.ledger == account_actual.ledger);
             assert(account_expect.code == account_actual.code);
             assert(account_expect.flags.linked == account_actual.flags.linked);
