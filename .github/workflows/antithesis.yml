@@ -5,6 +5,8 @@ on:
     secrets:
       ANTITHESIS_KEY:
         required: true
+      ANTITHESIS_HTTP_AUTH:
+        required: true
 
   # Just for testing - remove when done.
   pull_request:
@@ -19,10 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      # Zig needs LLVM 16 to build; the default Ubuntu packages are only at 14.
       - run: |
           wget https://apt.llvm.org/llvm.sh && \
           chmod +x llvm.sh && sudo ./llvm.sh 16 \
           && sudo apt-get install -y clang-16 clang-tools-16 clang-16-doc libclang-common-16-dev libclang-16-dev libclang1-16 lld-16 liblld-16-dev
+      # Build Zig and apply our custom patch enabling -ftrace-pc-guard. This and
+      # the above step can be removed once we upstream this.
       - run: |
           cd /tmp && \
           wget https://ziglang.org/download/0.11.0/zig-0.11.0.tar.xz && \
@@ -30,6 +35,10 @@ jobs:
           patch -p1 < "${GITHUB_WORKSPACE}/tools/antithesis/zig.patch" && \
           mkdir build && cd build && \
           cmake .. && make -j4
+      # Fetch libvoidstar from Antithesis.
+      - run: |
+          mkdir tools/antithesis/lib && \
+          curl -o tools/antithesis/lib/libvoidstar.so https://${{ secrets.ANTITHESIS_HTTP_AUTH }}@antithesis.com/assets/instrumentation/libvoidstar.so
       - run: /tmp/zig-0.11.0/build/stage3/bin/zig build antithesis_workload antithesis_api install
       - run: ./tools/antithesis/scripts/build.sh ${{ github.sha }}
       - run: echo "${{ secrets.ANTITHESIS_KEY }}" > /tmp/key
