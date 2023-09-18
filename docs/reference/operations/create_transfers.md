@@ -39,10 +39,6 @@ The cluster is responsible for setting this field.
 The transfer was not created.
 `Transfer.flags.reserved` is nonzero, but must be zero.
 
-### `reserved_field`
-The transfer was not created.
-[`Transfer.reserved`](../transfers.md#reserved) is nonzero, but must be zero.
-
 ### `id_must_not_be_zero`
 The transfer was not created.
 [`Transfer.id`](../transfers.md#id) is zero, which is a reserved value.
@@ -141,14 +137,6 @@ The transfer was not created.
 [`Transfer.timeout`](../transfers.md#timeout) is nonzero, but only
 [pending](../transfers.md#flagspending) transfers have nonzero timeouts.
 
-### `ledger_must_not_be_zero`
-The transfer was not created.
-[`Transfer.ledger`](../transfers.md#ledger) is zero, but must be nonzero.
-
-### `code_must_not_be_zero`
-The transfer was not created.
-[`Transfer.code`](../transfers.md#code) is zero, but must be nonzero.
-
 ### `amount_must_not_be_zero`
 The transfer was not created.
 [`Transfer.amount`](../transfers.md#amount) is zero, but must be nonzero.
@@ -156,6 +144,14 @@ The transfer was not created.
 Every transfer must move value.
 Only posting and voiding transfer amounts may be zero — when zero, they will move the full pending
 amount.
+
+### `ledger_must_not_be_zero`
+The transfer was not created.
+[`Transfer.ledger`](../transfers.md#ledger) is zero, but must be nonzero.
+
+### `code_must_not_be_zero`
+The transfer was not created.
+[`Transfer.code`](../transfers.md#code) is zero, but must be nonzero.
 
 ### `debit_account_not_found`
 The transfer was not created.
@@ -260,13 +256,28 @@ A transfer with the same `id` already exists, but with a different
 A transfer with the same `id` already exists, but with a different
 [`credit_account_id`](../transfers.md#credit_account_id).
 
+### `exists_with_different_amount`
+A transfer with the same `id` already exists, but with a different
+[`amount`](../transfers.md#amount).
+
+If the transfer has `flags.balancing_debit` or `flags.balancing_credit` set, this error refers
+to the actual amount transferred, not the original (possibly higher) balancing amount.
+
 ### `exists_with_different_pending_id`
 A transfer with the same `id` already exists, but with a different
 [`pending_id`](../transfers.md#pending_id).
 
-### `exists_with_different_user_data`
+### `exists_with_different_user_data_128`
 A transfer with the same `id` already exists, but with a different
-[`user_data`](../transfers.md#user_data).
+[`user_data_128`](../transfers.md#user_data_128).
+
+### `exists_with_different_user_data_64`
+A transfer with the same `id` already exists, but with a different
+[`user_data_64`](../transfers.md#user_data_64).
+
+### `exists_with_different_user_data_32`
+A transfer with the same `id` already exists, but with a different
+[`user_data_32`](../transfers.md#user_data_32).
 
 ### `exists_with_different_timeout`
 A transfer with the same `id` already exists, but with a different
@@ -274,13 +285,6 @@ A transfer with the same `id` already exists, but with a different
 
 ### `exists_with_different_code`
 A transfer with the same `id` already exists, but with a different [`code`](../transfers.md#code).
-
-### `exists_with_different_amount`
-A transfer with the same `id` already exists, but with a different
-[`amount`](../transfers.md#amount).
-
-If the transfer has `flags.balancing_debit` or `flags.balancing_credit` set, this error refers
-to the actual amount transferred, not the original (possibly higher) balancing amount.
 
 ### `exists`
 A transfer with the same `id` already exists, and is identical to the transfer in the request.
@@ -317,7 +321,10 @@ would overflow a 64-bit unsigned integer.
 
 ### `overflows_timeout`
 The transfer was not created.
-`transfer.timestamp + transfer.timeout` would overflow a 64-bit unsigned integer.
+`transfer.timestamp + (transfer.timeout * 1_000_000_000)`
+would overflow a 64-bit unsigned integer.
+
+[`Transfer.timeout`](../transfers.md#timeout) is converted to nanoseconds.
 
 This computation uses the [`Transfer.timestamp`](../transfers.md#timestamp) value assigned by the
 replica, not the `0` value sent by the client.

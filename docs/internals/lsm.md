@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 # LSM
@@ -165,6 +165,7 @@ Each half-bar contains `N=M/2` (`4`) beats. The next half-bar begins at `Y=X+N` 
 During the half-bar compaction `X`:
 - `snapshot_max` of each input table is truncated to `Y-1` (`15`).
 - `snapshot_min` of each output table is initialized to `Y` (`16`).
+- `snapshot_max` of each output table is initialized to `∞`.
 
 ```
 0   4   8  12  16  20  24  (op, snapshot)

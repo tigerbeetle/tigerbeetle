@@ -94,7 +94,7 @@ using (var client = new Client(
 
     // Validate accounts pending and posted debits/credits before
     // finishing the two-phase transfer.
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
@@ -139,7 +139,7 @@ using (var client = new Client(
     }
 
     // Validate account balances after posting 1st pending transfer.
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
@@ -184,7 +184,7 @@ using (var client = new Client(
     }
 
     // Validate account balances after voiding 2nd pending transfer.
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
@@ -229,7 +229,7 @@ using (var client = new Client(
     }
 
     // Validate account balances after posting 3rd pending transfer.
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
@@ -274,7 +274,7 @@ using (var client = new Client(
     }
 
     // Validate account balances after voiding 4th pending transfer.
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
@@ -319,7 +319,7 @@ using (var client = new Client(
     }
 
     // Validate account balances after posting 5th pending transfer.
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {

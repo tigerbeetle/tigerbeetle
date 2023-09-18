@@ -38,7 +38,7 @@ const InFlightQueue = std.AutoHashMapUnmanaged(struct {
 }, InFlight);
 
 const PendingTransfer = struct {
-    amount: u64,
+    amount: u128,
     debit_account_index: usize,
     credit_account_index: usize,
 };

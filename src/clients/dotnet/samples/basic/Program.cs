@@ -52,7 +52,7 @@ using (var client = new Client(
         return;
     }
 
-    accounts = client.LookupAccounts(new TigerBeetle.UInt128[] { 1, 2 });
+    accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
     foreach (var account in accounts)
     {
