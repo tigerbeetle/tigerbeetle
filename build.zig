@@ -649,9 +649,7 @@ pub fn build(b: *std.Build) !void {
         exe.addModule("vsr", vsr_module);
         exe.addModule("vsr_options", vsr_options_module);
 
-        if (antithesis_enable) {
-            link_antithesis(exe);
-        }
+        // Don't link Antithesis, so workload isn't focused on.
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_workload", "Antithesis Workload");
@@ -672,8 +670,13 @@ fn link_antithesis(exe: *std.Build.LibExeObjStep) void {
     }
     exe.build_id = .fast;
     exe.linkLibC();
+
+    // No matter what, it seems like Zig pulls in an absolute path to `libvoidstar.so` - regardless
+    // of if we add the path here, or if we don't and we put it in a searched folder. Hack around
+    // this by assuming our CI build will make it available in a well known location
+    // (/usr/local/lib/libvoidstar.so) and our Docker images will contain the same.
+    // exe.addLibraryPath(.{ .path = "tools/antithesis/lib" });
     exe.linkSystemLibrary("voidstar");
-    exe.addLibraryPath(.{ .path = "tools/antithesis/lib" });
 }
 
 fn link_tracer_backend(
