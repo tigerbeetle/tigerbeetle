@@ -37,6 +37,7 @@ jobs:
           cmake .. && make -j4
       # Fetch libvoidstar from Antithesis, and make it available in /usr/local/lib.
       - run: |
+          mkdir -p tools/antithesis/lib && \
           curl -o tools/antithesis/lib/libvoidstar.so https://${{ secrets.ANTITHESIS_HTTP_AUTH }}@antithesis.com/assets/instrumentation/libvoidstar.so && \
           sudo cp tools/antithesis/lib/libvoidstar.so /usr/local/lib
       - run: /tmp/zig-0.11.0/build/stage3/bin/zig build -Dantithesis antithesis_workload antithesis_api install
