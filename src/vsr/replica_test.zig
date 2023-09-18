@@ -14,6 +14,7 @@ const StateMachineType = @import("../testing/state_machine.zig").StateMachineTyp
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
+const Storage = @import("../testing/storage.zig").Storage;
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);
@@ -853,6 +854,9 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
         try c.request(checkpoint_3_trigger, checkpoint_3_trigger);
         try expectEqual(t.replica(.R_).status(), .normal);
         try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
+
+        t.run(); // (Wait for grid sync to finish.)
+        try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
     }
 }
 
@@ -886,6 +890,9 @@ test "Cluster: sync: sync, bump target, sync" {
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
     try expectEqual(t.replica(.R_).sync_status(), .idle);
+
+    t.run(); // (Wait for grid sync to finish.)
+    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
 }
 
 test "Cluster: sync: R=2" {
@@ -927,6 +934,8 @@ test "Cluster: sync: R=2" {
 
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 2);
     try expectEqual(c.replies(), checkpoint_1_trigger + 2);
+
+    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
 }
 
 test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
@@ -943,7 +952,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
-    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Block sync for now.)
+    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Prevent sync for now.)
     a0.diverge();
 
     // Prior to the checkpoint, the cluster has not realized that A0 diverged.
@@ -978,6 +987,8 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
     try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
+
+    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
 }
 
 test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
@@ -1009,6 +1020,8 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try expectEqual(t.replica(.R_).sync_status(), .idle);
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+
+    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
 }
 
 const ProcessSelector = enum {
@@ -1132,7 +1145,7 @@ const TestContext = struct {
     }
 
     pub fn run(t: *TestContext) void {
-        const tick_max = 3_000;
+        const tick_max = 4_100;
         var tick_count: usize = 0;
         while (tick_count < tick_max) : (tick_count += 1) {
             if (t.tick()) tick_count = 0;
@@ -1367,7 +1380,7 @@ const TestReplicas = struct {
     }
 
     pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
-        assert(t.replicas.len == 1);
+        assert(t.replicas.count() == 1);
         return t.cluster.replicas[t.replicas.get(0)].view_headers.array.const_slice();
     }
 
@@ -1491,6 +1504,32 @@ const TestReplicas = struct {
             }
         }
         return paths;
+    }
+
+    fn expect_equal_grid(want: TestReplicas, got: TestReplicas) !void {
+        assert(want.replicas.count() == 1);
+        assert(got.replicas.count() > 0);
+
+        const want_replica: *const Cluster.Replica = &want.cluster.replicas[want.replicas.get(0)];
+
+        for (got.replicas.const_slice()) |replica_index| {
+            const got_replica: *const Cluster.Replica = &got.cluster.replicas[replica_index];
+
+            var address: u64 = 1;
+            while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
+                const address_free = want_replica.superblock.free_set.is_free(address);
+                assert(address_free == got_replica.superblock.free_set.is_free(address));
+                if (address_free) continue;
+
+                const block_want = want_replica.superblock.storage.grid_block(address).?;
+                const block_got = got_replica.superblock.storage.grid_block(address).?;
+
+                try expectEqual(
+                    std.mem.bytesToValue(vsr.Header, block_want[0..@sizeOf(vsr.Header)]),
+                    std.mem.bytesToValue(vsr.Header, block_got[0..@sizeOf(vsr.Header)]),
+                );
+            }
+        }
     }
 };
 

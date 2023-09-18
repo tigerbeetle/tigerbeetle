@@ -108,9 +108,6 @@ pub const BlockType = enum(u8) {
 };
 
 pub const TableIndex = struct {
-    /// Every table has exactly one index block.
-    const index_block_count = 1;
-
     /// Stored in every index block's header's `context` field.
     ///
     /// The max-counts are stored in the header despite being available (per-tree) at comptime:
@@ -167,6 +164,8 @@ pub const TableIndex = struct {
         assert(parameters.key_size > 0);
         assert(parameters.filter_block_count_max > 0);
         assert(parameters.data_block_count_max > 0);
+        assert(parameters.data_block_count_max + parameters.filter_block_count_max <=
+            constants.lsm_table_content_blocks_max);
 
         const filter_checksums_offset = @sizeOf(vsr.Header);
         const filter_checksums_size = parameters.filter_block_count_max * checksum_size;
@@ -308,9 +307,39 @@ pub const TableIndex = struct {
         return @alignCast(slice[0..index.filter_blocks_used(index_block)]);
     }
 
-    inline fn blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        return index_block_count + index.filter_blocks_used(index_block) +
-            data_blocks_used(index_block);
+    // TODO: After filter blocks are removed, remove this function.
+    pub fn content_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
+        return index.filter_blocks_used(index_block) + index.data_blocks_used(index_block);
+    }
+
+    // TODO: After filter blocks are removed, remove this function.
+    pub fn content_block(
+        index: *const TableIndex,
+        index_block: BlockPtrConst,
+        content_block_index: u32,
+    ) struct {
+        block_checksum: u128,
+        block_address: u64,
+        block_type: BlockType,
+    } {
+        assert(content_block_index < index.content_blocks_used(index_block));
+
+        const filter_blocks_used_ = index.filter_blocks_used(index_block);
+        if (filter_blocks_used_ > content_block_index) {
+            const filter_block_index = content_block_index;
+            return .{
+                .block_checksum = index.filter_checksums_used(index_block)[filter_block_index],
+                .block_address = index.filter_addresses_used(index_block)[filter_block_index],
+                .block_type = .filter,
+            };
+        } else {
+            const data_block_index = content_block_index - filter_blocks_used_;
+            return .{
+                .block_checksum = index.data_checksums_used(index_block)[data_block_index],
+                .block_address = index.data_addresses_used(index_block)[data_block_index],
+                .block_type = .data,
+            };
+        }
     }
 
     inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {

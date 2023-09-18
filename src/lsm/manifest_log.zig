@@ -428,12 +428,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             write.* = .{ .manifest_log = manifest_log };
 
             manifest_log.writes_pending += 1;
-            manifest_log.grid.write_block(
-                write_block_callback,
-                &write.write,
-                block,
-                address,
-            );
+            manifest_log.grid.create_block(write_block_callback, &write.write, block);
         }
 
         fn write_block_callback(grid_write: *Grid.Write) void {

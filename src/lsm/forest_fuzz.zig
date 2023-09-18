@@ -108,6 +108,8 @@ const Environment = struct {
 
         env.grid = try Grid.init(allocator, .{
             .superblock = &env.superblock,
+            .missing_blocks_max = 0,
+            .missing_tables_max = 0,
         });
 
         env.forest = undefined;

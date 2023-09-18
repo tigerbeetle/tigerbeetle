@@ -48,6 +48,7 @@ pub const SuperBlockType = superblock.SuperBlockType;
 pub const SuperBlockTrailer = superblock.Trailer;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
+pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -813,6 +814,8 @@ pub const Header = extern struct {
 
     fn invalid_block(self: *const Header) ?[]const u8 {
         assert(self.command == .block);
+        if (self.size > constants.block_size) return "size > block_size";
+        if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
         if (self.client != 0) return "client != 0";
         if (self.view != 0) return "view != 0";
         if (self.op == 0) return "op == 0"; // address ≠ 0
@@ -1981,5 +1984,15 @@ pub const Checkpoint = struct {
 
     pub fn valid(op: u64) bool {
         return op == 0 or (op + 1) % constants.lsm_batch_multiple == 0;
+    }
+};
+
+pub const Snapshot = struct {
+    /// A table with TableInfo.snapshot_min=S was written during some commit with op<S.
+    /// A block with snapshot_min=S is definitely readable at op=S.
+    pub fn readable_at_commit(op: u64) u64 {
+        // TODO: This is going to become more complicated when snapshot numbers match the op
+        // acquiring the snapshot.
+        return op + 1;
     }
 };

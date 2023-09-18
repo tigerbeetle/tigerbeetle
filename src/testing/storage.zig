@@ -33,11 +33,12 @@ const FIFO = @import("../fifo.zig").FIFO;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
-const BlockType = @import("../lsm/schema.zig").BlockType;
+const schema = @import("../lsm/schema.zig");
 const stdx = @import("../stdx.zig");
 const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
 const hash_log = @import("./hash_log.zig");
+const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);
 
@@ -82,6 +83,9 @@ pub const Storage = struct {
         /// Enable/disable automatic read/write faults.
         /// Does not impact crash faults or manual faults.
         fault_atlas: ?*const ClusterFaultAtlas = null,
+
+        /// Accessed by the Grid for extra verification of grid coherence.
+        grid_checker: ?*GridChecker = null,
     };
 
     /// See usage in Journal.write_sectors() for details.
@@ -566,19 +570,19 @@ pub const Storage = struct {
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
-    ) *align(constants.sector_size) [constants.block_size]u8 {
+    ) ?*align(constants.sector_size) const [constants.block_size]u8 {
         assert(address > 0);
 
         const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
-        const block_header = mem.bytesToValue(
-            vsr.Header,
-            storage.memory[block_offset..][0..@sizeOf(vsr.Header)],
-        );
-        assert(storage.memory_written.isSet(@divExact(block_offset, constants.sector_size)));
-        assert(block_header.valid_checksum());
-        assert(block_header.size <= constants.block_size);
+        if (storage.memory_written.isSet(@divExact(block_offset, constants.sector_size))) {
+            const block_buffer = storage.memory[block_offset..][0..constants.block_size];
+            const block_header = schema.header_from_block(@alignCast(block_buffer));
+            assert(block_header.op == address);
 
-        return @alignCast(storage.memory[block_offset..][0..constants.block_size]);
+            return @alignCast(block_buffer);
+        } else {
+            return null;
+        }
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
@@ -621,6 +625,33 @@ pub const Storage = struct {
 
         if (assert_failed) {
             panic("Pending writes in zone: {}", .{zone});
+        }
+    }
+
+    /// Verify that the storage:
+    /// - contains the given index block
+    /// - contains every filter/data block referenced by the index block
+    pub fn verify_table(storage: *const Storage, index_address: u64, index_checksum: u128) void {
+        assert(index_address > 0);
+
+        const index_block = storage.grid_block(index_address).?;
+        const index_schema = schema.TableIndex.from(index_block);
+        const index_block_header = schema.header_from_block(index_block);
+        assert(index_block_header.op == index_address);
+        assert(index_block_header.checksum == index_checksum);
+        assert(schema.BlockType.from(index_block_header.operation) == .index);
+
+        const content_blocks_used = index_schema.content_blocks_used(index_block);
+        var content_block_index: u32 = 0;
+        while (content_block_index < content_blocks_used) : (content_block_index += 1) {
+            const content_block_id = index_schema.content_block(index_block, content_block_index);
+            const content_block = storage.grid_block(content_block_id.block_address).?;
+            const content_block_header = schema.header_from_block(content_block);
+
+            assert(content_block_header.op == content_block_id.block_address);
+            assert(content_block_header.checksum == content_block_id.block_checksum);
+            assert(schema.BlockType.from(content_block_header.operation) == .filter or
+                schema.BlockType.from(content_block_header.operation) == .data);
         }
     }
 };
