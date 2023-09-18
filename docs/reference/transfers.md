@@ -23,9 +23,11 @@ Fields used by each mode of transfer:
 | `id`                          | required     | required | required     | required     |
 | `debit_account_id`            | required     | required | optional     | optional     |
 | `credit_account_id`           | required     | required | optional     | optional     |
-| `user_data`                   | optional     | optional | optional     | optional     |
-| `reserved`                    | none         | none     | none         | none         |
+| `amount`                      | required     | required | optional     | optional     |
 | `pending_id`                  | none         | none     | required     | required     |
+| `user_data_128`               | optional     | optional | optional     | optional     |
+| `user_data_64`                | optional     | optional | optional     | optional     |
+| `user_data_32`                | optional     | optional | optional     | optional     |
 | `timeout`                     | none         | optional | none         | none         |
 | `ledger`                      | required     | required | optional     | optional     |
 | `code`                        | required     | required | optional     | optional     |
@@ -35,7 +37,6 @@ Fields used by each mode of transfer:
 | `flags.void_pending_transfer` | false        | false    | false        | true         |
 | `flags.balancing_debit`       | optional     | optional | false        | false        |
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
-| `amount`                      | required     | required | optional     | optional     |
 | `timestamp`                   | none         | none     | none         | none         |
 
 TigerBeetle uses the same data structures internally and
@@ -108,9 +109,9 @@ value of the pending transfer's field:
 
 * `debit_account_id`
 * `credit_account_id`
+* `amount`
 * `ledger`
 * `code`
-* `amount`
 
 #### Read more
 
