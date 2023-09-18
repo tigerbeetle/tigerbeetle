@@ -59,6 +59,9 @@ pub fn build(b: *std.Build) !void {
     ) orelse .none;
     options.addOption(config.HashLogMode, "hash_log_mode", hash_log_mode);
 
+    const antithesis_enable = b.option(bool, "antithesis", "Enable Antithesis support.") orelse false;
+    options.addOption(bool, "config_antithesis", antithesis_enable);
+
     const vsr_options_module = options.createModule();
     const vsr_module = b.addModule("vsr", .{
         .source_file = .{ .path = "src/vsr.zig" },
@@ -85,7 +88,9 @@ pub fn build(b: *std.Build) !void {
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.omit_frame_pointer = false;
     link_tracer_backend(tigerbeetle, git_clone_tracy, tracer_backend, target);
-    link_voidstar(tigerbeetle);
+    if (antithesis_enable) {
+        link_antithesis(tigerbeetle);
+    }
 
     {
         const run_cmd = b.addRunArtifact(tigerbeetle);
@@ -615,7 +620,10 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&run_cmd.step);
     }
 
-    // Antithesis
+    // Antithesis workload and API. Antithesis allows us to do full system deterministic simulation
+    // testing. See https://antithesis.com/ and tools/antithesis/README.md for more info.
+    // It's possible to run these outside of the Antithesis environment, in which case having
+    // antithesis_enable == false makes sense.
     {
         const exe = b.addExecutable(.{
             .name = "antithesis_api",
@@ -624,7 +632,9 @@ pub fn build(b: *std.Build) !void {
         exe.addModule("vsr", vsr_module);
         exe.addModule("vsr_options", vsr_options_module);
 
-        link_voidstar(exe);
+        if (antithesis_enable) {
+            link_antithesis(exe);
+        }
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_api", "Antithesis API");
@@ -639,7 +649,9 @@ pub fn build(b: *std.Build) !void {
         exe.addModule("vsr", vsr_module);
         exe.addModule("vsr_options", vsr_options_module);
 
-        link_voidstar(exe);
+        if (antithesis_enable) {
+            link_antithesis(exe);
+        }
 
         const install_step = b.addInstallArtifact(exe, .{});
         const build_step = b.step("antithesis_workload", "Antithesis Workload");
@@ -651,8 +663,17 @@ pub fn build(b: *std.Build) !void {
 
 }
 
-fn link_voidstar(exe: *std.Build.LibExeObjStep) void {
-    exe.trace_pc_guard = true;
+/// Sets up build options needed for running inside Antithesis.
+/// -ftrace-pc-guard currently only exists in a patch to Zig, so it will currently fail on regular
+/// compiler builds.
+/// libvoidstar is provided by Antithesis, we don't include it in the repo but pull it in during CI.
+/// https://antithesis.com/docs/instrumentation/instrumentation_toc.html
+fn link_antithesis(exe: *std.Build.LibExeObjStep) void {
+    if (@hasField(@TypeOf(exe.*), "trace_pc_guard")) {
+        exe.trace_pc_guard = true;
+    } else {
+        @panic("link_antithesis called, but no trace_pc_guard found.");
+    }
     exe.build_id = .fast;
     exe.linkLibC();
     exe.linkSystemLibrary("voidstar");
