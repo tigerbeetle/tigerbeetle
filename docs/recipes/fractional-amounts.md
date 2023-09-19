@@ -1,7 +1,7 @@
 # Fractional Amounts
 
 To maximize precision and efficiency, [`Account`](../reference/accounts.md) debits/credits
-and [`Transfer`](../reference/transfers.md) amounts are unsigned 64-bit integers.
+and [`Transfer`](../reference/transfers.md) amounts are unsigned 128-bit integers.
 However, currencies are often denominated in fractional amounts.
 
 To represent a fractional amount in TigerBeetle, map the smallest useful unit of the fractional
@@ -31,4 +31,4 @@ _asset scale_. For example, representing USD in cents uses an asset scale of `2`
 The other direction works as well. If the smallest useful unit of a currency is `10,000,000 ¤`,
 then it can be scaled down to the integer `1`.
 
-The 64-bit representation defines the precision, but not the scale.
+The 128-bit representation defines the precision, but not the scale.
