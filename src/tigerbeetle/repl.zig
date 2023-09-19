@@ -789,7 +789,10 @@ pub fn ReplType(comptime MessageBus: type) type {
                     );
 
                     if (lookup_account_results.len == 0) {
-                        try repl.fail("No such account or accounts exists.\n", .{});
+                        try repl.fail(
+                            "Failed to lookup account: {any}\n",
+                            .{LookupAccountResult.account_not_found},
+                        );
                     } else {
                         for (lookup_account_results) |*account| {
                             try repl.display_object(account);
@@ -818,7 +821,10 @@ pub fn ReplType(comptime MessageBus: type) type {
                     );
 
                     if (lookup_transfer_results.len == 0) {
-                        try repl.fail("No such transfer or transfers exists.\n", .{});
+                        try repl.fail(
+                            "Failed to lookup transfer: {any}\n",
+                            .{LookupTransferResult.transfer_not_found},
+                        );
                     } else {
                         for (lookup_transfer_results) |*transfer| {
                             try repl.display_object(transfer);
@@ -844,3 +850,23 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
     };
 }
+
+pub const LookupAccountResult = enum(u32) {
+    ok = 0,
+    account_not_found = 1,
+    comptime {
+        for (std.enums.values(LookupAccountResult), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
+        }
+    }
+};
+
+pub const LookupTransferResult = enum(u32) {
+    ok = 0,
+    transfer_not_found = 1,
+    comptime {
+        for (std.enums.values(LookupTransferResult), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
+        }
+    }
+};
