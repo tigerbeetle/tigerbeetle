@@ -251,6 +251,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn open(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
+            assert(forest.manifest_log_progress == .idle);
+
             forest.progress = .{ .open = .{ .callback = callback } };
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -267,6 +269,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
+            assert(forest.manifest_log_progress == .idle);
             assert(level < constants.lsm_levels);
 
             switch (table.tree_id) {
@@ -284,6 +287,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
+            assert(forest.manifest_log_progress == .idle);
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).open_complete();

@@ -593,8 +593,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 while (table_info_iterator.next()) |table_info| {
                     const table_snapshot = table_info.snapshot_min;
 
-                    if (key_max_previous) |key| {
-                        assert(compare_keys(key, table_info.key_min) == .lt);
+                    if (key_max_previous) |key_previous| {
+                        assert(compare_keys(key_previous, table_info.key_min) == .lt);
                     }
                     // We could have key_min == key_max if there is only one value.
                     assert(compare_keys(table_info.key_min, table_info.key_max) != .gt);
