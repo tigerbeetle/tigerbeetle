@@ -325,6 +325,7 @@ pub fn ManifestLevelType(
 
                     return;
                 }
+                assert(level_table.checksum != table.checksum);
             }
 
             @panic("remove() called with a table that was never inserted");

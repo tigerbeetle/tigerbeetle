@@ -541,6 +541,8 @@ pub const TableData = struct {
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
         const header = header_from_block(data_block);
+        assert(BlockType.from(header.operation) == .data);
+
         const used_values: u32 = header.request;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
