@@ -66,7 +66,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             break :default iterators;
         },
 
-        pub fn next(iterator: *ForestTableIterator, forest: *Forest) ?TableInfo {
+        pub fn next(iterator: *ForestTableIterator, forest: *const Forest) ?TableInfo {
             while (iterator.level < constants.lsm_levels) : (iterator.level += 1) {
                 for (iterator.tree_id..Forest.tree_id_range.max + 1) |tree_id_runtime| {
                     iterator.tree_id = @intCast(tree_id_runtime);
@@ -79,7 +79,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                             if (iterator.next_from_tree(
                                 tree_info.tree_name,
                                 tree_info.Tree,
-                                forest.tree_for_id(tree_id),
+                                forest.tree_for_id_const(tree_id),
                             )) |block| {
                                 return block;
                             }

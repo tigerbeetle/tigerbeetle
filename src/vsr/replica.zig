@@ -70,6 +70,7 @@ const CommitStage = enum {
 
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
+    state_machine_opened,
     /// Called immediately after a prepare is committed by the state machine.
     committed,
     /// Called immediately after a compaction.
@@ -688,6 +689,7 @@ pub fn ReplicaType(
             });
 
             self.state_machine_opened = true;
+            if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
