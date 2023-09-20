@@ -96,6 +96,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
         }
 
         pub fn decode(table: *const TableInfo) TreeTableInfo {
+            assert(table.tree_id > 0);
             assert(stdx.zeroed(&table.reserved));
 
             const key_min = std.mem.bytesAsValue(Key, table.key_min[0..@sizeOf(Key)]);
@@ -116,6 +117,8 @@ pub fn TreeTableInfoType(comptime Table: type) type {
         }
 
         pub fn encode(table: *const TreeTableInfo, tree_id: u16) TableInfo {
+            assert(tree_id > 0);
+
             var key_min = std.mem.zeroes(TableInfo.KeyPadded);
             var key_max = std.mem.zeroes(TableInfo.KeyPadded);
 

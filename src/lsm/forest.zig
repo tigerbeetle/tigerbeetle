@@ -439,5 +439,21 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .indexes => |index_name| return &@field(groove.indexes, index_name),
             }
         }
+
+        pub fn tree_for_id_const(
+            forest: *const Forest,
+            comptime tree_id: u16,
+        ) *const TreeForIdType(tree_id) {
+            const tree_info = tree_infos[tree_id - tree_id_range.min];
+            assert(tree_info.tree_id == tree_id);
+
+            var groove = &@field(forest.grooves, tree_info.groove_name);
+
+            switch (tree_info.groove_tree) {
+                .objects => return &groove.objects,
+                .ids => return &groove.ids,
+                .indexes => |index_name| return &@field(groove.indexes, index_name),
+            }
+        }
     };
 }
