@@ -437,6 +437,10 @@ pub fn StateMachineType(
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
+                        // This prefetch isn't run yet, but enqueue it here as well to save an extra
+                        // iteration over transfers.
+                        self.forest.grooves.posted.prefetch_enqueue(p.timestamp);
+
                         self.forest.grooves.accounts.prefetch_enqueue(p.debit_account_id);
                         self.forest.grooves.accounts.prefetch_enqueue(p.credit_account_id);
                     }
