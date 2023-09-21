@@ -620,7 +620,8 @@ pub fn StateMachineType(
                         else => unreachable,
                     };
                 };
-                log.debug("{s} {}/{}: {}: {}", .{
+                log.debug("{?}: {s} {}/{}: {}: {}", .{
+                    self.forest.grid.superblock.replica_index,
                     @tagName(operation),
                     index + 1,
                     events.len,
@@ -687,7 +688,8 @@ pub fn StateMachineType(
                     .create_transfers => self.create_transfer_rollback(&event),
                     else => unreachable,
                 }
-                log.debug("{s} {}/{}: rollback(): {}", .{
+                log.debug("{?}: {s} {}/{}: rollback(): {}", .{
+                    self.forest.grid.superblock.replica_index,
                     @tagName(operation),
                     index + 1,
                     events.len,
