@@ -124,7 +124,7 @@ for details, examples, and sample code.
 
 This is a unique identifier for the transaction.
 
-As an example, you might generate a [random id](../design/data-modeling.md#random-identifier) to
+As an example, you might generate a [ULID](../design/data-modeling.md#time-based-identifiers) to
 identify each transaction.
 
 Constraints:
@@ -221,7 +221,7 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this transfer to an
 external entity or event.
 
-As an example, you might use a [random id](../design/data-modeling.md#random-identifier)
+As an example, you might use a [ULID](../design/data-modeling.md#time-based-identifiers)
 that ties together a group of transfers.
 
 For more information, see [Data Modeling](../design/data-modeling.md#user_data).

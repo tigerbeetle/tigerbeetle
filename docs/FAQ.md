@@ -100,9 +100,9 @@ Here is an example of how you might integrate with TigerBeetle in a
 payment system.
 
 You might keep account metadata in your existing database (say,
-PostgreSQL or MongoDB). Then create an account in TigerBeetle with a
-[random id](./design/data-modeling.md#random-identifier) mapping it
-back to the account with metadata in your existing database.
+PostgreSQL or MongoDB). Then create an account in TigerBeetle with the
+[same identifier](./design/data-modeling.md#reuse-foreign-identifier) to
+map it back to the account with metadata in your existing database.
 
 Then as you need to process transfers between accounts, you store
 those transfers in TigerBeetle.

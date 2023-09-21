@@ -74,7 +74,7 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this account to an
 external entity or event.
 
-As an example, you might use a [random id](../design/data-modeling.md#random-identifier)
+As an example, you might use a [ULID](../design/data-modeling.md#time-based-identifiers)
 that ties together a group of accounts.
 
 For more information, see [Data Modeling](../design/data-modeling.md#user_data).

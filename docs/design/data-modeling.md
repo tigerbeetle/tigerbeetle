@@ -68,30 +68,43 @@ The primary purpose of an `id` (for both [accounts](../reference/accounts.md#id)
 executing an event twice. For example, if a client creates a transfer but the server's reply is
 lost, the client (or application) will retry — the database must not transfer the money twice.
 
-[Randomly-generated identifiers](#random-identifier) are recommended for most applications.
+[Time-based identifiers](#time-based-identifiers) are recommended for most applications.
 
 When selecting an `id` scheme:
 
 - Idempotency is particularly important (and difficult) in the context of
   [application crash recovery](./consistency.md#consistency-with-foreign-databases).
 - Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
-- An account and a transfer may share the same `id` — they belong to different "namespaces".
+- An account and a transfer may share the same `id` (they belong to different "namespaces"),
+  but this is not recommended because other systems (that you may later connect to TigerBeetle)
+  may use a single "namespace" for all objects.
 - Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in SQL).
   A central oracle may become a performance bottleneck when creating accounts/transfers.
+- Sequences of identifiers with long runs of strictly increasing (or strictly decreasing) values are
+  amenable to optimization, leading to higher database throughput.
 
-### Examples
-#### Random Identifier
+### Examples (Recommended)
+#### Time-Based Identifiers
 
-Randomly-generated identifiers are recommended for most applications.
+A time-based identifier (such as ULID or UUIDv7) are recommended for most applications.
 
-- Random identifiers require coordination with a secondary database to implement idempotent
-  [application crash recovery](./consistency.md#consistency-with-foreign-databases).
-- Random identifiers have an insignificant risk of collisions.
-- Random identifiers do not require a central oracle.
-- Only point queries are useful for fetching randomly-generated identifiers.
+A ULID ("Universally Unique Lexicographically Sortable identifier") consists of:
+
+- 48 bits of (millisecond) timestamp (high-order bits)
+- 80 bits of randomness (low-order bits)
+
+**Important**: When creating multiple objects during the same millisecond, increment the random bytes
+(instead of generating new random bytes). This ensures that a sequence of objects within a
+[batch](./client-requests.md#batching-events) has strictly increasing ids. (Batches of strictly
+increasing ids are amenable to LSM optimizations, leading to higher database throughput).
+
+- ULIDs have an insignificant risk of collision.
+- ULIDs do not require a central oracle.
 
 To maximize id entropy, prefer a cryptographically-secure PRNG (most languages have one in their
-cryptography library). We don't recommend UUIDv4 because it uses a few fixed bits.
+cryptography library).
+
+See also: [ULID specification](https://github.com/ulid/spec).
 
 #### Reuse Foreign Identifier
 
@@ -105,13 +118,9 @@ the identifier within the foreign database can be used as the `Account.id` withi
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 [constraints](../reference/accounts.md#id).
 
-Like [randomly-generated identifiers](#random-identifier), this technique requires careful
-coordination with the foreign database for idempotent
-[application crash recovery](./consistency.md#consistency-with-foreign-databases).
-
 ### Examples (Advanced)
 
-[Randomly-generated identifiers](#random-identifier) are recommended for most applications.
+[Time-based identifiers](#time-based-identifiers) are recommended for most applications.
 
 `id` is mostly accessed by point queries, but it is indexed for efficient iteration by range
 queries as well. The schemes described in this section take advantage of that index ordering.
@@ -159,3 +168,10 @@ This technique enables a simple range query to iterate every object
 with a target role. While you can't yet do prefix queries within
 TigerBeetle, you could do a prefix query in an external database to
 resolve `id`s and pass the resolved `id`s into TigerBeetle.
+
+#### Random Identifier
+
+Random identifiers are not recommended – they can't take advantage of all of the LSM's optimizations.
+
+For maximum throughput, use [time-based identifiers](#time-based-identifiers) instead.
+(Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
