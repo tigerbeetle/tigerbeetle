@@ -17,8 +17,8 @@ docker run -w /test "$id" sh -c "
 set -e
 yum update -y
 yum install -y xz wget git glibc tar
-wget -O- -q https://rpm.nodesource.com/setup_16.x | bash -
-yum install -y nodejs
+yum install https://rpm.nodesource.com/pub_16.x/nodistro/repo/nodesource-release-nodistro-1.noarch.rpm -y
+yum install nodejs -y --setopt=nodesource-nodejs.module_hotfixes=1
 npm install /wrk/src/clients/node/tigerbeetle-node-*.tgz
 node -e 'require(\"tigerbeetle-node\"); console.log(\"SUCCESS!\")'
 "
