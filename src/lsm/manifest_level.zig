@@ -316,6 +316,10 @@ pub fn ManifestLevelType(
 
             var it = level.tables.iterator_from_index(absolute_index, .ascending);
             while (it.next()) |level_table| : (absolute_index += 1) {
+                // The `table` parameter should *not* be a pointer into the `tables` SegmentedArray
+                // memory, since it will be invalidated by `tables.remove_elements()`.
+                assert(level_table != table);
+
                 if (level_table.equal(table)) {
                     level.keys.remove_elements(node_pool, absolute_index, 1);
                     level.tables.remove_elements(node_pool, absolute_index, 1);

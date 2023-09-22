@@ -348,7 +348,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 KeyRange{ .key_min = key_min, .key_max = key_max },
             );
 
-            while (it.next()) |table| {
+            while (it.next()) |table_pointer| {
+                // Copy the table onto the stack: `remove_table()` doesn't allow pointers into
+                // SegmentedArray memory since it invalidates them.
+                const table: TreeTableInfo = table_pointer.*;
                 assert(table.invisible(&snapshots));
                 assert(compare_keys(key_min, table.key_max) != .gt);
                 assert(compare_keys(key_max, table.key_min) != .lt);
@@ -358,7 +361,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     @as(u7, @intCast(level)),
                     &table.encode(manifest.config.id),
                 );
-                manifest_level.remove_table_invisible(manifest.node_pool, &snapshots, table);
+                manifest_level.remove_table_invisible(manifest.node_pool, &snapshots, &table);
             }
 
             if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
