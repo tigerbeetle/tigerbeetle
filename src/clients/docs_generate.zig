@@ -566,7 +566,7 @@ const Generator = struct {
         mw.paragraph(
             \\The response is an empty array if all transfers were created
             \\successfully. If the response is non-empty, each object in the
-            \\response array contains error information for an transfer that
+            \\response array contains error information for a transfer that
             \\failed. The error object contains an error code and the index of the
             \\transfer in the request batch.
             \\
