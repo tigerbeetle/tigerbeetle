@@ -25,6 +25,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.storage_checker);
 
 const constants = @import("../../constants.zig");
+const stdx = @import("../../stdx.zig");
 const vsr = @import("../../vsr.zig");
 const schema = @import("../../lsm/schema.zig");
 const Storage = @import("../storage.zig").Storage;
@@ -210,6 +211,9 @@ pub const StorageChecker = struct {
             stream.add(block[0..block_header.size]);
             // Extra guard against identical blocks:
             stream.add(std.mem.asBytes(&block_address));
+
+            // Grid block sector padding is zeroed:
+            assert(stdx.zeroed(block[block_header.size..vsr.sector_ceil(block_header.size)]));
         }
         assert(blocks_missing == 0);
 
