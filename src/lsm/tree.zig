@@ -698,7 +698,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     }
 
                     manifest_level.insert_table(tree.manifest.node_pool, &tree_table);
-
                 },
                 .remove => {
                     const removed = manifest_level.remove_table(

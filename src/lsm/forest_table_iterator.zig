@@ -56,7 +56,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         const ForestTableIterator = @This();
 
         /// The level we are currently pulling tables from.
-        level: u8 = 0,
+        level: u7 = 0,
         /// The tree we are currently pulling tables from.
         tree_id: u16 = Forest.tree_id_range.min,
 
@@ -66,7 +66,10 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             break :default iterators;
         },
 
-        pub fn next(iterator: *ForestTableIterator, forest: *const Forest) ?TableInfo {
+        pub fn next(iterator: *ForestTableIterator, forest: *const Forest) ?struct {
+            level: u7,
+            table: TableInfo,
+        } {
             while (iterator.level < constants.lsm_levels) : (iterator.level += 1) {
                 for (iterator.tree_id..Forest.tree_id_range.max + 1) |tree_id_runtime| {
                     iterator.tree_id = @intCast(tree_id_runtime);
@@ -76,12 +79,15 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                             const tree_info = Forest.tree_infos[tree_id - Forest.tree_id_range.min];
                             assert(tree_info.tree_id == tree_id);
 
-                            if (iterator.next_from_tree(
-                                tree_info.tree_name,
-                                tree_info.Tree,
+                            const tree_iterator = &@field(iterator.trees, tree_info.tree_name);
+                            if (tree_iterator.next(
                                 forest.tree_for_id_const(tree_id),
-                            )) |block| {
-                                return block;
+                                iterator.level,
+                            )) |table| {
+                                return .{
+                                    .level = iterator.level,
+                                    .table = table.encode(tree_id),
+                                };
                             }
                         },
                         else => unreachable,
@@ -95,20 +101,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
 
             return null;
         }
-
-        fn next_from_tree(
-            iterator: *ForestTableIterator,
-            comptime iterator_field: []const u8,
-            comptime Tree: type,
-            tree: *const Tree,
-        ) ?TableInfo {
-            const tree_iterator = &@field(iterator.trees, iterator_field);
-            if (tree_iterator.next(tree, iterator.level)) |table| {
-                return table.encode(tree.config.id);
-            } else {
-                return null;
-            }
-        }
     };
 }
 
@@ -119,7 +111,7 @@ fn TreeTableIteratorType(comptime Tree: type) type {
         const TreeTableIterator = @This();
 
         position: ?struct {
-            level: u8,
+            level: u7,
             /// Corresponds to `ManifestLevel.generation`.
             /// Used to detect when a ManifestLevel is mutated.
             generation: u32,
@@ -132,7 +124,7 @@ fn TreeTableIteratorType(comptime Tree: type) type {
         fn next(
             iterator: *TreeTableIterator,
             tree: *const Tree,
-            level: u8,
+            level: u7,
         ) ?*const Tree.Manifest.TreeTableInfo {
             assert(tree.manifest.manifest_log.?.opened);
             assert(level < constants.lsm_levels);
