@@ -620,9 +620,14 @@ pub const Manifest = struct {
         }
     };
 
+    pub const Event = enum(u1) {
+        insert,
+        remove,
+    };
+
     pub const Label = packed struct(u8) {
         level: u7,
-        event: enum(u1) { insert, remove },
+        event: Event,
 
         comptime {
             assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);

@@ -264,6 +264,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
+            event: schema.Manifest.Event,
             level: u7,
             table: *const schema.Manifest.TableInfo,
         ) void {
@@ -274,8 +275,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             switch (table.tree_id) {
                 inline tree_id_range.min...tree_id_range.max => |tree_id| {
-                    var t: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
-                    t.open_table(level, table);
+                    var tree: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
+                    tree.open_table(event, level, table);
                 },
                 else => {
                     log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});

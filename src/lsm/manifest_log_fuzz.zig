@@ -361,8 +361,14 @@ const Environment = struct {
         env.manifest_log.open(open_event, open_callback);
     }
 
-    fn open_event(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
+    fn open_event(
+        manifest_log: *ManifestLog,
+        event: schema.Manifest.Event,
+        level: u7,
+        table: *const TableInfo,
+    ) void {
         _ = manifest_log;
+        _ = event;
         _ = level;
         _ = table;
 
@@ -464,6 +470,8 @@ const Environment = struct {
             test_grid.deinit(env.allocator);
             test_grid.* = try Grid.init(env.allocator, .{
                 .superblock = test_superblock,
+                .missing_blocks_max = 0,
+                .missing_tables_max = 0,
             });
 
             test_manifest_log.deinit(env.allocator);
@@ -498,16 +506,21 @@ const Environment = struct {
 
     fn verify_manifest_open_event(
         manifest_log_verify: *ManifestLog,
+        event: schema.Manifest.Event,
         level: u7,
         table: *const TableInfo,
     ) void {
         const env = @fieldParentPtr(Environment, "manifest_log_verify", manifest_log_verify);
         assert(env.pending > 0);
 
-        const expect = env.manifest_log_opening.?.get(table.address).?;
-        assert(expect.level == level);
-        assert(std.meta.eql(expect.table, table.*));
-        assert(env.manifest_log_opening.?.remove(table.address));
+        if (env.manifest_log_opening.?.get(table.address)) |expect| {
+            assert(event == .insert);
+            assert(expect.level == level);
+            assert(std.meta.eql(expect.table, table.*));
+            assert(env.manifest_log_opening.?.remove(table.address));
+        } else {
+            // This is not the newest event for this table.
+        }
     }
 
     fn verify_manifest_open_callback(manifest_log_verify: *ManifestLog) void {
@@ -638,8 +651,10 @@ fn verify_manifest_compaction_set(
 
         const block_schema = schema.Manifest.from(block);
         var compact_soon: bool = block_schema.entry_count < schema.Manifest.entry_count_max;
-        for (block_schema.labels_used(block), 0..) |label, i| {
-            const table = &block_schema.tables_used(block)[i];
+        for (
+            block_schema.labels_const(block),
+            block_schema.tables_const(block),
+        ) |label, *table| {
             compact_soon = compact_soon or switch (label.event) {
                 .remove => true,
                 .insert => blk: {
