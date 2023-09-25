@@ -663,12 +663,57 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.open_commence(manifest_log);
         }
 
-        pub fn open_table(tree: *Tree, level: u8, table: *const schema.Manifest.TableInfo) void {
+        pub fn open_table(
+            tree: *Tree,
+            event: schema.Manifest.Event,
+            level: u8,
+            table: *const schema.Manifest.TableInfo,
+        ) void {
             assert(tree.compaction_op == null);
             assert(tree.key_range == null);
 
             const tree_table = Manifest.TreeTableInfo.decode(table);
-            tree.manifest.levels[level].insert_table(tree.manifest.node_pool, &tree_table);
+            const manifest_level = &tree.manifest.levels[level];
+            const snapshots = &[_]u64{};
+            var removes: usize = 0;
+
+            switch (event) {
+                .insert => {
+                    if (level > 0) {
+                        removes += @intFromBool(tree.manifest.levels[level - 1].remove_table(
+                            tree.manifest.node_pool,
+                            snapshots,
+                            &tree_table,
+                        ) != null);
+                    }
+
+                    if (table.snapshot_max < math.maxInt(u64)) {
+                        var tree_table_old = tree_table;
+                        tree_table_old.snapshot_max = math.maxInt(u64);
+                        removes += @intFromBool(manifest_level.remove_table(
+                            tree.manifest.node_pool,
+                            snapshots,
+                            &tree_table_old,
+                        ) != null);
+                    }
+
+                    manifest_level.insert_table(tree.manifest.node_pool, &tree_table);
+
+                },
+                .remove => {
+                    const removed = manifest_level.remove_table(
+                        tree.manifest.node_pool,
+                        snapshots,
+                        &tree_table,
+                    );
+                    assert(removed == null or removed.? == .invisible);
+                    removes += @intFromBool(removed != null);
+                },
+            }
+            // An "insert" is never be both a "move" and an "update".
+            assert(removes <= 1);
+            assert((removes == 0) ==
+                (tree.grid.superblock.manifest.tables.get(table.address) == null));
         }
 
         pub fn open_complete(tree: *Tree) void {

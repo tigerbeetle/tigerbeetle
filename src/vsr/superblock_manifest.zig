@@ -273,9 +273,8 @@ pub const Manifest = struct {
         return null;
     }
 
-    /// Inserts the table extent if it does not yet exist, and returns true.
-    /// Otherwise, returns false.
-    pub fn insert_table_extent(
+    /// Returns whether the table's current extent is exactly {block,entry}.
+    pub fn contains_table_extent(
         manifest: *Manifest,
         table: u64,
         block: u64,
@@ -284,15 +283,8 @@ pub const Manifest = struct {
         assert(table > 0);
         assert(block > 0);
 
-        var extent = manifest.tables.getOrPutAssumeCapacity(table);
-        if (extent.found_existing) return false;
-
-        extent.value_ptr.* = .{
-            .block = block,
-            .entry = entry,
-        };
-
-        return true;
+        const extent = manifest.tables.get(table) orelse return false;
+        return std.meta.eql(extent, .{ .block = block, .entry = entry });
     }
 
     /// Inserts or updates the table extent, and returns the previous block address if any.
@@ -318,25 +310,15 @@ pub const Manifest = struct {
         return previous_block;
     }
 
-    /// Removes the table extent if { block, entry } is the latest version, and returns true.
-    /// Otherwise, returns false.
-    pub fn remove_table_extent(
-        manifest: *Manifest,
-        table: u64,
-        block: u64,
-        entry: u32,
-    ) bool {
+    /// Removes the table extent (if any) and returns its manifest block address.
+    pub fn remove_table_extent(manifest: *Manifest, table: u64) ?u64 {
         assert(table > 0);
-        assert(block > 0);
 
-        const extent = manifest.tables.getPtr(table).?;
-        if (extent.block == block and extent.entry == entry) {
-            assert(manifest.tables.remove(table));
+        const extent = manifest.tables.get(table) orelse return null;
+        assert(manifest.tables.remove(table));
+        assert(extent.block > 0);
 
-            return true;
-        } else {
-            return false;
-        }
+        return extent.block;
     }
 
     /// Reference to a ManifestLog block.
@@ -353,16 +335,16 @@ pub const Manifest = struct {
         }
     };
 
-    pub const IteratorReverse = struct {
+    pub const Iterator = struct {
         manifest: *const Manifest,
-        count: u32,
+        count: u32 = 0,
 
-        pub fn next(it: *IteratorReverse) ?BlockReference {
+        pub fn next(it: *Iterator) ?BlockReference {
             assert(it.count <= it.manifest.count);
 
-            if (it.count > 0) {
-                it.count -= 1;
+            if (it.count < it.manifest.count) {
                 assert(it.manifest.addresses[it.count] > 0);
+                defer it.count += 1;
 
                 return BlockReference{
                     .checksum = it.manifest.checksums[it.count],
@@ -373,13 +355,9 @@ pub const Manifest = struct {
         }
     };
 
-    /// Return all block references in reverse order, latest-appended-first-out.
-    /// Using a reverse iterator is an optimization to avoid redundant updates to tree manifests.
-    pub fn iterator_reverse(manifest: *const Manifest) IteratorReverse {
-        return IteratorReverse{
-            .manifest = manifest,
-            .count = manifest.count,
-        };
+    /// Return all block references in order, first-appended-first-out.
+    pub fn iterator(manifest: *const Manifest) Iterator {
+        return .{ .manifest = manifest };
     }
 
     pub fn verify(manifest: *const Manifest) void {
@@ -408,22 +386,20 @@ pub const Manifest = struct {
     }
 };
 
-fn test_iterator_reverse(
+fn test_iterator(
     manifest: *Manifest,
     expect: []const Manifest.BlockReference,
 ) !void {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    var reverse: [3]Manifest.BlockReference = undefined;
-    var reverse_count: usize = 0;
+    var result = stdx.BoundedArray(Manifest.BlockReference, 3){};
 
-    var it = manifest.iterator_reverse();
+    var it = manifest.iterator();
     while (it.next()) |block| {
-        reverse[reverse_count] = block;
-        reverse_count += 1;
+        result.append_assume_capacity(block);
     }
 
-    try expectEqualSlices(Manifest.BlockReference, expect, reverse[0..reverse_count]);
+    try expectEqualSlices(Manifest.BlockReference, expect, result.const_slice());
 }
 
 fn test_codec(manifest: *Manifest) !void {
@@ -503,12 +479,12 @@ test "SuperBlockManifest" {
         manifest.oldest_block_queued_for_compaction(),
     );
 
-    try test_iterator_reverse(
+    try test_iterator(
         &manifest,
         &[_]BlockReference{
-            .{ .checksum = 4, .address = 5 },
-            .{ .checksum = 3, .address = 4 },
             .{ .checksum = 2, .address = 3 },
+            .{ .checksum = 3, .address = 4 },
+            .{ .checksum = 4, .address = 5 },
         },
     );
 

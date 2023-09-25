@@ -193,6 +193,7 @@ pub fn ManifestLevelType(
         pub fn reset(level: *Self) void {
             level.keys.reset();
             level.tables.reset();
+
             level.* = .{
                 .keys = level.keys,
                 .tables = level.tables,
@@ -261,36 +262,51 @@ pub fn ManifestLevelType(
             });
         }
 
-        /// Remove the given table from the level assuming it's visible to `lsm.snapshot_latest`.
-        /// Returns the same, unmodified table passed in to differentiate itself from
-        /// remove_table_invisible and guard against using the wrong function.
-        pub fn remove_table_visible(
-            level: *Self,
-            node_pool: *NodePool,
-            table: *const TableInfo,
-        ) *const TableInfo {
-            assert(table.visible(lsm.snapshot_latest));
-
-            level.remove_table(node_pool, table);
-            level.table_count_visible -= 1;
-            level.key_range.exclude(KeyRange{
-                .key_min = table.key_min,
-                .key_max = table.key_max,
-            });
-
-            return table;
-        }
-
-        /// Remove the given table from the ManifestLevel, asserting that it is not visible
-        /// by any snapshot in `snapshots` or by `lsm.snapshot_latest`.
-        pub fn remove_table_invisible(
+        /// Remove the given table.
+        /// - If the exact table does not exist in the ManifestLevel: return null.
+        /// - If the exact table exists in the ManifestLevel: remove it, and return whether the
+        ///   table is visible to any of the given snapshots or `snapshot_latest`.
+        /// The `table` parameter must *not* be a pointer into the `tables`' SegmentedArray memory.
+        pub fn remove_table(
             level: *Self,
             node_pool: *NodePool,
             snapshots: []const u64,
             table: *const TableInfo,
-        ) void {
-            assert(table.invisible(snapshots));
-            level.remove_table(node_pool, table);
+        ) ?Visibility {
+            assert(level.keys.len() == level.tables.len());
+            assert(compare_keys(table.key_min, table.key_max) != .gt);
+
+            // Use `key_min` for both ends of the iterator; we are looking for a single table.
+            const cursor_start =
+                level.iterator_start(table.key_min, table.key_min, .ascending) orelse return null;
+
+            var i = level.keys.absolute_index_for_cursor(cursor_start);
+            var tables = level.tables.iterator_from_index(i, .ascending);
+            const table_index_absolute = while (tables.next()) |level_table| : (i += 1) {
+                // The `table` parameter should *not* be a pointer into the `tables` SegmentedArray
+                // memory, since it will be invalidated by `tables.remove_elements()`.
+                assert(level_table != table);
+
+                if (level_table.equal(table)) break i;
+                assert(level_table.checksum != table.checksum);
+                assert(level_table.address != table.address);
+            } else return null;
+
+            level.generation +%= 1;
+            level.keys.remove_elements(node_pool, table_index_absolute, 1);
+            level.tables.remove_elements(node_pool, table_index_absolute, 1);
+            assert(level.keys.len() == level.tables.len());
+
+            if (table.invisible(snapshots)) {
+                return .invisible;
+            } else {
+                level.table_count_visible -= 1;
+                level.key_range.exclude(.{
+                    .key_min = table.key_min,
+                    .key_max = table.key_max,
+                });
+                return .visible;
+            }
         }
 
         /// Returns True if the given key may be present in the ManifestLevel,
@@ -304,35 +320,6 @@ pub fn ManifestLevelType(
             } else {
                 return true;
             }
-        }
-
-        fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
-            assert(level.keys.len() == level.tables.len());
-            assert(compare_keys(table.key_min, table.key_max) != .gt);
-
-            // Use `key_min` for both ends of the iterator; we are looking for a single table.
-            const cursor_start = level.iterator_start(table.key_min, table.key_min, .ascending).?;
-            var absolute_index = level.keys.absolute_index_for_cursor(cursor_start);
-
-            var it = level.tables.iterator_from_index(absolute_index, .ascending);
-            while (it.next()) |level_table| : (absolute_index += 1) {
-                // The `table` parameter should *not* be a pointer into the `tables` SegmentedArray
-                // memory, since it will be invalidated by `tables.remove_elements()`.
-                assert(level_table != table);
-
-                if (level_table.equal(table)) {
-                    level.keys.remove_elements(node_pool, absolute_index, 1);
-                    level.tables.remove_elements(node_pool, absolute_index, 1);
-                    assert(level.keys.len() == level.tables.len());
-
-                    level.generation +%= 1;
-
-                    return;
-                }
-                assert(level_table.checksum != table.checksum);
-            }
-
-            @panic("remove() called with a table that was never inserted");
         }
 
         pub const Visibility = enum {
@@ -1023,7 +1010,8 @@ pub fn TestContext(
 
             if (tables.items.len > 0) {
                 for (tables.items) |*table| {
-                    context.level.remove_table_invisible(&context.pool, snapshots, table);
+                    const removed = context.level.remove_table(&context.pool, snapshots, table);
+                    assert(removed.? == .invisible);
                 }
             }
         }
@@ -1101,11 +1089,12 @@ pub fn TestContext(
 
                 if (to_remove.items.len > 0) {
                     for (to_remove.items) |*table| {
-                        context.level.remove_table_invisible(
+                        const removed = context.level.remove_table(
                             &context.pool,
                             context.snapshots.slice(),
                             table,
                         );
+                        assert(removed.? == .invisible);
                     }
                 }
             }

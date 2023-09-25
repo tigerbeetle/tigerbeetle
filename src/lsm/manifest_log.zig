@@ -67,6 +67,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         pub const OpenEvent = *const fn (
             manifest_log: *ManifestLog,
+            event: schema.Manifest.Event,
             level: u7,
             table: *const TableInfo,
         ) void;
@@ -99,7 +100,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         opened: bool = false,
         open_event: OpenEvent = undefined,
-        open_iterator: SuperBlock.Manifest.IteratorReverse = undefined,
+        open_iterator: SuperBlock.Manifest.Iterator = undefined,
 
         /// Set for the duration of `compact`.
         reading: bool = false,
@@ -177,7 +178,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.entry_count == 0);
 
             manifest_log.open_event = event;
-            manifest_log.open_iterator = manifest_log.superblock.manifest.iterator_reverse();
+            manifest_log.open_iterator = manifest_log.superblock.manifest.iterator();
 
             manifest_log.reading = true;
             manifest_log.read_callback = callback;
@@ -242,27 +243,38 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const block_schema = schema.Manifest.from(block);
-            const labels_used = block_schema.labels_const(block);
-            const tables_used = block_schema.tables_const(block);
+            assert(block_schema.entry_count > 0);
+            assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
 
-            var entry = block_schema.entry_count;
-            while (entry > 0) {
-                entry -= 1;
-
-                const label = labels_used[entry];
-                const table = &tables_used[entry];
+            for (
+                block_schema.labels_const(block),
+                block_schema.tables_const(block),
+                0..block_schema.entry_count,
+            ) |label, *table, entry_index| {
+                const entry: u32 = @intCast(entry_index);
                 assert(table.tree_id >= manifest_log.options.tree_id_min);
                 assert(table.tree_id <= manifest_log.options.tree_id_max);
 
-                if (manifest.insert_table_extent(table.address, block_reference.address, entry)) {
-                    switch (label.event) {
-                        .insert => manifest_log.open_event(manifest_log, label.level, table),
-                        .remove => manifest.queue_for_compaction(block_reference.address),
-                    }
-                } else {
-                    manifest.queue_for_compaction(block_reference.address);
+                manifest_log.open_event(manifest_log, label.event, label.level, table);
+
+                switch (label.event) {
+                    .insert => {
+                        if (manifest.update_table_extent(
+                            table.address,
+                            block_reference.address,
+                            entry,
+                        )) |previous_block| {
+                            manifest.queue_for_compaction(previous_block);
+                        }
+                    },
+                    .remove => {
+                        if (manifest.remove_table_extent(table.address)) |extent_block| {
+                            manifest.queue_for_compaction(extent_block);
+                        }
+                        manifest.queue_for_compaction(block_reference.address);
+                    },
                 }
             }
 
@@ -341,12 +353,24 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             const address = header.op;
-            if (manifest.update_table_extent(table.address, address, entry)) |previous_block| {
-                manifest.queue_for_compaction(previous_block);
-                if (label.event == .remove) manifest.queue_for_compaction(address);
-            } else {
-                // A remove must remove a insert, which implies that it must update the extent.
-                assert(label.event != .remove);
+
+            switch (label.event) {
+                .insert => {
+                    if (manifest.update_table_extent(
+                        table.address,
+                        address,
+                        entry,
+                    )) |previous_block| {
+                        manifest.queue_for_compaction(previous_block);
+                    }
+                },
+                .remove => {
+                    const extent = manifest_log.superblock.manifest.tables.get(table.address).?;
+                    assert(manifest_log.superblock.manifest.tables.remove(table.address));
+
+                    manifest.queue_for_compaction(extent.block);
+                    manifest.queue_for_compaction(address);
+                },
             }
 
             manifest_log.entry_count += 1;
@@ -543,33 +567,42 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, block_reference.checksum, block_reference.address);
 
             const block_schema = schema.Manifest.from(block);
-            const labels_used = block_schema.labels_const(block);
-            const tables_used = block_schema.tables_const(block);
+            assert(block_schema.entry_count > 0);
+            assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
 
             const manifest: *SuperBlock.Manifest = &manifest_log.superblock.manifest;
-            assert(manifest.tables.count() > 0);
 
             var frees: u32 = 0;
-            var entry: u32 = 0;
-            while (entry < block_schema.entry_count) : (entry += 1) {
-                const label = labels_used[entry];
-                const table = &tables_used[entry];
-
-                // Remove the extent if the table is the latest version.
-                // We must iterate entries in forward order to drop the extent here.
-                // Otherwise, stale versions earlier in the block may reappear.
-                if (manifest.remove_table_extent(table.address, block_reference.address, entry)) {
-                    switch (label.event) {
-                        // Append the table, updating the table extent:
-                        .insert => manifest_log.append(label, table),
-                        // Since we compact oldest blocks first, we know that we have already
-                        // compacted all inserts that were eclipsed by this remove, so this remove
-                        // can now be safely dropped.
-                        .remove => frees += 1,
-                    }
-                } else {
-                    // The table is not the latest version and can dropped.
-                    frees += 1;
+            for (
+                block_schema.labels_const(block),
+                block_schema.tables_const(block),
+                0..block_schema.entry_count,
+            ) |label, *table, entry_index| {
+                const entry: u32 = @intCast(entry_index);
+                switch (label.event) {
+                    // Append the table, updating the table extent:
+                    .insert => {
+                        // Remove the extent if the table is the latest version.
+                        // We must iterate entries in forward order to drop the extent here.
+                        // Otherwise, stale versions earlier in the block may reappear.
+                        if (manifest.contains_table_extent(
+                            table.address,
+                            block_reference.address,
+                            entry,
+                        )) {
+                            // Append the table, updating the table extent:
+                            manifest_log.append(label, table);
+                        } else {
+                            // Either:
+                            // - This is not the latest insert for this table, so it can be dropped.
+                            // - The table was removed some time after this insert.
+                            frees += 1;
+                        }
+                    },
+                    // Since we compact oldest blocks first, we know that we have already
+                    // compacted all inserts that were eclipsed by this remove, so this remove
+                    // can now be safely dropped.
+                    .remove => frees += 1,
                 }
             }
 
@@ -657,12 +690,14 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.blocks.advance_tail();
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
+            const block_address = manifest_log.grid.acquire(manifest_log.grid_reservation.?);
+            assert(!manifest_log.superblock.manifest.queued_for_compaction(block_address));
 
             const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             header.* = .{
                 .context = undefined,
                 .cluster = manifest_log.superblock.working.cluster,
-                .op = manifest_log.grid.acquire(manifest_log.grid_reservation.?),
+                .op = block_address,
                 .size = undefined,
                 .command = .block,
                 .operation = BlockType.manifest.operation(),
