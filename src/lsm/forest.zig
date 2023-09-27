@@ -468,7 +468,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
         }
 
-        /// Verify that SuperBlock.Manifest.tables has an extent for every active table.
+        /// Verify that `ManifestLog.tables` has an extent for every active table.
         ///
         /// (Invoked between beats.)
         fn verify_table_extents(forest: *const Forest) void {
@@ -481,13 +481,12 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     if (constants.verify) {
                         var tables_iterator = tree_level.tables.iterator_from_index(0, .ascending);
                         while (tables_iterator.next()) |table| {
-                            assert(forest.grid.superblock.manifest.tables.get(table.address) !=
-                                null);
+                            assert(forest.manifest_log.tables.get(table.address) != null);
                         }
                     }
                 }
             }
-            assert(tables_count == forest.grid.superblock.manifest.tables.count());
+            assert(tables_count == forest.manifest_log.tables.count());
         }
 
         /// Verify the tables recovered into the ManifestLevels after opening the manifest log.
@@ -573,14 +572,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             var tables_latest_iterator = tables_latest.valueIterator();
             var table_extent_counts: usize = 0;
             while (tables_latest_iterator.next()) |table| {
-                const table_extent =
-                    forest.grid.superblock.manifest.tables.get(table.table.address).?;
+                const table_extent = forest.manifest_log.tables.get(table.table.address).?;
                 assert(table.manifest_block == table_extent.block);
                 assert(table.manifest_entry == table_extent.entry);
 
                 table_extent_counts += 1;
             }
-            assert(table_extent_counts == forest.grid.superblock.manifest.tables.count());
+            assert(table_extent_counts == forest.manifest_log.tables.count());
 
             // Verify the tables in `tables` are exactly the tables recovered by the Forest.
             var forest_tables_iterator = ForestTableIterator{};

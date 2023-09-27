@@ -21,7 +21,6 @@ const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
-const TableExtent = @import("../vsr/superblock_manifest.zig").Manifest.TableExtent;
 const Storage = @import("../testing/storage.zig").Storage;
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
@@ -526,6 +525,12 @@ const Environment = struct {
 
         try verify_manifest(&test_superblock.manifest, &env.manifest_log.superblock.manifest);
         try verify_manifest_compaction_set(test_superblock, &env.manifest_log_model);
+        try std.testing.expect(hash_map_equals(
+            u64,
+            ManifestLog.TableExtent,
+            &env.manifest_log.tables,
+            &test_manifest_log.tables,
+        ));
     }
 
     fn verify_superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -535,21 +540,16 @@ const Environment = struct {
 
     fn verify_manifest_open_event(
         manifest_log_verify: *ManifestLog,
-        event: schema.Manifest.Event,
         level: u6,
         table: *const TableInfo,
     ) void {
         const env = @fieldParentPtr(Environment, "manifest_log_verify", manifest_log_verify);
         assert(env.pending > 0);
 
-        if (env.manifest_log_opening.?.get(table.address)) |expect| {
-            assert(event == .insert);
-            assert(expect.level == level);
-            assert(std.meta.eql(expect.table, table.*));
-            assert(env.manifest_log_opening.?.remove(table.address));
-        } else {
-            // This is not the newest event for this table.
-        }
+        const expect = env.manifest_log_opening.?.get(table.address).?;
+        assert(expect.level == level);
+        assert(std.meta.eql(expect.table, table.*));
+        assert(env.manifest_log_opening.?.remove(table.address));
     }
 
     fn verify_manifest_open_callback(manifest_log_verify: *ManifestLog) void {
@@ -660,12 +660,6 @@ fn verify_manifest(
     try std.testing.expect(std.mem.eql(u128, expect.checksums[0..c], actual.checksums[0..c]));
     try std.testing.expect(std.mem.eql(u64, expect.addresses[0..c], actual.addresses[0..c]));
 
-    try std.testing.expect(hash_map_equals(
-        u64,
-        SuperBlock.Manifest.TableExtent,
-        &expect.tables,
-        &actual.tables,
-    ));
     try std.testing.expect(hash_map_equals(
         u64,
         void,
