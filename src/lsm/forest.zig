@@ -1,10 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const math = std.math;
+const maybe = stdx.maybe;
 const mem = std.mem;
 const log = std.log.scoped(.forest);
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
@@ -264,7 +265,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
-            event: schema.Manifest.Event,
             level: u6,
             table: *const schema.Manifest.TableInfo,
         ) void {
@@ -276,7 +276,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             switch (table.tree_id) {
                 inline tree_id_range.min...tree_id_range.max => |tree_id| {
                     var tree: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
-                    tree.open_table(event, level, table);
+                    tree.open_table(level, table);
                 },
                 else => {
                     log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
@@ -495,18 +495,17 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         /// There are two strategies to reconstruct the LSM's manifest levels (i.e. the list of
         /// tables) from a superblock manifest:
         ///
-        /// 1. Iterate the manifest events forward, replaying each insert/update/remove in sequence.
-        /// 2. Iterate the manifest events backward, ignoring events for tables that have already
-        ///    been encountered.
+        /// 1. Iterate the manifest events in chronological order, replaying each
+        ///    insert/update/remove in sequence.
+        /// 2. Iterate the manifest events in reverse-chronological order, ignoring events for
+        ///    tables that have already been encountered.
         ///
         /// The manifest levels constructed by each strategy are identical.
         ///
-        /// 1. `ManifestLog.open()` implements strategy 1.
-        /// 2. This function implements strategy 2, to validate `ManifestLog.open()`.
+        /// 1. This function implements strategy 1, to validate `ManifestLog.open()`.
+        /// 2. `ManifestLog.open()` implements strategy 2.
         ///
-        /// (Strategy 2 minimizes the number of ManifestLevel mutations, but requires that the
-        /// `SuperBlock.Manifest.tables` hash map allocate capacity for removed tables (in addition
-        /// to the "live" tables), so it is too expensive for production replicas.)
+        /// (Strategy 2 minimizes the number of ManifestLevel mutations.)
         ///
         /// (Invoked immediately after open() or checkpoint()).
         fn verify_tables_recovered(forest: *const Forest) void {
@@ -518,7 +517,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.manifest_log.opened);
 
             if (Forest.Storage != @import("../testing/storage.zig").Storage) return;
-            const allocator = forest.grid.superblock.storage.allocator;
 
             // The manifest log is opened, which means we have all of the manifest blocks.
             // But if the replica is syncing, those blocks might still be writing (and thus not in
@@ -527,22 +525,20 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             // The latest version of each table, keyed by table checksum.
             // Null when the table has been deleted.
-            var tables_latest = std.AutoHashMap(u128, ?struct {
+            var tables_latest = std.AutoHashMap(u128, struct {
                 level: u6,
                 table: schema.Manifest.TableInfo,
                 manifest_block: u64,
                 manifest_entry: u32,
-            }).init(allocator);
+            }).init(forest.grid.superblock.storage.allocator);
             defer tables_latest.deinit();
 
-            // Replay manifest events in reverse-chronological order.
+            // Replay manifest events in chronological order.
             // Accumulate all tables that belong in the recovered forest's ManifestLevels.
-            var block_index = forest.grid.superblock.manifest.count;
-            while (block_index > 0) {
-                block_index -= 1;
-
-                const block_checksum = forest.grid.superblock.manifest.checksums[block_index];
-                const block_address = forest.grid.superblock.manifest.addresses[block_index];
+            for (
+                forest.grid.superblock.manifest.checksums[0..forest.grid.superblock.manifest.count],
+                forest.grid.superblock.manifest.addresses[0..forest.grid.superblock.manifest.count],
+            ) |block_checksum, block_address| {
                 assert(block_address > 0);
 
                 const block = forest.grid.superblock.storage.grid_block(block_address).?;
@@ -555,71 +551,46 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 assert(block_schema.entry_count > 0);
                 assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
 
-                const labels = block_schema.labels_const(block);
-                const tables = block_schema.tables_const(block);
-                assert(tables.len == block_schema.entry_count);
-                assert(tables.len == labels.len);
-
-                var entry = block_schema.entry_count;
-                while (entry > 0) {
-                    entry -= 1;
-
-                    const label = labels[entry];
-                    const table = &tables[entry];
-
-                    var result = tables_latest.getOrPut(table.checksum) catch @panic("oom");
-                    if (result.found_existing) {
-                        // This event has been superseded by a (chronologically) later one.
-                        // (The later event was already processed, because we are iterating the
-                        // events in reverse order.)
+                for (
+                    block_schema.labels_const(block),
+                    block_schema.tables_const(block),
+                    0..,
+                ) |label, *table, entry| {
+                    if (label.event == .remove) {
+                        maybe(tables_latest.remove(table.checksum));
                     } else {
-                        result.value_ptr.* = switch (label.event) {
-                            .insert,
-                            .update,
-                            => .{
-                                .level = label.level,
-                                .table = table.*,
-                                .manifest_block = block_address,
-                                .manifest_entry = entry,
-                            },
-                            .remove => null,
-                        };
+                        tables_latest.put(table.checksum, .{
+                            .level = label.level,
+                            .table = table.*,
+                            .manifest_block = block_address,
+                            .manifest_entry = @intCast(entry),
+                        }) catch @panic("oom");
                     }
                 }
             }
 
-            {
-                // Verify that the SuperBlock Manifest's table extents are correct.
-                var tables_latest_iterator = tables_latest.valueIterator();
-                var table_extent_counts: usize = 0;
-                while (tables_latest_iterator.next()) |table_or_removed| {
-                    if (table_or_removed.*) |*table| {
-                        const table_extent =
-                            forest.grid.superblock.manifest.tables.get(table.table.address).?;
-                        assert(table.manifest_block == table_extent.block);
-                        assert(table.manifest_entry == table_extent.entry);
+            // Verify that the SuperBlock Manifest's table extents are correct.
+            var tables_latest_iterator = tables_latest.valueIterator();
+            var table_extent_counts: usize = 0;
+            while (tables_latest_iterator.next()) |table| {
+                const table_extent =
+                    forest.grid.superblock.manifest.tables.get(table.table.address).?;
+                assert(table.manifest_block == table_extent.block);
+                assert(table.manifest_entry == table_extent.entry);
 
-                        table_extent_counts += 1;
-                    }
-                }
-                assert(table_extent_counts == forest.grid.superblock.manifest.tables.count());
+                table_extent_counts += 1;
             }
+            assert(table_extent_counts == forest.grid.superblock.manifest.tables.count());
 
-            {
-                // Verify the tables in `tables` are exactly the tables recovered by the Forest.
-                var forest_tables_iterator = ForestTableIterator{};
-                while (forest_tables_iterator.next(forest)) |forest_table_item| {
-                    const table_latest = tables_latest.get(forest_table_item.table.checksum).?.?;
-                    assert(table_latest.level == forest_table_item.level);
-                    assert(std.meta.eql(table_latest.table, forest_table_item.table));
+            // Verify the tables in `tables` are exactly the tables recovered by the Forest.
+            var forest_tables_iterator = ForestTableIterator{};
+            while (forest_tables_iterator.next(forest)) |forest_table_item| {
+                const table_latest = tables_latest.get(forest_table_item.table.checksum).?;
+                assert(table_latest.level == forest_table_item.level);
+                assert(std.meta.eql(table_latest.table, forest_table_item.table));
 
-                    const table_removed = tables_latest.remove(forest_table_item.table.checksum);
-                    assert(table_removed);
-                }
-
-                // Any remaining tables are deleted, but not yet compacted out of the manifest.
-                var tables_latest_iterator = tables_latest.valueIterator();
-                while (tables_latest_iterator.next()) |table| assert(table.* == null);
+                const table_removed = tables_latest.remove(forest_table_item.table.checksum);
+                assert(table_removed);
             }
         }
     };
