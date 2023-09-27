@@ -18,7 +18,7 @@ const MessageBus = @import("cluster/message_bus.zig").MessageBus;
 const Network = @import("cluster/network.zig").Network;
 const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
-const StorageCheckerType = @import("cluster/storage_checker.zig").StorageCheckerType;
+const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 const SyncCheckerType = @import("cluster/sync_checker.zig").SyncCheckerType;
 const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
 
@@ -53,7 +53,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
-        pub const StorageChecker = StorageCheckerType(Storage);
         pub const SyncChecker = SyncCheckerType(Replica);
 
         pub const Options = struct {
