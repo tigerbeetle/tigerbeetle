@@ -11,7 +11,7 @@ const schema = @import("../lsm/schema.zig");
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
-const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
+const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
 const stdx = @import("../stdx.zig");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 
@@ -149,7 +149,7 @@ pub fn GridType(comptime Storage: type) type {
 
         const set_associative_cache_ways = 16;
 
-        pub const Cache = SetAssociativeCache(
+        pub const Cache = SetAssociativeCacheType(
             u64,
             u64,
             cache_interface.address_from_address,
@@ -645,7 +645,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Insert the write block into the cache, and give the evicted block to the writer.
-            const cache_index = grid.cache.upsert_index(&completed_write.address, Cache.noop_on_eviction);
+            const cache_index = grid.cache.upsert(&completed_write.address).index;
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             @memset(completed_write.block.*, 0);
@@ -888,7 +888,7 @@ pub fn GridType(comptime Storage: type) type {
 
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index =
-                if (read.cache_write) grid.cache.upsert_index(&read.address, Cache.noop_on_eviction) else null;
+                if (read.cache_write) grid.cache.upsert(&read.address).index else null;
             const block = block: {
                 if (read.cache_write) {
                     const cache_block = &grid.cache_blocks[cache_index.?];
@@ -938,7 +938,8 @@ pub fn GridType(comptime Storage: type) type {
 
                 if (read.cache_write) {
                     // Don't cache a corrupt or incorrect block.
-                    _ = grid.cache.remove(read.address);
+                    const removed = grid.cache.remove(read.address);
+                    assert(removed != null);
                 }
             }
 

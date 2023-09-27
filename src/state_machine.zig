@@ -473,13 +473,8 @@ pub fn StateMachineType(
         }
 
         fn prefetch_lookup_accounts(self: *StateMachine, ids: []const u128) void {
-<<<<<<< HEAD
             for (ids) |id| {
                 self.forest.grooves.accounts.prefetch_enqueue(id);
-=======
-           for (ids) |id| {
-                self.forest.grooves.accounts_immutable.prefetch_enqueue(id);
->>>>>>> ebfea535 (LSM: Hoist value cache, replace table_(im)mutable)
             }
 
             self.forest.grooves.accounts.prefetch(
@@ -586,16 +581,13 @@ pub fn StateMachineType(
             callback(self);
         }
 
-        fn scope_open(self: *StateMachine, comptime operation: Operation) void {
-            comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
-
+        fn scope_open(self: *StateMachine, operation: Operation) void {
             switch (operation) {
                 .create_accounts => {
-                    self.forest.grooves.accounts_immutable.scope_open();
-                    self.forest.grooves.accounts_mutable.scope_open();
+                    self.forest.grooves.accounts.scope_open();
                 },
                 .create_transfers => {
-                    self.forest.grooves.accounts_mutable.scope_open();
+                    self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.posted.scope_open();
                 },
@@ -603,18 +595,15 @@ pub fn StateMachineType(
             }
         }
 
-        fn scope_close(self: *StateMachine, comptime operation: Operation, data: ScopeCloseMode) void {
-            comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
-
+        fn scope_close(self: *StateMachine, operation: Operation, mode: ScopeCloseMode) void {
             switch (operation) {
                 .create_accounts => {
-                    self.forest.grooves.accounts_immutable.scope_close(data);
-                    self.forest.grooves.accounts_mutable.scope_close(data);
+                    self.forest.grooves.accounts.scope_close(mode);
                 },
                 .create_transfers => {
-                    self.forest.grooves.accounts_mutable.scope_close(data);
-                    self.forest.grooves.transfers.scope_close(data);
-                    self.forest.grooves.posted.scope_close(data);
+                    self.forest.grooves.accounts.scope_close(mode);
+                    self.forest.grooves.transfers.scope_close(mode);
+                    self.forest.grooves.posted.scope_close(mode);
                 },
                 else => unreachable,
             }
@@ -1115,8 +1104,7 @@ pub fn StateMachineType(
                         2 * batch_transfers_max,
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
-                    .tree_options_object = .{
-                    },
+                    .tree_options_object = .{},
                     .tree_options_id = .{},
                     .tree_options_index = .{
                         .user_data_128 = .{},
@@ -1134,8 +1122,7 @@ pub fn StateMachineType(
                     // *2 to fetch pending and post/void transfer.
                     .prefetch_entries_max = 2 * batch_transfers_max,
                     .cache_entries_max = options.cache_entries_transfers,
-                    .tree_options_object = .{
-                    },
+                    .tree_options_object = .{},
                     .tree_options_id = .{},
                     .tree_options_index = .{
                         .debit_account_id = .{},

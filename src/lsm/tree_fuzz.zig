@@ -421,11 +421,10 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
-        //8
-        100 * constants.lsm_growth_factor * 2048
+        constants.lsm_growth_factor * 2048
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        constants.lsm_growth_factor * 2048;
+        100 * constants.lsm_growth_factor * 2048;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 

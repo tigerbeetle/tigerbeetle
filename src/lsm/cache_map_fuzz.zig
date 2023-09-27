@@ -8,7 +8,6 @@ const allocator = fuzz.allocator;
 
 const TestTable = @import("cache_map.zig").TestTable;
 const TestCacheMap = @import("cache_map.zig").TestCacheMap;
-const CacheMap = @import("cache_map.zig").CacheMap;
 
 const log = std.log.scoped(.lsm_cache_map_fuzz);
 const Key = TestTable.Key;
@@ -62,24 +61,24 @@ const Environment = struct {
     }
 
     pub fn deinit(self: *Environment) void {
-        self.cache_map.deinit(allocator);
-        self.model.deinit();
         self.scope_model.deinit();
+        self.model.deinit();
+        self.cache_map.deinit(allocator);
     }
 
-    fn copy_hash_map(src: anytype, dst: anytype) !void {
+    fn copy_hash_map(dst: anytype, src: anytype) !void {
         dst.clearRetainingCapacity();
         var it = src.iterator();
         while (it.next()) |kv| {
-            try dst.put(kv.key_ptr.*, kv.value_ptr.*);
+            try dst.putNoClobber(kv.key_ptr.*, kv.value_ptr.*);
         }
     }
 
     pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
         // The cache_map should behave exactly like a hash map, with some exceptions:
-        // .compact() removes values added more than one .compact() ago.
-        // .scope_close(.discard) rolls back all operations done from the corresponding
-        //                       .scope_open()
+        // * .compact() removes values added more than one .compact() ago.
+        // * .scope_close(.discard) rolls back all operations done from the corresponding
+        //   .scope_open()
 
         for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
             log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
@@ -106,43 +105,44 @@ const Environment = struct {
                     const cache_map_value = env.cache_map.get(key);
 
                     // Compare result to model.
-                    var model_value = env.model.get(key);
+                    const model_value = env.model.get(key);
                     if (model_value == null) {
                         assert(cache_map_value == null);
                     } else if (env.compacts >= 2 and model_value.?.op <= env.compacts - 2) {
-                        // .compact() support; if the entry has an op 2 or compacts ago, it doesn't
-                        // have to exist in the cache_map. It may still be served from the cache
-                        // layer, however.
+                        // .compact() support; if the entry has an op 2 or more compacts ago, it
+                        // doesn't have to exist in the cache_map. It may still be served from the
+                        // cache layer, however.
                         stdx.maybe(cache_map_value == null);
+                        if (cache_map_value) |unwrapped_cache_map_value| {
+                            assert(std.meta.eql(unwrapped_cache_map_value.*, model_value.?.value));
+                        }
                     } else {
-                        assert(std.mem.eql(
-                            u8,
-                            std.mem.asBytes(&model_value.?.value),
-                            std.mem.asBytes(cache_map_value.?),
-                        ));
+                        assert(std.meta.eql(model_value.?.value, cache_map_value.?.*));
                     }
                 },
-                .scope => |mode| {
-                    if (mode == .open) {
+                .scope => |mode| switch (mode) {
+                    .open => {
                         env.cache_map.scope_open();
                         env.scope_open = true;
 
                         // Copy env.model to env.scope_model, so we can easily revert later.
-                        try copy_hash_map(&env.model, &env.scope_model);
-                    } else if (mode == .persist) {
+                        try copy_hash_map(&env.scope_model, &env.model);
+                    },
+                    .persist => {
                         env.cache_map.scope_close(.persist);
                         env.scope_open = false;
 
                         // To persist the scope, we don't need to do anything.
                         env.scope_model.clearRetainingCapacity();
-                    } else if (mode == .discard) {
+                    },
+                    .discard => {
                         env.cache_map.scope_close(.discard);
                         env.scope_open = false;
 
                         // To revert the scope, we can just overwrite model with scope_model.
-                        try copy_hash_map(&env.scope_model, &env.model);
+                        try copy_hash_map(&env.model, &env.scope_model);
                         env.scope_model.clearRetainingCapacity();
-                    }
+                    },
                 },
             }
         }
@@ -155,10 +155,10 @@ const Environment = struct {
     /// We verify the negative space by iterating over the cache_map's cache and maps directly,
     /// ensuring that:
     /// 1. The values in the cache all exist and are equal in the model.
-    /// 2. The values in map_1 either exists and are equal in the model, or there's the same key
+    /// 2. The values in stash_1 either exists and are equal in the model, or there's the same key
     ///    in the cache.
-    /// 3. The values in map_2 either exists and are equal in the model, or there's the same key
-    ///    in map_1 or the cache.
+    /// 3. The values in stash_2 either exists and are equal in the model, or there's the same key
+    ///    in stash_1 or the cache.
     pub fn verify(env: *Environment) void {
         var checked: u32 = 0;
         var it = env.model.iterator();
@@ -171,11 +171,7 @@ const Environment = struct {
             // Get account from cache_map.
             const cache_map_value = env.cache_map.get(kv.key_ptr.*);
 
-            assert(std.mem.eql(
-                u8,
-                std.mem.asBytes(&kv.value_ptr.value),
-                std.mem.asBytes(cache_map_value.?),
-            ));
+            assert(std.meta.eql(kv.value_ptr.value, cache_map_value.?.*));
 
             checked += 1;
         }
@@ -192,17 +188,13 @@ const Environment = struct {
 
             const model_val = env.model.get(TestTable.key_from_value(cache_value));
 
-            assert(std.mem.eql(
-                u8,
-                std.mem.asBytes(cache_value),
-                std.mem.asBytes(&model_val.?.value),
-            ));
+            assert(std.meta.eql(cache_value.*, model_val.?.value));
         }
 
         // The stash can have stale values, but in that case the real value _must_ exist
         // in the cache. It should be impossible for the stash to have a value that isn't in the
         // model, since cache_map.remove() removes from both the cache and stash.
-        var stash_iterator_1 = env.cache_map.map_1.keyIterator();
+        var stash_iterator_1 = env.cache_map.stash_1.keyIterator();
         while (stash_iterator_1.next()) |stash_value| {
             // Get account from model.
             const model_value = env.model.getPtr(TestTable.key_from_value(stash_value));
@@ -210,11 +202,7 @@ const Environment = struct {
             // Even if the stash has stale values, the key must still exist in the model.
             assert(model_value != null);
 
-            const stash_value_equal = std.mem.eql(
-                u8,
-                std.mem.asBytes(stash_value),
-                std.mem.asBytes(&model_value.?.value),
-            );
+            const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
 
             if (!stash_value_equal) {
                 // We verified all cache entries were equal and correct above, so if it exists,
@@ -224,7 +212,7 @@ const Environment = struct {
             }
         }
 
-        var stash_iterator_2 = env.cache_map.map_2.keyIterator();
+        var stash_iterator_2 = env.cache_map.stash_2.keyIterator();
         while (stash_iterator_2.next()) |stash_value| {
             // Get account from model.
             const model_value = env.model.getPtr(TestTable.key_from_value(stash_value));
@@ -232,17 +220,13 @@ const Environment = struct {
             // Even if the stash has stale values, the key must still exist in the model.
             assert(model_value != null);
 
-            const stash_value_equal = std.mem.eql(
-                u8,
-                std.mem.asBytes(stash_value),
-                std.mem.asBytes(&model_value.?.value),
-            );
+            const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
 
             if (!stash_value_equal) {
-                // Same logic as when map_1 checks the cache above.
+                // Same logic as when stash_1 checks the cache above.
                 const cache_value = env.cache_map.cache.get(TestTable.key_from_value(stash_value));
-                const map_1_value = env.cache_map.map_1.get(stash_value.*);
-                assert(cache_value != null or map_1_value != null);
+                const stash_1_value = env.cache_map.stash_1.get(stash_value.*);
+                assert(cache_value != null or stash_1_value != null);
             }
         }
 
@@ -257,10 +241,10 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
-        100 * constants.lsm_growth_factor * 2048
+        constants.lsm_growth_factor * 2048
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
-        constants.lsm_growth_factor * 2048;
+        100 * constants.lsm_growth_factor * 2048;
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
@@ -316,6 +300,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         } else {
             // Otherwise pick a random FuzzOp.
             fuzz_op_tag = fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
+            if (i == fuzz_ops.len - 1 and fuzz_op_tag == FuzzOpTag.scope) {
+                // We can't let our final operation be a scope open.
+                fuzz_op_tag = FuzzOpTag.get;
+            }
         }
 
         fuzz_op.* = switch (fuzz_op_tag) {

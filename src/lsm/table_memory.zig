@@ -52,45 +52,47 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
-            table.values = table.values.ptr[0..value_count_max];
             allocator.free(table.values);
         }
 
         pub fn reset(table: *TableMemory) void {
-            var values_max = table.values.ptr[0..value_count_max];
-            var mutability: Mutability = if (table.mutability == .immutable) .{ .immutable = .{
-                .flushed = true,
-            } } else .mutable;
+            var mutability: Mutability = switch (table.mutability) {
+                .immutable => .{ .immutable = .{} },
+                .mutable => .mutable,
+            };
 
             table.* = .{
-                .values = values_max,
+                .values = table.values,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
             };
         }
 
-        pub fn count(table: *TableMemory) usize {
+        pub fn count(table: *const TableMemory) usize {
             return table.value_context.count;
+        }
+
+        pub fn values_used(table: *const TableMemory) []Value {
+            return table.values[0..table.value_context.count];
         }
 
         pub fn put(table: *TableMemory, value: *const Value) void {
             assert(table.mutability == .mutable);
-            assert(table.values.len == value_count_max);
             assert(table.value_context.count < value_count_max);
 
-            const put_order = if (table.value_context.count == 0)
-                .lt
-            else
-                compare_keys(
+            if (table.value_context.sorted) {
+                table.value_context.sorted = table.value_context.count == 0 or
+                    compare_keys(
                     key_from_value(&table.values[table.value_context.count - 1]),
                     key_from_value(value),
-                );
+                ).compare(.lte);
+            } else {
+                assert(table.value_context.count > 0);
+            }
+
             table.values[table.value_context.count] = value.*;
             table.value_context.count += 1;
-
-            table.value_context.sorted = table.value_context.sorted and
-                (put_order == .eq or put_order == .lt);
         }
 
         /// This function is intended to never be called by regular code. It only
@@ -98,12 +100,13 @@ pub fn TableMemoryType(comptime Table: type) type {
         /// code must rely on the Groove cache for lookups.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
             assert(constants.verify);
+            assert(table.value_context.count <= value_count_max);
 
             // Just sort all the keys here, for simplicity.
             if (!table.value_context.sorted) {
                 std.mem.sort(
                     Value,
-                    table.values[0..table.value_context.count],
+                    table.values_used(),
                     {},
                     sort_values_by_key_in_ascending_order,
                 );
@@ -115,7 +118,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 Value,
                 key_from_value,
                 compare_keys,
-                table.values[0..table.value_context.count],
+                table.values_used(),
                 key,
                 .{ .mode = .upper_bound },
             );
@@ -130,13 +133,17 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
-
-            table.values = table.values[0..table.value_context.count];
+            assert(table.value_context.count <= value_count_max);
 
             // Sort all the values. In future, this will be done incrementally, and use
             // k_way_merge, but for now the performance regression was too bad.
             if (!table.value_context.sorted) {
-                std.mem.sort(Value, table.values, {}, sort_values_by_key_in_ascending_order);
+                std.mem.sort(
+                    Value,
+                    table.values_used(),
+                    {},
+                    sort_values_by_key_in_ascending_order,
+                );
                 table.value_context.sorted = true;
             }
 
@@ -150,12 +157,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_mutable(table: *TableMemory) void {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
-
-            var values_max = table.values.ptr[0..value_count_max];
-            assert(values_max.len == value_count_max);
+            assert(table.value_context.count <= value_count_max);
+            assert(table.value_context.sorted);
 
             table.* = .{
-                .values = values_max,
+                .values = table.values,
                 .value_context = .{},
                 .mutability = .mutable,
                 .name = table.name,
@@ -166,18 +172,22 @@ pub fn TableMemoryType(comptime Table: type) type {
             return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
         }
 
-        pub inline fn key_min(table: *const TableMemory) Key {
-            assert(table.values.len > 0);
+        pub fn key_min(table: *const TableMemory) Key {
+            const values = table.values_used();
+
+            assert(values.len > 0);
             assert(table.mutability == .immutable);
 
-            return key_from_value(&table.values[0]);
+            return key_from_value(&values[0]);
         }
 
-        pub inline fn key_max(table: *const TableMemory) Key {
-            assert(table.values.len > 0);
+        pub fn key_max(table: *const TableMemory) Key {
+            const values = table.values_used();
+
+            assert(values.len > 0);
             assert(table.mutability == .immutable);
 
-            return key_from_value(&table.values[table.values.len - 1]);
+            return key_from_value(&values[values.len - 1]);
         }
     };
 }

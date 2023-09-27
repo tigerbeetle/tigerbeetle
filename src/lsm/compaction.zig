@@ -77,7 +77,7 @@ pub fn CompactionType(
         const TableInfoReference = Manifest.TableInfoReference;
 
         pub const TableInfoA = union(enum) {
-            immutable: []Value,
+            immutable: []const Value,
             disk: TableInfoReference,
         };
 
@@ -275,38 +275,6 @@ pub fn CompactionType(
             }
         }
 
-        // TODO: We need to reimplement the .secondary_index optimization for sort here.
-        fn fill_immutable_values(compaction: *Compaction) u32 {
-            var immutable_values_for_compaction =
-                Table.data_block_values(compaction.data_blocks[0]);
-            var table_immutable_values = compaction.context.table_info_a.immutable;
-            var input_index: u32 = 0;
-            var output_index: u32 = 0;
-
-            while (input_index < table_immutable_values.len) {
-                if (output_index > 0 and compare_keys(
-                    key_from_value(&immutable_values_for_compaction[output_index - 1]),
-                    key_from_value(&table_immutable_values[input_index]),
-                ) == .eq) {
-                    output_index -= 1;
-                }
-
-                immutable_values_for_compaction[output_index] =
-                    table_immutable_values[input_index];
-
-                if (output_index == immutable_values_for_compaction.len - 1) {
-                    break;
-                }
-
-                input_index += 1;
-                output_index += 1;
-            }
-            compaction.context.table_info_a.immutable =
-                compaction.context.table_info_a.immutable[input_index..];
-
-            return output_index;
-        }
-
         /// The compaction's input tables are:
         /// * `context.table_a_info` (which is `.immutable` when `context_level_b` is 0), and
         /// * Any level_b tables visible to `context.op_min` within `context.range_b`.
@@ -484,10 +452,15 @@ pub fn CompactionType(
                 // TODO: Currently, this copies the values to compaction.data_blocks[0], but in
                 // future we can make it use a KWayMergeIterator.
                 if (compaction.context.table_info_a.immutable.len > 0) {
-                    const filled = compaction.fill_immutable_values();
+                    var target = Table.data_block_values(compaction.data_blocks[0]);
 
-                    // The immutable table is always considered `table a`, which maps to 0.
-                    compaction.values_in[0] = Table.data_block_values(compaction.data_blocks[0])[0..filled];
+                    const filled = compaction.fill_immutable_values(target);
+                    assert(filled > 0);
+
+                    // The immutable table is always considered "Table A", which maps to 0.
+                    compaction.values_in[0] = target[0..filled];
+                } else {
+                    assert(compaction.values_in[0].len == 0);
                 }
 
                 compaction.iterator_check_finish(input_level);
@@ -501,6 +474,76 @@ pub fn CompactionType(
                     }),
                 }
             }
+        }
+
+        // TODO: We need to reimplement the .secondary_index optimization here (or at a higher
+        // level). The original optimization is described at
+        // https://github.com/tigerbeetle/tigerbeetle/pull/337/files.
+        // When updating a secondary index for a single object multiple times within a bar,
+        // redundant tombstones and puts are generated, and these are tricky to filter out without
+        // either using a HashMap or having to do extra sorting. They are eventually filtered out
+        // by our compaction merge() however.
+        //
+        /// Copies values to `target` from our immutable table input, taking the last
+        /// matching value to resolve duplicates, and updating the immutable table slice.
+        fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
+            var source = compaction.context.table_info_a.immutable;
+            assert(source.len > 0);
+
+            if (constants.verify) {
+                // The input may have duplicate keys (last one wins), but keys must be
+                // non-decreasing.
+                // A source length of 1 is always non-decreasing.
+                for (source[0 .. source.len - 1], source[1..source.len]) |*value, *value_next| {
+                    assert(compare_keys(key_from_value(value_next), key_from_value(value)) != .lt);
+                }
+            }
+
+            var source_index: usize = 0;
+            var target_index: usize = 0;
+            while (target_index < target.len and source_index < source.len) : (source_index += 1) {
+                // The last value in a run of duplicates needs to be the one that ends up in
+                // target.
+                target[target_index] = source[source_index];
+
+                // If we're at the end of the source, there is no next value, so the next value
+                // can't be equal.
+                const value_next_equal = source_index + 1 < source.len and compare_keys(
+                    key_from_value(&source[source_index]),
+                    key_from_value(&source[source_index + 1]),
+                ) == .eq;
+
+                if (!value_next_equal) {
+                    target_index += 1;
+                }
+            }
+
+            // At this point, source_index and target_index are actually counts.
+            // source_index will always be incremented after the final iteration as part of the
+            // continue expression.
+            // target_index will always be incremented, since either source_index runs out first
+            // so value_next_equal is false, or a new value is hit, which will increment it.
+            const source_count = source_index;
+            const target_count = target_index;
+
+            assert(target_count <= source_count);
+            assert(target_count > 0);
+
+            compaction.context.table_info_a.immutable =
+                compaction.context.table_info_a.immutable[source_count..];
+
+            if (constants.verify) {
+                // Our output must be strictly increasing.
+                // An output length of 1 is always strictly increasing.
+                for (
+                    target[0 .. target_count - 1],
+                    target[1..target_count],
+                ) |*value, *value_next| {
+                    assert(compare_keys(key_from_value(value_next), key_from_value(value)) == .gt);
+                }
+            }
+
+            return target_count;
         }
 
         fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {

@@ -12,7 +12,7 @@ const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const CompositeKey = @import("composite_key.zig").CompositeKey;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
-const CacheMap = @import("cache_map.zig").CacheMap;
+const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const Fingerprint = @import("bloom_filter.zig").Fingerprint;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
@@ -408,7 +408,7 @@ pub fn GrooveType(
         }
     };
 
-    const _ObjectsCache = CacheMap(
+    const _ObjectsCache = CacheMapType(
         PrimaryKey,
         Object,
         ObjectsCacheHelpers.key_from_value,
@@ -434,11 +434,6 @@ pub fn GrooveType(
 
         const trees_total = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
         const TreesBitSet = std.StaticBitSet(trees_total);
-
-        const PrefetchKey = struct { key: union(enum) {
-            id: PrimaryKey,
-            timestamp: u64,
-        }, level: u8 };
 
         const PrefetchKeys = std.AutoArrayHashMapUnmanaged(
             union(enum) {
@@ -484,7 +479,7 @@ pub fn GrooveType(
         ///
         /// Invariant: if something is in the mutable or immutable table, it _must_ exist in our
         /// object cache.
-        objects_cache: *ObjectsCache,
+        objects_cache: ObjectsCache,
 
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched by a batch.
@@ -502,10 +497,7 @@ pub fn GrooveType(
             grid: *Grid,
             options: Options,
         ) !Groove {
-            var objects_cache = try allocator.create(ObjectsCache);
-            errdefer allocator.destroy(objects_cache);
-
-            objects_cache.* = try ObjectsCache.init(allocator, .{
+            var objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
                 // In the worst case, each Map must be able to store the value_count_max (to
@@ -522,7 +514,7 @@ pub fn GrooveType(
             });
             errdefer objects_cache.deinit(allocator);
 
-            // Intialize the object LSM tree.
+            // Initialize the object LSM tree.
             var object_tree = try ObjectTree.init(
                 allocator,
                 node_pool,
@@ -597,7 +589,6 @@ pub fn GrooveType(
 
             groove.prefetch_keys.deinit(allocator);
             groove.objects_cache.deinit(allocator);
-            allocator.destroy(groove.objects_cache);
 
             groove.* = undefined;
         }
@@ -643,7 +634,7 @@ pub fn GrooveType(
         /// This must be called by the state machine for every key to be prefetched.
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
-        pub inline fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
+        pub fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
             if (has_id) {
                 if (!groove.ids.key_range_contains(groove.prefetch_snapshot.?, key)) return;
 
@@ -666,7 +657,11 @@ pub fn GrooveType(
         /// If found in the IdTree, we attempt to prefetch a value for the timestamp.
         fn prefetch_from_memory_by_id(groove: *Groove, id: PrimaryKey) void {
             const fingerprint = key_fingerprint(id);
-            switch (groove.ids.lookup_from_levels_cache(groove.prefetch_snapshot.?, id, fingerprint)) {
+            switch (groove.ids.lookup_from_levels_cache(
+                groove.prefetch_snapshot.?,
+                id,
+                fingerprint,
+            )) {
                 .negative => {},
                 .positive => |id_tree_value| {
                     if (IdTreeValue.tombstone(id_tree_value)) return;
@@ -688,7 +683,11 @@ pub fn GrooveType(
         /// table blocks in the grid cache.
         fn prefetch_from_memory_by_timestamp(groove: *Groove, timestamp: u64) void {
             const fingerprint = key_fingerprint(timestamp);
-            switch (groove.objects.lookup_from_levels_cache(groove.prefetch_snapshot.?, timestamp, fingerprint)) {
+            switch (groove.objects.lookup_from_levels_cache(
+                groove.prefetch_snapshot.?,
+                timestamp,
+                fingerprint,
+            )) {
                 .negative => {},
                 .positive => |object| {
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
@@ -938,15 +937,10 @@ pub fn GrooveType(
         /// Insert the value (or update it, if it exists).
         /// Update the object and index trees by diff'ing the old and new values.
         pub fn upsert(groove: *Groove, new: *const Object) void {
-            const maybe_old = groove.objects_cache.get(@field(new, primary_field));
-
-            if (maybe_old == null) {
+            // Explicit stack copy needed - otherwise old will == new!
+            const old: Object = (groove.objects_cache.get(@field(new, primary_field)) orelse {
                 return groove.insert(new);
-            }
-
-            // Explict stack copy needed - otherwise old will == new!
-            const old = maybe_old.?.*;
-            assert(&old != new);
+            }).*;
 
             assert(@field(old, primary_field) == @field(new, primary_field));
             assert(old.timestamp == new.timestamp);
@@ -984,7 +978,8 @@ pub fn GrooveType(
 
         /// Asserts that the object with the given PrimaryKey exists.
         pub fn remove(groove: *Groove, key: PrimaryKey) void {
-            // Nothing currently calls or tests this method.
+            // TODO: Nothing currently calls or tests this method. The forest fuzzer should be
+            // extended to cover it.
             assert(false);
 
             const object = groove.objects_cache.get(key).?;
@@ -1019,16 +1014,16 @@ pub fn GrooveType(
             }
         }
 
-        pub fn scope_close(groove: *Groove, data: ScopeCloseMode) void {
-            groove.objects_cache.scope_close(data);
+        pub fn scope_close(groove: *Groove, mode: ScopeCloseMode) void {
+            groove.objects_cache.scope_close(mode);
 
             if (has_id) {
-                groove.ids.scope_close(data);
+                groove.ids.scope_close(mode);
             }
-            groove.objects.scope_close(data);
+            groove.objects.scope_close(mode);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).scope_close(data);
+                @field(groove.indexes, field.name).scope_close(mode);
             }
         }
 
