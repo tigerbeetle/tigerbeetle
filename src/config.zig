@@ -264,7 +264,7 @@ pub const configs = struct {
     /// able to max out the LSM levels.
     pub const fuzz_min = config: {
         var base = test_min;
-        base.cluster.storage_size_max = 4 * 1024 * 1024 * 1024;
+        base.cluster.storage_size_max = 1 * 1024 * 1024 * 1024;
         break :config base;
     };
 
