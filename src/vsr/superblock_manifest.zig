@@ -287,6 +287,28 @@ pub const Manifest = struct {
         return std.meta.eql(extent, .{ .block = block, .entry = entry });
     }
 
+    /// Inserts the table extent if it does not yet exist, and returns true.
+    /// Otherwise, returns false.
+    pub fn insert_table_extent(
+        manifest: *Manifest,
+        table: u64,
+        block: u64,
+        entry: u32,
+    ) bool {
+        assert(table > 0);
+        assert(block > 0);
+
+        var extent = manifest.tables.getOrPutAssumeCapacity(table);
+        if (extent.found_existing) return false;
+
+        extent.value_ptr.* = .{
+            .block = block,
+            .entry = entry,
+        };
+
+        return true;
+    }
+
     /// Inserts or updates the table extent, and returns the previous block address if any.
     /// The table extent must be updated immediately when appending, without delay.
     /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
@@ -335,16 +357,16 @@ pub const Manifest = struct {
         }
     };
 
-    pub const Iterator = struct {
+    pub const IteratorReverse = struct {
         manifest: *const Manifest,
-        count: u32 = 0,
+        count: u32,
 
-        pub fn next(it: *Iterator) ?BlockReference {
+        pub fn next(it: *IteratorReverse) ?BlockReference {
             assert(it.count <= it.manifest.count);
 
-            if (it.count < it.manifest.count) {
+            if (it.count > 0) {
+                it.count -= 1;
                 assert(it.manifest.addresses[it.count] > 0);
-                defer it.count += 1;
 
                 return BlockReference{
                     .checksum = it.manifest.checksums[it.count],
@@ -355,9 +377,13 @@ pub const Manifest = struct {
         }
     };
 
-    /// Return all block references in order, first-appended-first-out.
-    pub fn iterator(manifest: *const Manifest) Iterator {
-        return .{ .manifest = manifest };
+    /// Return all block references in reverse order, latest-appended-first-out.
+    /// Using a reverse iterator is an optimization to avoid redundant updates to tree manifests.
+    pub fn iterator_reverse(manifest: *const Manifest) IteratorReverse {
+        return .{
+            .manifest = manifest,
+            .count = manifest.count,
+        };
     }
 
     pub fn verify(manifest: *const Manifest) void {
@@ -386,7 +412,7 @@ pub const Manifest = struct {
     }
 };
 
-fn test_iterator(
+fn test_iterator_reverse(
     manifest: *Manifest,
     expect: []const Manifest.BlockReference,
 ) !void {
@@ -394,7 +420,7 @@ fn test_iterator(
 
     var result = stdx.BoundedArray(Manifest.BlockReference, 3){};
 
-    var it = manifest.iterator();
+    var it = manifest.iterator_reverse();
     while (it.next()) |block| {
         result.append_assume_capacity(block);
     }
@@ -479,12 +505,12 @@ test "SuperBlockManifest" {
         manifest.oldest_block_queued_for_compaction(),
     );
 
-    try test_iterator(
+    try test_iterator_reverse(
         &manifest,
         &[_]BlockReference{
-            .{ .checksum = 2, .address = 3 },
-            .{ .checksum = 3, .address = 4 },
             .{ .checksum = 4, .address = 5 },
+            .{ .checksum = 3, .address = 4 },
+            .{ .checksum = 2, .address = 3 },
         },
     );
 

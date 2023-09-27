@@ -203,7 +203,7 @@ fn generate_events(
     var append_count: usize = 0;
     for (events, 0..) |*event, i| {
         const event_type = blk: {
-            if (i == 0 or append_count == manifest_log_options.compaction_appends_max()) {
+            if (append_count == manifest_log_options.compaction_appends_max()) {
                 // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
                 break :blk if (random.boolean()) EventType.compact else EventType.checkpoint;
             }
@@ -370,14 +370,8 @@ const Environment = struct {
         env.manifest_log.open(open_event, open_callback);
     }
 
-    fn open_event(
-        manifest_log: *ManifestLog,
-        event: schema.Manifest.Event,
-        level: u6,
-        table: *const TableInfo,
-    ) void {
+    fn open_event(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
         _ = manifest_log;
-        _ = event;
         _ = level;
         _ = table;
 
@@ -519,8 +513,9 @@ const Environment = struct {
         env.wait(test_manifest_log);
 
         assert(env.manifest_log_opening == null);
-        env.manifest_log_opening = ManifestLogModel.TableMap.init(env.allocator);
+        env.manifest_log_opening = try env.manifest_log_model.tables.clone();
         defer {
+            assert(env.manifest_log_opening.?.count() == 0);
             env.manifest_log_opening.?.deinit();
             env.manifest_log_opening = null;
         }
@@ -531,11 +526,6 @@ const Environment = struct {
 
         try verify_manifest(&test_superblock.manifest, &env.manifest_log.superblock.manifest);
         try verify_manifest_compaction_set(test_superblock, &env.manifest_log_model);
-
-        try std.testing.expect(hash_map_equals(
-            &env.manifest_log_model.tables,
-            &env.manifest_log_opening.?,
-        ));
     }
 
     fn verify_superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -552,27 +542,13 @@ const Environment = struct {
         const env = @fieldParentPtr(Environment, "manifest_log_verify", manifest_log_verify);
         assert(env.pending > 0);
 
-        switch (event) {
-            .insert => {
-                assert(env.manifest_log_opening.?.get(table.address) == null);
-
-                env.manifest_log_opening.?.put(table.address, .{
-                    .level = level,
-                    .table = table.*,
-                }) catch @panic("oom");
-            },
-            .update => {
-                maybe(env.manifest_log_opening.?.get(table.address) == null);
-
-                env.manifest_log_opening.?.put(table.address, .{
-                    .level = level,
-                    .table = table.*,
-                }) catch @panic("oom");
-            },
-            .remove => {
-                const table_removed = env.manifest_log_opening.?.remove(table.address);
-                maybe(table_removed);
-            },
+        if (env.manifest_log_opening.?.get(table.address)) |expect| {
+            assert(event == .insert);
+            assert(expect.level == level);
+            assert(std.meta.eql(expect.table, table.*));
+            assert(env.manifest_log_opening.?.remove(table.address));
+        } else {
+            // This is not the newest event for this table.
         }
     }
 
@@ -685,10 +661,14 @@ fn verify_manifest(
     try std.testing.expect(std.mem.eql(u64, expect.addresses[0..c], actual.addresses[0..c]));
 
     try std.testing.expect(hash_map_equals(
+        u64,
+        SuperBlock.Manifest.TableExtent,
         &expect.tables,
         &actual.tables,
     ));
     try std.testing.expect(hash_map_equals(
+        u64,
+        void,
         &expect.compaction_set,
         &actual.compaction_set,
     ));
@@ -739,8 +719,10 @@ fn verify_manifest_compaction_set(
 }
 
 fn hash_map_equals(
-    a: anytype, // *const AutoHashMap|AutoHashMapUnmanaged
-    b: anytype, // *const AutoHashMap|AutoHashMapUnmanaged
+    comptime K: type,
+    comptime V: type,
+    a: *const std.AutoHashMapUnmanaged(K, V),
+    b: *const std.AutoHashMapUnmanaged(K, V),
 ) bool {
     if (a.count() != b.count()) return false;
 
