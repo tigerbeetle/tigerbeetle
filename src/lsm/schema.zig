@@ -571,7 +571,7 @@ pub const Manifest = struct {
         assert(labels_size_max % @alignOf(Label) == 0);
 
         // Bit 7 is reserved to indicate whether the event is an insert or remove.
-        assert(constants.lsm_levels <= std.math.maxInt(u7) + 1);
+        assert(constants.lsm_levels <= std.math.maxInt(u6) + 1);
 
         assert(@sizeOf(Label) == @sizeOf(u8));
         assert(@alignOf(Label) == 1);
@@ -620,13 +620,14 @@ pub const Manifest = struct {
         }
     };
 
-    pub const Event = enum(u1) {
-        insert,
-        remove,
+    pub const Event = enum(u2) {
+        insert = 0,
+        update = 1,
+        remove = 2,
     };
 
     pub const Label = packed struct(u8) {
-        level: u7,
+        level: u6,
         event: Event,
 
         comptime {

@@ -232,7 +232,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level.insert_table(manifest.node_pool, table);
 
             // Append insert changes to the manifest log.
-            const log_level = @as(u7, @intCast(level));
+            const log_level = @as(u6, @intCast(level));
             manifest.manifest_log.?.insert(log_level, &table.encode(manifest.config.id));
 
             if (constants.verify) {
@@ -259,8 +259,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
-            const log_level = @as(u7, @intCast(level));
-            manifest.manifest_log.?.insert(log_level, &table.encode(manifest.config.id));
+            const log_level = @as(u6, @intCast(level));
+            manifest.manifest_log.?.update(log_level, &table.encode(manifest.config.id));
         }
 
         pub fn move_table(
@@ -292,8 +292,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // LIFO order and duplicates are ignored. This means the table will only be replayed in
             // level B instead of the old one in level A.
             manifest_level_b.insert_table(manifest.node_pool, table);
-            manifest.manifest_log.?.insert(
-                @as(u7, @intCast(level_b)),
+            manifest.manifest_log.?.update(
+                @as(u6, @intCast(level_b)),
                 &table.encode(manifest.config.id),
             );
 
@@ -359,7 +359,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                 // Append remove changes to the manifest log and purge from memory (ManifestLevel):
                 manifest.manifest_log.?.remove(
-                    @as(u7, @intCast(level)),
+                    @as(u6, @intCast(level)),
                     &table.encode(manifest.config.id),
                 );
                 const removed = manifest_level.remove_table(manifest.node_pool, &snapshots, &table);

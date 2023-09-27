@@ -679,6 +679,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             switch (event) {
                 .insert => {
+                    manifest_level.insert_table(tree.manifest.node_pool, &tree_table);
+                },
+                .update => {
                     if (level > 0) {
                         removes += @intFromBool(tree.manifest.levels[level - 1].remove_table(
                             tree.manifest.node_pool,

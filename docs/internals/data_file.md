@@ -159,8 +159,8 @@ const CompactionEvent = struct {
 };
 
 const Label = struct {
-    level: u7,
-    event: enum(u1) { insert, remove },
+    level: u6,
+    event: enum(u2) { insert, update, remove },
 };
 ```
 

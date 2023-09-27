@@ -265,7 +265,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
             event: schema.Manifest.Event,
-            level: u7,
+            level: u6,
             table: *const schema.Manifest.TableInfo,
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
@@ -495,7 +495,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         /// There are two strategies to reconstruct the LSM's manifest levels (i.e. the list of
         /// tables) from a superblock manifest:
         ///
-        /// 1. Iterate the manifest events forward, replaying each insert/remove in sequence.
+        /// 1. Iterate the manifest events forward, replaying each insert/update/remove in sequence.
         /// 2. Iterate the manifest events backward, ignoring events for tables that have already
         ///    been encountered.
         ///
@@ -528,7 +528,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // The latest version of each table, keyed by table checksum.
             // Null when the table has been deleted.
             var tables_latest = std.AutoHashMap(u128, ?struct {
-                level: u7,
+                level: u6,
                 table: schema.Manifest.TableInfo,
                 manifest_block: u64,
                 manifest_entry: u32,
@@ -574,7 +574,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                         // events in reverse order.)
                     } else {
                         result.value_ptr.* = switch (label.event) {
-                            .insert => .{
+                            .insert,
+                            .update,
+                            => .{
                                 .level = label.level,
                                 .table = table.*,
                                 .manifest_block = block_address,

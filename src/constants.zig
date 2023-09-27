@@ -491,9 +491,9 @@ comptime {
 pub const lsm_levels = config.cluster.lsm_levels;
 
 comptime {
-    // ManifestLog serializes the level as a u7.
+    // ManifestLog serializes the level as a u6.
     assert(lsm_levels > 0);
-    assert(lsm_levels <= std.math.maxInt(u7));
+    assert(lsm_levels <= std.math.maxInt(u6));
 }
 
 /// The number of tables at level i (0 ≤ i < lsm_levels) is `pow(lsm_growth_factor, i+1)`.
