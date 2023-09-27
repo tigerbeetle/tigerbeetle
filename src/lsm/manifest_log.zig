@@ -18,7 +18,8 @@
 //! * Compaction must compact partially full blocks, even where it must rewrite all entries to the
 //!   tail end of the log.
 //!
-//! * If a remove is dropped from the log, then all prior inserts must already have been dropped.
+//! * If a remove is dropped from the log, then all prior inserts/updates must already have been
+//!   dropped.
 
 const std = @import("std");
 const assert = std.debug.assert;
@@ -68,7 +69,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         pub const OpenEvent = *const fn (
             manifest_log: *ManifestLog,
             event: schema.Manifest.Event,
-            level: u7,
+            level: u6,
             table: *const TableInfo,
         ) void;
 
@@ -260,12 +261,16 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.open_event(manifest_log, label.event, label.level, table);
 
                 switch (label.event) {
-                    .insert => {
+                    .insert,
+                    .update,
+                    => {
                         if (manifest.update_table_extent(
                             table.address,
                             block_reference.address,
                             entry,
                         )) |previous_block| {
+                            assert(label.event == .update);
+
                             manifest.queue_for_compaction(previous_block);
                         }
                     },
@@ -291,10 +296,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.open_read_block();
         }
 
-        /// Appends an insert, an update, or a direct move of a table to a level.
-        /// A move is only recorded as an insert, there is no remove from the previous level, since
-        /// this is safer (no potential to get the event order wrong) and reduces fragmentation.
-        pub fn insert(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
+        /// Appends an insert of a table to a level.
+        pub fn insert(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
             maybe(manifest_log.opened);
             maybe(manifest_log.reading);
             assert(!manifest_log.writing);
@@ -302,9 +305,20 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.append(.{ .level = level, .event = .insert }, table);
         }
 
+        /// Appends an update or a direct move of a table to a level.
+        /// A move is only recorded as an update, there is no remove from the previous level, since
+        /// this is safer (no potential to get the event order wrong) and reduces fragmentation.
+        pub fn update(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+            maybe(manifest_log.opened);
+            maybe(manifest_log.reading);
+            assert(!manifest_log.writing);
+
+            manifest_log.append(.{ .level = level, .event = .update }, table);
+        }
+
         /// Appends the removal of a table from a level.
         /// The table must have previously been inserted to the manifest log.
-        pub fn remove(manifest_log: *ManifestLog, level: u7, table: *const TableInfo) void {
+        pub fn remove(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
@@ -355,7 +369,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const address = header.op;
 
             switch (label.event) {
-                .insert => {
+                .insert,
+                .update,
+                => {
                     if (manifest.update_table_extent(
                         table.address,
                         address,
@@ -581,7 +597,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 const entry: u32 = @intCast(entry_index);
                 switch (label.event) {
                     // Append the table, updating the table extent:
-                    .insert => {
+                    .insert,
+                    .update,
+                    => {
                         // Remove the extent if the table is the latest version.
                         // We must iterate entries in forward order to drop the extent here.
                         // Otherwise, stale versions earlier in the block may reappear.
