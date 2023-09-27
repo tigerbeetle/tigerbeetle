@@ -1726,9 +1726,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const offset = Ring.prepares.offset(slot);
 
             // Assert that any sector padding has already been zeroed:
-            var sum_of_sector_padding_bytes: u8 = 0;
-            for (buffer[message.header.size..]) |byte| sum_of_sector_padding_bytes |= byte;
-            assert(sum_of_sector_padding_bytes == 0);
+            assert(stdx.zeroed(buffer[message.header.size..]));
 
             journal.prepare_inhabited[slot.index] = false;
             journal.prepare_checksums[slot.index] = 0;
