@@ -24,11 +24,11 @@ Documentation for (roughly) code in the `src/lsm` directory.
 
 A tree is a hierarchy of in-memory and on-disk tables. There are three categories of tables:
 
-- The [mutable table](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/lsm/table_mutable.zig) is an in-memory table.
+- The [mutable table](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/lsm/table_memory.zig) is an in-memory table.
   - Each tree has a single mutable table.
   - All tree updates, inserts, and removes are applied to the mutable table.
   - The mutable table's size is allocated to accommodate a full bar of updates.
-- The [immutable table](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/lsm/table_immutable.zig) is an in-memory table.
+- The [immutable table](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/lsm/table_memory.zig) is an in-memory table.
   - Each tree has a single immutable table.
   - The mutable table's contents are periodically moved to the immutable table,
     where they are stored while being flushed to level `0`.

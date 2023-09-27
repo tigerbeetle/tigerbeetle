@@ -205,6 +205,9 @@ pub const configs = struct {
             .direct_io = true,
             .direct_io_required = true,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
+            // TODO: Currently we need a non-zero cache size, because of how our CacheMap works.
+            // We should check if optimizing it to explicitly allow a zero cache size will increase
+            // performance, since the Transfer object cache isn't useful.
             .cache_transfers_size_default = @sizeOf(vsr.tigerbeetle.Transfer) * 2048,
             .cache_transfers_posted_size_default = @sizeOf(u256) * 256 * 1024,
             .verify = false,
