@@ -1116,7 +1116,11 @@ pub fn GridType(comptime Storage: type) type {
             const cached_header = schema.header_from_block(cached_block);
             assert(cached_header.checksum == actual_header.checksum);
 
-            assert(std.mem.eql(u8, cached_block, actual_block));
+            assert(std.mem.eql(
+                u8,
+                cached_block[0..cached_header.size],
+                actual_block[0..actual_header.size],
+            ));
         }
     };
 }
