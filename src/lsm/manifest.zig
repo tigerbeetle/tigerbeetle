@@ -272,6 +272,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(manifest.manifest_log.?.opened);
             assert(level_b == level_a + 1);
             assert(level_b < constants.lsm_levels);
+            assert(table.visible(snapshot_latest));
 
             const manifest_level_a = &manifest.levels[level_a];
             const manifest_level_b = &manifest.levels[level_b];
@@ -282,13 +283,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
 
             // First, remove the table from level A without appending changes to the manifest log.
-            const snapshots = [_]u64{};
-            const removed = manifest_level_a.remove_table(manifest.node_pool, &snapshots, table);
-            assert(removed.? == .visible);
+            manifest_level_a.remove_table(manifest.node_pool, table);
 
             // Then, insert the table into level B and append these changes to the manifest log.
             // To move a table w.r.t manifest log, a "remove" change should NOT be appended for
-            // the previous level A; When replaying the log from open(), inserts are processed in
+            // the previous level A; When replaying the log from open(), events are processed in
             // LIFO order and duplicates are ignored. This means the table will only be replayed in
             // level B instead of the old one in level A.
             manifest_level_b.insert_table(manifest.node_pool, table);
@@ -309,7 +308,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
             var manifest_range: ?KeyRange = null;
             for (&manifest.levels) |*level| {
-                if (level.key_range.key_range) |level_range| {
+                if (level.key_range_latest.key_range) |level_range| {
                     if (manifest_range) |*range| {
                         if (compare_keys(level_range.key_min, range.key_min) == .lt) {
                             range.key_min = level_range.key_min;
@@ -328,7 +327,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub fn remove_invisible_tables(
             manifest: *Manifest,
             level: u8,
-            snapshot: u64,
+            snapshots: []const u64,
             key_min: Key,
             key_max: Key,
         ) void {
@@ -339,12 +338,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // Remove tables in descending order to avoid desynchronizing the iterator from
             // the ManifestLevel.
             const direction = .descending;
-            const snapshots = [_]u64{snapshot};
             const manifest_level = &manifest.levels[level];
 
             var it = manifest_level.iterator(
                 .invisible,
-                &snapshots,
+                snapshots,
                 direction,
                 KeyRange{ .key_min = key_min, .key_max = key_max },
             );
@@ -353,7 +351,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 // Copy the table onto the stack: `remove_table()` doesn't allow pointers into
                 // SegmentedArray memory since it invalidates them.
                 const table: TreeTableInfo = table_pointer.*;
-                assert(table.invisible(&snapshots));
+                assert(table.snapshot_max < snapshot_latest);
+                assert(table.invisible(snapshots));
                 assert(compare_keys(key_min, table.key_max) != .gt);
                 assert(compare_keys(key_max, table.key_min) != .lt);
 
@@ -362,11 +361,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     @as(u6, @intCast(level)),
                     &table.encode(manifest.config.id),
                 );
-                const removed = manifest_level.remove_table(manifest.node_pool, &snapshots, &table);
-                assert(removed.? == .invisible);
+                manifest_level.remove_table(manifest.node_pool, &table);
             }
 
-            if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshot);
+            if (constants.verify) manifest.assert_no_invisible_tables_at_level(level, snapshots);
         }
 
         /// Returns an iterator over the tables visible to `snapshot` that may contain `key`
@@ -423,23 +421,18 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
-        pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshot: u64) void {
+        pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshots: []const u64) void {
             for (manifest.levels, 0..) |_, level| {
-                manifest.assert_no_invisible_tables_at_level(@as(u8, @intCast(level)), snapshot);
+                manifest.assert_no_invisible_tables_at_level(@as(u8, @intCast(level)), snapshots);
             }
         }
 
         fn assert_no_invisible_tables_at_level(
             manifest: *const Manifest,
             level: u8,
-            snapshot: u64,
+            snapshots: []const u64,
         ) void {
-            var it = manifest.levels[level].iterator(
-                .invisible,
-                @as(*const [1]u64, &snapshot),
-                .ascending,
-                null,
-            );
+            var it = manifest.levels[level].iterator(.invisible, snapshots, .ascending, null);
             assert(it.next() == null);
         }
 

@@ -77,7 +77,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             write: Grid.Write = undefined,
         };
 
-        const Tables = std.AutoHashMapUnmanaged(u64, TableExtent);
+        const TableExtents = std.AutoHashMapUnmanaged(u64, TableExtent);
         const TablesRemoved = std.AutoHashMapUnmanaged(u64, void);
 
         pub const TableExtent = struct {
@@ -126,7 +126,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         /// A map from table address to the manifest block and entry that is the latest extent
         /// version. Used to determine whether a table should be dropped in a compaction.
-        tables: Tables,
+        table_extents: TableExtents,
 
         /// For a particular table in the manifest, the sequence of events is:
         ///
@@ -161,9 +161,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             errdefer allocator.free(writes);
             @memset(writes, undefined);
 
-            var tables = Tables{};
-            try tables.ensureTotalCapacity(allocator, tree.table_count_max);
-            errdefer tables.deinit(allocator);
+            var table_extents = TableExtents{};
+            try table_extents.ensureTotalCapacity(allocator, tree.table_count_max);
+            errdefer table_extents.deinit(allocator);
 
             var tables_removed = TablesRemoved{};
             try tables_removed.ensureTotalCapacity(allocator, tree.table_count_max);
@@ -175,14 +175,14 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .options = options,
                 .blocks = blocks,
                 .writes = writes,
-                .tables = tables,
+                .table_extents = table_extents,
                 .tables_removed = tables_removed,
             };
         }
 
         pub fn deinit(manifest_log: *ManifestLog, allocator: mem.Allocator) void {
             manifest_log.tables_removed.deinit(allocator);
-            manifest_log.tables.deinit(allocator);
+            manifest_log.table_extents.deinit(allocator);
             allocator.free(manifest_log.writes);
             for (manifest_log.blocks.buffer) |block| allocator.free(block);
             manifest_log.blocks.deinit(allocator);
@@ -190,7 +190,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         pub fn reset(manifest_log: *ManifestLog) void {
             for (manifest_log.blocks.buffer) |block| @memset(block, 0);
-            manifest_log.tables.clearRetainingCapacity();
+            manifest_log.table_extents.clearRetainingCapacity();
             manifest_log.tables_removed.clearRetainingCapacity();
 
             manifest_log.* = .{
@@ -199,7 +199,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .options = manifest_log.options,
                 .blocks = .{ .buffer = manifest_log.blocks.buffer },
                 .writes = manifest_log.writes,
-                .tables = manifest_log.tables,
+                .table_extents = manifest_log.table_extents,
                 .tables_removed = manifest_log.tables_removed,
             };
         }
@@ -209,7 +209,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// Therefore, only the latest version of a table will be emitted by event() for insertion
         /// into the in-memory manifest. Older versions of a table in older manifest blocks will not
         /// be emitted, as an optimization to not replay all table mutations.
-        /// `ManifestLog.tables` is used to track the latest version of a table.
+        /// `ManifestLog.table_extents` is used to track the latest version of a table.
         // TODO(Optimization): Accumulate tables unordered, then sort all at once to splice into the
         // ManifestLevels' SegmentedArrays. (Constructing SegmentedArrays by repeated inserts is
         // expensive.)
@@ -222,7 +222,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.entry_count == 0);
-            assert(manifest_log.tables.count() == 0);
+            assert(manifest_log.table_extents.count() == 0);
             assert(manifest_log.tables_removed.count() == 0);
 
             manifest_log.open_event = event;
@@ -268,7 +268,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback != null);
             assert(!manifest_log.writing);
             assert(manifest_log.write_callback == null);
-            assert(manifest_log.tables.count() <= tree.table_count_max);
+            assert(manifest_log.table_extents.count() <= tree.table_count_max);
             assert(manifest_log.tables_removed.count() <= tree.table_count_max);
 
             manifest_log.opened = true;
@@ -312,10 +312,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 assert(table.address > 0);
 
                 if (label.event == .remove) {
-                    assert(manifest_log.tables_removed.get(table.address) == null);
-
                     manifest.queue_for_compaction(block_address);
-                    manifest_log.tables_removed.putAssumeCapacity(table.address, {});
+
+                    const table_removed =
+                        manifest_log.tables_removed.fetchPutAssumeCapacity(table.address, {});
+                    assert(table_removed == null);
                 } else {
                     if (manifest_log.tables_removed.get(table.address)) |_| {
                         manifest.queue_for_compaction(block_address);
@@ -324,7 +325,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                             assert(manifest_log.tables_removed.remove(table.address));
                         }
                     } else {
-                        var extent = manifest_log.tables.getOrPutAssumeCapacity(table.address);
+                        var extent =
+                            manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                         if (extent.found_existing) {
                             manifest.queue_for_compaction(block_address);
                         } else {
@@ -353,7 +355,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             maybe(manifest_log.opened);
             maybe(manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.tables.get(table.address) == null);
+            assert(manifest_log.table_extents.get(table.address) == null);
 
             manifest_log.append(.{ .level = level, .event = .insert }, table);
         }
@@ -365,7 +367,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             maybe(manifest_log.opened);
             maybe(manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.tables.get(table.address) != null);
+            assert(manifest_log.table_extents.get(table.address) != null);
 
             manifest_log.append(.{ .level = level, .event = .update }, table);
         }
@@ -376,7 +378,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.tables.get(table.address) != null);
+            assert(manifest_log.table_extents.get(table.address) != null);
 
             manifest_log.append(.{ .level = level, .event = .remove }, table);
         }
@@ -429,7 +431,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .insert,
                 .update,
                 => {
-                    var extent = manifest_log.tables.getOrPutAssumeCapacity(table.address);
+                    var extent = manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                     if (extent.found_existing) {
                         maybe(label.event == .insert); // (Compaction.)
                         manifest.queue_for_compaction(extent.value_ptr.block);
@@ -439,8 +441,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                     extent.value_ptr.* = .{ .block = block_address, .entry = entry };
                 },
                 .remove => {
-                    const extent = manifest_log.tables.get(table.address).?;
-                    assert(manifest_log.tables.remove(table.address));
+                    const extent = manifest_log.table_extents.get(table.address).?;
+                    assert(manifest_log.table_extents.remove(table.address));
 
                     manifest.queue_for_compaction(extent.block);
                     manifest.queue_for_compaction(block_address);
@@ -662,7 +664,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                         // We must iterate entries in forward order to drop the extent here.
                         // Otherwise, stale versions earlier in the block may reappear.
                         if (std.meta.eql(
-                            manifest_log.tables.get(table.address),
+                            manifest_log.table_extents.get(table.address),
                             .{ .block = block_reference.address, .entry = entry },
                         )) {
                             // Append the table, updating the table extent:

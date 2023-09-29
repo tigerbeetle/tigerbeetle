@@ -104,7 +104,7 @@ pub fn ManifestLevelType(
             fn exclude(self: *LevelKeyRange, exclude_range: KeyRange) void {
                 assert(self.key_range != null);
 
-                var level = @fieldParentPtr(Self, "key_range", self);
+                var level = @fieldParentPtr(Self, "key_range_latest", self);
                 if (level.table_count_visible == 0) {
                     self.key_range = null;
                     return;
@@ -160,10 +160,12 @@ pub fn ManifestLevelType(
         tables: Tables,
 
         /// The range of keys in this level covered by tables visible to snapshot_latest.
-        key_range: LevelKeyRange = .{ .key_range = null },
+        key_range_latest: LevelKeyRange = .{ .key_range = null },
 
         /// The number of tables visible to snapshot_latest.
         /// Used to enforce table_count_max_for_level().
+        // TODO Track this in Manifest instead, since it knows both when tables are
+        // added/updated/removed, and also knows the superblock's persisted snapshots.
         table_count_visible: u32 = 0,
 
         /// A monotonically increasing generation number that is used detect invalid internal
@@ -216,7 +218,7 @@ pub fn ManifestLevelType(
             if (table.visible(lsm.snapshot_latest)) level.table_count_visible += 1;
             level.generation +%= 1;
 
-            level.key_range.include(KeyRange{
+            level.key_range_latest.include(KeyRange{
                 .key_min = table.key_min,
                 .key_max = table.key_max,
             });
@@ -256,29 +258,20 @@ pub fn ManifestLevelType(
 
             table.snapshot_max = snapshot;
             level.table_count_visible -= 1;
-            level.key_range.exclude(KeyRange{
+            level.key_range_latest.exclude(KeyRange{
                 .key_min = table.key_min,
                 .key_max = table.key_max,
             });
         }
 
         /// Remove the given table.
-        /// - If the exact table does not exist in the ManifestLevel: return null.
-        /// - If the exact table exists in the ManifestLevel: remove it, and return whether the
-        ///   table is visible to any of the given snapshots or `snapshot_latest`.
         /// The `table` parameter must *not* be a pointer into the `tables`' SegmentedArray memory.
-        pub fn remove_table(
-            level: *Self,
-            node_pool: *NodePool,
-            snapshots: []const u64,
-            table: *const TableInfo,
-        ) ?Visibility {
+        pub fn remove_table(level: *Self, node_pool: *NodePool, table: *const TableInfo) void {
             assert(level.keys.len() == level.tables.len());
             assert(compare_keys(table.key_min, table.key_max) != .gt);
 
             // Use `key_min` for both ends of the iterator; we are looking for a single table.
-            const cursor_start =
-                level.iterator_start(table.key_min, table.key_min, .ascending) orelse return null;
+            const cursor_start = level.iterator_start(table.key_min, table.key_min, .ascending).?;
 
             var i = level.keys.absolute_index_for_cursor(cursor_start);
             var tables = level.tables.iterator_from_index(i, .ascending);
@@ -290,22 +283,22 @@ pub fn ManifestLevelType(
                 if (level_table.equal(table)) break i;
                 assert(level_table.checksum != table.checksum);
                 assert(level_table.address != table.address);
-            } else return null;
+            } else {
+                @panic("ManifestLevel.remove_table: table not found");
+            };
 
             level.generation +%= 1;
             level.keys.remove_elements(node_pool, table_index_absolute, 1);
             level.tables.remove_elements(node_pool, table_index_absolute, 1);
             assert(level.keys.len() == level.tables.len());
 
-            if (table.invisible(snapshots)) {
-                return .invisible;
-            } else {
+            if (table.visible(lsm.snapshot_latest)) {
                 level.table_count_visible -= 1;
-                level.key_range.exclude(.{
+
+                level.key_range_latest.exclude(.{
                     .key_min = table.key_min,
                     .key_max = table.key_max,
                 });
-                return .visible;
             }
         }
 
@@ -316,7 +309,7 @@ pub fn ManifestLevelType(
         /// be relied upon for queries to older snapshots.
         pub fn key_range_contains(level: *const Self, snapshot: u64, key: Key) bool {
             if (snapshot == lsm.snapshot_latest) {
-                return level.key_range.contains(key);
+                return level.key_range_latest.contains(key);
             } else {
                 return true;
             }
@@ -1010,8 +1003,7 @@ pub fn TestContext(
 
             if (tables.items.len > 0) {
                 for (tables.items) |*table| {
-                    const removed = context.level.remove_table(&context.pool, snapshots, table);
-                    assert(removed.? == .invisible);
+                    context.level.remove_table(&context.pool, table);
                 }
             }
         }
@@ -1089,12 +1081,7 @@ pub fn TestContext(
 
                 if (to_remove.items.len > 0) {
                     for (to_remove.items) |*table| {
-                        const removed = context.level.remove_table(
-                            &context.pool,
-                            context.snapshots.slice(),
-                            table,
-                        );
-                        assert(removed.? == .invisible);
+                        context.level.remove_table(&context.pool, table);
                     }
                 }
             }
