@@ -215,7 +215,7 @@ pub fn ReplicaType(
         /// Durably store VSR state, the "root" of the LSM tree, and other replica metadata.
         superblock: SuperBlock,
 
-        /// Context for SuperBlock.open(), .checkpoint(), .sync_start(), and .sync_done().
+        /// Context for SuperBlock.open(), .checkpoint(), and .sync().
         superblock_context: SuperBlock.Context = undefined,
         /// Context for SuperBlock.view_change().
         superblock_context_view_change: SuperBlock.Context = undefined,

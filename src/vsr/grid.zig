@@ -615,10 +615,14 @@ pub fn GridType(comptime Storage: type) type {
                 .write = write,
             };
 
+            const write_header = schema.header_from_block(write.block.*);
+            assert(write_header.size > @sizeOf(vsr.Header));
+            assert(write_header.size <= constants.block_size);
+
             grid.superblock.storage.write_sectors(
                 write_block_callback,
                 &iop.completion,
-                write.block.*,
+                write.block.*[0..vsr.sector_ceil(write_header.size)],
                 .grid,
                 block_offset(write.address),
             );
@@ -957,6 +961,10 @@ pub fn GridType(comptime Storage: type) type {
             if (!header.valid_checksum_body(block_body)) return .invalid_checksum_body;
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
+            if (constants.verify) {
+                assert(stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)]));
+            }
+
             assert(header.op == expect.address);
             return .{ .valid = block };
         }
@@ -1108,7 +1116,11 @@ pub fn GridType(comptime Storage: type) type {
             const cached_header = schema.header_from_block(cached_block);
             assert(cached_header.checksum == actual_header.checksum);
 
-            assert(std.mem.eql(u8, cached_block, actual_block));
+            assert(std.mem.eql(
+                u8,
+                cached_block[0..cached_header.size],
+                actual_block[0..actual_header.size],
+            ));
         }
     };
 }

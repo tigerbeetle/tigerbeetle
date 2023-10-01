@@ -660,9 +660,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const free_set_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
-                SuperBlockFreeSet.encode_size_max(block_count_limit),
+                vsr.sector_ceil(SuperBlockFreeSet.encode_size_max(block_count_limit)),
             );
             errdefer allocator.free(free_set_buffer);
+            assert(free_set_buffer.len <= superblock_trailer_free_set_size_max);
 
             const client_sessions_buffer = try allocator.alignedAlloc(
                 u8,
