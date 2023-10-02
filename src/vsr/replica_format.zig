@@ -2,10 +2,13 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const format_wal_headers = @import("./journal.zig").format_wal_headers;
 const format_wal_prepares = @import("./journal.zig").format_wal_prepares;
+
+// TODO Parallelize formatting IO.
 
 /// Initialize the TigerBeetle replica's data file.
 pub fn format(
@@ -19,6 +22,9 @@ pub fn format(
     var replica_format = ReplicaFormat{};
 
     try replica_format.format_wal(allocator, options.cluster, storage);
+    assert(!replica_format.formatting);
+
+    try replica_format.format_replies(allocator, storage);
     assert(!replica_format.formatting);
 
     superblock.format(
@@ -38,7 +44,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
 
         formatting: bool = false,
         superblock_context: SuperBlock.Context = undefined,
-        wal_write: Storage.Write = undefined,
+        write: Storage.Write = undefined,
 
         fn format_wal(
             self: *Self,
@@ -46,6 +52,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
             cluster: u32,
             storage: *Storage,
         ) !void {
+            assert(!self.formatting);
+
             const header_zeroes = [_]u8{0} ** @sizeOf(Header);
             const wal_write_size_max = 4 * 1024 * 1024;
             assert(wal_write_size_max % constants.sector_size == 0);
@@ -84,8 +92,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 }
 
                 storage.write_sectors(
-                    format_wal_sectors_callback,
-                    &self.wal_write,
+                    write_sectors_callback,
+                    &self.write,
                     wal_buffer[0..size],
                     .wal_prepares,
                     wal_offset,
@@ -114,8 +122,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 }
 
                 storage.write_sectors(
-                    format_wal_sectors_callback,
-                    &self.wal_write,
+                    write_sectors_callback,
+                    &self.write,
                     wal_buffer[0..size],
                     .wal_headers,
                     wal_offset,
@@ -128,8 +136,34 @@ fn ReplicaFormatType(comptime Storage: type) type {
             assert(format_wal_headers(cluster, wal_offset, wal_buffer) == 0);
         }
 
-        fn format_wal_sectors_callback(write: *Storage.Write) void {
-            const self = @fieldParentPtr(Self, "wal_write", write);
+        fn format_replies(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            storage: *Storage,
+        ) !void {
+            assert(!self.formatting);
+
+            // Direct I/O requires the buffer to be sector-aligned.
+            var message_buffer =
+                try allocator.alignedAlloc(u8, constants.sector_size, constants.message_size_max);
+            defer allocator.free(message_buffer);
+            @memset(message_buffer, 0);
+
+            for (0..constants.clients_max) |slot| {
+                storage.write_sectors(
+                    write_sectors_callback,
+                    &self.write,
+                    message_buffer,
+                    .client_replies,
+                    slot * constants.message_size_max,
+                );
+                self.formatting = true;
+                while (self.formatting) storage.tick();
+            }
+        }
+
+        fn write_sectors_callback(write: *Storage.Write) void {
+            const self = @fieldParentPtr(Self, "write", write);
             assert(self.formatting);
             self.formatting = false;
         }
@@ -143,7 +177,6 @@ fn ReplicaFormatType(comptime Storage: type) type {
 }
 
 test "format" {
-    const superblock_zone_size = @import("./superblock.zig").superblock_zone_size;
     const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const Storage = @import("../testing/storage.zig").Storage;
     const SuperBlock = vsr.SuperBlockType(Storage);
@@ -154,7 +187,7 @@ test "format" {
 
     var storage = try Storage.init(
         allocator,
-        superblock_zone_size + constants.journal_size + constants.client_replies_size,
+        data_file_size_min,
         .{
             .read_latency_min = 0,
             .read_latency_mean = 0,
@@ -197,9 +230,7 @@ test "format" {
     }
 
     // Verify the WAL headers and prepares zones.
-    assert(storage.wal_headers().len == storage.wal_headers().len);
-    for (storage.wal_headers(), 0..) |header, slot| {
-        const message = storage.wal_prepares()[slot];
+    for (storage.wal_headers(), storage.wal_prepares(), 0..) |header, *message, slot| {
         try std.testing.expect(std.meta.eql(header, message.header));
 
         try std.testing.expect(header.valid_checksum());
@@ -215,4 +246,10 @@ test "format" {
             try std.testing.expectEqual(header.command, .reserved);
         }
     }
+
+    // Verify client replies.
+    try std.testing.expectEqual(storage.client_replies().len, constants.clients_max);
+    try std.testing.expect(stdx.zeroed(
+        storage.memory[vsr.Zone.client_replies.offset(0)..][0..vsr.Zone.client_replies.size().?],
+    ));
 }
