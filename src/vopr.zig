@@ -424,7 +424,7 @@ fn parse_args(allocator: mem.Allocator) !Flags {
                 send_address = default_send_address;
             } else {
                 const str_address = parse_flag("--send", arg);
-                send_address = try vsr.parse_address(str_address);
+                send_address = try vsr.parse_address_and_port(str_address);
             }
         } else if (mem.startsWith(u8, arg, "--build-mode")) {
             if (mem.eql(u8, parse_flag("--build-mode", arg), "ReleaseSafe")) {
