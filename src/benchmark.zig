@@ -45,6 +45,7 @@ const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state
 const Client = vsr.Client(StateMachine, MessageBus);
 const tb = @import("tigerbeetle.zig");
 const StatsD = @import("statsd.zig").StatsD;
+const IdPermutation = @import("testing/id.zig").IdPermutation;
 
 const account_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
@@ -55,11 +56,17 @@ const transfer_count_per_batch = @divExact(
     @sizeOf(tb.Transfer),
 );
 
+/// The ID order can affect the results of a benchmark significantly. Specifically, sequential is
+/// expected to be the best (since it can take advantage of various optimizations such as avoiding
+/// negative prefetch) while random / reversed can't.
+const IdOrder = enum { sequential, random, reversed };
+
 const CliArgs = struct {
     account_count: usize = account_count_default,
     transfer_count: usize = transfer_count_default,
     transfer_count_per_second: usize = transfer_count_per_second_default,
     print_batch_timings: bool = false,
+    id_order: IdOrder = .reversed,
     statsd: bool = false,
     addresses: []const u8 = "127.0.0.1:" ++ std.fmt.comptimePrint("{}", .{constants.port}),
 };
@@ -140,6 +147,14 @@ pub fn main() !void {
         );
     }
 
+    var rng = std.rand.DefaultPrng.init(42);
+    const random = rng.random();
+    const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
+        .sequential => .{ .identity = {} },
+        .random => .{ .random = random.int(u64) },
+        .reversed => .{ .inversion = {} },
+    };
+
     var benchmark = Benchmark{
         .io = &io,
         .message_pool = &message_pool,
@@ -147,7 +162,8 @@ pub fn main() !void {
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_index = 0,
-        .rng = std.rand.DefaultPrng.init(42),
+        .account_id_permutation = account_id_permutation,
+        .rng = rng,
         .timer = try std.time.Timer.start(),
         .batch_latency_ns = batch_latency_ns,
         .transfer_latency_ns = transfer_latency_ns,
@@ -166,6 +182,7 @@ pub fn main() !void {
         .done = false,
         .statsd = if (statsd_opt) |*statsd| statsd else null,
         .print_batch_timings = cli_args.print_batch_timings,
+        .id_order = cli_args.id_order,
     };
 
     benchmark.create_accounts();
@@ -176,57 +193,6 @@ pub fn main() !void {
     }
 }
 
-fn parse_arg_addresses(
-    allocator: std.mem.Allocator,
-    args: *std.process.ArgIterator,
-    arg: []const u8,
-    arg_name: []const u8,
-    arg_value: *[]std.net.Address,
-) !bool {
-    if (!std.mem.eql(u8, arg, arg_name)) return false;
-
-    const address_string = args.next() orelse
-        panic("Expected an argument to {s}", .{arg_name});
-
-    const addresses = try vsr.parse_addresses(allocator, address_string, constants.members_max);
-    allocator.free(arg_value.*);
-    arg_value.* = addresses;
-    return true;
-}
-
-fn parse_arg_usize(
-    args: *std.process.ArgIterator,
-    arg: []const u8,
-    arg_name: []const u8,
-    arg_value: *usize,
-) !bool {
-    if (!std.mem.eql(u8, arg, arg_name)) return false;
-
-    const int_string = args.next() orelse
-        panic("Expected an argument to {s}", .{arg_name});
-    arg_value.* = std.fmt.parseInt(usize, int_string, 10) catch |err|
-        panic(
-        "Could not parse \"{}\" as an integer: {}",
-        .{ std.zig.fmtEscapes(int_string), err },
-    );
-    return true;
-}
-
-fn parse_arg_bool(
-    args: *std.process.ArgIterator,
-    arg: []const u8,
-    arg_name: []const u8,
-    arg_value: *bool,
-) !bool {
-    if (!std.mem.eql(u8, arg, arg_name)) return false;
-
-    const bool_string = args.next() orelse
-        panic("Expected an argument to {s}", .{arg_name});
-    arg_value.* = std.mem.eql(u8, bool_string, "true");
-
-    return true;
-}
-
 const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
@@ -234,6 +200,7 @@ const Benchmark = struct {
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_index: usize,
+    account_id_permutation: IdPermutation,
     rng: std.rand.DefaultPrng,
     timer: std.time.Timer,
     batch_latency_ns: std.ArrayListUnmanaged(u64),
@@ -253,6 +220,7 @@ const Benchmark = struct {
     done: bool,
     statsd: ?*StatsD,
     print_batch_timings: bool,
+    id_order: IdOrder,
 
     fn create_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {
@@ -268,7 +236,7 @@ const Benchmark = struct {
             b.batch_accounts.items.len < account_count_per_batch)
         {
             b.batch_accounts.appendAssumeCapacity(.{
-                .id = @bitReverse(@as(u128, b.account_index + 1)),
+                .id = b.account_id_permutation.encode(b.account_index + 1),
                 .user_data_128 = 0,
                 .user_data_64 = 0,
                 .user_data_32 = 0,
@@ -323,12 +291,14 @@ const Benchmark = struct {
             if (debit_account_index == credit_account_index) {
                 credit_account_index = (credit_account_index + 1) % b.account_count;
             }
+            const debit_account_id = b.account_id_permutation.encode(debit_account_index + 1);
+            const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
             assert(debit_account_index != credit_account_index);
+
             b.batch_transfers.appendAssumeCapacity(.{
-                // Reverse the bits to stress non-append-only index for `id`.
-                .id = @bitReverse(@as(u128, b.transfer_index + 1)),
-                .debit_account_id = @bitReverse(@as(u128, debit_account_index + 1)),
-                .credit_account_id = @bitReverse(@as(u128, credit_account_index + 1)),
+                .id = b.account_id_permutation.encode(b.transfer_index + 1),
+                .debit_account_id = debit_account_id,
+                .credit_account_id = credit_account_id,
                 .user_data_128 = random.int(u128),
                 .user_data_64 = random.int(u64),
                 .user_data_32 = random.int(u32),
