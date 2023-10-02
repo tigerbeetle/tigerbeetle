@@ -94,8 +94,8 @@ const CliArgs = union(enum) {
         \\
         \\  --addresses=<addresses>
         \\        Set the addresses of all replicas in the cluster.
-        \\        Accepts a comma-separated list of IPv4 addresses with port numbers.
-        \\        Either the IPv4 address or port number (but not both) may be omitted,
+        \\        Accepts a comma-separated list of IPv4/IPv6 addresses with port numbers.
+        \\        Either the address or port number (but not both) may be omitted,
         \\        in which case a default of {[default_address]s} or {[default_port]d}
         \\        will be used.
         \\        "addresses[i]" corresponds to replica "i".
@@ -121,6 +121,8 @@ const CliArgs = union(enum) {
         \\  tigerbeetle start --addresses=3003,3001,3002 0_2.tigerbeetle
         \\
         \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 0_0.tigerbeetle
+        \\
+        \\  tigerbeetle start --addresses='[::1]:3003,[::1]:3001,[::1]:3002'  0_0.tigerbeetle
         \\
         \\  tigerbeetle version --verbose
         \\
@@ -322,7 +324,7 @@ fn parse_addresses(allocator: std.mem.Allocator, raw_addresses: []const u8) []ne
         },
         error.PortOverflow => flags.fatal("--addresses: port exceeds 65535", .{}),
         error.PortInvalid => flags.fatal("--addresses: invalid port", .{}),
-        error.AddressInvalid => flags.fatal("--addresses: invalid IPv4 address", .{}),
+        error.AddressInvalid => flags.fatal("--addresses: invalid IPv4 or IPv6 address", .{}),
         error.OutOfMemory => flags.fatal("out of memory", .{}),
     };
 }
