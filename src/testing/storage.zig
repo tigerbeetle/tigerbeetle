@@ -567,6 +567,12 @@ pub const Storage = struct {
         return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
     }
 
+    pub fn client_replies(storage: *const Storage) []const MessageRaw {
+        const offset = vsr.Zone.client_replies.offset(0);
+        const size = vsr.Zone.client_replies.size().?;
+        return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
+    }
+
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
