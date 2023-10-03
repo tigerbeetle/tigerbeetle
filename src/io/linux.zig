@@ -9,9 +9,10 @@ const log = std.log.scoped(.io);
 const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
+const stdx = @import("../stdx.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
-const parse_dirty_semver = @import("../stdx.zig").parse_dirty_semver;
+const parse_dirty_semver = stdx.parse_dirty_semver;
 
 pub const IO = struct {
     ring: IO_Uring,
@@ -1002,7 +1003,16 @@ pub const IO = struct {
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
-        if (constants.direct_io) {
+        var dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
+
+        if (dir_on_tmpfs) {
+            log.warn("tmpfs is not durable, and your data will be lost on reboot", .{});
+        }
+
+        // Special case. tmpfs doesn't support Direct I/O. Normally we would panic here (see below)
+        // but being able to benchmark production workloads on tmpfs is very useful for removing
+        // disk speed from the equation.
+        if (constants.direct_io and !dir_on_tmpfs) {
             direct_io_supported = try fs_supports_direct_io(dir_fd);
             if (direct_io_supported) {
                 flags |= os.O.DIRECT;
@@ -1089,6 +1099,23 @@ pub const IO = struct {
         if (stat.size < size) @panic("data file inode size was truncated or corrupted");
 
         return fd;
+    }
+
+    /// Detects whether the underlying file system for a given directory fd is tmpfs. This is used
+    /// to relax our Direct I/O check - running on tmpfs for benchmarking is useful.
+    fn fs_is_tmpfs(dir_fd: std.os.fd_t) !bool {
+        var statfs: stdx.StatFs = undefined;
+
+        while (true) {
+            const res = stdx.fstatfs(dir_fd, &statfs);
+            switch (os.linux.getErrno(res)) {
+                .SUCCESS => {
+                    return statfs.f_type == stdx.TmpfsMagic;
+                },
+                .INTR => continue,
+                else => |err| return os.unexpectedErrno(err),
+            }
+        }
     }
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
