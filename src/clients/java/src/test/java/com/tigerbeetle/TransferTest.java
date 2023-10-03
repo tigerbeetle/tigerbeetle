@@ -201,6 +201,11 @@ public class TransferTest {
 
         transfers.setAmount(999);
         assertEquals(BigInteger.valueOf(999), transfers.getAmount());
+
+        transfers.setAmount(999, 1);
+        assertEquals(UInt128.asBigInteger(999, 1), transfers.getAmount());
+        assertEquals(999L, transfers.getAmount(UInt128.LeastSignificant));
+        assertEquals(1L, transfers.getAmount(UInt128.MostSignificant));
     }
 
     @Test
