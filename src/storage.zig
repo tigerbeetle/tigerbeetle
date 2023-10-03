@@ -299,7 +299,10 @@ pub const Storage = struct {
         //   in question is smaller (e.g. only 1 sector).
         // - Another replica requested a block, but we are lagging far behind, and the block address
         //   requested is beyond the end of our data file.
-        maybe(bytes_read == 0);
+        if (bytes_read == 0) {
+            read.callback(read);
+            return;
+        }
 
         // If our target was limited to a single sector, perhaps because of a latent sector error,
         // then increase `target_max` according to AIMD now that we have read successfully and
