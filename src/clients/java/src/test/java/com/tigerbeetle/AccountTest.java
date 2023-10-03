@@ -97,6 +97,11 @@ public class AccountTest {
 
         accounts.setCreditsPending(999);
         assertEquals(BigInteger.valueOf(999), accounts.getCreditsPending());
+
+        accounts.setCreditsPending(999, 1);
+        assertEquals(UInt128.asBigInteger(999, 1), accounts.getCreditsPending());
+        assertEquals(999L, accounts.getCreditsPending(UInt128.LeastSignificant));
+        assertEquals(1L, accounts.getCreditsPending(UInt128.MostSignificant));
     }
 
     @Test
@@ -116,6 +121,11 @@ public class AccountTest {
 
         accounts.setCreditsPosted(999);
         assertEquals(BigInteger.valueOf(999), accounts.getCreditsPosted());
+
+        accounts.setCreditsPosted(999, 1);
+        assertEquals(UInt128.asBigInteger(999, 1), accounts.getCreditsPosted());
+        assertEquals(999L, accounts.getCreditsPosted(UInt128.LeastSignificant));
+        assertEquals(1L, accounts.getCreditsPosted(UInt128.MostSignificant));
     }
 
     @Test
@@ -135,6 +145,11 @@ public class AccountTest {
 
         accounts.setDebitsPosted(999);
         assertEquals(BigInteger.valueOf(999), accounts.getDebitsPosted());
+
+        accounts.setDebitsPosted(999, 1);
+        assertEquals(UInt128.asBigInteger(999, 1), accounts.getDebitsPosted());
+        assertEquals(999L, accounts.getDebitsPosted(UInt128.LeastSignificant));
+        assertEquals(1L, accounts.getDebitsPosted(UInt128.MostSignificant));
     }
 
     @Test
@@ -154,6 +169,11 @@ public class AccountTest {
 
         accounts.setDebitsPending(999);
         assertEquals(BigInteger.valueOf(999), accounts.getDebitsPending());
+
+        accounts.setDebitsPending(999, 1);
+        assertEquals(UInt128.asBigInteger(999, 1), accounts.getDebitsPending());
+        assertEquals(999L, accounts.getDebitsPending(UInt128.LeastSignificant));
+        assertEquals(1L, accounts.getDebitsPending(UInt128.MostSignificant));
     }
 
     @Test
