@@ -487,3 +487,36 @@ test "stdx.zig: parse_dirty_semver" {
         try std.testing.expectEqual(case.expected_version, version);
     }
 }
+
+// TODO(zig): Zig 0.11 doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
+// Once those are available, this can be removed.
+// The `statfs` definition used by the Linux kernel, and the magic number for tmpfs, from
+// `man 2 fstatfs`.
+const fsblkcnt64_t = u64;
+const fsfilcnt64_t = u64;
+const fsword_t = i64;
+const fsid_t = u64;
+
+pub const TmpfsMagic = 0x01021994;
+pub const StatFs = extern struct {
+    f_type: fsword_t,
+    f_bsize: fsword_t,
+    f_blocks: fsblkcnt64_t,
+    f_bfree: fsblkcnt64_t,
+    f_bavail: fsblkcnt64_t,
+    f_files: fsfilcnt64_t,
+    f_ffree: fsfilcnt64_t,
+    f_fsid: fsid_t,
+    f_namelen: fsword_t,
+    f_frsize: fsword_t,
+    f_flags: fsword_t,
+    f_spare: [4]fsword_t,
+};
+
+pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
+    return std.os.linux.syscall2(
+        if (@hasField(std.os.linux.SYS, "fstatfs64")) .fstatfs64 else .fstatfs,
+        @as(usize, @bitCast(@as(isize, fd))),
+        @intFromPtr(statfs_buf),
+    );
+}
