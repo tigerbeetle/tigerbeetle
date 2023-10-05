@@ -191,7 +191,8 @@ pub fn TableType(
                     \\    filter_checksums_size: {}
                     \\    data_checksums_offset: {}
                     \\    data_checksums_size: {}
-                    \\    keys_offset: {}
+                    \\    keys_min_offset: {}
+                    \\    keys_max_offset: {}
                     \\    keys_size: {}
                     \\    filter_addresses_offset: {}
                     \\    filter_addresses_size: {}
@@ -227,7 +228,8 @@ pub fn TableType(
                         index.filter_checksums_size,
                         index.data_checksums_offset,
                         index.data_checksums_size,
-                        index.keys_offset,
+                        index.keys_min_offset,
+                        index.keys_max_offset,
                         index.keys_size,
                         index.filter_addresses_offset,
                         index.filter_addresses_size,
@@ -264,7 +266,7 @@ pub fn TableType(
                 data_block_count_max * data.value_count_max * filter_bytes_per_key);
 
             assert(index.size == @sizeOf(vsr.Header) +
-                data_block_count_max * (key_size + address_size + checksum_size) +
+                data_block_count_max * ((key_size * 2) + address_size + checksum_size) +
                 filter_block_count_max * (address_size + checksum_size));
             assert(index.size == index.data_addresses_offset + index.data_addresses_size);
             assert(index.size <= block_size);
@@ -441,15 +443,22 @@ pub fn TableType(
                     }
                 }
 
-                const key_max = key_from_value(&values[values.len - 1]);
+                const key_min = key_from_value(&values[0]);
+                const key_max = if (values.len == 1) key_min else blk: {
+                    const key = key_from_value(&values[values.len - 1]);
+                    assert(compare_keys(key_min, key) == .lt);
+                    break :blk key;
+                };
+
                 const current = builder.data_block_count;
                 { // Update the index block:
-                    index_data_keys(builder.index_block)[current] = key_max;
+                    index_data_keys(builder.index_block, .key_min)[current] = key_min;
+                    index_data_keys(builder.index_block, .key_max)[current] = key_max;
                     index.data_addresses(builder.index_block)[current] = options.address;
                     index.data_checksums(builder.index_block)[current] = header.checksum;
                 }
 
-                if (current == 0) builder.key_min = key_from_value(&values[0]);
+                if (current == 0) builder.key_min = key_min;
                 builder.key_max = key_max;
 
                 if (current == 0 and values.len == 1) {
@@ -460,8 +469,9 @@ pub fn TableType(
                 assert(compare_keys(builder.key_max, sentinel_key) == .lt);
 
                 if (current > 0) {
-                    const key_max_prev = index_data_keys(builder.index_block)[current - 1];
-                    assert(compare_keys(key_max_prev, key_from_value(&values[0])) == .lt);
+                    const slice = index_data_keys(builder.index_block, .key_max);
+                    const key_max_prev = slice[current - 1];
+                    assert(compare_keys(key_max_prev, key_min) == .lt);
                 }
 
                 builder.data_block_count += 1;
@@ -598,35 +608,49 @@ pub fn TableType(
             }
         };
 
-        pub inline fn index_data_keys(index_block: BlockPtr) []Key {
-            return mem.bytesAsSlice(Key, index_block[index.keys_offset..][0..index.keys_size]);
+        pub inline fn index_data_keys(
+            index_block: BlockPtr,
+            comptime key: enum { key_min, key_max },
+        ) []Key {
+            const offset = comptime switch (key) {
+                .key_min => index.keys_min_offset,
+                .key_max => index.keys_max_offset,
+            };
+            return mem.bytesAsSlice(Key, index_block[offset..][0..index.keys_size]);
         }
 
-        pub inline fn index_data_keys_used(index_block: BlockPtrConst) []const Key {
-            const slice = mem.bytesAsSlice(
-                Key,
-                index_block[index.keys_offset..][0..index.keys_size],
-            );
+        pub inline fn index_data_keys_used(
+            index_block: BlockPtrConst,
+            comptime key: enum { key_min, key_max },
+        ) []const Key {
+            const offset = comptime switch (key) {
+                .key_min => index.keys_min_offset,
+                .key_max => index.keys_max_offset,
+            };
+            const slice = mem.bytesAsSlice(Key, index_block[offset..][0..index.keys_size]);
             return slice[0..index.data_blocks_used(index_block)];
         }
 
-        /// Returns the zero-based index of the data block that may contain the key.
+        /// Returns the zero-based index of the data block that may contain the key
+        /// or null if the key is not contained in the index block's key range.
         /// May be called on an index block only when the key is in range of the table.
-        inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) u32 {
-            // Because we store key_max in the index block we can use the raw binary search
-            // here and avoid the extra comparison. If the search finds an exact match, we
-            // want to return that data block. If the search does not find an exact match
-            // it returns the index of the next greatest key, which again is the index of the
-            // data block that may contain the key.
+        inline fn index_data_block_for_key(index_block: BlockPtrConst, key: Key) ?u32 {
+            // Because we search key_max in the index block we can use the `upsert_index`
+            // binary search here and avoid the extra comparison.
+            // If the search finds an exact match, we want to return that data block.
+            // If the search does not find an exact match it returns the index of the next
+            // greatest key, which again is the index of the data block that may contain the key.
             const data_block_index = binary_search.binary_search_keys_upsert_index(
                 Key,
                 compare_keys,
-                Table.index_data_keys_used(index_block),
+                Table.index_data_keys_used(index_block, .key_max),
                 key,
                 .{},
             );
             assert(data_block_index < index.data_blocks_used(index_block));
-            return data_block_index;
+
+            const key_min = Table.index_data_keys_used(index_block, .key_min)[data_block_index];
+            return if (compare_keys(key, key_min) == .lt) null else data_block_index;
         }
 
         pub const IndexBlocks = struct {
@@ -636,10 +660,11 @@ pub fn TableType(
             data_block_checksum: u128,
         };
 
-        /// Returns all data stored in the index block relating to a given key.
+        /// Returns all data stored in the index block relating to a given key
+        /// or null if the key is not contained in the index block's keys range.
         /// May be called on an index block only when the key is in range of the table.
-        pub inline fn index_blocks_for_key(index_block: BlockPtrConst, key: Key) IndexBlocks {
-            const d = Table.index_data_block_for_key(index_block, key);
+        pub inline fn index_blocks_for_key(index_block: BlockPtrConst, key: Key) ?IndexBlocks {
+            const d = Table.index_data_block_for_key(index_block, key) orelse return null;
             const f = @divFloor(d, filter.data_block_count_max);
 
             return .{

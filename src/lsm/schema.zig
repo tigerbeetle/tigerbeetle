@@ -145,7 +145,8 @@ pub const TableIndex = struct {
     filter_checksums_size: u32,
     data_checksums_offset: u32,
     data_checksums_size: u32,
-    keys_offset: u32,
+    keys_min_offset: u32,
+    keys_max_offset: u32,
     keys_size: u32,
     filter_addresses_offset: u32,
     filter_addresses_size: u32,
@@ -173,10 +174,11 @@ pub const TableIndex = struct {
         const data_checksums_offset = filter_checksums_offset + filter_checksums_size;
         const data_checksums_size = parameters.data_block_count_max * checksum_size;
 
-        const keys_offset = data_checksums_offset + data_checksums_size;
         const keys_size = parameters.data_block_count_max * parameters.key_size;
+        const keys_min_offset = data_checksums_offset + data_checksums_size;
+        const keys_max_offset = keys_min_offset + keys_size;
 
-        const filter_addresses_offset = keys_offset + keys_size;
+        const filter_addresses_offset = keys_max_offset + keys_size;
         const filter_addresses_size = parameters.filter_block_count_max * address_size;
 
         const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
@@ -185,8 +187,9 @@ pub const TableIndex = struct {
         const padding_offset = data_addresses_offset + data_addresses_size;
         const padding_size = constants.block_size - padding_offset;
 
+        // `keys_size * 2` for counting both key_min and key_max:
         const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
-            keys_size + filter_addresses_size + data_addresses_size;
+            (keys_size * 2) + filter_addresses_size + data_addresses_size;
 
         return .{
             .key_size = parameters.key_size,
@@ -197,7 +200,8 @@ pub const TableIndex = struct {
             .filter_checksums_size = filter_checksums_size,
             .data_checksums_offset = data_checksums_offset,
             .data_checksums_size = data_checksums_size,
-            .keys_offset = keys_offset,
+            .keys_min_offset = keys_min_offset,
+            .keys_max_offset = keys_max_offset,
             .keys_size = keys_size,
             .filter_addresses_offset = filter_addresses_offset,
             .filter_addresses_size = filter_addresses_size,
