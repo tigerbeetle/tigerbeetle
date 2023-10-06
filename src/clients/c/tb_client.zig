@@ -105,6 +105,11 @@ pub fn init_echo(
     return context_to_client(&context.implementation);
 }
 
+pub fn completion_context(client: tb_client_t) callconv(.C) usize {
+    const context = client_to_context(client);
+    return context.completion_ctx;
+}
+
 pub fn acquire_packet(
     client: tb_client_t,
     out_packet: *?*tb_packet_t,
