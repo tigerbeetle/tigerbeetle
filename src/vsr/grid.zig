@@ -13,7 +13,7 @@ const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
 const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
 const stdx = @import("../stdx.zig");
-const BlockType = schema.BlockType;
+const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -41,6 +41,8 @@ pub fn GridType(comptime Storage: type) type {
         pub const read_iops_max = constants.grid_iops_read_max;
         pub const write_iops_max = constants.grid_iops_write_max;
 
+        pub const RepairTable = GridBlocksMissing.RepairTable;
+        pub const RepairTableResult = GridBlocksMissing.RepairTableResult;
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = free_set.Reservation;
@@ -160,6 +162,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
+        blocks_missing: GridBlocksMissing,
 
         cache: Cache,
         /// Each entry in cache has a corresponding block.
@@ -193,13 +196,18 @@ pub fn GridType(comptime Storage: type) type {
         canceling: ?struct { callback: *const fn (*Grid) void } = null,
         canceling_tick_context: NextTick = undefined,
 
-        on_read_fault: ?*const fn (*Grid, *Grid.Read) void,
-
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
-            on_read_fault: ?*const fn (*Grid, *Grid.Read) void = null,
+            missing_blocks_max: usize,
+            missing_tables_max: usize,
         }) !Grid {
+            var blocks_missing = try GridBlocksMissing.init(allocator, .{
+                .blocks_max = options.missing_blocks_max,
+                .tables_max = options.missing_tables_max,
+            });
+            errdefer blocks_missing.deinit(allocator);
+
             const cache_blocks = try allocator.alloc(BlockPtr, options.cache_blocks_count);
             errdefer allocator.free(cache_blocks);
 
@@ -222,10 +230,10 @@ pub fn GridType(comptime Storage: type) type {
 
             return Grid{
                 .superblock = options.superblock,
+                .blocks_missing = blocks_missing,
                 .cache = cache,
                 .cache_blocks = cache_blocks,
                 .read_iop_blocks = read_iop_blocks,
-                .on_read_fault = options.on_read_fault,
             };
         }
 
@@ -239,6 +247,7 @@ pub fn GridType(comptime Storage: type) type {
             allocator.free(grid.cache_blocks);
 
             grid.cache.deinit(allocator);
+            grid.blocks_missing.deinit(allocator);
 
             grid.* = undefined;
         }
@@ -249,7 +258,10 @@ pub fn GridType(comptime Storage: type) type {
         pub fn checkpoint(grid: *Grid, callback: *const fn (*Grid) void) void {
             assert(grid.checkpointing == null);
             assert(grid.canceling == null);
+            assert(grid.read_global_queue.empty());
             grid.assert_only_repairing();
+
+            grid.blocks_missing.checkpoint_commence(&grid.superblock.free_set);
 
             grid.checkpointing = .{ .callback = callback };
             grid.on_next_tick(checkpoint_tick_callback, &grid.checkpointing_tick_context);
@@ -264,11 +276,14 @@ pub fn GridType(comptime Storage: type) type {
         fn checkpoint_join(grid: *Grid) void {
             assert(grid.checkpointing != null);
             assert(grid.canceling == null);
+            assert(grid.read_global_queue.empty());
             grid.assert_only_repairing();
 
-            // TODO(Grid repair queue): This check is too conservative – we only need to wait for
-            // all released-block writes to finish.
-            if (grid.write_iops.executing() > 0) return;
+            // We are still repairing some blocks that were released at the checkpoint.
+            if (!grid.blocks_missing.checkpoint_complete()) {
+                assert(grid.write_iops.executing() > 0);
+                return;
+            }
 
             var write_queue = grid.write_queue.peek();
             while (write_queue) |write| : (write_queue = write.next) {
@@ -295,6 +310,7 @@ pub fn GridType(comptime Storage: type) type {
 
             grid.canceling = .{ .callback = callback };
 
+            grid.blocks_missing.cancel();
             grid.read_queue.reset();
             grid.read_pending_queue.reset();
             grid.read_global_queue.reset();
@@ -390,22 +406,6 @@ pub fn GridType(comptime Storage: type) type {
             grid.superblock.free_set.release(address);
         }
 
-        pub fn faulty(grid: *Grid, address: u64, checksum: ?u128) bool {
-            assert(address > 0);
-
-            var it = grid.read_global_queue.peek();
-            while (it) |faulty_read| : (it = faulty_read.next) {
-                if (faulty_read.address == address) {
-                    assert(!grid.superblock.free_set.is_free(address));
-
-                    if (checksum == null or checksum.? == faulty_read.checksum) {
-                        return true;
-                    }
-                }
-            }
-            return false;
-        }
-
         const Writing = enum { create, repair, not_writing };
 
         /// If the address is being written to by a non-repair, return `.create`.
@@ -491,18 +491,91 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
+        pub fn fulfill_block(grid: *Grid, block: BlockPtrConst) bool {
+            assert(grid.canceling == null);
+
+            const block_header = schema.header_from_block(block);
+            assert(block_header.cluster == grid.superblock.working.cluster);
+
+            var reads_iterator = grid.read_global_queue.peek();
+            while (reads_iterator) |read| : (reads_iterator = read.next) {
+                if (read.checksum == block_header.checksum and
+                    read.address == block_header.op)
+                {
+                    grid.read_global_queue.remove(read);
+                    grid.read_block_resolve(read, .{ .valid = block });
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        pub fn repair_block_waiting(grid: *Grid, address: u64, checksum: u128) bool {
+            assert(grid.superblock.opened);
+            assert(grid.canceling == null);
+            return grid.blocks_missing.repair_waiting(address, checksum);
+        }
+
+        /// Write a block that should already exist but (maybe) doesn't because of:
+        /// - a disk fault, or
+        /// - the block was missed due to state sync.
+        ///
         /// NOTE: This will consume `block` and replace it with a fresh block.
-        pub fn write_block(
+        pub fn repair_block(
             grid: *Grid,
             callback: *const fn (*Grid.Write) void,
             write: *Grid.Write,
             block: *BlockPtr,
-            address: u64,
         ) void {
-            assert(address > 0);
+            const block_header = schema.header_from_block(block.*);
+            assert(grid.superblock.opened);
+            assert(grid.canceling == null);
+            maybe(grid.checkpointing == null);
+            assert(grid.writing(block_header.op, block.*) == .not_writing);
+            assert(grid.blocks_missing.repair_waiting(block_header.op, block_header.checksum));
+            assert(!grid.superblock.free_set.is_free(block_header.op));
+
+            grid.blocks_missing.repair_commence(block_header.op, block_header.checksum);
+            grid.write_block(callback, write, block, .repair);
+        }
+
+        /// Write a block for the first time.
+        /// NOTE: This will consume `block` and replace it with a fresh block.
+        pub fn create_block(
+            grid: *Grid,
+            callback: *const fn (*Grid.Write) void,
+            write: *Grid.Write,
+            block: *BlockPtr,
+        ) void {
+            const block_header = schema.header_from_block(block.*);
+            assert(grid.superblock.opened);
+            assert(grid.canceling == null);
+            assert(grid.checkpointing == null);
+            assert(grid.writing(block_header.op, block.*) == .not_writing);
+            assert(!grid.blocks_missing.repair_waiting(block_header.op, block_header.checksum));
+            assert(!grid.superblock.free_set.is_free(block_header.op));
+            grid.assert_not_reading(block_header.op, block.*);
+
+            grid.write_block(callback, write, block, .create);
+        }
+
+        /// NOTE: This will consume `block` and replace it with a fresh block.
+        fn write_block(
+            grid: *Grid,
+            callback: *const fn (*Grid.Write) void,
+            write: *Grid.Write,
+            block: *BlockPtr,
+            trigger: enum { create, repair },
+        ) void {
+            const header = schema.header_from_block(block.*);
+            assert(header.cluster == grid.superblock.working.cluster);
+
+            const address = header.op;
+            assert(grid.superblock.opened);
             assert(grid.canceling == null);
             assert(grid.writing(address, block.*) == .not_writing);
-            grid.assert_not_reading(address, block.*);
+            assert(!grid.superblock.free_set.is_free(address));
+            grid.assert_coherent(address, header.checksum);
 
             if (constants.verify) {
                 for (grid.cache_blocks) |cache_block| {
@@ -510,47 +583,10 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
-            assert(grid.superblock.opened);
-            assert(!grid.superblock.free_set.is_free(address));
-
             write.* = .{
                 .callback = callback,
                 .address = address,
-                .repair = false,
-                .block = block,
-                .checkpoint_id = grid.superblock.working.checkpoint_id(),
-            };
-
-            const iop = grid.write_iops.acquire() orelse {
-                grid.write_queue.push(write);
-                return;
-            };
-
-            grid.write_block_with(iop, write);
-        }
-
-        /// NOTE: This will consume `block` and replace it with a fresh block.
-        pub fn write_block_repair(
-            grid: *Grid,
-            callback: *const fn (*Grid.Write) void,
-            write: *Grid.Write,
-            block: *BlockPtr,
-            address: u64,
-        ) void {
-            const header = schema.header_from_block(block.*);
-
-            assert(address > 0);
-            assert(address == header.op);
-            assert(grid.superblock.opened);
-            assert(grid.canceling == null);
-            assert(!grid.superblock.free_set.is_free(address));
-            assert(grid.faulty(address, header.checksum));
-            assert(grid.writing(address, block.*) == .not_writing);
-
-            write.* = .{
-                .callback = callback,
-                .address = address,
-                .repair = true,
+                .repair = trigger == .repair,
                 .block = block,
                 .checkpoint_id = grid.superblock.working.checkpoint_id(),
             };
@@ -564,6 +600,8 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn write_block_with(grid: *Grid, iop: *WriteIOP, write: *Write) void {
+            assert(!grid.superblock.free_set.is_free(write.address));
+
             const write_iop_index = grid.write_iops.index(iop);
             tracer.start(
                 &grid.write_iop_tracer_slots[write_iop_index],
@@ -577,10 +615,14 @@ pub fn GridType(comptime Storage: type) type {
                 .write = write,
             };
 
+            const write_header = schema.header_from_block(write.block.*);
+            assert(write_header.size > @sizeOf(vsr.Header));
+            assert(write_header.size <= constants.block_size);
+
             grid.superblock.storage.write_sectors(
                 write_block_callback,
                 &iop.completion,
-                write.block.*,
+                write.block.*[0..vsr.sector_ceil(write_header.size)],
                 .grid,
                 block_offset(write.address),
             );
@@ -596,13 +638,21 @@ pub fn GridType(comptime Storage: type) type {
 
             // We can only update the cache if the Grid is not resolving callbacks with a cache block.
             assert(!grid.read_resolving);
-            assert(grid.superblock.working.checkpoint_id() == completed_write.checkpoint_id);
+            assert(!grid.superblock.free_set.is_free(completed_write.address));
+
+            if (!completed_write.repair) {
+                assert(grid.superblock.working.checkpoint_id() == completed_write.checkpoint_id);
+            }
 
             // Insert the write block into the cache, and give the evicted block to the writer.
             const cache_index = grid.cache.insert_index(&completed_write.address);
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             @memset(completed_write.block.*, 0);
+
+            const cache_block_header = schema.header_from_block(cache_block.*);
+            assert(cache_block_header.op == completed_write.address);
+            grid.assert_coherent(completed_write.address, cache_block_header.checksum);
 
             const write_iop_index = grid.write_iops.index(iop);
             tracer.end(
@@ -611,28 +661,11 @@ pub fn GridType(comptime Storage: type) type {
             );
 
             if (grid.canceling) |_| {
+                assert(grid.write_queue.empty());
+
                 grid.write_iops.release(iop);
                 grid.cancel_join_callback();
                 return;
-            }
-
-            if (completed_write.repair) {
-                // We wait until the write completes to resolve the repair queue, to prevent
-                // these writes from ever overlapping with compaction or checkpoints.
-                const header = schema.header_from_block(cache_block.*);
-
-                var read_ = grid.read_global_queue.peek();
-                while (read_) |read| : (read_ = read.next) {
-                    if (read.checksum == header.checksum and
-                        read.address == completed_write.address)
-                    {
-                        grid.read_global_queue.remove(read);
-                        grid.read_block_resolve(read, .{ .valid = cache_block.* });
-                        break;
-                    }
-                } else {
-                    unreachable;
-                }
             }
 
             // Start a queued write if possible *before* calling the completed
@@ -648,6 +681,8 @@ pub fn GridType(comptime Storage: type) type {
                 grid.write_iops.release(iop);
             }
 
+            // Precede the write's callback, since the callback takes back ownership of the block.
+            if (completed_write.repair) grid.blocks_missing.repair_complete(cache_block.*);
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
@@ -668,6 +703,7 @@ pub fn GridType(comptime Storage: type) type {
             if (options.coherent) {
                 assert(grid.writing(address, null) != .create);
                 assert(!grid.superblock.free_set.is_free(address));
+                grid.assert_coherent(address, checksum);
             }
 
             assert(address > 0);
@@ -680,12 +716,19 @@ pub fn GridType(comptime Storage: type) type {
             assert(header.cluster == grid.superblock.working.cluster);
 
             if (header.checksum == checksum) {
-                if (constants.verify and options.coherent) {
+                if (constants.verify and
+                    options.coherent and
+                    grid.superblock.working.vsr_state.sync_op_max == 0)
+                {
                     grid.verify_read(address, cache_block);
                 }
 
                 return cache_block;
             } else {
+                if (options.coherent) {
+                    assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+                }
+
                 return null;
             }
         }
@@ -717,6 +760,7 @@ pub fn GridType(comptime Storage: type) type {
                     assert(grid.checkpointing == null);
                     assert(!grid.superblock.free_set.is_free(address));
                     assert(grid.writing(address, null) != .create);
+                    grid.assert_coherent(address, checksum);
                 },
             }
 
@@ -881,8 +925,9 @@ pub fn GridType(comptime Storage: type) type {
             if (result != .valid) {
                 const header = mem.bytesAsValue(vsr.Header, block.*[0..@sizeOf(vsr.Header)]);
                 log.err(
-                    "{s}: expected address={} checksum={}, found address={} checksum={}",
+                    "{}: {s}: expected address={} checksum={}, found address={} checksum={}",
                     .{
+                        grid.superblock.replica_index.?,
                         @tagName(result),
                         read.address,
                         read.checksum,
@@ -916,6 +961,10 @@ pub fn GridType(comptime Storage: type) type {
             if (!header.valid_checksum_body(block_body)) return .invalid_checksum_body;
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
+            if (constants.verify) {
+                assert(stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)]));
+            }
+
             assert(header.op == expect.address);
             return .{ .valid = block };
         }
@@ -934,6 +983,7 @@ pub fn GridType(comptime Storage: type) type {
             if (read.coherent) {
                 assert(!grid.superblock.free_set.is_free(read.address));
                 assert(read.checkpoint_id == grid.superblock.working.checkpoint_id());
+                grid.assert_coherent(read.address, read.checksum);
             }
 
             if (result == .valid) {
@@ -987,17 +1037,53 @@ pub fn GridType(comptime Storage: type) type {
                 assert(read_remote_head.callback == .from_local_or_global_storage);
                 assert(read_remote_head.coherent);
 
-                // On the result of an invalid block, move the "root" read (and all others it
-                // resolves) to recovery queue. Future reads on the same address will see the "root"
-                // read in the recovery queue and enqueue to it.
+                log.debug("{}: read_block: fault: address={} checksum={}", .{
+                    grid.superblock.replica_index.?,
+                    read_remote_head.address,
+                    read_remote_head.checksum,
+                });
+
                 read_remote_head.resolves = read_remote_resolves;
                 grid.read_global_queue.push(read_remote_head);
 
-                if (grid.on_read_fault) |on_read_fault| {
-                    on_read_fault(grid, read_remote_head);
-                } else {
-                    @panic("Grid.on_read_fault not set");
+                if (grid.blocks_missing.enqueue_blocks_available() > 0) {
+                    grid.blocks_missing.enqueue_block(
+                        read_remote_head.address,
+                        read_remote_head.checksum,
+                    );
                 }
+            }
+        }
+
+        pub fn next_batch_of_block_requests(grid: *Grid, requests: []vsr.BlockRequest) usize {
+            assert(grid.canceling == null);
+            assert(requests.len > 0);
+
+            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
+            // continue.
+            const request_faults_count = @min(grid.read_global_queue.count, requests.len);
+            // (Note that many – but not all – of these blocks are also in the GridBlocksMissing.
+            // The `read_global_queue` is a FIFO, whereas the GridBlocksMissing has a fixed
+            // capacity.)
+            for (requests[0..request_faults_count]) |*request| {
+                // Pop-push the FIFO to cycle the faulty queue so that successive requests
+                // rotate through all stalled blocks (approximately) evenly.
+                const read_fault = grid.read_global_queue.pop().?;
+                grid.read_global_queue.push(read_fault);
+
+                request.* = .{
+                    .block_address = read_fault.address,
+                    .block_checksum = read_fault.checksum,
+                };
+            }
+
+            if (request_faults_count == requests.len) {
+                return request_faults_count;
+            } else {
+                const request_repairs_count = grid.blocks_missing.next_batch_of_block_requests(
+                    requests[request_faults_count..],
+                );
+                return request_faults_count + request_repairs_count;
             }
         }
 
@@ -1007,18 +1093,34 @@ pub fn GridType(comptime Storage: type) type {
             return (address - 1) * block_size;
         }
 
+        fn assert_coherent(grid: *const Grid, address: u64, checksum: u128) void {
+            assert(!grid.superblock.free_set.is_free(address));
+
+            const TestStorage = @import("../testing/storage.zig").Storage;
+            if (Storage != TestStorage) return;
+
+            if (grid.superblock.storage.options.grid_checker) |checker| {
+                checker.assert_coherent(grid.superblock.working.checkpoint_id(), address, checksum);
+                checker.assert_coherent(grid.superblock.staging.checkpoint_id(), address, checksum);
+            }
+        }
+
         fn verify_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {
             assert(constants.verify);
 
             const TestStorage = @import("../testing/storage.zig").Storage;
             if (Storage != TestStorage) return;
 
-            const actual_block = grid.superblock.storage.grid_block(address);
+            const actual_block = grid.superblock.storage.grid_block(address).?;
             const actual_header = schema.header_from_block(actual_block);
             const cached_header = schema.header_from_block(cached_block);
             assert(cached_header.checksum == actual_header.checksum);
 
-            assert(std.mem.eql(u8, cached_block, actual_block));
+            assert(std.mem.eql(
+                u8,
+                cached_block[0..cached_header.size],
+                actual_block[0..actual_header.size],
+            ));
         }
     };
 }

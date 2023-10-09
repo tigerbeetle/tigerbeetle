@@ -277,11 +277,31 @@ pub const grid_repair_request_max = config.process.grid_repair_request_max;
 /// The number of grid reads allocated to handle incoming command=request_blocks messages.
 pub const grid_repair_reads_max = config.process.grid_repair_reads_max;
 
-/// The number of grid writes allocated to handle incoming command=block messages.
-pub const grid_repair_writes_max = config.process.grid_repair_writes_max;
+/// Immediately after state sync we want access to all of the grid's write bandwidth to rapidly sync
+/// table blocks.
+pub const grid_repair_writes_max = grid_iops_write_max;
 
 /// The default sizing of the grid cache. It's expected for operators to override this on the CLI.
 pub const grid_cache_size_default = config.process.grid_cache_size_default;
+
+/// The maximum capacity (in *single* blocks – not counting syncing tables) of the
+/// GridBlocksMissing.
+///
+/// As this increases:
+/// - GridBlocksMissing allocates more memory.
+/// - The "period" of GridBlocksMissing's requests increases.
+///   This makes the repair protocol more tolerant of network latency.
+/// - (Repair protocol is used to repair manifest log blocks immediately after state sync).
+pub const grid_missing_blocks_max = config.process.grid_missing_blocks_max;
+
+/// The number of tables that can be synced simultaneously.
+/// "Table" in this context is the number of table index blocks to hold in memory while syncing
+/// their content.
+///
+/// As this increases:
+/// - GridBlocksMissing allocates more memory (~2 blocks for each).
+/// - Syncing is more efficient, as more blocks can be fetched concurrently.
+pub const grid_missing_tables_max = config.process.grid_missing_tables_max;
 
 comptime {
     assert(grid_repair_request_max > 0);
@@ -290,6 +310,11 @@ comptime {
 
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
+    assert(grid_repair_writes_max <=
+        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_content_blocks_max);
+
+    assert(grid_missing_blocks_max > 0);
+    assert(grid_missing_tables_max > 0);
 }
 
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
@@ -494,6 +519,20 @@ comptime {
 }
 
 pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
+
+/// The maximum number of blocks that can possibly be referenced by any table index block.
+///
+/// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
+///   tree configuration. (To avoid prevent Grid from depending on StateMachine).
+/// - This counts filter and data blocks, but does not count the index block itself.
+pub const lsm_table_content_blocks_max = table_blocks_max: {
+    const checksum_size = @sizeOf(u128);
+    const address_size = @sizeOf(u64);
+    break :table_blocks_max @divFloor(
+        block_size - @sizeOf(vsr.Header),
+        (checksum_size + address_size),
+    );
+};
 
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.

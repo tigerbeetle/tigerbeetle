@@ -18,8 +18,9 @@ const MessageBus = @import("cluster/message_bus.zig").MessageBus;
 const Network = @import("cluster/network.zig").Network;
 const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
-const StorageCheckerType = @import("cluster/storage_checker.zig").StorageCheckerType;
+const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 const SyncCheckerType = @import("cluster/sync_checker.zig").SyncCheckerType;
+const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
 
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
@@ -52,7 +53,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
-        pub const StorageChecker = StorageCheckerType(Storage);
         pub const SyncChecker = SyncCheckerType(Replica);
 
         pub const Options = struct {
@@ -98,6 +98,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         state_checker: StateChecker,
         storage_checker: StorageChecker,
         sync_checker: SyncChecker,
+        grid_checker: *GridChecker,
 
         context: ?*anyopaque = null,
 
@@ -145,6 +146,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 options.storage_fault_atlas,
             );
 
+            var grid_checker = try allocator.create(GridChecker);
+            errdefer allocator.destroy(grid_checker);
+
+            grid_checker.* = GridChecker.init(allocator);
+            errdefer grid_checker.deinit();
+
             const storages = try allocator.alloc(Storage, node_count);
             errdefer allocator.free(storages);
 
@@ -153,6 +160,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var storage_options = options.storage;
                 storage_options.replica_index = @as(u8, @intCast(replica_index));
                 storage_options.fault_atlas = storage_fault_atlas;
+                storage_options.grid_checker = grid_checker;
                 storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
                 // Disable most faults at startup, so that the replicas don't get stuck recovering_head.
                 storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
@@ -218,8 +226,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             });
             errdefer state_checker.deinit();
 
-            var storage_checker = StorageChecker.init(allocator);
-            errdefer storage_checker.deinit();
+            var storage_checker = try StorageChecker.init(allocator);
+            errdefer storage_checker.deinit(allocator);
 
             var sync_checker = SyncChecker.init(allocator);
             errdefer sync_checker.deinit();
@@ -269,6 +277,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
                 .sync_checker = sync_checker,
+                .grid_checker = grid_checker,
             };
 
             for (cluster.replicas, 0..) |_, replica_index| {
@@ -296,7 +305,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn deinit(cluster: *Self) void {
             cluster.sync_checker.deinit();
-            cluster.storage_checker.deinit();
+            cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
             cluster.network.deinit();
             for (cluster.clients) |*client| client.deinit(cluster.allocator);
@@ -311,6 +320,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
             for (cluster.aofs) |*aof| aof.deinit(cluster.allocator);
 
+            cluster.grid_checker.deinit(); // (Storage references this.)
+
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
@@ -318,6 +329,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
             cluster.allocator.free(cluster.aofs);
+            cluster.allocator.destroy(cluster.grid_checker);
             cluster.allocator.destroy(cluster.storage_fault_atlas);
             cluster.allocator.destroy(cluster.network);
             cluster.allocator.destroy(cluster);
@@ -348,6 +360,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// This simulates a storage determinism bug.
         ///
         /// (Replica must be running and also between compaction beats for this to run.)
+        // TODO Test the occasional divergence in the VOPR.
         pub fn diverge(cluster: *Self, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
@@ -358,6 +371,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const reservation = replica.superblock.free_set.reserve(1).?;
             defer replica.superblock.free_set.forfeit(reservation);
+
+            cluster.storages[replica_index].options.grid_checker = null;
 
             // We don't need to actually use the block for the storage to diverge —
             // it is marked as acquired in the superblock free set.
@@ -620,7 +635,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
                     "<{[sync_op_min]:_>3}:{[sync_op_max]:_>3}> " ++
                     "{[grid_blocks_free]:>7}Gf " ++
-                    "{[grid_blocks_faulty]:>2}G!", .{
+                    "{[grid_blocks_global]:>2}G! " ++
+                    "{[grid_blocks_repair]:>3}G?", .{
                     .view = replica.view,
                     .commit_min = replica.commit_min,
                     .commit_max = replica.commit_max,
@@ -633,7 +649,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .grid_blocks_free = replica.superblock.free_set.count_free(),
-                    .grid_blocks_faulty = replica.grid.read_global_queue.count,
+                    .grid_blocks_global = replica.grid.read_global_queue.count,
+                    .grid_blocks_repair = replica.grid.blocks_missing.faulty_blocks.count(),
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {

@@ -48,6 +48,7 @@ pub const SuperBlockType = superblock.SuperBlockType;
 pub const SuperBlockTrailer = superblock.Trailer;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
+pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -813,6 +814,8 @@ pub const Header = extern struct {
 
     fn invalid_block(self: *const Header) ?[]const u8 {
         assert(self.command == .block);
+        if (self.size > constants.block_size) return "size > block_size";
+        if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
         if (self.client != 0) return "client != 0";
         if (self.view != 0) return "view != 0";
         if (self.op == 0) return "op == 0"; // address ≠ 0
@@ -1375,45 +1378,48 @@ pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8, address_li
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < address_limit);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        addresses[index] = try parse_address(raw_address);
+        addresses[index] = try parse_address_and_port(raw_address);
     }
     assert(index == address_count);
 
     return addresses;
 }
 
-pub fn parse_address(raw: []const u8) !std.net.Address {
-    var colon_iterator = std.mem.split(u8, raw, ":");
-    // The split iterator will always return non-null once, even if the delimiter is not found:
-    const raw_ipv4 = colon_iterator.next().?;
+pub fn parse_address_and_port(string: []const u8) !std.net.Address {
+    assert(string.len > 0);
 
-    if (colon_iterator.next()) |raw_port| {
-        if (colon_iterator.next() != null) return error.AddressHasMoreThanOneColon;
+    if (std.mem.lastIndexOfAny(u8, string, ":.]")) |split| {
+        if (string[split] == ':') {
+            return parse_address(
+                string[0..split],
+                std.fmt.parseUnsigned(u16, string[split + 1 ..], 10) catch |err| switch (err) {
+                    error.Overflow => return error.PortOverflow,
+                    error.InvalidCharacter => return error.PortInvalid,
+                },
+            );
+        } else {
+            return parse_address(string, constants.port);
+        }
+    } else {
+        return std.net.Address.parseIp4(
+            constants.address,
+            std.fmt.parseUnsigned(u16, string, 10) catch |err| switch (err) {
+                error.Overflow => return error.PortOverflow,
+                error.InvalidCharacter => return error.AddressInvalid,
+            },
+        ) catch unreachable;
+    }
+}
 
-        const port = std.fmt.parseUnsigned(u16, raw_port, 10) catch |err| switch (err) {
-            error.Overflow => return error.PortOverflow,
-            error.InvalidCharacter => return error.PortInvalid,
-        };
-        return std.net.Address.parseIp4(raw_ipv4, port) catch {
+fn parse_address(string: []const u8, port: u16) !std.net.Address {
+    if (string[string.len - 1] == ':') return error.AddressHasMoreThanOneColon;
+
+    if (string[0] == '[' and string[string.len - 1] == ']') {
+        return std.net.Address.parseIp6(string[1 .. string.len - 1], port) catch {
             return error.AddressInvalid;
         };
     } else {
-        // There was no colon in the address so there are now two cases:
-        // 1. an IPv4 address with the default port, or
-        // 2. a port with the default IPv4 address.
-
-        // Let's try parsing as a port first:
-        if (std.fmt.parseUnsigned(u16, raw, 10)) |port| {
-            return std.net.Address.parseIp4(constants.address, port) catch unreachable;
-        } else |err| switch (err) {
-            error.Overflow => return error.PortOverflow,
-            error.InvalidCharacter => {
-                // Something was not a digit, let's try parsing as an IPv4 instead:
-                return std.net.Address.parseIp4(raw, constants.port) catch {
-                    return error.AddressInvalid;
-                };
-            },
-        }
+        return std.net.Address.parseIp4(string, port) catch return error.AddressInvalid;
     }
 }
 
@@ -1455,6 +1461,30 @@ test "parse_addresses" {
             .addresses = &[2]std.net.Address{
                 std.net.Address.initIp4([_]u8{ 1, 2, 3, 4 }, 5),
                 try std.net.Address.parseIp4(constants.address, 4321),
+            },
+        },
+        .{
+            // Test IPv6 address with default port.
+            .raw = "[fe80::1ff:fe23:4567:890a]",
+            .addresses = &[_]std.net.Address{
+                std.net.Address.initIp6(
+                    [_]u8{ 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x01, 0xff, 0xfe, 0x23, 0x45, 0x67, 0x89, 0x0a },
+                    constants.port,
+                    0,
+                    0,
+                ),
+            },
+        },
+        .{
+            // Test IPv6 address with port.
+            .raw = "[fe80::1ff:fe23:4567:890a]:1234",
+            .addresses = &[_]std.net.Address{
+                std.net.Address.initIp6(
+                    [_]u8{ 0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0x01, 0xff, 0xfe, 0x23, 0x45, 0x67, 0x89, 0x0a },
+                    1234,
+                    0,
+                    0,
+                ),
             },
         },
     };
@@ -1981,5 +2011,15 @@ pub const Checkpoint = struct {
 
     pub fn valid(op: u64) bool {
         return op == 0 or (op + 1) % constants.lsm_batch_multiple == 0;
+    }
+};
+
+pub const Snapshot = struct {
+    /// A table with TableInfo.snapshot_min=S was written during some commit with op<S.
+    /// A block with snapshot_min=S is definitely readable at op=S.
+    pub fn readable_at_commit(op: u64) u64 {
+        // TODO: This is going to become more complicated when snapshot numbers match the op
+        // acquiring the snapshot.
+        return op + 1;
     }
 };

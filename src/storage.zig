@@ -2,8 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const os = std.os;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const log = std.log.scoped(.storage);
 
+const stdx = @import("stdx.zig");
 const IO = @import("io.zig").IO;
 const FIFO = @import("fifo.zig").FIFO;
 const constants = @import("constants.zig");
@@ -288,15 +290,18 @@ pub const Storage = struct {
             },
         };
 
+        // We tried to read more than there really is available to read.
+        // In other words, we thought we could read beyond the end of the file descriptor.
+        //
+        // Some possible causes:
+        // - The data file inode `size` was truncated or corrupted.
+        // - We are reading the last grid block in the data file, (block_size bytes), but the block
+        //   in question is smaller (e.g. only 1 sector).
+        // - Another replica requested a block, but we are lagging far behind, and the block address
+        //   requested is beyond the end of our data file.
         if (bytes_read == 0) {
-            // We tried to read more than there really is available to read.
-            // In other words, we thought we could read beyond the end of the file descriptor.
-            // This can happen if the data file inode `size` was truncated or corrupted.
-            log.err(
-                "short read: buffer.len={} offset={} bytes_read={}",
-                .{ read.offset, read.buffer.len, bytes_read },
-            );
-            @panic("data file inode size was truncated or corrupted");
+            read.callback(read);
+            return;
         }
 
         // If our target was limited to a single sector, perhaps because of a latent sector error,

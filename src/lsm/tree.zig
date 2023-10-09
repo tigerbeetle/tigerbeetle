@@ -90,19 +90,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     return struct {
         const Tree = @This();
 
-        // Expose the Table & hash for the Groove.
         pub const Table = TreeTable;
+        pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
+        pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
 
         const Grid = @import("../vsr/grid.zig").GridType(Storage);
-        const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
         const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
         const KeyRange = Manifest.KeyRange;
-
-        pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
         const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
-
         const CompactionType = @import("compaction.zig").CompactionType;
         const Compaction = CompactionType(Table, Tree, Storage);
+
         pub const LookupMemoryResult = union(enum) {
             negative,
             positive: *const Value,

@@ -660,9 +660,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             const free_set_buffer = try allocator.alignedAlloc(
                 u8,
                 constants.sector_size,
-                SuperBlockFreeSet.encode_size_max(block_count_limit),
+                vsr.sector_ceil(SuperBlockFreeSet.encode_size_max(block_count_limit)),
             );
             errdefer allocator.free(free_set_buffer);
+            assert(free_set_buffer.len <= superblock_trailer_free_set_size_max);
 
             const client_sessions_buffer = try allocator.alignedAlloc(
                 u8,
@@ -1548,10 +1549,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     // We should have finished all pending superblock io before starting any more.
                     superblock.storage.assert_no_pending_reads(.superblock);
                     superblock.storage.assert_no_pending_writes(.superblock);
-                    if (context.caller != .view_change) {
-                        superblock.storage.assert_no_pending_writes(.grid);
-                        // (Pending repair-reads are possible.)
-                    }
                 }
 
                 if (context.caller == .open) {

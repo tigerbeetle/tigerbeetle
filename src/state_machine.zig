@@ -437,6 +437,10 @@ pub fn StateMachineType(
             for (transfers) |*t| {
                 if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
                     if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
+                        // This prefetch isn't run yet, but enqueue it here as well to save an extra
+                        // iteration over transfers.
+                        self.forest.grooves.posted.prefetch_enqueue(p.timestamp);
+
                         self.forest.grooves.accounts.prefetch_enqueue(p.debit_account_id);
                         self.forest.grooves.accounts.prefetch_enqueue(p.credit_account_id);
                     }
@@ -616,7 +620,8 @@ pub fn StateMachineType(
                         else => unreachable,
                     };
                 };
-                log.debug("{s} {}/{}: {}: {}", .{
+                log.debug("{?}: {s} {}/{}: {}: {}", .{
+                    self.forest.grid.superblock.replica_index,
                     @tagName(operation),
                     index + 1,
                     events.len,
@@ -683,7 +688,8 @@ pub fn StateMachineType(
                     .create_transfers => self.create_transfer_rollback(&event),
                     else => unreachable,
                 }
-                log.debug("{s} {}/{}: rollback(): {}", .{
+                log.debug("{?}: {s} {}/{}: rollback(): {}", .{
+                    self.forest.grid.superblock.replica_index,
                     @tagName(operation),
                     index + 1,
                     events.len,
@@ -1283,6 +1289,8 @@ const TestContext = struct {
 
         ctx.grid = try Grid.init(allocator, .{
             .superblock = &ctx.superblock,
+            .missing_blocks_max = 0,
+            .missing_tables_max = 0,
         });
         errdefer ctx.grid.deinit(allocator);
 

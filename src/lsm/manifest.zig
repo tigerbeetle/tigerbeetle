@@ -7,6 +7,7 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const growth_factor = constants.lsm_growth_factor;
 
+const vsr = @import("../vsr.zig");
 const table_count_max = @import("tree.zig").table_count_max;
 const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -146,12 +147,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const TableInfoReference = Level.TableInfoReference;
         pub const KeyRange = Level.KeyRange;
         pub const ManifestLog = ManifestLogType(Storage);
+        pub const Level =
+            ManifestLevelType(NodePool, Key, TreeTableInfo, compare_keys, table_count_max);
 
         const Grid = GridType(Storage);
         const Callback = *const fn (*Manifest) void;
-
-        const Level =
-            ManifestLevelType(NodePool, Key, TreeTableInfo, compare_keys, table_count_max);
 
         const CompactionTableRange = struct {
             table_a: TableInfoReference,
@@ -553,7 +553,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             return true;
         }
 
-        pub fn verify(manifest: *Manifest, snapshot: u64) void {
+        pub fn verify(manifest: *const Manifest, snapshot: u64) void {
             assert(snapshot <= snapshot_latest);
 
             switch (Table.usage) {
@@ -582,34 +582,32 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .secondary_index => {},
             }
 
-            // TODO: When state sync is proactive, re-enable this.
-            if (true) return;
+            const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
+            const vsr_state = &manifest.manifest_log.?.grid.superblock.working.vsr_state;
+            for (&manifest.levels) |*level| {
+                var key_max_previous: ?Key = null;
+                var table_info_iterator = level.iterator(.visible, &.{snapshot}, .ascending, null);
+                while (table_info_iterator.next()) |table_info| {
+                    const table_snapshot = table_info.snapshot_min;
 
-            // TODO s/prev/previous; s/iter/iterator.
-            for (manifest.levels) |*level| {
-                var key_max_prev: ?Key = null;
-                var table_info_iter = level.iterator(
-                    .visible,
-                    &.{snapshot},
-                    .ascending,
-                    null,
-                );
-                while (table_info_iter.next()) |table_info| {
-                    if (key_max_prev) |k| {
-                        // A level's tables at given snapshot are disjoint.
-                        assert(compare_keys(k, table_info.key_min) == .lt);
+                    if (key_max_previous) |key| {
+                        assert(compare_keys(key, table_info.key_min) == .lt);
                     }
                     // We could have key_min == key_max if there is only one value.
                     assert(compare_keys(table_info.key_min, table_info.key_max) != .gt);
-                    key_max_prev = table_info.key_max;
+                    key_max_previous = table_info.key_max;
 
-                    Table.verify(
-                        Storage,
-                        manifest.manifest_log.?.grid.superblock.storage,
-                        table_info.address,
-                        table_info.key_min,
-                        table_info.key_max,
-                    );
+                    if (table_snapshot < snapshot_from_commit(vsr_state.sync_op_min) or
+                        table_snapshot > snapshot_from_commit(vsr_state.sync_op_max))
+                    {
+                        Table.verify(
+                            Storage,
+                            manifest.manifest_log.?.grid.superblock.storage,
+                            table_info.address,
+                            table_info.key_min,
+                            table_info.key_max,
+                        );
+                    }
                 }
             }
         }

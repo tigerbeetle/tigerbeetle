@@ -23,6 +23,6 @@ For language-specific docs see:
 ## Internals
 
 If you're curious and want to learn more, you can find the source code
-for creating an transfer in
+for looking up a transfer in
 [src/state_machine.zig](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/state_machine.zig). Search
 for `fn execute_lookup_transfers(`.

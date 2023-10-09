@@ -22,7 +22,7 @@ pub const messages_max_replica = messages_max: {
     sum += constants.journal_iops_write_max; // Journal writes
     sum += constants.client_replies_iops_read_max; // Client-reply reads
     sum += constants.client_replies_iops_write_max; // Client-reply writes
-    sum += constants.grid_repair_reads_max; // Grid repair reads
+    sum += constants.grid_repair_reads_max; // Replica.grid_reads (Replica.BlockRead)
     sum += 1; // Replica.loopback_queue
     sum += constants.pipeline_prepare_queue_max; // Replica.Pipeline{Queue|Cache}
     sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}
@@ -71,6 +71,9 @@ pub const MessagePool = struct {
 
         /// Increment the reference count of the message and return the same pointer passed.
         pub fn ref(message: *Message) *Message {
+            assert(message.references > 0);
+            assert(message.next == null);
+
             message.references += 1;
             return message;
         }
@@ -147,6 +150,8 @@ pub const MessagePool = struct {
 
     /// Decrement the reference count of the message, possibly freeing it.
     pub fn unref(pool: *MessagePool, message: *Message) void {
+        assert(message.next == null);
+
         message.references -= 1;
         if (message.references == 0) {
             message.header = undefined;
