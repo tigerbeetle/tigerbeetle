@@ -16,7 +16,7 @@ The Antithesis test consists of 4 images:
 ### Resources
 
 - [Antithesis documentation](https://antithesis.com/docs/index.html)
-- [instrumentation.h](https://drive.google.com/file/d/1D7FPHL54znblGol4vMw8uwMFpLkaOePX/view)
+- [instrumentation.h](https://drive.google.com/file/d/1D7FPHL54znblGol4vMw8uwMFpLkaOePX/view) - currently not used.
 
 ### Faults
 
@@ -45,6 +45,7 @@ The Antithesis test consists of 4 images:
 - Connections between containers with IPs ending in 129 or above are exempt from network faults.
 - `libvoidstar.so` requires glibc v2.17 or later
 - Antithesis recommends not enabling the LLVM instrumentation on the `workload`, to allow them to focus on the `api` and `replica` containers.
+- A custom patch (`zig.patch`) is required to enable LLVM instrumentation. A custom Zig compiler is built automatically with this in CI.
 
 # Usage
 
@@ -53,12 +54,14 @@ The Antithesis test consists of 4 images:
 To test locally (run from `tigerbeetle/`):
 
 ```bash
+# This builds without libvoidstar linked in. Libvoidstar has trace_pc_guard hooks that are used by Antithesis when running
+# on their Hypervisor. To enable libvoidstar linking, pass `-Dantithesis` to `zig build`.
 # Build and tag the containers.
-zig build
-./scripts/build.sh <tag>
+zig build antithesis_workload antithesis_api install
+./tools/antithesis/scripts/build.sh <tag>
 
 # Run containers.
-cd config/
+cd tools/antithesis/config/
 docker-compose up
 ```
 
@@ -73,16 +76,8 @@ docker-compose rm
 
 ### Push Containers
 
-Push the containers to Antithesis (authorization must be already configured):
+Push the containers to Antithesis (authorization must be already configured) - this happens automatically in CI:
 
 ```bash
 ./scripts/push.sh <tag>
-```
-
-### Updating
-
-Update the TigerBeetle submodule:
-
-```bash
-git submodule update --remote
 ```

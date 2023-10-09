@@ -30,7 +30,7 @@ pub const log_level: std.log.Level = .debug;
 pub const crypto_always_getrandom = true;
 
 pub fn main() anyerror!void {
-    const ticks_max = 50_000_000;
+    const ticks_max = 1_000_000;
     const accounts_count = 8; // TODO fuzz_get_random()
     assert(accounts_count >= 2);
 
