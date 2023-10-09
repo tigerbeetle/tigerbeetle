@@ -19,16 +19,16 @@ namespace TigerBeetle.Tests
             account.UserData128 = 101;
             Assert.AreEqual(account.UserData128, (UInt128)101);
 
-			account.UserData64 = 102;
-			Assert.AreEqual(account.UserData64, (ulong)102L);
+            account.UserData64 = 102;
+            Assert.AreEqual(account.UserData64, (ulong)102L);
 
-			account.UserData32 = 103;
-			Assert.AreEqual(account.UserData32, (uint)103);
+            account.UserData32 = 103;
+            Assert.AreEqual(account.UserData32, (uint)103);
 
-			account.Reserved = 0;
-			Assert.AreEqual(account.Reserved, (uint)0);
+            account.Reserved = 0;
+            Assert.AreEqual(account.Reserved, (uint)0);
 
-			account.Ledger = 104;
+            account.Ledger = 104;
             Assert.AreEqual(account.Ledger, (uint)104);
 
             account.Code = 105;
@@ -60,9 +60,9 @@ namespace TigerBeetle.Tests
             var account = new Account(); ;
             Assert.AreEqual(account.Id, UInt128.Zero);
             Assert.AreEqual(account.UserData128, UInt128.Zero);
-			Assert.AreEqual(account.UserData64, (ulong)0);
-			Assert.AreEqual(account.UserData32, (uint)0);
-			Assert.AreEqual(account.Reserved, (uint)0);
+            Assert.AreEqual(account.UserData64, (ulong)0);
+            Assert.AreEqual(account.UserData32, (uint)0);
+            Assert.AreEqual(account.Reserved, (uint)0);
             Assert.AreEqual(account.Ledger, (uint)0);
             Assert.AreEqual(account.Code, (ushort)0);
             Assert.AreEqual(account.Flags, AccountFlags.None);
@@ -81,19 +81,19 @@ namespace TigerBeetle.Tests
             {
                 writer.Write(10L); // Id (lsb)
                 writer.Write(11L); // Id (msb)
-				writer.Write(100L); // DebitsPending (lsb)
-				writer.Write(110L); // DebitsPending (msb)
-				writer.Write(200L); // DebitsPosted (lsb)
-				writer.Write(210L); // DebitsPosted (msb)
-				writer.Write(300L); // CreditPending (lsb)
-				writer.Write(310L); // CreditPending (msb)
-				writer.Write(400L); // CreditsPosted (lsb)
-				writer.Write(410L); // CreditsPosted (msb)
-				writer.Write(1000L); // UserData128 (lsb)
+                writer.Write(100L); // DebitsPending (lsb)
+                writer.Write(110L); // DebitsPending (msb)
+                writer.Write(200L); // DebitsPosted (lsb)
+                writer.Write(210L); // DebitsPosted (msb)
+                writer.Write(300L); // CreditPending (lsb)
+                writer.Write(310L); // CreditPending (msb)
+                writer.Write(400L); // CreditsPosted (lsb)
+                writer.Write(410L); // CreditsPosted (msb)
+                writer.Write(1000L); // UserData128 (lsb)
                 writer.Write(1100L); // UserData128 (msb)
-				writer.Write(2000L); // UserData64
-				writer.Write(3000); // UserData32
-				writer.Write(0); // Reserved
+                writer.Write(2000L); // UserData64
+                writer.Write(3000); // UserData32
+                writer.Write(0); // Reserved
                 writer.Write(720); // Ledger
                 writer.Write((short)1); // Code
                 writer.Write((short)1); // Flags
@@ -103,11 +103,11 @@ namespace TigerBeetle.Tests
             var account = new Account
             {
                 Id = new UInt128(11L, 10L),
-				DebitsPending = new UInt128(110L,100L),
-				DebitsPosted = new UInt128(210L, 200L),
-				CreditsPending = new UInt128(310L,300L),
-				CreditsPosted = new UInt128(410L, 400L),
-				UserData128 = new UInt128(1100L, 1000L),
+                DebitsPending = new UInt128(110L, 100L),
+                DebitsPosted = new UInt128(210L, 200L),
+                CreditsPending = new UInt128(310L, 300L),
+                CreditsPosted = new UInt128(410L, 400L),
+                UserData128 = new UInt128(1100L, 1000L),
                 UserData64 = 2000L,
                 UserData32 = 3000,
                 Ledger = 720,
@@ -146,22 +146,22 @@ namespace TigerBeetle.Tests
             transfer.CreditAccountId = 102;
             Assert.AreEqual(transfer.CreditAccountId, (UInt128)102);
 
-			transfer.Amount = 1001;
-			Assert.AreEqual(transfer.Amount, (UInt128)1001);
+            transfer.Amount = 1001;
+            Assert.AreEqual(transfer.Amount, (UInt128)1001);
 
-			transfer.PendingId = 103;
-			Assert.AreEqual(transfer.PendingId, (UInt128)103);
+            transfer.PendingId = 103;
+            Assert.AreEqual(transfer.PendingId, (UInt128)103);
 
-			transfer.UserData128 = 104;
+            transfer.UserData128 = 104;
             Assert.AreEqual(transfer.UserData128, (UInt128)104);
 
-			transfer.UserData64 = 105;
-			Assert.AreEqual(transfer.UserData64, (ulong)105);
+            transfer.UserData64 = 105;
+            Assert.AreEqual(transfer.UserData64, (ulong)105);
 
-			transfer.UserData32 = 106;
-			Assert.AreEqual(transfer.UserData32, (uint)106);
+            transfer.UserData32 = 106;
+            Assert.AreEqual(transfer.UserData32, (uint)106);
 
-			transfer.Timeout = 107;
+            transfer.Timeout = 107;
             Assert.AreEqual(transfer.Timeout, (uint)107);
 
             transfer.Ledger = 108;
@@ -185,67 +185,67 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(transfer.Id, (UInt128)0);
             Assert.AreEqual(transfer.DebitAccountId, (UInt128)0);
             Assert.AreEqual(transfer.CreditAccountId, (UInt128)0);
-			Assert.AreEqual(transfer.Amount, (UInt128)0);
-			Assert.AreEqual(transfer.PendingId, (UInt128)0);
-			Assert.AreEqual(transfer.UserData128, (UInt128)0);
-			Assert.AreEqual(transfer.UserData64, (ulong)0);
-			Assert.AreEqual(transfer.UserData32, (uint)0);
-			Assert.AreEqual(transfer.Timeout, (uint)0);
+            Assert.AreEqual(transfer.Amount, (UInt128)0);
+            Assert.AreEqual(transfer.PendingId, (UInt128)0);
+            Assert.AreEqual(transfer.UserData128, (UInt128)0);
+            Assert.AreEqual(transfer.UserData64, (ulong)0);
+            Assert.AreEqual(transfer.UserData32, (uint)0);
+            Assert.AreEqual(transfer.Timeout, (uint)0);
             Assert.AreEqual(transfer.Ledger, (uint)0);
             Assert.AreEqual(transfer.Code, (ushort)0);
             Assert.AreEqual(transfer.Flags, TransferFlags.None);
             Assert.AreEqual(transfer.Timestamp, (ulong)0);
         }
 
-		[TestMethod]
-		public void TransfersSerialize()
-		{
-			var expected = new byte[Transfer.SIZE];
-			using (var writer = new BinaryWriter(new MemoryStream(expected)))
-			{
-				writer.Write(10L); // Id (lsb)
-				writer.Write(11L); // Id (msb)
-				writer.Write(100L); // DebitAccountId (lsb)
-				writer.Write(110L); // DebitAccountId (msb)
-				writer.Write(200L); // CreditAccountId (lsb)
-				writer.Write(210L); // CreditAccountId (msb)
-				writer.Write(300L); // Amount (lsb)
-				writer.Write(310L); // Amount (msb)
-				writer.Write(400L); // PendingId (lsb)
-				writer.Write(410L); // PendingId (msb)
-				writer.Write(1000L); // UserData128 (lsb)
-				writer.Write(1100L); // UserData128 (msb)
-				writer.Write(2000L); // UserData64
-				writer.Write(3000); // UserData32
-				writer.Write(999); // Timeout
-				writer.Write(720); // Ledger
-				writer.Write((short)1); // Code
-				writer.Write((short)1); // Flags
-				writer.Write(99_999L); // Timestamp
-			}
+        [TestMethod]
+        public void TransfersSerialize()
+        {
+            var expected = new byte[Transfer.SIZE];
+            using (var writer = new BinaryWriter(new MemoryStream(expected)))
+            {
+                writer.Write(10L); // Id (lsb)
+                writer.Write(11L); // Id (msb)
+                writer.Write(100L); // DebitAccountId (lsb)
+                writer.Write(110L); // DebitAccountId (msb)
+                writer.Write(200L); // CreditAccountId (lsb)
+                writer.Write(210L); // CreditAccountId (msb)
+                writer.Write(300L); // Amount (lsb)
+                writer.Write(310L); // Amount (msb)
+                writer.Write(400L); // PendingId (lsb)
+                writer.Write(410L); // PendingId (msb)
+                writer.Write(1000L); // UserData128 (lsb)
+                writer.Write(1100L); // UserData128 (msb)
+                writer.Write(2000L); // UserData64
+                writer.Write(3000); // UserData32
+                writer.Write(999); // Timeout
+                writer.Write(720); // Ledger
+                writer.Write((short)1); // Code
+                writer.Write((short)1); // Flags
+                writer.Write(99_999L); // Timestamp
+            }
 
-			var transfer = new Transfer
-			{
-				Id = new UInt128(11L, 10L),
-				DebitAccountId = new UInt128(110L, 100L),
-				CreditAccountId = new UInt128(210L, 200L),
-				Amount = new UInt128(310L, 300L),
-				PendingId = new UInt128(410L, 400L),
-				UserData128 = new UInt128(1100L, 1000L),
-				UserData64 = 2000L,
-				UserData32 = 3000,
+            var transfer = new Transfer
+            {
+                Id = new UInt128(11L, 10L),
+                DebitAccountId = new UInt128(110L, 100L),
+                CreditAccountId = new UInt128(210L, 200L),
+                Amount = new UInt128(310L, 300L),
+                PendingId = new UInt128(410L, 400L),
+                UserData128 = new UInt128(1100L, 1000L),
+                UserData64 = 2000L,
+                UserData32 = 3000,
                 Timeout = 999,
-				Ledger = 720,
-				Code = 1,
-				Flags = TransferFlags.Linked,
-				Timestamp = 99_999,
-			};
+                Ledger = 720,
+                Code = 1,
+                Flags = TransferFlags.Linked,
+                Timestamp = 99_999,
+            };
 
-			var serialized = MemoryMarshal.AsBytes<Transfer>(new Transfer[] { transfer }).ToArray();
-			Assert.IsTrue(expected.SequenceEqual(serialized));
-		}
+            var serialized = MemoryMarshal.AsBytes<Transfer>(new Transfer[] { transfer }).ToArray();
+            Assert.IsTrue(expected.SequenceEqual(serialized));
+        }
 
-		[TestMethod]
+        [TestMethod]
         public void CreateTransfersResults()
         {
             var result = new CreateTransfersResult();

@@ -19,19 +19,19 @@ namespace TigerBeetle.Tests
             {
                 Id = 100,
                 UserData128 = 1000,
-				UserData64 = 1001,
-				UserData32 = 1002,
-				Flags = AccountFlags.None,
+                UserData64 = 1001,
+                UserData32 = 1002,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 1,
             },
             new Account
             {
                 Id = 101,
-				UserData128 = 1000,
-				UserData64 = 1001,
-				UserData32 = 1002,
-				Flags = AccountFlags.None,
+                UserData128 = 1000,
+                UserData64 = 1001,
+                UserData32 = 1002,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 2,
             }
@@ -218,8 +218,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -255,8 +255,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -292,8 +292,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -323,8 +323,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -354,9 +354,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -382,9 +382,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				PendingId = transfer.Id,
-				Ledger = 1,
+                Amount = 100,
+                PendingId = transfer.Id,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.PostPendingTransfer,
             };
@@ -421,9 +421,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -449,9 +449,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				PendingId = transfer.Id,
-				Ledger = 1,
+                Amount = 100,
+                PendingId = transfer.Id,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.PostPendingTransfer,
             };
@@ -488,9 +488,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -516,8 +516,8 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.VoidPendingTransfer,
                 PendingId = transfer.Id,
@@ -555,9 +555,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -583,9 +583,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				PendingId = transfer.Id,
-				Ledger = 1,
+                Amount = 100,
+                PendingId = transfer.Id,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.VoidPendingTransfer,
             };
@@ -622,8 +622,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Linked,
             };
@@ -633,8 +633,8 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
-				Amount = 49,
-				Ledger = 1,
+                Amount = 49,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.None,
             };
@@ -676,8 +676,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Linked,
             };
@@ -687,8 +687,8 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
-				Amount = 49,
-				Ledger = 1,
+                Amount = 49,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.None,
             };
@@ -713,6 +713,130 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfer2.Amount);
             Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
+        }
+
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void CreateAccountTooMuchData()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            const int TOO_MUCH_DATA = 10000;
+            var accounts = new Account[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                accounts[i] = new Account
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    Code = 1,
+                    Ledger = 1
+                };
+            }
+
+            try
+            {
+                _ = client.CreateAccounts(accounts);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public async Task CreateAccountTooMuchDataAsync()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            const int TOO_MUCH_DATA = 10000;
+            var accounts = new Account[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                accounts[i] = new Account
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    Code = 1,
+                    Ledger = 1
+                };
+            }
+
+            try
+            {
+                _ = await client.CreateAccountsAsync(accounts);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void CreateTransferTooMuchData()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            const int TOO_MUCH_DATA = 10000;
+            var transfers = new Transfer[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                transfers[i] = new Transfer
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    Code = 1,
+                    Ledger = 1
+                };
+            }
+
+            try
+            {
+                _ = client.CreateTransfers(transfers);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public async Task CreateTransferTooMuchDataAsync()
+        {
+            using var server = new TBServer();
+            using var client = GetClient();
+
+            const int TOO_MUCH_DATA = 10000;
+            var transfers = new Transfer[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                transfers[i] = new Transfer
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    DebitAccountId = accounts[0].Id,
+                    CreditAccountId = accounts[1].Id,
+                    Code = 1,
+                    Ledger = 1,
+                    Amount = 100,
+                };
+            }
+
+            try
+            {
+                _ = await client.CreateTransfersAsync(transfers);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
         }
 
         /// <summary>
@@ -747,8 +871,8 @@ namespace TigerBeetle.Tests
                     Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
-					Amount = 100,
-					Ledger = 1,
+                    Amount = 100,
+                    Ledger = 1,
                     Code = 1,
                 };
 
@@ -879,8 +1003,8 @@ namespace TigerBeetle.Tests
                     Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
-					Amount = 100,
-					Ledger = 1,
+                    Amount = 100,
+                    Ledger = 1,
                     Code = 1,
                 };
 
@@ -926,8 +1050,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -949,9 +1073,9 @@ namespace TigerBeetle.Tests
         {
             Assert.AreEqual(a.Id, b.Id);
             Assert.AreEqual(a.UserData128, b.UserData128);
-			Assert.AreEqual(a.UserData64, b.UserData64);
-			Assert.AreEqual(a.UserData32, b.UserData32);
-			Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.UserData64, b.UserData64);
+            Assert.AreEqual(a.UserData32, b.UserData32);
+            Assert.AreEqual(a.Flags, b.Flags);
             Assert.AreEqual(a.Code, b.Code);
             Assert.AreEqual(a.Ledger, b.Ledger);
         }
@@ -961,13 +1085,13 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(a.Id, b.Id);
             Assert.AreEqual(a.DebitAccountId, b.DebitAccountId);
             Assert.AreEqual(a.CreditAccountId, b.CreditAccountId);
-			Assert.AreEqual(a.Amount, b.Amount);
-			Assert.AreEqual(a.PendingId, b.PendingId);
-			Assert.AreEqual(a.UserData128, b.UserData128);
-			Assert.AreEqual(a.UserData64, b.UserData64);
-			Assert.AreEqual(a.UserData32, b.UserData32);
-			Assert.AreEqual(a.Timeout, b.Timeout);
-			Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.Amount, b.Amount);
+            Assert.AreEqual(a.PendingId, b.PendingId);
+            Assert.AreEqual(a.UserData128, b.UserData128);
+            Assert.AreEqual(a.UserData64, b.UserData64);
+            Assert.AreEqual(a.UserData32, b.UserData32);
+            Assert.AreEqual(a.Timeout, b.Timeout);
+            Assert.AreEqual(a.Flags, b.Flags);
             Assert.AreEqual(a.Code, b.Code);
             Assert.AreEqual(a.Ledger, b.Ledger);
         }
