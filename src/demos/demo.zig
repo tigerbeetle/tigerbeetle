@@ -67,7 +67,7 @@ pub fn request(
     defer client.deinit(allocator);
 
     const message = client.get_message();
-    defer client.unref(message);
+    errdefer client.release(message);
 
     const body = std.mem.asBytes(&batch);
     stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
