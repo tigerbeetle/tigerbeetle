@@ -21,10 +21,13 @@ url_prefix='us-central1-docker.pkg.dev/molten-verve-216720/tigerbeetle-repositor
 push_image() {
 	image=$1
 	url="$url_prefix/$image:$tag"
+	latest_url="$url_prefix/$image:antithesis-latest"
 
 	# XXX sudo
 	sudo docker tag "$image:$tag" "$url"
+	sudo docker tag "$image:$tag" "$latest_url"
 	sudo docker push              "$url"
+	sudo docker push              "$latest_url"
 }
 
 push_image api
