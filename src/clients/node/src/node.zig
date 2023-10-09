@@ -618,7 +618,7 @@ fn request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_valu
         ) catch return null;
     }
     const message = context.client.get_message();
-    defer context.client.unref(message);
+    errdefer context.client.release(message);
 
     const operation = @as(Operation, @enumFromInt(@as(u8, @intCast(operation_int))));
     const body_length = decode_events(
@@ -674,7 +674,7 @@ fn raw_request(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_
         ) catch return null;
     }
     const message = context.client.get_message();
-    defer context.client.unref(message);
+    errdefer context.client.release(message);
 
     const body_length = translate.bytes_from_buffer(
         env,
