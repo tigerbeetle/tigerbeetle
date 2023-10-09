@@ -444,8 +444,6 @@ const Benchmark = struct {
         }
 
         const b: *Benchmark = @ptrFromInt(@as(u64, @intCast(user_data)));
-
-        b.client.unref(b.message.?);
         b.message = null;
 
         const callback = b.callback.?;
