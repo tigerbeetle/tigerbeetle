@@ -1029,7 +1029,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         tree.compaction_table_immutable.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.context.level_b,
-                            snapshot_latest,
+                            &.{},
                             tree.compaction_table_immutable.context.range_b.key_min,
                             tree.compaction_table_immutable.context.range_b.key_max,
                         );
@@ -1050,14 +1050,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         context.compaction.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.context.level_b,
-                            snapshot_latest,
+                            &.{},
                             context.compaction.context.range_b.key_min,
                             context.compaction.context.range_b.key_max,
                         );
                         if (context.compaction.context.level_b > 0) {
                             tree.manifest.remove_invisible_tables(
                                 context.compaction.context.level_b - 1,
-                                snapshot_latest,
+                                &.{},
                                 context.compaction.context.range_b.key_min,
                                 context.compaction.context.range_b.key_max,
                             );
@@ -1129,7 +1129,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.assert_level_table_counts();
 
             if (constants.verify) {
-                tree.manifest.assert_no_invisible_tables(compaction_op_min(tree.compaction_op.?));
+                tree.manifest.assert_no_invisible_tables(&.{});
             }
         }
 

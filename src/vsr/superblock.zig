@@ -637,11 +637,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             errdefer allocator.free(reading);
 
-            var manifest = try Manifest.init(
-                allocator,
-                manifest_blocks_max,
-                @import("../lsm/tree.zig").table_count_max,
-            );
+            var manifest = try Manifest.init(allocator, manifest_blocks_max);
             errdefer manifest.deinit(allocator);
 
             var free_set = try FreeSet.init(allocator, block_count_limit);
