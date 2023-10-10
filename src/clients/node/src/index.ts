@@ -71,7 +71,7 @@ export type ResultCallback = (error: Error | null, results: Result[] | null) => 
 
 interface BindingInitArgs {
   cluster_id: number, // u32
-  concurrency_max: number, // u32
+  concurrency: number, // u32
   replica_addresses: Buffer,
 }
 
@@ -99,7 +99,7 @@ export function createClient (args: ClientInitArgs): Client {
   const concurrency_max_default = 32 // arbitrary
   const context = binding.init({
     cluster_id: args.cluster_id,
-    concurrency_max: args.concurrency_max || concurrency_max_default,
+    concurrency: args.concurrency_max || concurrency_max_default,
     replica_addresses: Buffer.from(args.replica_addresses.join(',')),
   })
 

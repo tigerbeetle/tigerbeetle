@@ -78,7 +78,7 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
     if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
         translate.throw(env, "Failed to get args.") catch return null;
     }
-    if (argc != 1) {
+    if (argc != 4) {
         translate.throw(env, "Function submit() requires exactly 4 arguments.") catch return null;
     }
 
@@ -116,12 +116,17 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 // tb_client Logic
 
 fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const u8) !c.napi_value {
+    var tsfn_name: c.napi_value = undefined;
+    if (c.napi_create_string_utf8(env, "tb_client", c.NAPI_AUTO_LENGTH, &tsfn_name) != c.napi_ok) {
+        return translate.throw(env, "Failed to create resource name for thread-safe function.");
+    }
+
     var on_completion_tsfn: c.napi_threadsafe_function = undefined;
     if (c.napi_create_threadsafe_function(
         env,
         null, // No javascript function to call directly from here.
         null, // No async resource.
-        null, // No async resource name.
+        tsfn_name,
         0, // Max queue size of 0 means no limit.
         1, // Number of acquires/threads that will be calling this TSFN.
         null, // No finalization data.
@@ -364,7 +369,7 @@ fn decode_array_into_data(
                     const value = try @field(translate, @typeName(FieldInt) ++ "_from_object")(
                         env,
                         object,
-                        comptime @as([:0]const u8, @ptrCast(field.name)),
+                        @ptrCast(field.name ++ "\x00"),
                     );
 
                     if (std.mem.eql(u8, field.name, "timestamp") and value != 0) {
@@ -449,7 +454,7 @@ fn encode_data_into_array(
             try @field(translate, @typeName(FieldInt) ++ "_into_object")(
                 env,
                 object,
-                comptime @as([:0]const u8, @ptrCast(field.name)),
+                @ptrCast(field.name ++ "\x00"),
                 value,
                 "Failed to set property \"" ++ field.name ++ "\" of " ++ @typeName(Result) ++ " object",
             );
