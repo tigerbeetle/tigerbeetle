@@ -19,15 +19,17 @@ if [ $# -ne 0 ] || [ -z "$CLUSTER" ] || [ -z "$REPLICA" ] || [ -z "$ADDRESSES" ]
 	exit 1
 fi
 
-if ! find . -type f -name '*.tigerbeetle' | grep -q .
-then ./tigerbeetle format \
+datafile="${CLUSTER}_${REPLICA}.antithesis.tigerbeetle"
+
+rm -f "${datafile}"
+
+./tigerbeetle format \
 	--cluster="$CLUSTER" \
 	--replica="$REPLICA" \
 	--replica-count="$REPLICA_COUNT" \
-	0_0.antithesis.tigerbeetle
-fi
+	"${datafile}"
 
 exec ./tigerbeetle start \
 	--addresses="$ADDRESSES" \
-	0_0.antithesis.tigerbeetle
+	"${datafile}"
 

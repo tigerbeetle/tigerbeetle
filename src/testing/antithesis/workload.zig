@@ -23,7 +23,9 @@ const Operation = StateMachine.Operation;
 const send_message_retry_timeout = 200; // TODO what is a reasonable value?
 const requests_max = constants.journal_slot_count * 9 / 10;
 
-pub const log_level: std.log.Level = .debug;
+pub const std_options = struct {
+    pub const log_level: std.log.Level = .info;
+};
 
 // Always use the OS's random calls directly; this allows Antithesis to fuzz them.
 // Applies to std.crypto.random
@@ -71,20 +73,22 @@ pub fn main() anyerror!void {
     var clients = try allocator.alloc(Client, api_addresses.len);
     defer allocator.free(clients);
 
-    var message_pool = try MessagePool.init(allocator, .client);
+    var pools = try allocator.alloc(MessagePool, api_addresses.len);
+    defer allocator.free(pools);
 
-    for (clients, 0..) |*client, i| {
-        _ = i;
+    for (clients, pools, 0..) |*client, *pool, i| {
+        pool.* = try MessagePool.init(allocator, .client);
         const client_id = std.crypto.random.int(u128);
-
+        const address = api_addresses[i .. i + 1];
+        std.log.info("Creating client {} pointing to {}", .{ i, address[0] });
         client.* = try Client.init(
             allocator,
             client_id,
             cluster,
-            @as(u8, @intCast(api_addresses.len)),
-            &message_pool,
+            1,
+            pool,
             .{
-                .configuration = api_addresses,
+                .configuration = address,
                 .io = &io,
             },
         );

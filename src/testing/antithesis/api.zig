@@ -22,7 +22,9 @@ const MessagePool = vsr.message_pool.MessagePool;
 
 const ticks_max = 50_000_000;
 
-pub const log_level: std.log.Level = .info;
+pub const std_options = struct {
+    pub const log_level: std.log.Level = .info;
+};
 
 pub fn main() anyerror!void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
