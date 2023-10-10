@@ -149,7 +149,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             while (self.request_queue.pop()) |inflight| {
-                self.unref(inflight.message);
+                self.release(inflight.message);
             }
             assert(self.messages_available == constants.client_request_queue_max);
             self.message_bus.deinit(allocator);
@@ -234,7 +234,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
-                .message = message.ref(),
+                .message = message,
             });
             if (self.request_queue.full()) assert(self.messages_available == 0);
 
@@ -273,7 +273,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
-                .message = message.ref(),
+                .message = message,
             });
             if (self.request_queue.full()) assert(self.messages_available == 0);
 
@@ -282,8 +282,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// Acquires a message from the message bus.
-        ///
         /// The caller must ensure that a message is available.
+        ///
+        /// Either use it in `client.request()` or discard via `client.release()`,
+        /// the reference is not guaranteed to be valid after both actions.
+        /// Do NOT use the reference counter function `message.ref()` for storing the message.
         pub fn get_message(self: *Self) *Message {
             assert(self.messages_available > 0);
             self.messages_available -= 1;
@@ -292,11 +295,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// Releases a message back to the message bus.
-        pub fn unref(self: *Self, message: *Message) void {
+        pub fn release(self: *Self, message: *Message) void {
             assert(self.messages_available < constants.client_request_queue_max);
-            if (message.references == 1) {
-                self.messages_available += 1;
-            }
+            self.messages_available += 1;
+
             self.message_bus.unref(message);
         }
 
@@ -388,12 +390,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Eagerly release request message, to ensure that user's callback can submit a new
             // request.
-            self.unref(inflight.message);
-            inflight.message = undefined;
+            self.release(inflight.message);
+            assert(self.messages_available > 0);
 
-            // Even though we release our reference to the message, the user might have retained
-            // another one.
-            maybe(self.messages_available == 0);
+            // Even though we release our reference to the message, we might have another one
+            // retained by the send queue in case of timeout.
+            maybe(inflight.message.references > 0);
+            inflight.message = undefined;
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -490,7 +493,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.pool.get_message();
+            const message = self.message_bus.get_message();
             defer self.message_bus.unref(message);
 
             message.header.* = header;
@@ -505,7 +508,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             if (self.request_number > 0) return;
 
             const message = self.get_message();
-            defer self.unref(message);
+            errdefer self.release(message);
 
             // We will set parent, context, view and checksums only when sending for the first time:
             message.header.* = .{
@@ -526,7 +529,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_queue.push_assume_capacity(.{
                 .user_data = 0,
                 .callback = null,
-                .message = message.ref(),
+                .message = message,
             });
 
             self.send_request_for_the_first_time(message);

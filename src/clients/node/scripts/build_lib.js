@@ -29,4 +29,4 @@ execSync(`${zig} dlltool -m i386:x86-64 -D node.exe -d ${defFile} -l ${libFile}`
 
 // Build the tigerbeetle node client.
 process.chdir(path.resolve('../../../'))
-execSync(`${zig} build node_client -Doptimize=ReleaseSafe`)
+execSync(`${zig} build node_client -Doptimize=ReleaseSafe -Dconfig=production`)

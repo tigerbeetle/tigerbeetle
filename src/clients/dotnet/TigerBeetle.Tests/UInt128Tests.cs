@@ -23,11 +23,11 @@ namespace TigerBeetle.Tests
         public void GuidMaxConvertion()
         {
             Guid guid = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
-			UInt128 value = guid.ToUInt128();
+            UInt128 value = guid.ToUInt128();
 
-			Assert.AreEqual(value, guid.ToUInt128());
-			Assert.AreEqual(guid, value.ToGuid());
-		}
+            Assert.AreEqual(value, guid.ToUInt128());
+            Assert.AreEqual(guid, value.ToGuid());
+        }
 
         [TestMethod]
         public void ArrayConvertion()
@@ -53,16 +53,16 @@ namespace TigerBeetle.Tests
         public void EmptyArrayConvertion()
         {
             byte[] array = new byte[0];
-			_ = array.ToUInt128();
-		}
+            _ = array.ToUInt128();
+        }
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentException))]
         public void InvalidArrayConvertion()
         {
             byte[] array = new byte[17];
-			_ = array.ToUInt128();
-		}
+            _ = array.ToUInt128();
+        }
 
 
         [TestMethod]
@@ -100,7 +100,7 @@ namespace TigerBeetle.Tests
             Assert.IsTrue(expected.SequenceEqual(BigInteger.Parse("123456", NumberStyles.HexNumber).ToUInt128().ToArray()));
             Assert.IsTrue(expected.SequenceEqual(new Guid(expected).ToUInt128().ToArray()));
             Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
-        }        
+        }
 
 #if !NET7_0_OR_GREATER
 
