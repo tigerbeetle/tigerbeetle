@@ -54,7 +54,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
         argv[0],
         "replica_addresses",
     ) catch return null;
-    
+
     return create(env, cluster, concurrency, addresses) catch null;
 }
 
@@ -141,8 +141,8 @@ fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const
 
     if (c.napi_acquire_threadsafe_function(on_completion_tsfn) != c.napi_ok) {
         return translate.throw(env, "Failed to acquire reference to thread-safe function.");
-    } 
-    
+    }
+
     const on_completion_ctx = @intFromPtr(on_completion_tsfn);
     const client = tb.init(
         allocator,
@@ -257,7 +257,7 @@ fn on_completion(
         .lookup_transfers => encode_results_into_data(u128, Transfer, results, events),
     };
 
-    // Update the packet data size with the results and stuff client in packet.next to avoid alloc. 
+    // Update the packet data size with the results and stuff client in packet.next to avoid alloc.
     assert(@intFromPtr(result_data.ptr) == @intFromPtr(events.ptr));
     packet.data_size = @intCast(result_data.len);
     @as(*usize, @ptrCast(&packet.next)).* = @intFromPtr(client);
@@ -275,7 +275,7 @@ fn on_completion_js(
     env: c.napi_env,
     unused_js_cb: c.napi_value,
     unused_context: ?*anyopaque,
-    packet_argument: ?*anyopaque, 
+    packet_argument: ?*anyopaque,
 ) callconv(.C) void {
     _ = unused_js_cb;
     _ = unused_context;
@@ -350,7 +350,7 @@ fn decode_array_into_data(
     errdefer allocator.free(data);
 
     // Parse the event objects from the array.
-    const events = std.mem.bytesAsSlice(Event, data[0..@sizeOf(Event) * array_length]);
+    const events = std.mem.bytesAsSlice(Event, data[0 .. @sizeOf(Event) * array_length]);
     for (events, 0..) |*event, i| {
         const object = try translate.array_element(env, array, @intCast(i));
         switch (Event) {
@@ -386,7 +386,7 @@ fn decode_array_into_data(
     }
 
     // Return only the memory for the Events. The total size of the bytes allocation can be inferred
-    // via `bytes[0..max(bytes.len, events.len * ResultFrom(Event))]`. 
+    // via `bytes[0..max(bytes.len, events.len * ResultFrom(Event))]`.
     return std.mem.sliceAsBytes(events);
 }
 
@@ -398,7 +398,7 @@ fn encode_results_into_data(
 ) []u8 {
     // Event data should have been allocated with enough space to also contain the Results.
     const event_count = @divExact(event_data.len, @sizeOf(Event));
-    const results = std.mem.bytesAsSlice(Result, event_data.ptr[0..@sizeOf(Result) * event_count]);
+    const results = std.mem.bytesAsSlice(Result, event_data.ptr[0 .. @sizeOf(Result) * event_count]);
 
     const packet_results = std.mem.bytesAsSlice(Result, result_bytes);
     assert(packet_results.len == results.len);
@@ -466,7 +466,3 @@ fn encode_data_into_array(
 
     return array;
 }
-
-
-
-
