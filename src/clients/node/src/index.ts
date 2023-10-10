@@ -7,7 +7,7 @@ import {
   Operation,
 } from './bindings'
 
-function getBinding (): Binding {
+const binding: Binding = (() => {
   const { arch, platform } = process
 
   const archMap = {
@@ -60,209 +60,72 @@ function getBinding (): Binding {
 
   const filename = `./bin/${archMap[arch]}-${platformMap[platform]}${extra}/client.node`
   return require(filename)
-}
+})()
 
-const binding = getBinding()
-
-interface Binding {
-  init: (args: BindingInitArgs) => Context
-  request: (context: Context, operation: Operation, batch: Event[], result: ResultCallback) => void
-  raw_request: (context: Context, operation: Operation, raw_batch: Buffer, result: ResultCallback) => void
-  tick: (context: Context) => void,
-  deinit: (context: Context) => void,
-  tick_ms: number
-}
+export type Context = object // tb_client
+export type AccountID = bigint // u128
+export type TransferID = bigint // u128
+export type Event = Account | Transfer | AccountID | TransferID
+export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer
+export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
 interface BindingInitArgs {
   cluster_id: number, // u32
+  concurrency_max: number, // u32
   replica_addresses: Buffer,
 }
 
-export interface InitArgs {
-  cluster_id: number, // u32
-  replica_addresses: Array<string | number>,
+interface Binding {
+  init: (args: BindingInitArgs) => Context
+  submit: (context: Context, operation: Operation, batch: Event[], callback: ResultCallback) => void
+  deinit: (context: Context) => void,
 }
 
-export type Context = object
-
-export type AccountID = bigint // u128
-export type TransferID = bigint // u128
-
-export type Event = Account | Transfer | AccountID | TransferID
-export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer
-// Note: as of #990, the error is always `undefined` here.
-export type ResultCallback = (error: undefined | Error, results: Result[]) => void
+export interface ClientInitArgs {
+  cluster_id: number, // u32
+  concurrency_max?: number, // u32
+  replica_addresses: Array<string | number>,
+}
 
 export interface Client {
   createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
-  request: (operation: Operation, batch: Event[], callback: ResultCallback) => void
-  rawRequest: (operation: Operation, rawBatch: Buffer, callback: ResultCallback) => void
   destroy: () => void
 }
 
-let _args: InitArgs | undefined = undefined
-const isSameArgs = (args: InitArgs): boolean => {
-  if (typeof _args === 'undefined') {
-    return false
-  }
-
-  if (_args.replica_addresses.length !== args.replica_addresses.length) {
-    return false
-  }
-
-  let isSameReplicas = true
-  args.replica_addresses.forEach((entry, index) => {
-    if (_args?.replica_addresses[index] !== entry) {
-      isSameReplicas = false
-    }
-  })
-
-  return args.cluster_id === _args.cluster_id && isSameReplicas
-}
-
-let _client: Client | undefined = undefined
-let _interval: NodeJS.Timeout | undefined = undefined
-// Here to wait until  `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
-let _pinged = false
-// TODO: allow creation of clients if the arguments are different. Will require changes in node.zig as well.
-export function createClient (args: InitArgs): Client {
-  const duplicateArgs = isSameArgs(args)
-  if (!duplicateArgs && typeof _client !== 'undefined'){
-    throw new Error('Client has already been initialized with different arguments.')
-  }
-
-  if (duplicateArgs && typeof _client !== 'undefined'){
-    throw new Error('Client has already been initialized with the same arguments.')
-  }
-
-  _args = Object.assign({}, { ...args })
+export function createClient (args: ClientInitArgs): Client {
+  const concurrency_max_default = 32 // arbitrary
   const context = binding.init({
-    ...args,
-    replica_addresses: Buffer.from(args.replica_addresses.join(','))
+    cluster_id: args.cluster_id,
+    concurrency_max: args.concurrency_max || concurrency_max_default,
+    replica_addresses: Buffer.from(args.replica_addresses.join(',')),
   })
 
-  const request = (operation: Operation, batch: Event[], callback: ResultCallback) => {
-    binding.request(context, operation, batch, callback)
-  }
-
-  const rawRequest = (operation: Operation, rawBatch: Buffer, callback: ResultCallback) => {
-    binding.raw_request(context, operation, rawBatch, callback)
-  }
-
-  const createAccounts = async (batch: Account[]): Promise<CreateAccountsError[]> => {
-    // Here to wait until `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
-    if (!_pinged) {
-      await new Promise<void>(resolve => {
-        setTimeout(() => {
-          _pinged = true
-          resolve()
-        }, 600)
-      })
-    }
+  const request = <T extends Result>(operation: Operation, batch: Event[]): Promise<T[]> => {
     return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateAccountsError[]) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve(results)
-      }
-
       try {
-        binding.request(context, Operation.create_accounts, batch, callback)
-      } catch (error) {
-        reject(error)
+        binding.submit(context, operation, batch, (error, result) => {
+          if (error) {
+            reject(error)
+          } else if (result) {
+            resolve(result as T[])
+          } else {
+            throw new Error("UB: Binding invoked callback without error or result")
+          }
+        })
+      } catch (err) {
+        reject(err)
       }
     })
   }
 
-  const createTransfers = async (batch: Transfer[]): Promise<CreateTransfersError[]> => {
-    // Here to wait until `ping` is sent to server so that connection is registered - temporary till client table and sessions are implemented.
-    if (!_pinged) {
-      await new Promise<void>(resolve => {
-        setTimeout(() => {
-          _pinged = true
-          resolve()
-        }, 600)
-      })
-    }
-    return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: CreateTransfersError[]) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve(results)
-      }
-
-      try {
-        binding.request(context, Operation.create_transfers, batch, callback)
-      } catch (error) {
-        reject(error)
-      }
-    })
+  return {
+    createAccounts(batch) { return request(Operation.create_accounts, batch) },
+    createTransfers(batch) { return request(Operation.create_transfers, batch) },
+    lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
+    lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
+    destroy() { binding.deinit(context) },
   }
-
-  const lookupAccounts = async (batch: AccountID[]): Promise<Account[]> => {
-    return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: Account[]) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve(results)
-      }
-
-      try {
-        binding.request(context, Operation.lookup_accounts, batch, callback)
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  const lookupTransfers = async (batch: TransferID[]): Promise<Transfer[]> => {
-    return new Promise((resolve, reject) => {
-      const callback = (error: undefined | Error, results: Transfer[]) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolve(results)
-      }
-
-      try {
-        binding.request(context, Operation.lookup_transfers, batch, callback)
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  const destroy = (): void => {
-    binding.deinit(context)
-    if (_interval){
-      clearInterval(_interval)
-    }
-    _client = undefined
-  }
-
-  _client = {
-    createAccounts,
-    createTransfers,
-    lookupAccounts,
-    lookupTransfers,
-    request,
-    rawRequest,
-    destroy
-  }
-
-  _interval = setInterval(() => {
-    binding.tick(context)
-  }, binding.tick_ms)
-
-  return _client
 }
