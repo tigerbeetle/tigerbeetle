@@ -84,7 +84,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
-                .message = message.ref(),
+                .message = message,
             });
         }
 
@@ -94,10 +94,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             return self.message_pool.get_message();
         }
 
-        pub fn unref(self: *Self, message: *Message) void {
-            if (message.references == 1) {
-                self.messages_available += 1;
-            }
+        pub fn release(self: *Self, message: *Message) void {
+            assert(self.messages_available < constants.client_request_queue_max);
+            self.messages_available += 1;
             self.message_pool.unref(message);
         }
 
@@ -109,7 +108,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 stdx.copy_disjoint(.exact, u8, reply_message.buffer, inflight.message.buffer);
                 // Similarly to the real client, release the request message before invoking the
                 // callback. This necessitates a `copy_disjoint` above.
-                self.unref(inflight.message);
+                self.release(inflight.message);
 
                 inflight.callback.?(
                     inflight.user_data,

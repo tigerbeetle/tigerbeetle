@@ -242,9 +242,6 @@ pub fn ContextType(
         pub fn request(self: *Context, packet: *Packet) void {
             assert(self.client.messages_available > 0);
 
-            const message = self.client.get_message();
-            defer self.client.unref(message);
-
             // Get the size of each request structure in the packet.data:
             const event_size: usize = operation_event_size(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
@@ -257,12 +254,15 @@ pub fn ContextType(
             }
 
             // Make sure the packet.data wouldn't overflow a message:
-            const writable = message.buffer[@sizeOf(Header)..][0..constants.message_body_size_max];
-            if (readable.len > writable.len) {
+            if (readable.len > constants.message_body_size_max) {
                 return self.on_complete(packet, error.TooMuchData);
             }
 
+            const message = self.client.get_message();
+            errdefer self.client.release(message);
+
             // Write the packet data to the message:
+            const writable = message.buffer[@sizeOf(Header)..][0..constants.message_body_size_max];
             stdx.copy_disjoint(.inexact, u8, writable, readable);
             const wrote = readable.len;
 

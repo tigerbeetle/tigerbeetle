@@ -471,7 +471,7 @@ git clone https://github.com/tigerbeetle/tigerbeetle
 cd tigerbeetle
 git submodule update --init --recursive
 ./scripts/install_zig.sh
-./zig/zig build go_client -Doptimize=ReleaseSafe
+./zig/zig build go_client -Doptimize=ReleaseSafe -Dconfig=production
 cd src/clients/go
 if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
 ```
@@ -485,7 +485,7 @@ git clone https://github.com/tigerbeetle/tigerbeetle
 cd tigerbeetle
 git submodule update --init --recursive
 .\scripts\install_zig.bat
-.\zig\zig build go_client -Doptimize=ReleaseSafe
+.\zig\zig build go_client -Doptimize=ReleaseSafe -Dconfig=production
 cd src\clients\go
 if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
 ```

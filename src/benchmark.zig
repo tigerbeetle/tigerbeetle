@@ -177,7 +177,6 @@ pub fn main() !void {
         .transfers_sent = 0,
         .transfer_index = 0,
         .transfer_next_arrival_ns = 0,
-        .message = null,
         .callback = null,
         .done = false,
         .statsd = if (statsd_opt) |*statsd| statsd else null,
@@ -215,7 +214,6 @@ const Benchmark = struct {
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
-    message: ?*MessagePool.Message,
     callback: ?*const fn (*Benchmark) void,
     done: bool,
     statsd: ?*StatsD,
@@ -398,12 +396,14 @@ const Benchmark = struct {
         payload: []u8,
     ) void {
         b.callback = callback;
-        b.message = b.client.get_message();
+
+        const message = b.client.get_message();
+        errdefer b.client.release(message);
 
         stdx.copy_disjoint(
             .inexact,
             u8,
-            b.message.?.buffer[@sizeOf(vsr.Header)..],
+            message.buffer[@sizeOf(vsr.Header)..],
             payload,
         );
 
@@ -411,7 +411,7 @@ const Benchmark = struct {
             @intCast(@intFromPtr(b)),
             send_complete,
             operation,
-            b.message.?,
+            message,
             payload.len,
         );
     }
@@ -444,9 +444,6 @@ const Benchmark = struct {
         }
 
         const b: *Benchmark = @ptrFromInt(@as(u64, @intCast(user_data)));
-
-        b.client.unref(b.message.?);
-        b.message = null;
 
         const callback = b.callback.?;
         b.callback = null;
