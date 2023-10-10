@@ -685,7 +685,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             }
 
-            var message = repl.client.get_message();
+            const message = repl.client.get_message();
             errdefer repl.client.release(message);
 
             stdx.copy_disjoint(

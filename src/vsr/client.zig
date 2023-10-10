@@ -282,8 +282,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// Acquires a message from the message bus.
-        ///
         /// The caller must ensure that a message is available.
+        ///
+        /// Either use it in `client.request()` or discard via `client.release()`,
+        /// the reference is not guaranteed to be valid after both actions.
+        /// Do NOT use the reference counter function `message.ref()` for storing the message.
         pub fn get_message(self: *Self) *Message {
             assert(self.messages_available > 0);
             self.messages_available -= 1;
@@ -390,9 +393,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.release(inflight.message);
             assert(self.messages_available > 0);
 
-            // Even though we release our reference to the message, we might have retained
-            // another one.
-            maybe(inflight.message.references == 0);
+            // Even though we release our reference to the message, we might have another one
+            // retained by the send queue in case of timeout.
+            maybe(inflight.message.references > 0);
             inflight.message = undefined;
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
