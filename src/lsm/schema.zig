@@ -541,6 +541,8 @@ pub const TableData = struct {
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
         const header = header_from_block(data_block);
+        assert(BlockType.from(header.operation) == .data);
+
         const used_values: u32 = header.request;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
@@ -569,7 +571,7 @@ pub const Manifest = struct {
         assert(labels_size_max % @alignOf(Label) == 0);
 
         // Bit 7 is reserved to indicate whether the event is an insert or remove.
-        assert(constants.lsm_levels <= std.math.maxInt(u7) + 1);
+        assert(constants.lsm_levels <= std.math.maxInt(u6) + 1);
 
         assert(@sizeOf(Label) == @sizeOf(u8));
         assert(@alignOf(Label) == 1);
@@ -618,9 +620,15 @@ pub const Manifest = struct {
         }
     };
 
+    pub const Event = enum(u2) {
+        insert = 0,
+        update = 1,
+        remove = 2,
+    };
+
     pub const Label = packed struct(u8) {
-        level: u7,
-        event: enum(u1) { insert, remove },
+        level: u6,
+        event: Event,
 
         comptime {
             assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);

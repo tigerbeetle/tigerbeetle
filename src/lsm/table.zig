@@ -707,8 +707,18 @@ pub fn TableType(
 
             const index_block = storage.grid_block(index_address).?;
             const data_block_addresses = index.data_addresses_used(index_block);
-            for (data_block_addresses, 0..) |data_block_address, data_block_index| {
+            const data_block_checksums = index.data_checksums_used(index_block);
+
+            for (
+                data_block_addresses,
+                data_block_checksums,
+                0..,
+            ) |data_block_address, data_block_checksum, data_block_index| {
                 const data_block = storage.grid_block(data_block_address).?;
+                const data_block_header = schema.header_from_block(data_block);
+                assert(data_block_header.op == data_block_address);
+                assert(data_block_header.checksum == data_block_checksum);
+
                 const values = data_block_values_used(data_block);
                 if (values.len > 0) {
                     if (data_block_index == 0) {
