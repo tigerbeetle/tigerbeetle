@@ -706,7 +706,7 @@ pub const Simulator = struct {
 
         // Make sure that there is capacity in the client's request queue.
         if (client.messages_available == 0) return;
-        var request_message = client.get_message();
+        const request_message = client.get_message();
         errdefer client.release(request_message);
 
         const request_metadata = simulator.workload.build_request(
