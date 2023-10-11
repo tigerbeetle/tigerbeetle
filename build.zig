@@ -510,6 +510,11 @@ pub fn build(b: *std.Build) !void {
             .description = "Fuzz EWAH codec. Args: [--seed <seed>]",
         },
         .{
+            .name = "fuzz_lsm_cache_map",
+            .file = "src/lsm/cache_map_fuzz.zig",
+            .description = "Fuzz the LSM cache map. Args: [--seed <seed>] [--events-max <count>]",
+        },
+        .{
             .name = "fuzz_lsm_forest",
             .file = "src/lsm/forest_fuzz.zig",
             .description = "Fuzz the LSM forest. Args: [--seed <seed>] [--events-max <count>]",

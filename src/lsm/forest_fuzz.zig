@@ -284,7 +284,7 @@ const Environment = struct {
     }
 
     fn put_account(env: *Environment, a: *const Account) void {
-        env.forest.grooves.accounts.put(a);
+        env.forest.grooves.accounts.upsert(a);
     }
 
     fn get_account(env: *Environment, id: u128) ?Account {
@@ -362,7 +362,7 @@ const Environment = struct {
 
         for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
             assert(env.state == .fuzzing);
-            log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op });
+            log.debug("Running fuzz_ops[{}/{}] == {}", .{ fuzz_op_index, fuzz_ops.len, fuzz_op.action });
 
             const storage_size_used = env.storage.size_used();
             log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
@@ -430,6 +430,19 @@ const Environment = struct {
                             ));
                         } else {
                             std.debug.panic("Account checkpointed but not in lsm after crash.\n {}\n", .{checkpointed_account});
+                        }
+
+                        // There are strict limits around how many values can be prefetched by one
+                        // commit, see `map_value_count_max` in groove.zig. Thus, we need to make
+                        // sure we manually call groove.objects_cache.compact() every
+                        // `map_value_count_max` operations here. This is specific to this fuzzing
+                        // code.
+                        const groove_map_value_count_max =
+                            env.forest.grooves.accounts.objects_cache.options.map_value_count_max;
+
+                        if (log_index % groove_map_value_count_max == 0) {
+                            env.forest.grooves.accounts_immutable.objects_cache.compact();
+                            env.forest.grooves.accounts_mutable.objects_cache.compact();
                         }
                     }
                 }
