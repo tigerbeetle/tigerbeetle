@@ -185,11 +185,13 @@ pub const TableIndex = struct {
         const data_addresses_size = parameters.data_block_count_max * address_size;
 
         const padding_offset = data_addresses_offset + data_addresses_size;
+        assert(padding_offset <= constants.block_size);
         const padding_size = constants.block_size - padding_offset;
 
         // `keys_size * 2` for counting both key_min and key_max:
         const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
             (keys_size * 2) + filter_addresses_size + data_addresses_size;
+        assert(size <= constants.block_size);
 
         return .{
             .key_size = parameters.key_size,
