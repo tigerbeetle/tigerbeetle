@@ -36,7 +36,7 @@ rm -f aof-test.tigerbeetle
 rm -f aof-test.tigerbeetle.aof
 
 ./tigerbeetle-aof format --cluster=0 --replica=0 --replica-count=1 aof-test.tigerbeetle > aof.log 2>&1
-./tigerbeetle-aof start --addresses=3001 aof-test.tigerbeetle >> aof.log 2>&1 &
+./tigerbeetle-aof start --cache-grid=256MB --addresses=3001 aof-test.tigerbeetle >> aof.log 2>&1 &
 
 # Wait for replicas to start, listen and connect:
 sleep 1
@@ -58,12 +58,12 @@ rm -rf 1 2
 
 mkdir 1 && cd 1
 ../tigerbeetle-aof-recovery format --cluster=0 --replica=0 --replica-count=2 aof-test.tigerbeetle >> aof.log 2>&1
-../tigerbeetle-aof-recovery start --addresses=3001,3002 aof-test.tigerbeetle >> aof.log 2>&1 &
+../tigerbeetle-aof-recovery start --cache-grid=256MB --addresses=3001,3002 aof-test.tigerbeetle >> aof.log 2>&1 &
 cd ..
 
 mkdir 2 && cd 2
 ../tigerbeetle-aof-recovery format --cluster=0 --replica=1 --replica-count=2 aof-test.tigerbeetle >> aof.log 2>&1
-../tigerbeetle-aof-recovery start --addresses=3001,3002 aof-test.tigerbeetle >> aof.log 2>&1 &
+../tigerbeetle-aof-recovery start --cache-grid=256MB --addresses=3001,3002 aof-test.tigerbeetle >> aof.log 2>&1 &
 cd ..
 
 # mkdir 3 && cd 3

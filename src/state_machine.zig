@@ -10,6 +10,7 @@ const stdx = @import("./stdx.zig");
 const global_constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
+const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
 
 const Account = tb.Account;
@@ -580,6 +581,34 @@ pub fn StateMachineType(
             callback(self);
         }
 
+        fn scope_open(self: *StateMachine, operation: Operation) void {
+            switch (operation) {
+                .create_accounts => {
+                    self.forest.grooves.accounts.scope_open();
+                },
+                .create_transfers => {
+                    self.forest.grooves.accounts.scope_open();
+                    self.forest.grooves.transfers.scope_open();
+                    self.forest.grooves.posted.scope_open();
+                },
+                else => unreachable,
+            }
+        }
+
+        fn scope_close(self: *StateMachine, operation: Operation, mode: ScopeCloseMode) void {
+            switch (operation) {
+                .create_accounts => {
+                    self.forest.grooves.accounts.scope_close(mode);
+                },
+                .create_transfers => {
+                    self.forest.grooves.accounts.scope_close(mode);
+                    self.forest.grooves.transfers.scope_close(mode);
+                    self.forest.grooves.posted.scope_close(mode);
+                },
+                else => unreachable,
+            }
+        }
+
         fn execute(
             self: *StateMachine,
             comptime operation: Operation,
@@ -604,6 +633,7 @@ pub fn StateMachineType(
                         if (chain == null) {
                             chain = index;
                             assert(chain_broken == false);
+                            self.scope_open(operation);
                         }
 
                         if (index == events.len - 1) break :blk .linked_event_chain_open;
@@ -632,8 +662,9 @@ pub fn StateMachineType(
                     if (chain) |chain_start_index| {
                         if (!chain_broken) {
                             chain_broken = true;
-                            // Rollback events in LIFO order, excluding this event that broke the chain:
-                            self.rollback(operation, input, chain_start_index, index);
+                            // Our chain has just been broken, discard the scope we started above.
+                            self.scope_close(operation, .discard);
+
                             // Add errors for rolled back events in FIFO order:
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
@@ -651,6 +682,11 @@ pub fn StateMachineType(
                     count += 1;
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
+                    if (!chain_broken) {
+                        // We've finished this linked chain, and all events have applied successfully.
+                        self.scope_close(operation, .persist);
+                    }
+
                     chain = null;
                     chain_broken = false;
                 }
@@ -659,44 +695,6 @@ pub fn StateMachineType(
             assert(chain_broken == false);
 
             return @sizeOf(Result(operation)) * count;
-        }
-
-        fn rollback(
-            self: *StateMachine,
-            comptime operation: Operation,
-            input: []const u8,
-            chain_start_index: usize,
-            chain_error_index: usize,
-        ) void {
-            const events = mem.bytesAsSlice(Event(operation), input);
-
-            // We commit events in FIFO order.
-            // We must therefore rollback events in LIFO order with a reverse loop.
-            // We do not rollback `self.commit_timestamp` to ensure that subsequent events are
-            // timestamped correctly.
-            var index = chain_error_index;
-            while (index > chain_start_index) {
-                index -= 1;
-
-                assert(index >= chain_start_index);
-                assert(index < chain_error_index);
-                const event = events[index];
-                assert(event.timestamp <= self.commit_timestamp);
-
-                switch (operation) {
-                    .create_accounts => self.create_account_rollback(&event),
-                    .create_transfers => self.create_transfer_rollback(&event),
-                    else => unreachable,
-                }
-                log.debug("{?}: {s} {}/{}: rollback(): {}", .{
-                    self.forest.grid.superblock.replica_index,
-                    @tagName(operation),
-                    index + 1,
-                    events.len,
-                    event,
-                });
-            }
-            assert(index == chain_start_index);
         }
 
         // Accounts that do not fit in the response are omitted.
@@ -761,13 +759,9 @@ pub fn StateMachineType(
                 return create_account_exists(a, e);
             }
 
-            self.forest.grooves.accounts.put_no_clobber(a);
+            self.forest.grooves.accounts.insert(a);
             self.commit_timestamp = a.timestamp;
             return .ok;
-        }
-
-        fn create_account_rollback(self: *StateMachine, a: *const Account) void {
-            self.forest.grooves.accounts.remove(a.id);
         }
 
         fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResult {
@@ -871,7 +865,7 @@ pub fn StateMachineType(
 
             var t2 = t.*;
             t2.amount = amount;
-            self.forest.grooves.transfers.put_no_clobber(&t2);
+            self.forest.grooves.transfers.insert(&t2);
 
             var dr_account_new = dr_account.*;
             var cr_account_new = cr_account.*;
@@ -882,34 +876,11 @@ pub fn StateMachineType(
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
-            self.forest.grooves.accounts.put(&dr_account_new);
-            self.forest.grooves.accounts.put(&cr_account_new);
+            self.forest.grooves.accounts.upsert(&dr_account_new);
+            self.forest.grooves.accounts.upsert(&cr_account_new);
 
             self.commit_timestamp = t.timestamp;
             return .ok;
-        }
-
-        fn create_transfer_rollback(self: *StateMachine, t: *const Transfer) void {
-            if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer_rollback(t);
-            }
-
-            var dr_account = self.forest.grooves.accounts.get(t.debit_account_id).?.*;
-            var cr_account = self.forest.grooves.accounts.get(t.credit_account_id).?.*;
-            assert(dr_account.id == t.debit_account_id);
-            assert(cr_account.id == t.credit_account_id);
-
-            if (t.flags.pending) {
-                dr_account.debits_pending -= t.amount;
-                cr_account.credits_pending -= t.amount;
-            } else {
-                dr_account.debits_posted -= t.amount;
-                cr_account.credits_posted -= t.amount;
-            }
-            self.forest.grooves.accounts.put(&dr_account);
-            self.forest.grooves.accounts.put(&cr_account);
-
-            self.forest.grooves.transfers.remove(t.id);
         }
 
         fn create_transfer_exists(t: *const Transfer, e: *const Transfer) CreateTransferResult {
@@ -997,7 +968,7 @@ pub fn StateMachineType(
                 if (t.timestamp >= p.timestamp + timeout_ns) return .pending_transfer_expired;
             }
 
-            self.forest.grooves.transfers.put_no_clobber(&Transfer{
+            self.forest.grooves.transfers.insert(&Transfer{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
@@ -1013,7 +984,7 @@ pub fn StateMachineType(
                 .amount = amount,
             });
 
-            self.forest.grooves.posted.put_no_clobber(&PostedGrooveValue{
+            self.forest.grooves.posted.insert(&PostedGrooveValue{
                 .timestamp = p.timestamp,
                 .fulfillment = fulfillment: {
                     if (t.flags.post_pending_transfer) break :fulfillment .posted;
@@ -1035,43 +1006,11 @@ pub fn StateMachineType(
                 cr_account_new.credits_posted += amount;
             }
 
-            self.forest.grooves.accounts.put(&dr_account_new);
-            self.forest.grooves.accounts.put(&cr_account_new);
+            self.forest.grooves.accounts.upsert(&dr_account_new);
+            self.forest.grooves.accounts.upsert(&cr_account_new);
 
             self.commit_timestamp = t.timestamp;
             return .ok;
-        }
-
-        fn post_or_void_pending_transfer_rollback(self: *StateMachine, t: *const Transfer) void {
-            assert(t.id > 0);
-            assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
-
-            assert(t.pending_id > 0);
-            const p = self.get_transfer(t.pending_id).?;
-            assert(p.id == t.pending_id);
-            assert(p.debit_account_id > 0);
-            assert(p.credit_account_id > 0);
-
-            var dr_account = self.forest.grooves.accounts.get(p.debit_account_id).?.*;
-            var cr_account = self.forest.grooves.accounts.get(p.credit_account_id).?.*;
-            assert(dr_account.id == p.debit_account_id);
-            assert(cr_account.id == p.credit_account_id);
-
-            if (t.flags.post_pending_transfer) {
-                const amount = if (t.amount > 0) t.amount else p.amount;
-                assert(amount > 0);
-                assert(amount <= p.amount);
-                dr_account.debits_posted -= amount;
-                cr_account.credits_posted -= amount;
-            }
-            dr_account.debits_pending += p.amount;
-            cr_account.credits_pending += p.amount;
-
-            self.forest.grooves.accounts.put(&dr_account);
-            self.forest.grooves.accounts.put(&cr_account);
-
-            self.forest.grooves.posted.remove(p.timestamp);
-            self.forest.grooves.transfers.remove(t.id);
         }
 
         fn post_or_void_pending_transfer_exists(
@@ -1164,12 +1103,9 @@ pub fn StateMachineType(
                         // AccountImmutables for every transfer.
                         2 * batch_transfers_max,
                     ),
-                    .tree_options_object = .{
-                        .cache_entries_max = options.cache_entries_accounts,
-                    },
-                    .tree_options_id = .{
-                        .cache_entries_max = options.cache_entries_accounts,
-                    },
+                    .cache_entries_max = options.cache_entries_accounts,
+                    .tree_options_object = .{},
+                    .tree_options_id = .{},
                     .tree_options_index = .{
                         .user_data_128 = .{},
                         .user_data_64 = .{},
@@ -1185,12 +1121,9 @@ pub fn StateMachineType(
                 .transfers = .{
                     // *2 to fetch pending and post/void transfer.
                     .prefetch_entries_max = 2 * batch_transfers_max,
-                    .tree_options_object = .{
-                        .cache_entries_max = options.cache_entries_transfers,
-                    },
-                    .tree_options_id = .{
-                        .cache_entries_max = options.cache_entries_transfers,
-                    },
+                    .cache_entries_max = options.cache_entries_transfers,
+                    .tree_options_object = .{},
+                    .tree_options_id = .{},
                     .tree_options_index = .{
                         .debit_account_id = .{},
                         .credit_account_id = .{},
@@ -1206,9 +1139,8 @@ pub fn StateMachineType(
                 },
                 .posted = .{
                     .prefetch_entries_max = batch_transfers_max,
-                    .tree_options_object = .{
-                        .cache_entries_max = options.cache_entries_posted,
-                    },
+                    .cache_entries_max = options.cache_entries_posted,
+                    .tree_options_object = .{},
                     .tree_options_id = {},
                     .tree_options_index = .{},
                 },
@@ -1471,7 +1403,7 @@ fn check(test_table: []const u8) !void {
                 account.debits_posted = b.debits_posted;
                 account.credits_pending = b.credits_pending;
                 account.credits_posted = b.credits_posted;
-                context.state_machine.forest.grooves.accounts.put(&account);
+                context.state_machine.forest.grooves.accounts.upsert(&account);
             },
 
             .tick => |ticks| {
@@ -1801,7 +1733,7 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T1 A1 A3   -0   _ U1 U1 U1    _ L1 C2   _   _   _   _   _   _  _ _ exists_with_different_flags
         \\ transfer   T1 A3 A1   -0   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _  _ _ exists_with_different_debit_account_id
         \\ transfer   T1 A1 A4   -0   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _  _ _ exists_with_different_credit_account_id
-        \\ transfer   T1 A1 A3   -0   _ U1 U1 U1    1 L1 C1   _ PEN   _   _   _   _  _ _ exists_with_different_amount        
+        \\ transfer   T1 A1 A3   -0   _ U1 U1 U1    1 L1 C1   _ PEN   _   _   _   _  _ _ exists_with_different_amount
         \\ transfer   T1 A1 A3  123   _ U1 U1 U1    1 L1 C2   _ PEN   _   _   _   _  _ _ exists_with_different_user_data_128
         \\ transfer   T1 A1 A3  123   _  _ U1 U1    1 L1 C2   _ PEN   _   _   _   _  _ _ exists_with_different_user_data_64
         \\ transfer   T1 A1 A3  123   _  _  _ U1    1 L1 C2   _ PEN   _   _   _   _  _ _ exists_with_different_user_data_32

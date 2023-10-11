@@ -69,9 +69,10 @@ pub fn StateMachineType(
                 options.lsm_forest_node_count,
                 .{
                     .things = .{
+                        .cache_entries_max = 2048,
                         .prefetch_entries_max = 1,
-                        .tree_options_object = .{ .cache_entries_max = 2048 },
-                        .tree_options_id = .{ .cache_entries_max = 2048 },
+                        .tree_options_object = .{},
+                        .tree_options_id = .{},
                         .tree_options_index = .{ .value = .{} },
                     },
                 },
@@ -166,7 +167,7 @@ pub fn StateMachineType(
                     const thing = state_machine.forest.grooves.things.get(op);
                     assert(thing == null);
 
-                    state_machine.forest.grooves.things.put(&.{
+                    state_machine.forest.grooves.things.upsert(&.{
                         .timestamp = timestamp,
                         .id = op,
                         .value = @as(u64, @truncate(vsr.checksum(input))),

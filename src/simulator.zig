@@ -143,9 +143,9 @@ pub fn main() !void {
             .testing => .{ .lsm_forest_node_count = 4096 },
             .accounting => .{
                 .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = if (random.boolean()) 0 else 2048,
-                .cache_entries_transfers = 0,
-                .cache_entries_posted = if (random.boolean()) 0 else 2048,
+                .cache_entries_accounts = 2048,
+                .cache_entries_transfers = 2048,
+                .cache_entries_posted = 2048,
             },
         },
     };
