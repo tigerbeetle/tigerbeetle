@@ -1710,11 +1710,11 @@ pub const Headers = struct {
     pub const ViewChangeArray = ViewChangeHeadersArray;
 
     fn dvc_blank(op: u64) Header {
-        return std.mem.zeroInit(Header, .{
-            .command = .reserved,
-            .op = op,
-            .checksum = 0,
-        });
+        var header: Header = undefined;
+        @memset(std.mem.asBytes(&header), 0);
+        header.command = .reserved;
+        header.op = op;
+        return header;
     }
 
     pub fn dvc_header_type(header: *const Header) enum { blank, valid } {
