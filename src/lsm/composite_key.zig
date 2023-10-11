@@ -65,3 +65,41 @@ pub fn CompositeKeyType(comptime Field: type) type {
         }
     };
 }
+
+fn composite_key_test(comptime CompositeKey: type) !void {
+    {
+        const a = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
+        const b = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 101 });
+        try std.testing.expect(a < b);
+    }
+
+    {
+        const a = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
+        const b = CompositeKey.key_from_value(&.{ .field = 2, .timestamp = 99 });
+        try std.testing.expect(a < b);
+    }
+
+    {
+        const a = CompositeKey.key_from_value(&.{
+            .field = 1,
+            .timestamp = @as(u64, 100) | CompositeKey.tombstone_bit,
+        });
+        const b = CompositeKey.key_from_value(&.{
+            .field = 1,
+            .timestamp = 100,
+        });
+        try std.testing.expect(a == b);
+    }
+
+    {
+        const key = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
+        const value = CompositeKey.tombstone_from_key(key);
+        try std.testing.expect(CompositeKey.tombstone(&value));
+        try std.testing.expect(value.timestamp == @as(u64, 100) | CompositeKey.tombstone_bit);
+    }
+}
+
+test "composite_key" {
+    try composite_key_test(CompositeKeyType(u64));
+    try composite_key_test(CompositeKeyType(u128));
+}
