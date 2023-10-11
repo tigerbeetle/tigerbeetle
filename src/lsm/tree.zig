@@ -335,7 +335,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     return .{ .possible = iterator.level - 1 };
                 };
 
-                const key_blocks = Table.index_blocks_for_key(index_block, key);
+                const key_blocks = Table.index_blocks_for_key(index_block, key) orelse continue;
+
                 // Only general purpose tables have filter blocks.
                 if (comptime Table.usage == .general) {
                     switch (tree.cached_filter_block_search(
@@ -525,7 +526,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count <= constants.lsm_levels);
                 assert(schema.TableIndex.tree_id(index_block) == context.tree.config.id);
 
-                const blocks = Table.index_blocks_for_key(index_block, context.key);
+                const blocks = Table.index_blocks_for_key(index_block, context.key) orelse {
+                    // The key is not present in this table, check the next level.
+                    context.advance_to_next_level();
+                    return;
+                };
 
                 context.data_block = .{
                     .address = blocks.data_block_address,
@@ -607,10 +612,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn advance_to_next_level(context: *LookupContext) void {
-                assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
+
+                // Data block may be null if the key is not contained in the
+                // index block's key range.
+                maybe(context.data_block == null);
 
                 context.index_block += 1;
                 if (context.index_block == context.index_block_count) {
