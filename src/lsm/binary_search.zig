@@ -12,26 +12,28 @@ pub const Config = struct {
 };
 
 // TODO The Zig self hosted compiler will implement inlining itself before passing the IR to llvm,
-// which should eliminate the current poor codegen of key_from_value/compare_keys.
+// which should eliminate the current poor codegen of key_from_value.
 
 /// Returns either the index of the value equal to `key`,
 /// or if there is no such value then the index where `key` would be inserted.
 ///
 /// In other words, return `i` such that both:
-/// * key_from_value(values[i])  >= key or i == values.len
-/// * key_value_from(values[i-1]) < key or i == 0
+/// * key <= key_from_value(values[i]) or i == values.len
+/// * key_value_from(values[i-1]) <= key or i == 0
 ///
-/// Expects `values` to be sorted by key.
 /// If `values` contains duplicated matches, then returns
 /// the first index when `Config.mode == .lower_bound`,
 /// or the last index when `Config.mode == .upper_bound`.
+/// This invariant can be expressed as:
+/// * key_value_from(values[i-1]) < key or i == 0 when Config.mode == .lower_bound.
+/// * key < key_value_from(values[i+1]) or i == values.len when Config.mode == .upper_bound.
 ///
+/// Expects `values` to be sorted by key.
 /// Doesn't perform the extra key comparison to determine if the match is exact.
 pub fn binary_search_values_upsert_index(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
     comptime config: Config,
@@ -42,10 +44,15 @@ pub fn binary_search_values_upsert_index(
     var length: usize = values.len;
     while (length > 1) {
         if (constants.verify) {
-            assert(offset == 0 or
-                compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
-            assert(offset + length == values.len or
-                compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+            assert(offset == 0 or switch (comptime config.mode) {
+                .lower_bound => key_from_value(&values[offset - 1]) < key,
+                .upper_bound => key_from_value(&values[offset - 1]) <= key,
+            });
+
+            assert(offset + length == values.len or switch (comptime config.mode) {
+                .lower_bound => key <= key_from_value(&values[offset + length]),
+                .upper_bound => key < key_from_value(&values[offset + length]),
+            });
         }
 
         const half = length / 2;
@@ -69,7 +76,7 @@ pub fn binary_search_values_upsert_index(
 
             // @sizeOf(Value) can be greater than a single cache line.
             // In that case, we need to prefetch multiple cache lines for a single value:
-            comptime stdx.maybe(constants.cache_line_size >= @sizeOf(Value));
+            comptime stdx.maybe(@sizeOf(Value) > constants.cache_line_size);
             const CacheLineBytes = [*]const [constants.cache_line_size]u8;
             const cache_lines_per_value = comptime stdx.div_ceil(
                 @sizeOf(Value),
@@ -98,8 +105,8 @@ pub fn binary_search_values_upsert_index(
             // For exact matches, takes the first half if `mode == .lower_bound`,
             // or the second half if `mode == .upper_bound`.
             @intFromBool(switch (comptime config.mode) {
-                .lower_bound => compare_keys(key_from_value(&values[mid]), key) == .lt,
-                .upper_bound => compare_keys(key_from_value(&values[mid]), key) != .gt,
+                .lower_bound => key_from_value(&values[mid]) < key,
+                .upper_bound => key_from_value(&values[mid]) <= key,
             })
         ];
 
@@ -108,25 +115,31 @@ pub fn binary_search_values_upsert_index(
 
     if (constants.verify) {
         assert(length == 1);
-        assert(offset == 0 or
-            compare_keys(key_from_value(&values[offset - 1]), key) != .gt);
-        assert(offset + length == values.len or
-            compare_keys(key_from_value(&values[offset + length]), key) != .lt);
+
+        assert(offset == 0 or switch (comptime config.mode) {
+            .lower_bound => key_from_value(&values[offset - 1]) < key,
+            .upper_bound => key_from_value(&values[offset - 1]) <= key,
+        });
+
+        assert(offset + length == values.len or switch (comptime config.mode) {
+            .lower_bound => key <= key_from_value(&values[offset + length]),
+            .upper_bound => key < key_from_value(&values[offset + length]),
+        });
     }
 
-    offset += @intFromBool(compare_keys(key_from_value(&values[offset]), key) == .lt);
+    offset += @intFromBool(key_from_value(&values[offset]) < key);
 
     if (constants.verify) {
         assert(offset == 0 or switch (config.mode) {
-            .lower_bound => compare_keys(key_from_value(&values[offset - 1]), key) == .lt,
-            .upper_bound => compare_keys(key_from_value(&values[offset - 1]), key) != .gt,
+            .lower_bound => key_from_value(&values[offset - 1]) < key,
+            .upper_bound => key_from_value(&values[offset - 1]) <= key,
         });
         assert(offset >= values.len - 1 or switch (config.mode) {
-            .lower_bound => compare_keys(key_from_value(&values[offset + 1]), key) != .lt,
-            .upper_bound => compare_keys(key_from_value(&values[offset + 1]), key) == .gt,
+            .lower_bound => key <= key_from_value(&values[offset + 1]),
+            .upper_bound => key < key_from_value(&values[offset + 1]),
         });
         assert(offset == values.len or
-            compare_keys(key_from_value(&values[offset]), key) != .lt);
+            key <= key_from_value(&values[offset]));
     }
 
     return @as(u32, @intCast(offset));
@@ -134,7 +147,6 @@ pub fn binary_search_values_upsert_index(
 
 pub inline fn binary_search_keys_upsert_index(
     comptime Key: type,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key: Key,
     comptime config: Config,
@@ -147,7 +159,6 @@ pub inline fn binary_search_keys_upsert_index(
                 return k.*;
             }
         }.key_from_key,
-        compare_keys,
         keys,
         key,
         config,
@@ -163,7 +174,6 @@ pub inline fn binary_search_values(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key: Key,
     comptime config: Config,
@@ -172,28 +182,26 @@ pub inline fn binary_search_values(
         Key,
         Value,
         key_from_value,
-        compare_keys,
         values,
         key,
         config,
     );
     return .{
         .index = index,
-        .exact = index < values.len and compare_keys(key_from_value(&values[index]), key) == .eq,
+        .exact = index < values.len and key_from_value(&values[index]) == key,
     };
 }
 
 pub inline fn binary_search_keys(
     comptime Key: type,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key: Key,
     comptime config: Config,
 ) BinarySearchResult {
-    const index = binary_search_keys_upsert_index(Key, compare_keys, keys, key, config);
+    const index = binary_search_keys_upsert_index(Key, keys, key, config);
     return .{
         .index = index,
-        .exact = index < keys.len and compare_keys(keys[index], key) == .eq,
+        .exact = index < keys.len and keys[index] == key,
     };
 }
 
@@ -215,18 +223,16 @@ pub inline fn binary_search_values_range_upsert_indexes(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key_min: Key,
     key_max: Key,
 ) BinarySearchRangeUpsertIndexes {
-    assert(compare_keys(key_min, key_max) != .gt);
+    assert(key_min <= key_max);
 
     const start = binary_search_values_upsert_index(
         Key,
         Value,
         key_from_value,
-        compare_keys,
         values,
         key_min,
         .{ .mode = .lower_bound },
@@ -241,7 +247,6 @@ pub inline fn binary_search_values_range_upsert_indexes(
         Key,
         Value,
         key_from_value,
-        compare_keys,
         values[start..],
         key_max,
         .{ .mode = .upper_bound },
@@ -255,7 +260,6 @@ pub inline fn binary_search_values_range_upsert_indexes(
 
 pub inline fn binary_search_keys_range_upsert_indexes(
     comptime Key: type,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key_min: Key,
     key_max: Key,
@@ -268,7 +272,6 @@ pub inline fn binary_search_keys_range_upsert_indexes(
                 return k.*;
             }
         }.key_from_key,
-        compare_keys,
         keys,
         key_min,
         key_max,
@@ -290,7 +293,6 @@ pub inline fn binary_search_values_range(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     values: []const Value,
     key_min: Key,
     key_max: Key,
@@ -299,7 +301,6 @@ pub inline fn binary_search_values_range(
         Key,
         Value,
         key_from_value,
-        compare_keys,
         values,
         key_min,
         key_max,
@@ -312,7 +313,7 @@ pub inline fn binary_search_values_range(
 
     const inclusive = @intFromBool(
         upsert_indexes.end < values.len and
-            compare_keys(key_max, key_from_value(&values[upsert_indexes.end])) == .eq,
+            key_max == key_from_value(&values[upsert_indexes.end]),
     );
     return .{
         .start = upsert_indexes.start,
@@ -322,7 +323,6 @@ pub inline fn binary_search_values_range(
 
 pub inline fn binary_search_keys_range(
     comptime Key: type,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     keys: []const Key,
     key_min: Key,
     key_max: Key,
@@ -335,7 +335,6 @@ pub inline fn binary_search_keys_range(
                 return k.*;
             }
         }.key_from_key,
-        compare_keys,
         keys,
         key_min,
         key_max,
@@ -348,10 +347,6 @@ const test_binary_search = struct {
     const log = false;
 
     const gpa = std.testing.allocator;
-
-    inline fn compare_keys(a: u32, b: u32) math.Order {
-        return math.order(a, b);
-    }
 
     fn less_than_key(_: void, a: u32, b: u32) bool {
         return a < b;
@@ -367,7 +362,7 @@ const test_binary_search = struct {
         while (target_key < keys_count + 13) : (target_key += 1) {
             var expect: BinarySearchResult = .{ .index = 0, .exact = false };
             for (keys, 0..) |key, i| {
-                switch (compare_keys(key, target_key)) {
+                switch (std.math.order(key, target_key)) {
                     .lt => expect.index = @as(u32, @intCast(i)) + 1,
                     .eq => {
                         expect.index = @as(u32, @intCast(i));
@@ -387,7 +382,6 @@ const test_binary_search = struct {
 
             const actual = binary_search_keys(
                 u32,
-                compare_keys,
                 keys,
                 target_key,
                 .{ .mode = mode },
@@ -417,7 +411,6 @@ const test_binary_search = struct {
             const expect = expected_results[i];
             const actual = binary_search_keys(
                 u32,
-                compare_keys,
                 keys,
                 target_key,
                 .{ .mode = mode },
@@ -448,7 +441,7 @@ const test_binary_search = struct {
 
         var expect: BinarySearchResult = .{ .index = 0, .exact = false };
         for (keys, 0..) |key, i| {
-            switch (compare_keys(key, target_key)) {
+            switch (std.math.order(key, target_key)) {
                 .lt => expect.index = @as(u32, @intCast(i)) + 1,
                 .eq => {
                     expect.index = @as(u32, @intCast(i));
@@ -461,7 +454,6 @@ const test_binary_search = struct {
 
         const actual = binary_search_keys(
             u32,
-            compare_keys,
             keys,
             target_key,
             .{ .mode = mode },
@@ -480,7 +472,6 @@ const test_binary_search = struct {
     ) !void {
         const actual = binary_search_keys_range(
             u32,
-            compare_keys,
             sequence,
             key_min,
             key_max,
@@ -513,8 +504,8 @@ const test_binary_search = struct {
             else
                 fuzz.random_int_exponential(random, u32, 100);
 
-            if (compare_keys(key_max, key_min) == .lt) std.mem.swap(u32, &key_min, &key_max);
-            assert(compare_keys(key_min, key_max) != .gt);
+            if (key_max < key_min) std.mem.swap(u32, &key_min, &key_max);
+            assert(key_min <= key_max);
 
             break :blk .{
                 .key_min = key_min,
@@ -526,7 +517,7 @@ const test_binary_search = struct {
         var key_target: enum { key_min, key_max } = .key_min;
         for (keys) |key| {
             if (key_target == .key_min) {
-                switch (compare_keys(key, target_range.key_min)) {
+                switch (std.math.order(key, target_range.key_min)) {
                     .lt => if (expect.start < keys.len - 1) {
                         expect.start += 1;
                     },
@@ -535,7 +526,7 @@ const test_binary_search = struct {
             }
 
             if (key_target == .key_max) {
-                switch (compare_keys(key, target_range.key_max)) {
+                switch (std.math.order(key, target_range.key_max)) {
                     .lt, .eq => expect.count += 1,
                     .gt => break,
                 }
@@ -544,7 +535,6 @@ const test_binary_search = struct {
 
         const actual = binary_search_keys_range(
             u32,
-            compare_keys,
             keys,
             target_range.key_min,
             target_range.key_max,
