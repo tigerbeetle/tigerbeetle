@@ -47,8 +47,6 @@ const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 pub fn TableType(
     comptime TableKey: type,
     comptime TableValue: type,
-    /// Returns the sort order between two keys.
-    comptime table_compare_keys: fn (TableKey, TableKey) callconv(.Inline) math.Order,
     /// Returns the key for a value. For example, given `object` returns `object.id`.
     /// Since most objects contain an id, this avoids duplicating the key when storing the value.
     comptime table_key_from_value: fn (*const TableValue) callconv(.Inline) TableKey,
@@ -62,13 +60,14 @@ pub fn TableType(
     comptime table_value_count_max: usize,
     comptime table_usage: TableUsage,
 ) type {
+    comptime assert(std.meta.trait.isIntegral(TableKey));
+
     return struct {
         const Table = @This();
 
         // Re-export all the generic arguments.
         pub const Key = TableKey;
         pub const Value = TableValue;
-        pub const compare_keys = table_compare_keys;
         pub const key_from_value = table_key_from_value;
         pub const sentinel_key = table_sentinel_key;
         pub const tombstone = table_tombstone;
@@ -79,7 +78,7 @@ pub fn TableType(
         // Export hashmap context for Key and Value
         pub const HashMapContextValue = struct {
             pub inline fn eql(_: HashMapContextValue, a: Value, b: Value) bool {
-                return compare_keys(key_from_value(&a), key_from_value(&b)) == .eq;
+                return key_from_value(&a) == key_from_value(&b);
             }
 
             pub inline fn hash(_: HashMapContextValue, value: Value) u64 {
@@ -414,7 +413,7 @@ pub fn TableType(
                     if (constants.verify) {
                         var a = &values[0];
                         for (values[1..]) |*b| {
-                            assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
+                            assert(key_from_value(a) < key_from_value(b));
                             a = b;
                         }
                     }
@@ -446,7 +445,7 @@ pub fn TableType(
                 const key_min = key_from_value(&values[0]);
                 const key_max = if (values.len == 1) key_min else blk: {
                     const key = key_from_value(&values[values.len - 1]);
-                    assert(compare_keys(key_min, key) == .lt);
+                    assert(key_min < key);
                     break :blk key;
                 };
 
@@ -462,16 +461,16 @@ pub fn TableType(
                 builder.key_max = key_max;
 
                 if (current == 0 and values.len == 1) {
-                    assert(compare_keys(builder.key_min, builder.key_max) == .eq);
+                    assert(builder.key_min == builder.key_max);
                 } else {
-                    assert(compare_keys(builder.key_min, builder.key_max) == .lt);
+                    assert(builder.key_min < builder.key_max);
                 }
-                assert(compare_keys(builder.key_max, sentinel_key) == .lt);
+                assert(builder.key_max < sentinel_key);
 
                 if (current > 0) {
                     const slice = index_data_keys(builder.index_block, .key_max);
                     const key_max_prev = slice[current - 1];
-                    assert(compare_keys(key_max_prev, key_min) == .lt);
+                    assert(key_max_prev < key_from_value(&values[0]));
                 }
 
                 builder.data_block_count += 1;
@@ -642,7 +641,6 @@ pub fn TableType(
             // greatest key, which again is the index of the data block that may contain the key.
             const data_block_index = binary_search.binary_search_keys_upsert_index(
                 Key,
-                compare_keys,
                 Table.index_data_keys_used(index_block, .key_max),
                 key,
                 .{},
@@ -650,7 +648,7 @@ pub fn TableType(
             assert(data_block_index < index.data_blocks_used(index_block));
 
             const key_min = Table.index_data_keys_used(index_block, .key_min)[data_block_index];
-            return if (compare_keys(key, key_min) == .lt) null else data_block_index;
+            return if (key < key_min) null else data_block_index;
         }
 
         pub const IndexBlocks = struct {
@@ -697,7 +695,6 @@ pub fn TableType(
                 Key,
                 Value,
                 key_from_value,
-                compare_keys,
                 values,
                 key,
                 .{},
@@ -705,14 +702,14 @@ pub fn TableType(
             if (result.exact) {
                 const value = &values[result.index];
                 if (constants.verify) {
-                    assert(compare_keys(key, key_from_value(value)) == .eq);
+                    assert(key == key_from_value(value));
                 }
                 return value;
             }
 
             if (constants.verify) {
                 for (values) |*value| {
-                    assert(compare_keys(key, key_from_value(value)) != .eq);
+                    assert(key != key_from_value(value));
                 }
             }
 
@@ -748,15 +745,15 @@ pub fn TableType(
                 if (values.len > 0) {
                     if (data_block_index == 0) {
                         assert(key_min == null or
-                            compare_keys(key_min.?, key_from_value(&values[0])) == .eq);
+                            key_min.? == key_from_value(&values[0]));
                     }
                     if (data_block_index == data_block_addresses.len - 1) {
                         assert(key_max == null or
-                            compare_keys(key_from_value(&values[values.len - 1]), key_max.?) == .eq);
+                            key_from_value(&values[values.len - 1]) == key_max.?);
                     }
                     var a = &values[0];
                     for (values[1..]) |*b| {
-                        assert(compare_keys(key_from_value(a), key_from_value(b)) == .lt);
+                        assert(key_from_value(a) < key_from_value(b));
                         a = b;
                     }
                 }
@@ -766,16 +763,15 @@ pub fn TableType(
 }
 
 test "Table" {
-    const Key = @import("composite_key.zig").CompositeKey(u128);
+    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u128);
 
     const Table = TableType(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
+        CompositeKey.Key,
+        CompositeKey,
+        CompositeKey.key_from_value,
+        CompositeKey.sentinel_key,
+        CompositeKey.tombstone,
+        CompositeKey.tombstone_from_key,
         1, // Doesn't matter for this test.
         .general,
     );

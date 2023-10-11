@@ -25,7 +25,7 @@ pub fn SegmentedArray(
     comptime element_count_max: u32,
     comptime options: Options,
 ) type {
-    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, {}, options);
+    return SegmentedArrayType(T, NodePool, element_count_max, null, {}, options);
 }
 
 pub fn SortedSegmentedArray(
@@ -34,10 +34,9 @@ pub fn SortedSegmentedArray(
     comptime element_count_max: u32,
     comptime Key: type,
     comptime key_from_value: fn (*const T) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime options: Options,
 ) type {
-    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, compare_keys, options);
+    return SegmentedArrayType(T, NodePool, element_count_max, Key, key_from_value, options);
 }
 
 pub const Options = struct {
@@ -46,7 +45,6 @@ pub const Options = struct {
     verify: bool = false,
 };
 
-// TODO Check whether this would be faster if compare_keys() passed `*const K` values.
 fn SegmentedArrayType(
     comptime T: type,
     comptime NodePool: type,
@@ -54,9 +52,10 @@ fn SegmentedArrayType(
     // Set when the SegmentedArray is ordered:
     comptime Key: ?type,
     comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
-    comptime compare_keys: if (Key) |K| (fn (K, K) callconv(.Inline) math.Order) else void,
     comptime options: Options,
 ) type {
+    comptime assert(Key == null or std.meta.trait.isIntegral(Key.?));
+
     return struct {
         const Self = @This();
 
@@ -195,7 +194,7 @@ fn SegmentedArrayType(
                     for (array.node_elements(@as(u32, @intCast(node_index)))) |*value| {
                         const key = key_from_value(value);
                         if (key_prior_or_null) |key_prior| {
-                            assert(compare_keys(key_prior, key) != .gt);
+                            assert(key_prior <= key);
                         }
                         key_prior_or_null = key;
                     }
@@ -727,11 +726,12 @@ fn SegmentedArrayType(
             assert(absolute_index < element_count_max);
             assert(absolute_index <= array.len());
 
-            const result = binary_search_keys(u32, struct {
-                inline fn compare(a: u32, b: u32) math.Order {
-                    return math.order(a, b);
-                }
-            }.compare, array.indexes[0..array.node_count], absolute_index, .{});
+            const result = binary_search_keys(
+                u32,
+                array.indexes[0..array.node_count],
+                absolute_index,
+                .{},
+            );
 
             if (result.exact) {
                 return .{
@@ -899,7 +899,7 @@ fn SegmentedArrayType(
                     // This trick seems to be what's needed to get llvm to emit branchless code for this,
                     // a ternary-style if expression was generated as a jump here for whatever reason.
                     const next_offsets = [_]usize{ offset, mid };
-                    offset = next_offsets[@intFromBool(compare_keys(key_from_value(node), key) == .lt)];
+                    offset = next_offsets[@intFromBool(key_from_value(node) < key)];
 
                     length -= half;
                 }
@@ -917,7 +917,6 @@ fn SegmentedArrayType(
                     K,
                     T,
                     key_from_value,
-                    compare_keys,
                     array.node_elements(node),
                     key,
                     .{},
@@ -949,7 +948,6 @@ fn TestContext(
     comptime element_count_max: u32,
     comptime Key: type,
     comptime key_from_value: fn (*const T) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime element_order: enum { sorted, unsorted },
     comptime options: Options,
 ) type {
@@ -964,7 +962,7 @@ fn TestContext(
         // Test overaligned nodes to catch compile errors for missing @alignCast()
         const TestPool = NodePool(node_size, 2 * @alignOf(T));
         const TestArray = switch (element_order) {
-            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, compare_keys, options),
+            .sorted => SortedSegmentedArray(T, TestPool, element_count_max, Key, key_from_value, options),
             .unsorted => SegmentedArray(T, TestPool, element_count_max, options),
         };
 
@@ -1206,10 +1204,8 @@ fn TestContext(
             if (element_order == .sorted) {
                 for (context.reference.items, 0..) |*expect, i| {
                     if (i == 0) continue;
-                    try testing.expect(compare_keys(
-                        key_from_value(&context.reference.items[i - 1]),
-                        key_from_value(expect),
-                    ) != .gt);
+                    try testing.expect(key_from_value(&context.reference.items[i - 1]) <=
+                        key_from_value(expect));
                 }
             }
 
@@ -1260,7 +1256,6 @@ fn TestContext(
                 Key,
                 T,
                 key_from_value,
-                compare_keys,
                 context.reference.items,
                 key,
                 .{},
@@ -1273,36 +1268,27 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
-    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);
     const TableType = @import("table.zig").TableType;
     const TableInfoType = @import("manifest.zig").TreeTableInfoType;
     const TableInfo = TableInfoType(TableType(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
+        CompositeKey.Key,
+        CompositeKey,
+        CompositeKey.key_from_value,
+        CompositeKey.sentinel_key,
+        CompositeKey.tombstone,
+        CompositeKey.tombstone_from_key,
         1, // Doesn't matter for this test.
         .general,
     ));
 
     const CompareInt = struct {
-        inline fn compare_keys(a: u32, b: u32) std.math.Order {
-            return std.math.order(a, b);
-        }
-
         inline fn key_from_value(value: *const u32) u32 {
             return value.*;
         }
     };
 
     const CompareTable = struct {
-        inline fn compare_keys(a: u64, b: u64) std.math.Order {
-            return std.math.order(a, b);
-        }
-
         inline fn key_from_value(value: *const TableInfo) u64 {
             return value.address;
         }
@@ -1341,7 +1327,6 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
                 test_options.element_count_max,
                 if (test_options.element_type == u32) u32 else u64,
                 if (test_options.element_type == u32) CompareInt.key_from_value else CompareTable.key_from_value,
-                if (test_options.element_type == u32) CompareInt.compare_keys else CompareTable.compare_keys,
                 order,
                 options,
             );

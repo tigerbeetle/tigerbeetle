@@ -141,10 +141,6 @@ pub fn GridType(comptime Storage: type) type {
                 assert(address > 0);
                 return stdx.hash_inline(address);
             }
-
-            inline fn equal_addresses(a: u64, b: u64) bool {
-                return a == b;
-            }
         };
 
         const set_associative_cache_ways = 16;
@@ -154,7 +150,6 @@ pub fn GridType(comptime Storage: type) type {
             u64,
             cache_interface.address_from_address,
             cache_interface.hash_address,
-            cache_interface.equal_addresses,
             .{
                 .ways = set_associative_cache_ways,
                 .value_alignment = @alignOf(u64),

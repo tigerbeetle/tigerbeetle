@@ -10,7 +10,7 @@ const constants = @import("../constants.zig");
 const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("../vsr/grid.zig").GridType;
-const CompositeKey = @import("composite_key.zig").CompositeKey;
+const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
@@ -25,10 +25,6 @@ fn ObjectTreeHelpers(comptime Object: type) type {
     assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
 
     return struct {
-        inline fn compare_keys(timestamp_a: u64, timestamp_b: u64) std.math.Order {
-            return std.math.order(timestamp_a, timestamp_b);
-        }
-
         inline fn key_from_value(value: *const Object) u64 {
             return value.timestamp & ~@as(u64, tombstone_bit);
         }
@@ -41,6 +37,8 @@ fn ObjectTreeHelpers(comptime Object: type) type {
         }
 
         inline fn tombstone_from_key(timestamp: u64) Object {
+            assert(timestamp & tombstone_bit == 0);
+
             var value = std.mem.zeroes(Object); // Full zero-initialized Value.
             value.timestamp = timestamp | tombstone_bit;
             return value;
@@ -57,10 +55,6 @@ const IdTreeValue = extern struct {
         // Assert that there is no implicit padding.
         assert(@sizeOf(IdTreeValue) == 32);
         assert(stdx.no_padding(IdTreeValue));
-    }
-
-    inline fn compare_keys(a: u128, b: u128) std.math.Order {
-        return std.math.order(a, b);
     }
 
     inline fn key_from_value(value: *const IdTreeValue) u128 {
@@ -125,15 +119,14 @@ fn IndexTreeType(
     comptime Field: type,
     comptime value_count_max: usize,
 ) type {
-    const Key = CompositeKey(IndexCompositeKeyType(Field));
+    const CompositeKey = CompositeKeyType(IndexCompositeKeyType(Field));
     const Table = TableType(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
+        CompositeKey.Key,
+        CompositeKey,
+        CompositeKey.key_from_value,
+        CompositeKey.sentinel_key,
+        CompositeKey.tombstone,
+        CompositeKey.tombstone_from_key,
         value_count_max,
         .secondary_index,
     );
@@ -266,7 +259,6 @@ pub fn GrooveType(
         const Table = TableType(
             u64, // key = timestamp
             Object,
-            ObjectTreeHelpers(Object).compare_keys,
             ObjectTreeHelpers(Object).key_from_value,
             ObjectTreeHelpers(Object).sentinel_key,
             ObjectTreeHelpers(Object).tombstone,
@@ -281,7 +273,6 @@ pub fn GrooveType(
         const Table = TableType(
             u128,
             IdTreeValue,
-            IdTreeValue.compare_keys,
             IdTreeValue.key_from_value,
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
@@ -358,7 +349,7 @@ pub fn GrooveType(
                 pub fn derive_value(
                     object: *const Object,
                     index: Index,
-                ) CompositeKey(IndexCompositeKeyType(Index)).Value {
+                ) CompositeKeyType(IndexCompositeKeyType(Index)) {
                     return .{
                         .timestamp = object.timestamp,
                         .field = switch (@typeInfo(Index)) {
@@ -387,10 +378,6 @@ pub fn GrooveType(
             return stdx.hash_inline(key);
         }
 
-        inline fn equal(a: PrimaryKey, b: PrimaryKey) bool {
-            return a == b;
-        }
-
         inline fn tombstone_from_key(a: PrimaryKey) Object {
             var obj: Object = undefined;
             if (has_id) {
@@ -413,7 +400,6 @@ pub fn GrooveType(
         Object,
         ObjectsCacheHelpers.key_from_value,
         ObjectsCacheHelpers.hash,
-        ObjectsCacheHelpers.equal,
         ObjectsCacheHelpers.tombstone_from_key,
         ObjectsCacheHelpers.tombstone,
     );

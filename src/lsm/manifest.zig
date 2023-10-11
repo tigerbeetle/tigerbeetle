@@ -23,7 +23,6 @@ const TableInfo = schema.Manifest.TableInfo;
 
 pub fn TreeTableInfoType(comptime Table: type) type {
     const Key = Table.Key;
-    const compare_keys = Table.compare_keys;
 
     return struct {
         const TreeTableInfo = @This();
@@ -83,16 +82,12 @@ pub fn TreeTableInfoType(comptime Table: type) type {
         }
 
         pub fn equal(table: *const TreeTableInfo, other: *const TreeTableInfo) bool {
-            // TODO Since the layout of TreeTableInfo is well defined, a direct memcmp may be faster
-            // here. However, it's not clear if we can make the assumption that compare_keys()
-            // will return .eq exactly when the memory of the keys are equal.
-            // Consider defining the API to allow this.
             return table.checksum == other.checksum and
                 table.address == other.address and
                 table.snapshot_min == other.snapshot_min and
                 table.snapshot_max == other.snapshot_max and
-                compare_keys(table.key_min, other.key_min) == .eq and
-                compare_keys(table.key_max, other.key_max) == .eq;
+                table.key_min == other.key_min and
+                table.key_max == other.key_max;
         }
 
         pub fn decode(table: *const TableInfo) TreeTableInfo {
@@ -102,7 +97,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
             const key_min = std.mem.bytesAsValue(Key, table.key_min[0..@sizeOf(Key)]);
             const key_max = std.mem.bytesAsValue(Key, table.key_max[0..@sizeOf(Key)]);
 
-            assert(compare_keys(key_min.*, key_max.*) != .gt);
+            assert(key_min.* <= key_max.*);
             assert(stdx.zeroed(table.key_min[@sizeOf(Key)..]));
             assert(stdx.zeroed(table.key_max[@sizeOf(Key)..]));
 
@@ -140,7 +135,6 @@ pub fn TreeTableInfoType(comptime Table: type) type {
 
 pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
     const Key = Table.Key;
-    const compare_keys = Table.compare_keys;
 
     return struct {
         const Manifest = @This();
@@ -151,7 +145,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         pub const KeyRange = Level.KeyRange;
         pub const ManifestLog = ManifestLogType(Storage);
         pub const Level =
-            ManifestLevelType(NodePool, Key, TreeTableInfo, compare_keys, table_count_max);
+            ManifestLevelType(NodePool, Key, TreeTableInfo, table_count_max);
 
         const Grid = GridType(Storage);
         const Callback = *const fn (*Manifest) void;
@@ -310,10 +304,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             for (&manifest.levels) |*level| {
                 if (level.key_range_latest.key_range) |level_range| {
                     if (manifest_range) |*range| {
-                        if (compare_keys(level_range.key_min, range.key_min) == .lt) {
+                        if (level_range.key_min < range.key_min) {
                             range.key_min = level_range.key_min;
                         }
-                        if (compare_keys(level_range.key_max, range.key_max) == .gt) {
+                        if (level_range.key_max > range.key_max) {
                             range.key_max = level_range.key_max;
                         }
                     } else {
@@ -333,7 +327,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         ) void {
             assert(manifest.manifest_log.?.opened);
             assert(level < constants.lsm_levels);
-            assert(compare_keys(key_min, key_max) != .gt);
+            assert(key_min <= key_max);
 
             // Remove tables in descending order to avoid desynchronizing the iterator from
             // the ManifestLevel.
@@ -353,8 +347,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const table: TreeTableInfo = table_pointer.*;
                 assert(table.snapshot_max < snapshot_latest);
                 assert(table.invisible(snapshots));
-                assert(compare_keys(key_min, table.key_max) != .gt);
-                assert(compare_keys(key_max, table.key_min) != .lt);
+                assert(key_min <= table.key_max);
+                assert(table.key_min <= key_max);
 
                 // Append remove changes to the manifest log and purge from memory (ManifestLevel):
                 manifest.manifest_log.?.remove(
@@ -399,8 +393,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
                     if (inner.next()) |table| {
                         assert(table.visible(it.snapshot));
-                        assert(compare_keys(it.key, table.key_min) != .lt);
-                        assert(compare_keys(it.key, table.key_max) != .gt);
+                        assert(table.key_min <= it.key);
+                        assert(it.key <= table.key_max);
                         assert(inner.next() == null);
 
                         it.level += 1;
@@ -448,7 +442,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             direction: Direction,
         }) ?*const TreeTableInfo {
             assert(parameters.level < constants.lsm_levels);
-            assert(compare_keys(parameters.key_min, parameters.key_max) != .gt);
+            assert(parameters.key_min <= parameters.key_max);
             return manifest.levels[parameters.level].next_table(.{
                 .snapshot = parameters.snapshot,
                 .key_min = parameters.key_min,
@@ -499,7 +493,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             key_min: Key,
             key_max: Key,
         ) CompactionRange {
-            assert(compare_keys(key_min, key_max) != .gt);
+            assert(key_min <= key_max);
             const level_b = 0;
             const manifest_level: *const Level = &manifest.levels[level_b];
 
@@ -513,9 +507,9 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 growth_factor,
             ).?;
 
-            assert(compare_keys(range.key_min, range.key_max) != .gt);
-            assert(compare_keys(range.key_min, key_min) != .gt);
-            assert(compare_keys(range.key_max, key_max) != .lt);
+            assert(range.key_min <= range.key_max);
+            assert(range.key_min <= key_min);
+            assert(key_max <= range.key_max);
 
             return .{
                 .key_min = range.key_min,
@@ -531,7 +525,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             range: CompactionRange,
         ) bool {
             assert(level_b < constants.lsm_levels);
-            assert(compare_keys(range.key_min, range.key_max) != .gt);
+            assert(range.key_min <= range.key_max);
 
             var level_c: u8 = level_b + 1;
             while (level_c < constants.lsm_levels) : (level_c += 1) {
@@ -592,10 +586,10 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                     const table_snapshot = table_info.snapshot_min;
 
                     if (key_max_previous) |key_previous| {
-                        assert(compare_keys(key_previous, table_info.key_min) == .lt);
+                        assert(key_previous < table_info.key_min);
                     }
                     // We could have key_min == key_max if there is only one value.
-                    assert(compare_keys(table_info.key_min, table_info.key_max) != .gt);
+                    assert(table_info.key_min <= table_info.key_max);
                     key_max_previous = table_info.key_max;
 
                     if (table_snapshot < snapshot_from_commit(vsr_state.sync_op_min) or

@@ -109,6 +109,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
 fn TreeTableIteratorType(comptime Tree: type) type {
     return struct {
         const TreeTableIterator = @This();
+        const KeyMaxSnapshotMin = Tree.Manifest.Level.KeyMaxSnapshotMin;
 
         position: ?struct {
             level: u6,
@@ -149,12 +150,14 @@ fn TreeTableIteratorType(comptime Tree: type) type {
                         // The ManifestLevel was mutated since the last iteration, so our
                         // position's cursor/ManifestLevel.Iterator is invalid.
                         break :tables manifest_level.tables.iterator_from_cursor(
-                            manifest_level.tables.search(.{
-                                .key_max = position.previous.key_max,
-                                // +1 to skip past the previous table.
-                                // (The tables are ordered by (key_max,snapshot_min).)
-                                .snapshot_min = position.previous.snapshot_min + 1,
-                            }),
+                            manifest_level.tables.search(KeyMaxSnapshotMin.key_from_value(
+                                .{
+                                    // +1 to skip past the previous table.
+                                    // (The tables are ordered by (key_max,snapshot_min).)
+                                    .snapshot_min = position.previous.snapshot_min + 1,
+                                    .key_max = position.previous.key_max,
+                                },
+                            )),
                             .ascending,
                         );
                     }
@@ -169,12 +172,10 @@ fn TreeTableIteratorType(comptime Tree: type) type {
             const table = table_iterator.next() orelse return null;
 
             if (iterator.position) |position| {
-                const table_order =
-                    Tree.Table.compare_keys(position.previous.key_max, table.key_max);
-                assert(table_order.compare(.lte));
-
-                if (table_order == .eq) {
-                    assert(position.previous.snapshot_min < table.snapshot_min);
+                switch (std.math.order(position.previous.key_max, table.key_max)) {
+                    .eq => assert(position.previous.snapshot_min < table.snapshot_min),
+                    .lt => {},
+                    .gt => unreachable,
                 }
             }
 

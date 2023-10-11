@@ -10,7 +10,6 @@ pub fn KWayMergeIteratorType(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime compare_keys: fn (Key, Key) callconv(.Inline) math.Order,
     comptime k_max: u32,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
@@ -93,7 +92,7 @@ pub fn KWayMergeIteratorType(
             while (try it.pop_internal()) |value| {
                 const key = key_from_value(&value);
                 if (it.previous_key_popped) |previous| {
-                    switch (compare_keys(previous, key)) {
+                    switch (std.math.order(previous, key)) {
                         .lt => assert(it.direction == .ascending),
                         // Discard this value and pop the next one.
                         .eq => continue,
@@ -196,7 +195,7 @@ pub fn KWayMergeIteratorType(
         }
 
         inline fn ordered(it: Self, a: u32, b: ?u32) bool {
-            return b == null or switch (compare_keys(it.keys[a], it.keys[b.?])) {
+            return b == null or switch (std.math.order(it.keys[a], it.keys[b.?])) {
                 .lt => it.direction == .ascending,
                 .eq => stream_precedence(it.context, it.streams[a], it.streams[b.?]),
                 .gt => it.direction == .descending,
@@ -223,10 +222,6 @@ fn TestContext(comptime k_max: u32) type {
         };
 
         streams: [k_max][]const Value,
-
-        inline fn compare_keys(a: u32, b: u32) math.Order {
-            return math.order(a, b);
-        }
 
         fn stream_peek(context: *const Self, stream_index: u32) error{ Empty, Drained }!u32 {
             // TODO: test for Drained somehow as well.
@@ -258,7 +253,6 @@ fn TestContext(comptime k_max: u32) type {
                 u32,
                 Value,
                 Value.to_key,
-                compare_keys,
                 k_max,
                 stream_peek,
                 stream_pop,
