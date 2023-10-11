@@ -10,7 +10,6 @@ pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const value_count_max = Table.value_count_max;
-    const compare_keys = Table.compare_keys;
     const key_from_value = Table.key_from_value;
 
     return struct {
@@ -83,10 +82,8 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
-                    compare_keys(
-                    key_from_value(&table.values[table.value_context.count - 1]),
-                    key_from_value(value),
-                ).compare(.lte);
+                    key_from_value(&table.values[table.value_context.count - 1]) <=
+                    key_from_value(value);
             } else {
                 assert(table.value_context.count > 0);
             }
@@ -117,14 +114,13 @@ pub fn TableMemoryType(comptime Table: type) type {
                 Key,
                 Value,
                 key_from_value,
-                compare_keys,
                 table.values_used(),
                 key,
                 .{ .mode = .upper_bound },
             );
             if (result.exact) {
                 const value = &table.values[result.index];
-                assert(compare_keys(key, key_from_value(value)) == .eq);
+                assert(key == key_from_value(value));
                 return value;
             }
 
@@ -169,7 +165,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
-            return compare_keys(key_from_value(&a), key_from_value(&b)) == .lt;
+            return key_from_value(&a) < key_from_value(&b);
         }
 
         pub fn key_min(table: *const TableMemory) Key {

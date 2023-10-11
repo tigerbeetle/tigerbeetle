@@ -28,7 +28,6 @@ pub fn CacheMapType(
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
     comptime hash_from_key: fn (Key) callconv(.Inline) u64,
-    comptime equal: fn (Key, Key) callconv(.Inline) bool,
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
     comptime tombstone: fn (*const Value) callconv(.Inline) bool,
 ) type {
@@ -37,7 +36,6 @@ pub fn CacheMapType(
         Value,
         key_from_value,
         hash_from_key,
-        equal,
         .{},
     );
 
@@ -45,7 +43,7 @@ pub fn CacheMapType(
         const Self = @This();
 
         pub inline fn eql(_: Self, a: Value, b: Value) bool {
-            return equal(key_from_value(&a), key_from_value(&b));
+            return key_from_value(&a) == key_from_value(&b);
         }
 
         pub inline fn hash(_: Self, value: Value) u64 {
@@ -350,10 +348,6 @@ pub const TestTable = struct {
     pub inline fn hash(key: TestTable.Key) u64 {
         return stdx.hash_inline(key);
     }
-
-    pub inline fn equal(a: TestTable.Key, b: TestTable.Key) bool {
-        return a == b;
-    }
 };
 
 pub const TestCacheMap = CacheMapType(
@@ -361,7 +355,6 @@ pub const TestCacheMap = CacheMapType(
     TestTable.Value,
     TestTable.key_from_value,
     TestTable.hash,
-    TestTable.equal,
     TestTable.tombstone_from_key,
     TestTable.tombstone,
 );

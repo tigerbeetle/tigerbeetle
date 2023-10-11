@@ -30,38 +30,28 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
-const Key = extern struct {
+const Value = packed struct(u128) {
     id: u64,
+    value: u63,
+    tombstone: u1 = 0,
 
-    const Value = packed struct(u128) {
-        id: u64,
-        value: u63,
-        tombstone: u1 = 0,
-
-        comptime {
-            assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
-        }
-    };
-
-    inline fn compare_keys(a: Key, b: Key) std.math.Order {
-        return std.math.order(a.id, b.id);
+    comptime {
+        assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
     }
 
-    inline fn key_from_value(value: *const Key.Value) Key {
-        return Key{ .id = value.id };
+    inline fn key_from_value(value: *const Value) u64 {
+        return value.id;
     }
 
-    const sentinel_key = Key{
-        .id = std.math.maxInt(u64),
-    };
+    const sentinel_key = std.math.maxInt(u64);
 
-    inline fn tombstone(value: *const Key.Value) bool {
+    inline fn tombstone(value: *const Value) bool {
         return value.tombstone != 0;
     }
 
-    inline fn tombstone_from_key(key: Key) Key.Value {
-        return Key.Value{
-            .id = key.id,
+    inline fn tombstone_from_key(key: u64) Value {
+        return Value{
+            .id = key,
             .value = 0,
             .tombstone = 1,
         };
@@ -75,13 +65,13 @@ const FuzzOp = union(enum) {
         op: u64,
         checkpoint: bool,
     },
-    put: Key.Value,
-    remove: Key.Value,
-    get: Key,
+    put: Value,
+    remove: Value,
+    get: u64,
 };
 
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
-const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Key.Value));
+const commit_entries_max = @divFloor(batch_size_max, @sizeOf(Value));
 const value_count_max = constants.lsm_batch_multiple * commit_entries_max;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
@@ -106,13 +96,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         const Tree = @import("tree.zig").TreeType(Table, Storage);
         const Table = TableType(
-            Key,
-            Key.Value,
-            Key.compare_keys,
-            Key.key_from_value,
-            Key.sentinel_key,
-            Key.tombstone,
-            Key.tombstone_from_key,
+            u64,
+            Value,
+            Value.key_from_value,
+            Value.sentinel_key,
+            Value.tombstone,
+            Value.tombstone_from_key,
             value_count_max,
             table_usage,
         );
@@ -140,7 +129,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         node_pool: NodePool,
         tree: Tree,
         lookup_context: Tree.LookupContext,
-        lookup_value: ?*const Key.Value,
+        lookup_value: ?*const Value,
 
         pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
@@ -312,7 +301,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.superblock_checkpoint, .fuzzing);
         }
 
-        pub fn get(env: *Environment, key: Key) ?*const Key.Value {
+        pub fn get(env: *Environment, key: u64) ?*const Value {
             env.change_state(.fuzzing, .tree_lookup);
             env.lookup_value = null;
 
@@ -334,7 +323,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             return env.lookup_value;
         }
 
-        fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Key.Value) void {
+        fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Value) void {
             const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
             assert(env.lookup_value == null);
             env.lookup_value = value;
@@ -344,7 +333,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
             // The tree should behave like a simple key-value data-structure.
             // We'll compare it to a hash map.
-            var model = std.hash_map.AutoHashMap(Key, Key.Value).init(allocator);
+            var model = std.hash_map.AutoHashMap(u64, Value).init(allocator);
             defer model.deinit();
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -354,7 +343,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 const storage_size_used = env.storage.size_used();
                 log.debug("storage.size_used = {}/{}", .{ storage_size_used, env.storage.size });
 
-                const model_size = model.count() * @sizeOf(Key.Value);
+                const model_size = model.count() * @sizeOf(Value);
                 log.debug("space_amplification = {d:.2}", .{
                     @as(f64, @floatFromInt(storage_size_used)) / @as(f64, @floatFromInt(model_size)),
                 });
@@ -367,21 +356,21 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     },
                     .put => |value| {
                         if (table_usage == .secondary_index) {
-                            if (model.get(Key.key_from_value(&value))) |old_value| {
+                            if (model.get(Value.key_from_value(&value))) |old_value| {
                                 // Not allowed to put a present key without removing the old value first.
                                 env.tree.remove(&old_value);
                             }
                         }
                         env.tree.put(&value);
-                        try model.put(Key.key_from_value(&value), value);
+                        try model.put(Value.key_from_value(&value), value);
                     },
                     .remove => |value| {
-                        if (table_usage == .secondary_index and !model.contains((Key.key_from_value(&value)))) {
+                        if (table_usage == .secondary_index and !model.contains((Value.key_from_value(&value)))) {
                             // Not allowed to remove non-present keys
                         } else {
                             env.tree.remove(&value);
                         }
-                        _ = model.remove(Key.key_from_value(&value));
+                        _ = model.remove(Value.key_from_value(&value));
                     },
                     .get => |key| {
                         // Get account from lsm.
@@ -404,8 +393,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                                     // secondary_index only preserves keys - may return old values
                                     assert(std.mem.eql(
                                         u8,
-                                        std.mem.asBytes(&Key.key_from_value(&model_value.?)),
-                                        std.mem.asBytes(&Key.key_from_value(tree_value.?)),
+                                        std.mem.asBytes(&Value.key_from_value(&model_value.?)),
+                                        std.mem.asBytes(&Value.key_from_value(tree_value.?)),
                                     ));
                                 },
                             }
@@ -483,9 +472,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 .id = random_id(random, u64),
                 .value = random.int(u63),
             } },
-            .get => FuzzOp{ .get = .{
-                .id = random_id(random, u64),
-            } },
+            .get => FuzzOp{ .get = random_id(random, u64) },
         };
         switch (fuzz_op.*) {
             .compact => puts_since_compact = 0,

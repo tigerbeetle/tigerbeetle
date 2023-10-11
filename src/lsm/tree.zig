@@ -17,7 +17,7 @@ const vsr = @import("../vsr.zig");
 const bloom_filter = @import("bloom_filter.zig");
 const schema = @import("schema.zig");
 
-const CompositeKey = @import("composite_key.zig").CompositeKey;
+const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 pub const ScopeCloseMode = enum { persist, discard };
@@ -85,7 +85,6 @@ pub const TreeConfig = struct {
 pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     const Key = TreeTable.Key;
     const Value = TreeTable.Value;
-    const compare_keys = TreeTable.compare_keys;
     const tombstone = TreeTable.tombstone;
 
     return struct {
@@ -277,8 +276,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         pub fn key_range_update(tree: *Tree, key: Key) void {
             if (tree.key_range) |*key_range| {
-                if (compare_keys(key, key_range.key_min) == .lt) key_range.key_min = key;
-                if (compare_keys(key, key_range.key_max) == .gt) key_range.key_max = key;
+                if (key < key_range.key_min) key_range.key_min = key;
+                if (key > key_range.key_max) key_range.key_max = key;
             } else {
                 tree.key_range = KeyRange{ .key_min = key, .key_max = key };
             }
@@ -291,8 +290,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn key_range_contains(tree: *const Tree, snapshot: u64, key: Key) bool {
             if (snapshot == snapshot_latest) {
                 return tree.key_range != null and
-                    compare_keys(key, tree.key_range.?.key_min) != .lt and
-                    compare_keys(key, tree.key_range.?.key_max) != .gt;
+                    tree.key_range.?.key_min <= key and
+                    key <= tree.key_range.?.key_max;
             } else {
                 return true;
             }
@@ -450,8 +449,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 );
                 while (it.next()) |table| : (index_block_count += 1) {
                     assert(table.visible(parameters.snapshot));
-                    assert(compare_keys(table.key_min, parameters.key) != .gt);
-                    assert(compare_keys(table.key_max, parameters.key) != .lt);
+                    assert(table.key_min <= parameters.key);
+                    assert(parameters.key <= table.key_max);
 
                     index_block_addresses[index_block_count] = table.address;
                     index_block_checksums[index_block_count] = table.checksum;
@@ -831,8 +830,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             // +1 to count the input table from level A.
             assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
-            assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
-            assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);
+            assert(range_b.key_min <= tree.table_immutable.key_min());
+            assert(tree.table_immutable.key_max() <= range_b.key_max);
 
             log.debug("{s}: compacting immutable table to level 0 " ++
                 "(snapshot_min={d} compaction.op_min={d} table_count={d})", .{
@@ -868,9 +867,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             const range_b = table_range.range_b;
 
             assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
-            assert(compare_keys(table_a.key_min, table_a.key_max) != .gt);
-            assert(compare_keys(range_b.key_min, table_a.key_min) != .gt);
-            assert(compare_keys(range_b.key_max, table_a.key_max) != .lt);
+            assert(table_a.key_min <= table_a.key_max);
+            assert(range_b.key_min <= table_a.key_min);
+            assert(table_a.key_max <= range_b.key_max);
 
             log.debug("{s}: compacting {d} tables from level {d} to level {d}", .{
                 tree.config.name,
@@ -1271,7 +1270,7 @@ fn is_composite_key(comptime Key: type) bool {
         @hasField(Key, "timestamp"))
     {
         const Field = std.meta.fieldInfo(Key, .field).type;
-        return Key == CompositeKey(Field);
+        return Key == CompositeKeyType(Field);
     }
 
     return false;
@@ -1280,10 +1279,10 @@ fn is_composite_key(comptime Key: type) bool {
 test "is_composite_key" {
     const expect = std.testing.expect;
 
-    try expect(is_composite_key(CompositeKey(u128)));
+    try expect(is_composite_key(CompositeKeyType(u128)));
     try expect(!is_composite_key(u128));
 
-    try expect(is_composite_key(CompositeKey(u64)));
+    try expect(is_composite_key(CompositeKeyType(u64)));
     try expect(!is_composite_key(u64));
 }
 
@@ -1307,15 +1306,14 @@ test "table_count_max_for_level/tree" {
 }
 
 test "TreeType" {
-    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);
     const Table = @import("table.zig").TableType(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
+        CompositeKey.Key,
+        CompositeKey,
+        CompositeKey.key_from_value,
+        CompositeKey.sentinel_key,
+        CompositeKey.tombstone,
+        CompositeKey.tombstone_from_key,
         constants.state_machine_config.lsm_batch_multiple * 1024,
         .secondary_index,
     );

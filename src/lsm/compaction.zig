@@ -70,7 +70,6 @@ pub fn CompactionType(
 
         const Key = Table.Key;
         const Value = Table.Value;
-        const compare_keys = Table.compare_keys;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
@@ -495,7 +494,7 @@ pub fn CompactionType(
                 // non-decreasing.
                 // A source length of 1 is always non-decreasing.
                 for (source[0 .. source.len - 1], source[1..source.len]) |*value, *value_next| {
-                    assert(compare_keys(key_from_value(value_next), key_from_value(value)) != .lt);
+                    assert(key_from_value(value) <= key_from_value(value_next));
                 }
             }
 
@@ -508,10 +507,9 @@ pub fn CompactionType(
 
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.
-                const value_next_equal = source_index + 1 < source.len and compare_keys(
-                    key_from_value(&source[source_index]),
-                    key_from_value(&source[source_index + 1]),
-                ) == .eq;
+                const value_next_equal = source_index + 1 < source.len and
+                    key_from_value(&source[source_index]) ==
+                    key_from_value(&source[source_index + 1]);
 
                 if (!value_next_equal) {
                     target_index += 1;
@@ -539,7 +537,7 @@ pub fn CompactionType(
                     target[0 .. target_count - 1],
                     target[1..target_count],
                 ) |*value, *value_next| {
-                    assert(compare_keys(key_from_value(value_next), key_from_value(value)) == .gt);
+                    assert(key_from_value(value_next) > key_from_value(value));
                 }
             }
 
@@ -596,16 +594,16 @@ pub fn CompactionType(
                 assert(values_in.len > 0);
                 if (constants.verify) {
                     for (values_in[0 .. values_in.len - 1], values_in[1..]) |*value, *value_next| {
-                        assert(compare_keys(key_from_value(value), key_from_value(value_next)) == .lt);
+                        assert(key_from_value(value) < key_from_value(value_next));
                     }
                 }
                 const first_key = key_from_value(&values_in[0]);
                 const last_key = key_from_value(&values_in[values_in.len - 1]);
                 if (compaction.last_keys_in[index]) |last_key_prev| {
-                    assert(compare_keys(last_key_prev, first_key) == .lt);
+                    assert(last_key_prev < first_key);
                 }
                 if (values_in.len > 1) {
-                    assert(compare_keys(first_key, last_key) == .lt);
+                    assert(first_key < last_key);
                 }
                 compaction.last_keys_in[index] = last_key;
             } else {
@@ -738,7 +736,7 @@ pub fn CompactionType(
             {
                 const value_a = &values_in_a[values_in_a_index];
                 const value_b = &values_in_b[values_in_b_index];
-                switch (compare_keys(key_from_value(value_a), key_from_value(value_b))) {
+                switch (std.math.order(key_from_value(value_a), key_from_value(value_b))) {
                     .lt => {
                         values_in_a_index += 1;
                         if (compaction.drop_tombstones and
