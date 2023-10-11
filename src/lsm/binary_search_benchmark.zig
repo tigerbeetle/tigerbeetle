@@ -88,7 +88,6 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
                     K,
                     V,
                     V.key_from_value,
-                    V.key_compare,
                     page.values[0..],
                     target,
                     .{ .prefetch = prefetch },
@@ -139,10 +138,6 @@ fn Value(comptime layout: Layout) type {
 
         inline fn key_from_value(self: *const Self) Key {
             return self.key;
-        }
-
-        inline fn key_compare(a: Key, b: Key) math.Order {
-            return math.order(a, b);
         }
     };
 }

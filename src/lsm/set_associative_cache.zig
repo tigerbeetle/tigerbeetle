@@ -32,7 +32,6 @@ pub fn SetAssociativeCacheType(
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
     comptime hash: fn (Key) callconv(.Inline) u64,
-    comptime equal: fn (Key, Key) callconv(.Inline) bool,
     comptime layout: Layout,
 ) type {
     assert(math.isPowerOfTwo(@sizeOf(Key)));
@@ -266,7 +265,7 @@ pub fn SetAssociativeCacheType(
             var it = BitIterator(Ways){ .bits = ways };
             while (it.next()) |way| {
                 const count = self.counts.get(set.offset + way);
-                if (count > 0 and equal(key_from_value(&set.values[way]), key)) {
+                if (count > 0 and key_from_value(&set.values[way]) == key) {
                     return way;
                 }
             }
@@ -437,7 +436,6 @@ fn set_associative_cache_test(
         Value,
         context.key_from_value,
         context.hash,
-        context.equal,
         layout,
     );
 
@@ -562,9 +560,6 @@ test "SetAssociativeCache: eviction" {
         }
         inline fn hash(key: Key) u64 {
             return key;
-        }
-        inline fn equal(a: Key, b: Key) bool {
-            return a == b;
         }
     };
 
@@ -822,7 +817,6 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
         Value,
         context.key_from_value,
         context.hash,
-        context.equal,
         layout,
     );
 
