@@ -406,8 +406,8 @@ fn encode_results_into_data(
     const results = std.mem.bytesAsSlice(Result, event_data.ptr[0 .. @sizeOf(Result) * event_count]);
 
     const packet_results = std.mem.bytesAsSlice(Result, result_bytes);
-    assert(packet_results.len == results.len);
-    @memcpy(results, packet_results);
+    assert(packet_results.len <= results.len);
+    @memcpy(results[0..packet_results.len], packet_results);
 
     return std.mem.sliceAsBytes(results);
 }
