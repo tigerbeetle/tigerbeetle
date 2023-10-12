@@ -362,7 +362,8 @@ pub const AccountingAuditor = struct {
                     });
                     self.pending_expiries.add(.{
                         .transfer = transfer.id,
-                        .timestamp = transfer_timestamp + transfer.timeout,
+                        .timestamp = transfer_timestamp +
+                            @as(u64, transfer.timeout) * std.time.ns_per_s,
                     }) catch unreachable;
                     // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
                     // created more pending transfers than permitted.
