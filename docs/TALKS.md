@@ -2,9 +2,11 @@
 
 ## March 27, 2023: A New Era for Database Design with TigerBeetle at QCon London 2023
 
-TODO: Talk will be posted eventually by QCon London.
+Joran Dirk Greef discusses pivotal moments in database design and how
+they influenced the design decisions for TigerBeetle, a distributed
+financial accounting database.
 
-https://twitter.com/qconlondon/status/1640314727950606339
+https://www.youtube.com/watch?v=ehYcCTHRyFs
 
 ## March 9, 2023: How to Thought Lead and the Double Entry Accounting Database
 
