@@ -162,7 +162,7 @@ Here are a few key pages you might be interested in:
 ## Clients
 
 * [.NET](https://docs.tigerbeetle.com/clients/dotnet)
-* [Golang](https://docs.tigerbeetle.com/clients/go)
+* [Go](https://docs.tigerbeetle.com/clients/go)
 * [Java](https://docs.tigerbeetle.com/clients/java)
 * [Node.js](https://docs.tigerbeetle.com/clients/node)
 
