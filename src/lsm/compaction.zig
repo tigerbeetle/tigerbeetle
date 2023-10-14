@@ -162,7 +162,6 @@ pub fn CompactionType(
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
         write_data_block: Grid.Write = undefined,
-        write_filter_block: Grid.Write = undefined,
         write_index_block: Grid.Write = undefined,
 
         tracer_slot: ?tracer.SpanStart,
@@ -561,7 +560,6 @@ pub fn CompactionType(
             const grid = compaction.context.grid;
             const index_schema = schema.TableIndex.from(index_block);
             for (index_schema.data_addresses_used(index_block)) |address| grid.release(address);
-            for (index_schema.filter_addresses_used(index_block)) |address| grid.release(address);
             grid.release(Table.block_address(index_block));
         }
 
@@ -785,9 +783,6 @@ pub fn CompactionType(
 
             // Flush the data block if needed.
             if (table_builder.data_block_full() or
-                // If the filter or index blocks need to be flushed,
-                // the data block has to be flushed first.
-                table_builder.filter_block_full() or
                 table_builder.index_block_full() or
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.data_block_empty()))
@@ -799,23 +794,6 @@ pub fn CompactionType(
                     .tree_id = compaction.tree_config.id,
                 });
                 WriteBlock(.data).write_block(compaction);
-            }
-
-            // Flush the filter block if needed.
-            if (table_builder.filter_block_full() or
-                // If the index block need to be flushed,
-                // the filter block has to be flushed first.
-                table_builder.index_block_full() or
-                // If the input is exhausted then we need to flush all blocks before finishing.
-                (input_exhausted and !table_builder.filter_block_empty()))
-            {
-                table_builder.filter_block_finish(.{
-                    .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
-                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
-                    .tree_id = compaction.tree_config.id,
-                });
-                WriteBlock(.filter).write_block(compaction);
             }
 
             // Flush the index block if needed.
@@ -842,7 +820,7 @@ pub fn CompactionType(
             }
         }
 
-        const WriteBlockField = enum { data, filter, index };
+        const WriteBlockField = enum { data, index };
         fn WriteBlock(comptime write_block_field: WriteBlockField) type {
             return struct {
                 fn write_block(compaction: *Compaction) void {
@@ -850,12 +828,10 @@ pub fn CompactionType(
 
                     const write = switch (write_block_field) {
                         .data => &compaction.write_data_block,
-                        .filter => &compaction.write_filter_block,
                         .index => &compaction.write_index_block,
                     };
                     const block = switch (write_block_field) {
                         .data => &compaction.table_builder.data_block,
-                        .filter => &compaction.table_builder.filter_block,
                         .index => &compaction.table_builder.index_block,
                     };
                     compaction.state.tables_writing.pending += 1;
@@ -867,7 +843,6 @@ pub fn CompactionType(
                         Compaction,
                         switch (write_block_field) {
                             .data => "write_data_block",
-                            .filter => "write_filter_block",
                             .index => "write_index_block",
                         },
                         write,
