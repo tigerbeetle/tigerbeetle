@@ -14,11 +14,9 @@ const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
-const Fingerprint = @import("bloom_filter.zig").Fingerprint;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
-const key_fingerprint = @import("tree.zig").key_fingerprint;
 
 fn ObjectTreeHelpers(comptime Object: type) type {
     assert(@hasField(Object, "timestamp"));
@@ -421,16 +419,11 @@ pub fn GrooveType(
         const trees_total = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
         const TreesBitSet = std.StaticBitSet(trees_total);
 
-        const PrefetchKeys = std.AutoArrayHashMapUnmanaged(
-            union(enum) {
-                id: PrimaryKey,
-                timestamp: u64,
-            },
-            struct {
-                fingerprint: Fingerprint,
-                level: u8,
-            },
-        );
+        const PrefetchKey = struct { key: union(enum) {
+            id: PrimaryKey,
+            timestamp: u64,
+        }, level: u8 };
+        const PrefetchKeys = std.AutoHashMapUnmanaged(PrefetchKey, void);
 
         compacting: ?struct {
             /// Count which tree compactions are in progress.
@@ -642,11 +635,9 @@ pub fn GrooveType(
         /// table blocks in the grid cache.
         /// If found in the IdTree, we attempt to prefetch a value for the timestamp.
         fn prefetch_from_memory_by_id(groove: *Groove, id: PrimaryKey) void {
-            const fingerprint = key_fingerprint(id);
             switch (groove.ids.lookup_from_levels_cache(
                 groove.prefetch_snapshot.?,
                 id,
-                fingerprint,
             )) {
                 .negative => {},
                 .positive => |id_tree_value| {
@@ -655,11 +646,11 @@ pub fn GrooveType(
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
-                        .{ .id = id },
                         .{
+                            .key = .{ .id = id },
                             .level = level,
-                            .fingerprint = fingerprint,
                         },
+                        {},
                     );
                 },
             }
@@ -668,11 +659,9 @@ pub fn GrooveType(
         /// This function attempts to prefetch a value for the timestamp from the ObjectTree's
         /// table blocks in the grid cache.
         fn prefetch_from_memory_by_timestamp(groove: *Groove, timestamp: u64) void {
-            const fingerprint = key_fingerprint(timestamp);
             switch (groove.objects.lookup_from_levels_cache(
                 groove.prefetch_snapshot.?,
                 timestamp,
-                fingerprint,
             )) {
                 .negative => {},
                 .positive => |object| {
@@ -681,11 +670,11 @@ pub fn GrooveType(
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
-                        .{ .timestamp = timestamp },
                         .{
-                            .fingerprint = fingerprint,
+                            .key = .{ .timestamp = timestamp },
                             .level = level,
                         },
+                        {},
                     );
                 },
             }
@@ -796,41 +785,25 @@ pub fn GrooveType(
                 // prefetch_enqueue() ensures that the tree's cache is checked before queueing the
                 // object for prefetching. If not in the LSM tree's cache, the object must be read
                 // from disk and added to the auxiliary prefetch_objects hash map.
-                switch (prefetch_entry.key_ptr.*) {
+                switch (prefetch_entry.key_ptr.key) {
                     .id => |id| {
-                        if (constants.verify) {
-                            assert(std.meta.eql(
-                                prefetch_entry.value_ptr.fingerprint,
-                                key_fingerprint(id),
-                            ));
-                        }
-
                         if (has_id) {
                             worker.context.groove.ids.lookup_from_levels_storage(.{
                                 .callback = lookup_id_callback,
                                 .context = worker.lookup.get(.id),
                                 .snapshot = worker.context.snapshot,
                                 .key = id,
-                                .fingerprint = prefetch_entry.value_ptr.fingerprint,
-                                .level_min = prefetch_entry.value_ptr.level,
+                                .level_min = prefetch_entry.key_ptr.level,
                             });
                         } else unreachable;
                     },
                     .timestamp => |timestamp| {
-                        if (constants.verify) {
-                            assert(std.meta.eql(
-                                prefetch_entry.value_ptr.fingerprint,
-                                key_fingerprint(timestamp),
-                            ));
-                        }
-
                         worker.context.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_object_callback,
                             .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .fingerprint = prefetch_entry.value_ptr.fingerprint,
-                            .level_min = prefetch_entry.value_ptr.level,
+                            .level_min = prefetch_entry.key_ptr.level,
                         });
                     },
                 }
@@ -854,11 +827,9 @@ pub fn GrooveType(
             }
 
             fn lookup_by_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
-                const fingerprint = key_fingerprint(timestamp);
                 switch (worker.context.groove.objects.lookup_from_levels_cache(
                     worker.context.snapshot,
                     timestamp,
-                    fingerprint,
                 )) {
                     .negative => {
                         lookup_object_callback(worker.lookup.get(.object), null);
@@ -872,7 +843,6 @@ pub fn GrooveType(
                             .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .fingerprint = fingerprint,
                             .level_min = level_min,
                         });
                     },
