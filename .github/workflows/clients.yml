@@ -12,7 +12,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, windows-latest, macos-13,  macos-13-xlarge]
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -38,7 +38,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, windows-latest, macos-13,  macos-13-xlarge]
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -59,7 +59,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, windows-latest, macos-13,  macos-13-xlarge]
         java-version: ['11']
 
     runs-on: ${{ matrix.os }}
@@ -92,12 +92,12 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        os: [ubuntu-latest, windows-latest, macos-13,  macos-13-xlarge]
         node-version: ['14.x', '18.x']
         exclude:
-          - os: [self-hosted, ARM64, macos-12.6]
+          - os: macos-13
             node-version: '14.x'
-          - os: [self-hosted, ARM64, macos-13.2]
+          - os: macos-13-xlarge
             node-version: '14.x'
 
     runs-on: ${{ matrix.os }}
