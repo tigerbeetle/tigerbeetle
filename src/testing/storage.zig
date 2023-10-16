@@ -647,11 +647,10 @@ pub const Storage = struct {
         assert(index_block_header.checksum == index_checksum);
         assert(schema.BlockType.from(index_block_header.operation) == .index);
 
-        const data_blocks_used = index_schema.data_blocks_used(index_block);
-        for (0..data_blocks_used) |data_block_index| {
-            const checksum = index_schema.data_checksums_used(index_block)[data_block_index];
-            const address = index_schema.data_addresses_used(index_block)[data_block_index];
-
+        for (
+            index_schema.data_addresses_used(index_block),
+            index_schema.data_checksums_used(index_block),
+        ) |address, checksum| {
             const data_block = storage.grid_block(address).?;
             const data_block_header = schema.header_from_block(data_block);
 

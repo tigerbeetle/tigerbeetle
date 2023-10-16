@@ -383,19 +383,22 @@ pub const GridBlocksMissing = struct {
         assert(index_block_header.checksum == table.index_checksum);
         assert(schema.BlockType.from(index_block_header.operation) == .index);
 
-        const data_blocks_total = index_schema.data_blocks_used(index_block_data);
-        table.table_blocks_total = 1 + data_blocks_total;
+        table.table_blocks_total = index_schema.data_blocks_used(index_block_data) + 1;
 
-        for (0..data_blocks_total) |data_block_index| {
+        for (
+            index_schema.data_addresses_used(index_block_data),
+            index_schema.data_checksums_used(index_block_data),
+            0..,
+        ) |address, checksum, index| {
             const enqueue = queue.enqueue_faulty_block(
-                index_schema.data_addresses_used(index_block_data)[data_block_index],
-                index_schema.data_checksums_used(index_block_data)[data_block_index],
-                .{ .table_data = .{ .table = table, .index = @intCast(data_block_index) } },
+                address,
+                checksum,
+                .{ .table_data = .{ .table = table, .index = @intCast(index) } },
             );
 
             if (enqueue == .replace) {
                 if (enqueue.replace.state == .writing) {
-                    table.data_blocks_received.set(data_block_index);
+                    table.data_blocks_received.set(index);
                 }
             } else {
                 assert(enqueue == .insert);

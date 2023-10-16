@@ -216,10 +216,10 @@ If more histories diverge, the cluster will be unavailable (unable to commit), a
 If a state-syncing replica crashes before completing sync, we don't want to restart from scratch.
 (This is mainly important for tables — the manifest is smaller.)
 
-Progress is tracked implicitly: If a table index block is present on disk, we implicitly assume that all of its filter/data blocks have already been written too.
-That is, "table index block in grid" implies "table's referenced data/filter blocks are in grid".
+Progress is tracked implicitly: If a table index block is present on disk, we implicitly assume that all of its data blocks have already been written too.
+That is, "table index block in grid" implies "table's referenced data blocks are in grid".
 
 To enforce this invariant:
-1. When syncing table blocks, don't write an index block until all of its data and filter blocks are written.
+1. When syncing table blocks, don't write an index block until all of its data blocks are written.
 2. A history cannot diverge from the canonical history by more than one checkpoint.
 3. A replica never syncs towards a checkpoint from its past.
