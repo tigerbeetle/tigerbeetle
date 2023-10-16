@@ -25,32 +25,32 @@ export AWS_DEFAULT_REGION=eu-west-1
 echo "Spinning up replica EC2 instances - ${REPLICA_COUNT}..." 1>&2
 epoch_plus_hour=$(($(date +%s) + 3600))
 
-# shellcheck disable=SC2086 # we hardcode SECURITY_GROUP_IDS and need it to be multiple parameters
-output=$(aws ec2 run-instances \
-	--image-id "${AMI_ID}" \
-	--count "${REPLICA_COUNT}" \
-	--instance-type "${AWS_INSTANCE_TYPE}" \
-	--security-group-ids ${SECURITY_GROUP_IDS} \
-	--subnet-id "${SUBNET_ID}" \
-	--associate-public-ip-address \
-	--iam-instance-profile Name="worker-profile" \
-	--tag-specifications "ResourceType=instance,Tags=[{Key=test_id,Value=${TEST_ID}},{Key=ttl,Value=${epoch_plus_hour}}]" \
-)
+# # shellcheck disable=SC2086 # we hardcode SECURITY_GROUP_IDS and need it to be multiple parameters
+# output=$(aws ec2 run-instances \
+# 	--image-id "${AMI_ID}" \
+# 	--count "${REPLICA_COUNT}" \
+# 	--instance-type "${AWS_INSTANCE_TYPE}" \
+# 	--security-group-ids ${SECURITY_GROUP_IDS} \
+# 	--subnet-id "${SUBNET_ID}" \
+# 	--associate-public-ip-address \
+# 	--iam-instance-profile Name="worker-profile" \
+# 	--tag-specifications "ResourceType=instance,Tags=[{Key=test_id,Value=${TEST_ID}},{Key=ttl,Value=${epoch_plus_hour}}]" \
+# )
 
-for i in $(seq 1 "${REPLICA_COUNT}"); do
-	# 0-index our replicas
-	i=$((i - 1))
+# for i in $(seq 1 "${REPLICA_COUNT}"); do
+# 	# 0-index our replicas
+# 	i=$((i - 1))
 
-	REPLICA_INSTANCE_IDS+=("$(echo "${output}" | jq -r .Instances[${i}].InstanceId)")
-	REPLICA_PRIVATE_IPS+=("$(echo "${output}" | jq -r .Instances[${i}].PrivateIpAddress)":3001)
-done
+# 	REPLICA_INSTANCE_IDS+=("$(echo "${output}" | jq -r .Instances[${i}].InstanceId)")
+# 	REPLICA_PRIVATE_IPS+=("$(echo "${output}" | jq -r .Instances[${i}].PrivateIpAddress)":3001)
+# done
+REPLICA_INSTANCE_IDS=("Debian-1201-bookworm-amd64-base")
+REPLICA_PRIVATE_IPS=("65.108.43.178")
 
 # The below are set for both client and replicas.
 # We fix our git URL, so we'll only ever run this on our own branches and not random PRs
 export NOMAD_VAR_git_url="https://github.com/tigerbeetle/tigerbeetle.git"
 export NOMAD_VAR_git_ref="${3}"
-echo export NOMAD_VAR_git_url="https://github.com/tigerbeetle/tigerbeetle.git"
-echo export NOMAD_VAR_git_ref="${3}"
 
 # Build the address string
 function join_by { local IFS="$1"; shift; echo "$*"; }
@@ -62,30 +62,30 @@ for replica in $(seq 1 "${REPLICA_COUNT}"); do
 	replica=$((replica - 1))
 	JOB_NAME="tigerbeetle-${TEST_ID}-${replica}"
 
-	echo export NOMAD_VAR_instance_id=${REPLICA_INSTANCE_IDS[$replica]}
-	echo export NOMAD_VAR_test_id="${TEST_ID}"
-	echo export NOMAD_VAR_replica="${replica}"
-	echo export NOMAD_VAR_replica_count="${REPLICA_COUNT}"
-	echo export NOMAD_VAR_addresses="${addresses}"
+	export NOMAD_VAR_instance_id=${REPLICA_INSTANCE_IDS[$replica]}
+	export NOMAD_VAR_test_id="${TEST_ID}"
+	export NOMAD_VAR_replica="${replica}"
+	export NOMAD_VAR_replica_count="${REPLICA_COUNT}"
+	export NOMAD_VAR_addresses="${addresses}"
 
-	sed "s/__JOB_NAME__/${JOB_NAME}/g" < tigerbeetle.hcl > /tmp/job_to_run.hcl #| nomad job run -detach - 1>&2
+	sed "s/__JOB_NAME__/${JOB_NAME}/g" < tigerbeetle.hcl | nomad job run -detach - 1>&2
 done
 
 # Spin up EC2 instance for test client
 echo "Spinning up client EC2 instance..." 1>&2
 # shellcheck disable=SC2086 # we hardcode SECURITY_GROUP_IDS and need it to be multiple parameters
-output=$(aws ec2 run-instances \
-	--image-id "${AMI_ID}" \
-	--count 1 \
-	--instance-type "t3.xlarge" \
-	--security-group-ids ${SECURITY_GROUP_IDS} \
-	--subnet-id "${SUBNET_ID}" \
-	--associate-public-ip-address \
-	--iam-instance-profile Name="worker-profile" \
-	--tag-specifications "ResourceType=instance,Tags=[{Key=test_id,Value=${TEST_ID}},{Key=ttl,Value=${epoch_plus_hour}}]" \
-)
+# output=$(aws ec2 run-instances \
+# 	--image-id "${AMI_ID}" \
+# 	--count 1 \
+# 	--instance-type "t3.xlarge" \
+# 	--security-group-ids ${SECURITY_GROUP_IDS} \
+# 	--subnet-id "${SUBNET_ID}" \
+# 	--associate-public-ip-address \
+# 	--iam-instance-profile Name="worker-profile" \
+# 	--tag-specifications "ResourceType=instance,Tags=[{Key=test_id,Value=${TEST_ID}},{Key=ttl,Value=${epoch_plus_hour}}]" \
+# )
 
-CLIENT_INSTANCE_ID=$(echo "${output}" | jq -r .Instances[0].InstanceId)
+CLIENT_INSTANCE_ID="Debian-1201-bookworm-amd64-base" #$(echo "${output}" | jq -r .Instances[0].InstanceId)
 
 # Spin up test client Nomad Job
 JOB_NAME="tigerbeetle-${TEST_ID}-client"

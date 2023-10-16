@@ -48,7 +48,7 @@ job "__JOB_NAME__" {
   type        = "batch"
 
   constraint {
-    attribute = attr.unique.platform.aws.instance-id
+    attribute = attr.unique.hostname
     operator  = "="
     value     = var.instance_id
   }

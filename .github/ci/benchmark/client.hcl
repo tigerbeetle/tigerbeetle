@@ -35,7 +35,7 @@ job "__JOB_NAME__" {
   type        = "batch"
 
   constraint {
-    attribute = attr.unique.platform.aws.instance-id
+    attribute = attr.unique.hostname
     operator  = "="
     value     = var.instance_id
   }
@@ -77,7 +77,7 @@ export AWS_DEFAULT_REGION=eu-west-1
 # they need to, either.
 function finish {
   # Shut down all instances - the instance role has permission to do this
-  aws ec2 terminate-instances --instance-ids ${var.replica_instance_ids} || true
+  #aws ec2 terminate-instances --instance-ids ${var.replica_instance_ids} || true
 
   # Purge Nomad jobs, then terminate this instance. We have a shutdown delay of
   # 10s which should be plenty of time.
@@ -87,7 +87,7 @@ function finish {
     echo "No Nomad yet - not purging."
   fi
 
-  aws ec2 terminate-instances --instance-ids ${var.instance_id} || true
+  #aws ec2 terminate-instances --instance-ids ${var.instance_id} || true
 }
 trap finish EXIT
 
