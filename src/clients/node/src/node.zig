@@ -270,7 +270,6 @@ fn on_completion(
     };
 
     // Update the packet data size with the results and stuff client in packet.next to avoid alloc.
-    assert(@intFromPtr(result_data.ptr) == @intFromPtr(events.ptr));
     packet.data_size = @intCast(result_data.len);
     @as(*usize, @ptrCast(&packet.next)).* = @intFromPtr(client);
 
@@ -414,9 +413,10 @@ fn encode_results_into_data(
 
     const packet_results = std.mem.bytesAsSlice(Result, result_bytes);
     assert(packet_results.len <= results.len);
-    @memcpy(results[0..packet_results.len], packet_results);
 
-    return std.mem.sliceAsBytes(results);
+    const data_results = results[0..packet_results.len];
+    @memcpy(data_results, packet_results);
+    return std.mem.sliceAsBytes(data_results);
 }
 
 fn encode_data_into_array(
