@@ -25,7 +25,7 @@ const IOPS = @import("../iops.zig").IOPS;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
 pub const GridBlocksMissing = struct {
-    const TableContentBlocksSet = std.StaticBitSet(constants.lsm_table_content_blocks_max);
+    const TableDataBlocksSet = std.StaticBitSet(constants.lsm_table_data_blocks_max);
 
     /// A block is removed from the collection when:
     /// - the block's write completes, or
@@ -50,28 +50,28 @@ pub const GridBlocksMissing = struct {
         block,
         /// Repair the table and all of its content. Awaiting table index block.
         table_index: TableIndex,
-        /// Repair the table and all of its content. Awaiting table content blocks.
-        table_content: TableContent,
+        /// Repair the table and all of its content. Awaiting table data blocks.
+        table_data: TableData,
 
         const TableIndex = struct { table: *RepairTable };
-        const TableContent = struct { table: *RepairTable, index: u32 };
+        const TableData = struct { table: *RepairTable, index: u32 };
     };
 
     pub const RepairTable = struct {
         index_address: u64,
         index_checksum: u128,
         /// Invariants:
-        /// - content_blocks_received.count < table_blocks_total
+        /// - data_blocks_received.count < table_blocks_total
         /// TODO(Congestion control): This bitset is currently used only for extra validation.
         /// Eventually we should request tables using this + EWAH encoding, instead of
         /// block-by-block.
-        content_blocks_received: TableContentBlocksSet = TableContentBlocksSet.initEmpty(),
+        data_blocks_received: TableDataBlocksSet = TableDataBlocksSet.initEmpty(),
         /// This count includes the index block.
         /// Invariants:
         /// - table_blocks_written ≤ table_blocks_total
         table_blocks_written: u32 = 0,
         /// When null, the table is awaiting an index block.
-        /// When non-null, the table is awaiting content blocks.
+        /// When non-null, the table is awaiting data blocks.
         /// This count includes the index block.
         table_blocks_total: ?u32 = null,
         /// "next" belongs to the `faulty_tables`/`faulty_tables_free` FIFOs.
@@ -122,7 +122,7 @@ pub const GridBlocksMissing = struct {
 
         try faulty_blocks.ensureTotalCapacity(
             allocator,
-            options.blocks_max + options.tables_max * constants.lsm_table_content_blocks_max,
+            options.blocks_max + options.tables_max * constants.lsm_table_data_blocks_max,
         );
 
         return GridBlocksMissing{
@@ -191,12 +191,12 @@ pub const GridBlocksMissing = struct {
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
         assert(queue.enqueued_blocks_table <=
-            queue.options.tables_max * constants.lsm_table_content_blocks_max);
+            queue.options.tables_max * constants.lsm_table_data_blocks_max);
 
         const faulty_blocks_free =
             queue.faulty_blocks.capacity() -
             queue.enqueued_blocks_single -
-            queue.options.tables_max * constants.lsm_table_content_blocks_max;
+            queue.options.tables_max * constants.lsm_table_data_blocks_max;
         return faulty_blocks_free;
     }
 
@@ -266,7 +266,7 @@ pub const GridBlocksMissing = struct {
             switch (progress) {
                 .block => return .duplicate,
                 .table_index,
-                .table_content,
+                .table_data,
                 => {
                     // The content block may already have been queued by either the scrubber or a
                     // commit/compaction grid read.
@@ -282,7 +282,7 @@ pub const GridBlocksMissing = struct {
             switch (progress) {
                 .block => queue.enqueued_blocks_single += 1,
                 .table_index => queue.enqueued_blocks_table += 1,
-                .table_content => queue.enqueued_blocks_table += 1,
+                .table_data => queue.enqueued_blocks_table += 1,
             }
 
             fault_result.value_ptr.* = .{
@@ -307,12 +307,12 @@ pub const GridBlocksMissing = struct {
         assert(fault.checksum == checksum);
         assert(fault.state == .waiting);
 
-        if (fault.progress == .table_content) {
-            const progress = &fault.progress.table_content;
+        if (fault.progress == .table_data) {
+            const progress = &fault.progress.table_data;
             assert(progress.table.table_blocks_written < progress.table.table_blocks_total.?);
-            assert(!progress.table.content_blocks_received.isSet(progress.index));
+            assert(!progress.table.data_blocks_received.isSet(progress.index));
 
-            progress.table.content_blocks_received.set(progress.index);
+            progress.table.data_blocks_received.set(progress.index);
         }
 
         fault.state = .writing;
@@ -337,26 +337,26 @@ pub const GridBlocksMissing = struct {
         switch (fault.progress) {
             .block => {},
             .table_index => |progress| {
-                assert(progress.table.content_blocks_received.count() == 0);
+                assert(progress.table.data_blocks_received.count() == 0);
 
-                // The reason that the content blocks are queued here (when the write ends) rather
+                // The reason that the data blocks are queued here (when the write ends) rather
                 // than when the write begins is so that a `enqueue_block()` can be converted to a
                 // `enqueue_table()` after the former's write is already in progress.
-                queue.enqueue_table_content(fault.progress.table_index.table, block);
+                queue.enqueue_table_data(fault.progress.table_index.table, block);
             },
-            .table_content => |progress| {
-                assert(progress.table.content_blocks_received.isSet(progress.index));
+            .table_data => |progress| {
+                assert(progress.table.data_blocks_received.isSet(progress.index));
             },
         }
 
         if (switch (fault.progress) {
             .block => null,
             .table_index => |progress| progress.table,
-            .table_content => |progress| progress.table,
+            .table_data => |progress| progress.table,
         }) |table| {
             assert(table.table_blocks_total != null); // We already received the index block.
             assert(table.table_blocks_written < table.table_blocks_total.?);
-            assert(table.content_blocks_received.count() <= table.table_blocks_total.? - 1);
+            assert(table.data_blocks_received.count() <= table.table_blocks_total.? - 1);
 
             table.table_blocks_written += 1;
             if (table.table_blocks_written == table.table_blocks_total.?) {
@@ -366,7 +366,7 @@ pub const GridBlocksMissing = struct {
         }
     }
 
-    fn enqueue_table_content(
+    fn enqueue_table_data(
         queue: *GridBlocksMissing,
         table: *RepairTable,
         index_block_data: BlockPtrConst,
@@ -375,7 +375,7 @@ pub const GridBlocksMissing = struct {
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
         assert(table.table_blocks_total == null);
         assert(table.table_blocks_written == 0);
-        assert(table.content_blocks_received.count() == 0);
+        assert(table.data_blocks_received.count() == 0);
 
         const index_schema = schema.TableIndex.from(index_block_data);
         const index_block_header = schema.header_from_block(index_block_data);
@@ -383,22 +383,22 @@ pub const GridBlocksMissing = struct {
         assert(index_block_header.checksum == table.index_checksum);
         assert(schema.BlockType.from(index_block_header.operation) == .index);
 
-        const content_blocks_total = index_schema.content_blocks_used(index_block_data);
-        table.table_blocks_total = 1 + content_blocks_total;
+        table.table_blocks_total = index_schema.data_blocks_used(index_block_data) + 1;
 
-        for (0..content_blocks_total) |content_block_index_usize| {
-            const content_block_index: u32 = @intCast(content_block_index_usize);
-            const block_id = index_schema.content_block(index_block_data, content_block_index);
-
+        for (
+            index_schema.data_addresses_used(index_block_data),
+            index_schema.data_checksums_used(index_block_data),
+            0..,
+        ) |address, checksum, index| {
             const enqueue = queue.enqueue_faulty_block(
-                block_id.block_address,
-                block_id.block_checksum,
-                .{ .table_content = .{ .table = table, .index = content_block_index } },
+                address,
+                checksum,
+                .{ .table_data = .{ .table = table, .index = @intCast(index) } },
             );
 
             if (enqueue == .replace) {
                 if (enqueue.replace.state == .writing) {
-                    table.content_blocks_received.set(content_block_index);
+                    table.data_blocks_received.set(index);
                 }
             } else {
                 assert(enqueue == .insert);
@@ -412,7 +412,7 @@ pub const GridBlocksMissing = struct {
         switch (queue.faulty_blocks.entries.items(.value)[fault_index].progress) {
             .block => queue.enqueued_blocks_single -= 1,
             .table_index => queue.enqueued_blocks_table -= 1,
-            .table_content => queue.enqueued_blocks_table -= 1,
+            .table_data => queue.enqueued_blocks_table -= 1,
         }
 
         queue.faulty_blocks.swapRemoveAt(fault_index);

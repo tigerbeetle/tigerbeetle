@@ -253,12 +253,6 @@ pub const PlotId = union(enum) {
     cache_misses: struct {
         cache_name: []const u8,
     },
-    filter_block_hits: struct {
-        tree_name: []const u8,
-    },
-    filter_block_misses: struct {
-        tree_name: []const u8,
-    },
 
     pub fn format(
         plot_id: PlotId,
@@ -272,8 +266,6 @@ pub const PlotId = union(enum) {
             .queue_count => |args| try writer.print("queue_count({s})", .{args.queue_name}),
             .cache_hits => |args| try writer.print("cache_hits({s})", .{args.cache_name}),
             .cache_misses => |args| try writer.print("cache_misses({s})", .{args.cache_name}),
-            .filter_block_hits => |args| try writer.print("filter_block_hits({s})", .{args.tree_name}),
-            .filter_block_misses => |args| try writer.print("filter_block_misses({s})", .{args.tree_name}),
         };
     }
 };
