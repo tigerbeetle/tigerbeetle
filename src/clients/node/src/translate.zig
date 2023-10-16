@@ -430,17 +430,17 @@ pub fn call_function(
     env: c.napi_env,
     this: c.napi_value,
     callback: c.napi_value,
-    argc: usize,
-    argv: [*]c.napi_value,
-) !void {
-    const result = c.napi_call_function(env, this, callback, argc, argv, null);
-    switch (result) {
+    args: []c.napi_value,
+) !c.napi_value {
+    var result: c.napi_value = undefined;
+    switch (c.napi_call_function(env, this, callback, args.len, args.ptr, &result)) {
         c.napi_ok => {},
         // the user's callback may throw a JS exception or call other functions that do so. We
         // therefore don't throw another error.
         c.napi_pending_exception => {},
         else => return throw(env, "Failed to invoke results callback."),
     }
+    return result;
 }
 
 pub fn scope(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {

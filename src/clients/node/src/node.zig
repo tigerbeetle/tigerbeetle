@@ -27,8 +27,15 @@ pub const std_options = struct {
     pub const log_level: std.log.Level = .err;
 };
 
+// Cached value for JS (null).
+var napi_null: c.napi_value = undefined;
+
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
+    if (c.napi_get_null(env, &napi_null) != c.napi_ok) {
+        translate.throw(env, "Failed to get JS (null) value.") catch return null;
+    }
+
     translate.register_function(env, exports, "init", init) catch return null;
     translate.register_function(env, exports, "deinit", deinit) catch return null;
     translate.register_function(env, exports, "submit", submit) catch return null;
@@ -296,7 +303,8 @@ fn on_completion_js(
     tb.release_packet(client, packet);
 
     // Parse Result array out of packet data, freeing it in the process.
-    var callback_error: c.napi_value = null;
+    // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
+    var callback_error = napi_null;
     const callback_result = (switch (op) {
         .create_accounts => encode_data_into_array(Account, CreateAccountsResult, env, data),
         .create_transfers => encode_data_into_array(Transfer, CreateTransfersResult, env, data),
@@ -307,7 +315,7 @@ fn on_completion_js(
             if (c.napi_get_and_clear_last_exception(env, &callback_error) != c.napi_ok) {
                 std.log.warn("Failed to capture callback error from thrown Exception.", .{});
             }
-            break :blk @as(c.napi_value, null);
+            break :blk napi_null;
         },
     };
 
@@ -316,7 +324,6 @@ fn on_completion_js(
         std.log.warn("Failed to delete reference to user's JS callback.", .{});
     };
 
-    const scope = translate.scope(env, "Failed to get \"this\" for results callback.") catch return;
     const callback = translate.reference_value(
         env,
         callback_ref,
@@ -324,7 +331,7 @@ fn on_completion_js(
     ) catch return;
 
     var args = [_]c.napi_value{ callback_error, callback_result };
-    translate.call_function(env, scope, callback, @intCast(args.len), &args) catch return;
+    _ = translate.call_function(env, napi_null, callback, &args) catch return;
 }
 
 // (De)Serialization
