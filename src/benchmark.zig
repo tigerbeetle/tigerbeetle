@@ -127,10 +127,12 @@ pub fn main() !void {
 
     const batch_accounts =
         try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
-    const batch_latency_ns =
-        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
-    const transfer_latency_ns =
-        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
+    // const batch_latency_ns =
+    //     try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
+    // _ = batch_latency_ns;
+    // const transfer_latency_ns =
+    //     try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
+    // _ = transfer_latency_ns;
     const batch_transfers =
         try std.ArrayListUnmanaged(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
     const transfer_start_ns =
@@ -165,8 +167,8 @@ pub fn main() !void {
         .account_id_permutation = account_id_permutation,
         .rng = rng,
         .timer = try std.time.Timer.start(),
-        .batch_latency_ns = batch_latency_ns,
-        .transfer_latency_ns = transfer_latency_ns,
+        // .batch_latency_ns = batch_latency_ns,
+        // .transfer_latency_ns = transfer_latency_ns,
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
@@ -202,8 +204,8 @@ const Benchmark = struct {
     account_id_permutation: IdPermutation,
     rng: std.rand.DefaultPrng,
     timer: std.time.Timer,
-    batch_latency_ns: std.ArrayListUnmanaged(u64),
-    transfer_latency_ns: std.ArrayListUnmanaged(u64),
+    // batch_latency_ns: std.ArrayListUnmanaged(u64),
+    // transfer_latency_ns: std.ArrayListUnmanaged(u64),
     batch_transfers: std.ArrayListUnmanaged(tb.Transfer),
     batch_start_ns: usize,
     transfers_sent: usize,
@@ -339,10 +341,10 @@ const Benchmark = struct {
             });
         }
 
-        b.batch_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
-        for (b.transfer_start_ns.items) |start_ns| {
-            b.transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
-        }
+        // b.batch_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
+        // for (b.transfer_start_ns.items) |start_ns| {
+        //     b.transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
+        // }
 
         b.batch_index += 1;
         b.transfers_sent += b.batch_transfers.items.len;
@@ -365,8 +367,9 @@ const Benchmark = struct {
                 return ns1 < ns2;
             }
         }).lessThan;
-        std.mem.sort(u64, b.batch_latency_ns.items, {}, less_than_ns);
-        std.mem.sort(u64, b.transfer_latency_ns.items, {}, less_than_ns);
+        _ = less_than_ns;
+        // std.mem.sort(u64, b.batch_latency_ns.items, {}, less_than_ns);
+        // std.mem.sort(u64, b.transfer_latency_ns.items, {}, less_than_ns);
 
         const stdout = std.io.getStdOut().writer();
 
@@ -383,8 +386,8 @@ const Benchmark = struct {
                 total_ns,
             ),
         }) catch unreachable;
-        print_deciles(stdout, "batch", b.batch_latency_ns.items);
-        print_deciles(stdout, "transfer", b.transfer_latency_ns.items);
+        // print_deciles(stdout, "batch", b.batch_latency_ns.items);
+        // print_deciles(stdout, "transfer", b.transfer_latency_ns.items);
 
         b.done = true;
     }

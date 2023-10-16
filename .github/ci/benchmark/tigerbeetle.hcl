@@ -74,7 +74,7 @@ job "__JOB_NAME__" {
         image = "debian:bullseye"
         entrypoint = ["/local/tigerbeetle.sh"]
         network_mode = "host"
-        memory_hard_limit = 60000
+        memory_hard_limit = 6000000
 
         mounts = [
           {
@@ -105,7 +105,7 @@ if ! [ -e "/tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle" ]; then
   ./tigerbeetle format --cluster=${var.cluster_id} --replica=${var.replica} --replica-count=${var.replica_count} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
 fi
 
-exec ./tigerbeetle start --addresses=${var.addresses} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
+exec ./tigerbeetle start --cache-grid=500GB --addresses=${var.addresses} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
     EOF
 
         destination = "local/tigerbeetle.sh"

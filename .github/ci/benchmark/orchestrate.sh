@@ -49,6 +49,8 @@ done
 # We fix our git URL, so we'll only ever run this on our own branches and not random PRs
 export NOMAD_VAR_git_url="https://github.com/tigerbeetle/tigerbeetle.git"
 export NOMAD_VAR_git_ref="${3}"
+echo export NOMAD_VAR_git_url="https://github.com/tigerbeetle/tigerbeetle.git"
+echo export NOMAD_VAR_git_ref="${3}"
 
 # Build the address string
 function join_by { local IFS="$1"; shift; echo "$*"; }
@@ -60,13 +62,13 @@ for replica in $(seq 1 "${REPLICA_COUNT}"); do
 	replica=$((replica - 1))
 	JOB_NAME="tigerbeetle-${TEST_ID}-${replica}"
 
-	export NOMAD_VAR_instance_id=${REPLICA_INSTANCE_IDS[$replica]}
-	export NOMAD_VAR_test_id="${TEST_ID}"
-	export NOMAD_VAR_replica="${replica}"
-	export NOMAD_VAR_replica_count="${REPLICA_COUNT}"
-	export NOMAD_VAR_addresses="${addresses}"
+	echo export NOMAD_VAR_instance_id=${REPLICA_INSTANCE_IDS[$replica]}
+	echo export NOMAD_VAR_test_id="${TEST_ID}"
+	echo export NOMAD_VAR_replica="${replica}"
+	echo export NOMAD_VAR_replica_count="${REPLICA_COUNT}"
+	echo export NOMAD_VAR_addresses="${addresses}"
 
-	sed "s/__JOB_NAME__/${JOB_NAME}/g" < tigerbeetle.hcl | nomad job run -detach - 1>&2
+	sed "s/__JOB_NAME__/${JOB_NAME}/g" < tigerbeetle.hcl > /tmp/job_to_run.hcl #| nomad job run -detach - 1>&2
 done
 
 # Spin up EC2 instance for test client
