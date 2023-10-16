@@ -32,9 +32,7 @@ var napi_null: c.napi_value = undefined;
 
 /// N-API will call this constructor automatically to register the module.
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
-    if (c.napi_get_null(env, &napi_null) != c.napi_ok) {
-        translate.throw(env, "Failed to get JS (null) value.") catch return null;
-    }
+    napi_null = translate.capture_null(env) catch return null;
 
     translate.register_function(env, exports, "init", init) catch return null;
     translate.register_function(env, exports, "deinit", deinit) catch return null;
@@ -45,20 +43,16 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
 // Add-on code
 
 fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 1;
-    var argv: [1]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
-        translate.throw(env, "Failed to get args for init().") catch return null;
-    }
-    if (argc != 1) {
-        translate.throw(env, "Function init() requires exactly 1 argument.") catch return null;
-    }
+    const args = translate.extract_args(env, info, .{
+        .count = 1,
+        .function = "init",
+    }) catch return null;
 
-    const cluster = translate.u32_from_object(env, argv[0], "cluster_id") catch return null;
-    const concurrency = translate.u32_from_object(env, argv[0], "concurrency") catch return null;
+    const cluster = translate.u32_from_object(env, args[0], "cluster_id") catch return null;
+    const concurrency = translate.u32_from_object(env, args[0], "concurrency") catch return null;
     const addresses = translate.slice_from_object(
         env,
-        argv[0],
+        args[0],
         "replica_addresses",
     ) catch return null;
 
@@ -66,36 +60,28 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
 }
 
 fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 1;
-    var argv: [1]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
-        translate.throw(env, "Failed to get args for deinit().") catch return null;
-    }
-    if (argc != 1) {
-        translate.throw(env, "Function deinit() requires exactly 1 argument.") catch return null;
-    }
+    const args = translate.extract_args(env, info, .{
+        .count = 1,
+        .function = "deinit",
+    }) catch return null;
 
-    destroy(env, argv[0]) catch {};
+    destroy(env, args[0]) catch {};
     return null;
 }
 
 fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
-    var argc: usize = 4;
-    var argv: [4]c.napi_value = undefined;
-    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
-        translate.throw(env, "Failed to get args.") catch return null;
-    }
-    if (argc != 4) {
-        translate.throw(env, "Function submit() requires exactly 4 arguments.") catch return null;
-    }
+    const args = translate.extract_args(env, info, .{
+        .count = 4,
+        .function = "submit",
+    }) catch return null;
 
-    const operation_int = translate.u32_from_value(env, argv[1], "operation") catch return null;
+    const operation_int = translate.u32_from_value(env, args[1], "operation") catch return null;
     if (!@as(vsr.Operation, @enumFromInt(operation_int)).valid(StateMachine)) {
         translate.throw(env, "Unknown operation.") catch return null;
     }
 
     var is_array: bool = undefined;
-    if (c.napi_is_array(env, argv[2], &is_array) != c.napi_ok) {
+    if (c.napi_is_array(env, args[2], &is_array) != c.napi_ok) {
         translate.throw(env, "Failed to check array argument type.") catch return null;
     }
     if (!is_array) {
@@ -103,7 +89,7 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
     }
 
     var callback_type: c.napi_valuetype = undefined;
-    if (c.napi_typeof(env, argv[3], &callback_type) != c.napi_ok) {
+    if (c.napi_typeof(env, args[3], &callback_type) != c.napi_ok) {
         translate.throw(env, "Failed to check callback argument type.") catch return null;
     }
     if (callback_type != c.napi_function) {
@@ -112,10 +98,10 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 
     request(
         env,
-        argv[0],
+        args[0],
         @enumFromInt(@as(u8, @intCast(operation_int))),
-        argv[2],
-        argv[3],
+        args[2],
+        args[3],
     ) catch {};
     return null;
 }
@@ -218,6 +204,7 @@ fn request(
     };
     errdefer tb.release_packet(client, packet);
 
+    // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
     if (c.napi_create_reference(env, callback, 1, &callback_ref) != c.napi_ok) {
         return translate.throw(env, "Failed to create reference to callback.");
@@ -226,6 +213,7 @@ fn request(
         std.log.warn("Failed to delete reference to callback on error.", .{});
     };
 
+    // NOTE: No error returns allowed after this call as data can't be `errdefer free()` on its own.
     const data = switch (op) {
         .create_accounts => try decode_array_into_data(Account, CreateAccountsResult, env, array),
         .create_transfers => try decode_array_into_data(Transfer, CreateTransfersResult, env, array),
@@ -262,18 +250,22 @@ fn on_completion(
     // Copy the results given to use into the packet dataa.
     const events = @as([*]align(16) u8, @ptrCast(@alignCast(packet.data.?)))[0..packet.data_size];
     const results = result_ptr.?[0..result_len];
-    const result_data = switch (@as(Operation, @enumFromInt(packet.operation))) {
+    const data_size = switch (@as(Operation, @enumFromInt(packet.operation))) {
         .create_accounts => encode_results_into_data(Account, CreateAccountsResult, results, events),
         .create_transfers => encode_results_into_data(Transfer, CreateTransfersResult, results, events),
         .lookup_accounts => encode_results_into_data(u128, Account, results, events),
         .lookup_transfers => encode_results_into_data(u128, Transfer, results, events),
     };
 
-    // Update the packet data size with the results and stuff client in packet.next to avoid alloc.
-    packet.data_size = @intCast(result_data.len);
+    // Stuff the event size along with the packet result size into the packet.
+    // The former is needed to know the full heap allocation size in packet.data.
+    // The latter is needed to know how many Results in packet.data to serialize for JS.
+    packet.data_size = @bitCast(data_size);
+
+    // Stuff client pointer into packet.next to store it until the packet arrives on the JS thread.
     @as(*usize, @ptrCast(&packet.next)).* = @intFromPtr(client);
 
-    // Process the packet on the JS thread.
+    // Queue the packet to be processed on the JS thread to invoke its JS callback.
     const on_completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(on_completion_ctx);
     switch (c.napi_call_threadsafe_function(on_completion_tsfn, packet, c.napi_tsfn_nonblocking)) {
         c.napi_ok => {},
@@ -297,7 +289,8 @@ fn on_completion_js(
     // Extract all the packet information and release it back to the client.
     const client: tb.tb_client_t = @ptrFromInt(@as(*usize, @ptrCast(&packet.next)).*);
     const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
-    const data = @as([*]align(16) u8, @ptrCast(@alignCast(packet.data.?)))[0..packet.data_size];
+    const data: [*]align(16) u8 = @ptrCast(@alignCast(packet.data.?));
+    const data_size: DataSize = @bitCast(packet.data_size);
     const op: Operation = @enumFromInt(packet.operation);
     tb.release_packet(client, packet);
 
@@ -305,10 +298,10 @@ fn on_completion_js(
     // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
     var callback_error = napi_null;
     const callback_result = (switch (op) {
-        .create_accounts => encode_data_into_array(Account, CreateAccountsResult, env, data),
-        .create_transfers => encode_data_into_array(Transfer, CreateTransfersResult, env, data),
-        .lookup_accounts => encode_data_into_array(u128, Account, env, data),
-        .lookup_transfers => encode_data_into_array(u128, Transfer, env, data),
+        .create_accounts => encode_data_into_array(Account, CreateAccountsResult, env, data, data_size),
+        .create_transfers => encode_data_into_array(Transfer, CreateTransfersResult, env, data, data_size),
+        .lookup_accounts => encode_data_into_array(u128, Account, env, data, data_size),
+        .lookup_transfers => encode_data_into_array(u128, Transfer, env, data, data_size),
     }) catch |err| switch (err) {
         error.ExceptionThrown => blk: {
             if (c.napi_get_and_clear_last_exception(env, &callback_error) != c.napi_ok) {
@@ -326,7 +319,7 @@ fn on_completion_js(
     const callback = translate.reference_value(
         env,
         callback_ref,
-        "Failed to get callback reference.",
+        "Failed to get callback from reference.",
     ) catch return;
 
     var args = [_]c.napi_value{ callback_error, callback_result };
@@ -401,38 +394,48 @@ fn decode_array_into_data(
     return std.mem.sliceAsBytes(events);
 }
 
+const DataSize = packed struct(u32) {
+    event_count: u16,
+    result_count: u16,
+};
+
 fn encode_results_into_data(
     comptime Event: type,
     comptime Result: type,
     result_bytes: []const u8,
     event_data: []align(16) u8,
-) []u8 {
+) DataSize {
     // Event data should have been allocated with enough space to also contain the Results.
     const event_count = @divExact(event_data.len, @sizeOf(Event));
     const results = std.mem.bytesAsSlice(Result, event_data.ptr[0 .. @sizeOf(Result) * event_count]);
 
     const packet_results = std.mem.bytesAsSlice(Result, result_bytes);
     assert(packet_results.len <= results.len);
+    @memcpy(results[0..packet_results.len], packet_results);
 
-    const data_results = results[0..packet_results.len];
-    @memcpy(data_results, packet_results);
-    return std.mem.sliceAsBytes(data_results);
+    return .{
+        .event_count = @intCast(event_count),
+        .result_count = @intCast(packet_results.len),
+    };
 }
 
 fn encode_data_into_array(
     comptime Event: type,
     comptime Result: type,
     env: c.napi_env,
-    result_data: []align(16) u8,
+    data: [*]align(16) u8,
+    data_size: DataSize,
 ) !c.napi_value {
     // Make sure to deallocate the data memory at the end.
-    const results = std.mem.bytesAsSlice(Result, result_data);
     defer {
-        const alloc_size = @max(@sizeOf(Result) * results.len, @sizeOf(Event) * results.len);
-        const data: []align(16) u8 = @alignCast(result_data.ptr[0..alloc_size]);
-        allocator.free(data);
+        const alloc_size = @max(
+            @sizeOf(Result) * data_size.result_count,
+            @sizeOf(Event) * data_size.event_count,
+        );
+        allocator.free(data[0..alloc_size]);
     }
 
+    const results = std.mem.bytesAsSlice(Result, data[0 .. @sizeOf(Result) * data_size.result_count]);
     const array = try translate.create_array(
         env,
         @as(u32, @intCast(results.len)),
