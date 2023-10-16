@@ -311,7 +311,7 @@ comptime {
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
     assert(grid_repair_writes_max <=
-        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_content_blocks_max);
+        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_data_blocks_max);
 
     assert(grid_missing_blocks_max > 0);
     assert(grid_missing_tables_max > 0);
@@ -500,7 +500,7 @@ comptime {
 /// A higher growth factor increases write amplification (by increasing the number of tables in
 /// level B that overlap a table in level A in a compaction), but decreases read amplification (by
 /// reducing the height of the tree and thus the number of levels that must be probed). Since read
-/// amplification can be optimized more easily (with filters and caching), we target a growth
+/// amplification can be optimized more easily (with caching), we target a growth
 /// factor of 8 for lower write amplification rather than the more typical growth factor of 10.
 pub const lsm_growth_factor = config.cluster.lsm_growth_factor;
 
@@ -523,9 +523,9 @@ pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 /// The maximum number of blocks that can possibly be referenced by any table index block.
 ///
 /// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
-///   tree configuration. (To avoid prevent Grid from depending on StateMachine).
-/// - This counts filter and data blocks, but does not count the index block itself.
-pub const lsm_table_content_blocks_max = table_blocks_max: {
+///   tree configuration. (To prevent Grid from depending on StateMachine).
+/// - This counts data blocks, but does not count the index block itself.
+pub const lsm_table_data_blocks_max = table_blocks_max: {
     const checksum_size = @sizeOf(u128);
     const address_size = @sizeOf(u64);
     break :table_blocks_max @divFloor(

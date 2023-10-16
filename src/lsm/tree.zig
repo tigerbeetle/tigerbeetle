@@ -14,14 +14,12 @@ const tracer = @import("../tracer.zig");
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const bloom_filter = @import("bloom_filter.zig");
 const schema = @import("schema.zig");
 
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 pub const ScopeCloseMode = enum { persist, discard };
-const Fingerprint = bloom_filter.Fingerprint;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
@@ -151,8 +149,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         compaction_next_tick: Grid.NextTick = undefined,
 
         tracer_slot: ?tracer.SpanStart = null,
-        filter_block_hits: u64 = 0,
-        filter_block_misses: u64 = 0,
 
         active_scope: ?TableMemory.ValueContext = null,
 
@@ -312,16 +308,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// - .possible if the key may exist in the Manifest but its existence cannot be
         ///  ascertained without IO, along with the level number at which IO must be performed.
         ///
-        /// This function attempts to fetch the index, filter & data blocks for the tables that
+        /// This function attempts to fetch the index & data blocks for the tables that
         /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
-        /// the existence of the key in the filter/data block. If any of the blocks needed to
+        /// the existence of the key in the data block. If any of the blocks needed to
         /// ascertain the existence of the key are not in the Grid cache, it bails out.
-        pub fn lookup_from_levels_cache(
-            tree: *Tree,
-            snapshot: u64,
-            key: Key,
-            fingerprint: Fingerprint,
-        ) LookupMemoryResult {
+        pub fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
             var iterator = tree.manifest.lookup(snapshot, key, 0);
             while (iterator.next()) |table| {
                 const index_block = tree.grid.read_block_from_cache(
@@ -335,33 +326,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 };
 
                 const key_blocks = Table.index_blocks_for_key(index_block, key) orelse continue;
-
-                // Only general purpose tables have filter blocks.
-                if (comptime Table.usage == .general) {
-                    switch (tree.cached_filter_block_search(
-                        key_blocks.filter_block_address,
-                        key_blocks.filter_block_checksum,
-                        fingerprint,
-                    )) {
-                        .negative => {
-                            if (constants.verify) {
-                                assert(tree.cached_data_block_search(
-                                    key_blocks.data_block_address,
-                                    key_blocks.data_block_checksum,
-                                    key,
-                                ) != .positive);
-                            }
-                            // Filter block indicates that the key is not present in the data block,
-                            // move on to the next table that could contain the key.
-                            continue;
-                        },
-                        .possible, .block_not_in_cache => {
-                            // Give yourself another fighting chance to rule out the existence of
-                            // the key; search for the data block in the grid cache.
-                        },
-                    }
-                }
-
                 switch (tree.cached_data_block_search(
                     key_blocks.data_block_address,
                     key_blocks.data_block_checksum,
@@ -377,31 +341,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
             // Key not present in the Manifest.
             return .negative;
-        }
-
-        fn cached_filter_block_search(
-            tree: *Tree,
-            address: u64,
-            checksum: u128,
-            fingerprint: Fingerprint,
-        ) enum { negative, possible, block_not_in_cache } {
-            comptime assert(Table.usage == .general);
-
-            if (tree.grid.read_block_from_cache(
-                address,
-                checksum,
-                .{ .coherent = true },
-            )) |filter_block| {
-                const filter_schema = schema.TableFilter.from(filter_block);
-                const filter_bytes = filter_schema.block_filter_const(filter_block);
-                if (!bloom_filter.may_contain(fingerprint, filter_bytes)) {
-                    return .negative;
-                } else {
-                    return .possible;
-                }
-            } else {
-                return .block_not_in_cache;
-            }
         }
 
         fn cached_data_block_search(
@@ -435,7 +374,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             context: *LookupContext,
             snapshot: u64,
             key: Key,
-            fingerprint: Fingerprint,
             level_min: u8,
         }) void {
             var index_block_count: u8 = 0;
@@ -465,14 +403,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             parameters.context.* = .{
                 .tree = tree,
                 .completion = undefined,
-
                 .key = parameters.key,
-                .fingerprint = parameters.fingerprint,
-
                 .index_block_count = index_block_count,
                 .index_block_addresses = index_block_addresses,
                 .index_block_checksums = index_block_checksums,
-
                 .callback = parameters.callback,
             };
 
@@ -487,7 +421,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             completion: Read,
 
             key: Key,
-            fingerprint: Fingerprint,
 
             /// This value is an index into the index_block_addresses/checksums arrays.
             index_block: u8 = 0,
@@ -536,62 +469,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .checksum = blocks.data_block_checksum,
                 };
 
-                // Only general purpose tables have filter blocks.
-                if (comptime Table.usage == .general) {
-                    context.tree.grid.read_block(
-                        .{ .from_local_or_global_storage = read_filter_block_callback },
-                        completion,
-                        blocks.filter_block_address,
-                        blocks.filter_block_checksum,
-                        .{ .cache_read = true, .cache_write = true },
-                    );
-                } else {
-                    context.tree.grid.read_block(
-                        .{ .from_local_or_global_storage = read_data_block_callback },
-                        completion,
-                        context.data_block.?.address,
-                        context.data_block.?.checksum,
-                        .{ .cache_read = true, .cache_write = true },
-                    );
-                }
-            }
-
-            fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
-                comptime assert(Table.usage == .general);
-
-                const context = @fieldParentPtr(LookupContext, "completion", completion);
-                assert(context.data_block != null);
-                assert(context.index_block < context.index_block_count);
-                assert(context.index_block_count > 0);
-                assert(context.index_block_count <= constants.lsm_levels);
-                assert(schema.TableFilter.tree_id(filter_block) == context.tree.config.id);
-
-                const filter_schema = schema.TableFilter.from(filter_block);
-                const filter_bytes = filter_schema.block_filter_const(filter_block);
-                if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
-                    context.tree.filter_block_hits += 1;
-                    tracer.plot(
-                        .{ .filter_block_hits = .{ .tree_name = context.tree.config.name } },
-                        @as(f64, @floatFromInt(context.tree.filter_block_hits)),
-                    );
-
-                    context.tree.grid.read_block(
-                        .{ .from_local_or_global_storage = read_data_block_callback },
-                        completion,
-                        context.data_block.?.address,
-                        context.data_block.?.checksum,
-                        .{ .cache_read = true, .cache_write = true },
-                    );
-                } else {
-                    context.tree.filter_block_misses += 1;
-                    tracer.plot(
-                        .{ .filter_block_misses = .{ .tree_name = context.tree.config.name } },
-                        @as(f64, @floatFromInt(context.tree.filter_block_misses)),
-                    );
-
-                    // The key is not present in this table, check the next level.
-                    context.advance_to_next_level();
-                }
+                context.tree.grid.read_block(
+                    .{ .from_local_or_global_storage = read_data_block_callback },
+                    completion,
+                    context.data_block.?.address,
+                    context.data_block.?.checksum,
+                    .{ .cache_read = true, .cache_write = true },
+                );
             }
 
             fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
@@ -1252,38 +1136,6 @@ pub fn table_count_max_for_level(growth_factor: u32, level: u32) u32 {
     assert(level < constants.lsm_levels);
 
     return math.pow(u32, growth_factor, level + 1);
-}
-
-pub inline fn key_fingerprint(key: anytype) Fingerprint {
-    return Fingerprint.create(stdx.hash_inline(
-        // Composite keys are filtered by the prefix only.
-        if (comptime is_composite_key(@TypeOf(key)))
-            key.field
-        else
-            key,
-    ));
-}
-
-fn is_composite_key(comptime Key: type) bool {
-    if (@typeInfo(Key) == .Struct and
-        @hasField(Key, "field") and
-        @hasField(Key, "timestamp"))
-    {
-        const Field = std.meta.fieldInfo(Key, .field).type;
-        return Key == CompositeKeyType(Field);
-    }
-
-    return false;
-}
-
-test "is_composite_key" {
-    const expect = std.testing.expect;
-
-    try expect(is_composite_key(CompositeKeyType(u128)));
-    try expect(!is_composite_key(u128));
-
-    try expect(is_composite_key(CompositeKeyType(u64)));
-    try expect(!is_composite_key(u64));
 }
 
 test "table_count_max_for_level/tree" {

@@ -18,7 +18,6 @@ test {
     _ = @import("clients/node/node_bindings.zig");
 
     _ = @import("lsm/binary_search.zig");
-    _ = @import("lsm/bloom_filter.zig");
     _ = @import("lsm/cache_map.zig");
     _ = @import("lsm/composite_key.zig");
     _ = @import("lsm/forest.zig");

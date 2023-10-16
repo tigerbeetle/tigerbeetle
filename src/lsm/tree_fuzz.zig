@@ -22,7 +22,6 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
-const key_fingerprint = @import("tree.zig").key_fingerprint;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 
 const Grid = GridType(Storage);
@@ -305,7 +304,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.fuzzing, .tree_lookup);
             env.lookup_value = null;
 
-            const fingerprint = key_fingerprint(key);
             if (env.tree.lookup_from_memory(key)) |value| {
                 get_callback(&env.lookup_context, Tree.unwrap_tombstone(value));
             } else {
@@ -314,7 +312,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     .context = &env.lookup_context,
                     .snapshot = snapshot_latest,
                     .key = key,
-                    .fingerprint = fingerprint,
                     .level_min = 0,
                 });
             }
