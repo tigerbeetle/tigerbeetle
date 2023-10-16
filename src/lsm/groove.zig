@@ -419,10 +419,13 @@ pub fn GrooveType(
         const trees_total = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
         const TreesBitSet = std.StaticBitSet(trees_total);
 
-        const PrefetchKeys = std.AutoHashMapUnmanaged(union(enum) {
-            id: PrimaryKey,
-            timestamp: u64,
-        }, u8);
+        const PrefetchKeys = std.AutoHashMapUnmanaged(
+            union(enum) {
+                id: PrimaryKey,
+                timestamp: u64,
+            },
+            struct { level: u8 },
+        );
 
         compacting: ?struct {
             /// Count which tree compactions are in progress.
@@ -646,7 +649,7 @@ pub fn GrooveType(
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
                         .{ .id = id },
-                        level,
+                        .{ .level = level },
                     );
                 },
             }
@@ -667,7 +670,7 @@ pub fn GrooveType(
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
                         .{ .timestamp = timestamp },
-                        level,
+                        .{ .level = level },
                     );
                 },
             }
@@ -786,7 +789,7 @@ pub fn GrooveType(
                                 .context = worker.lookup.get(.id),
                                 .snapshot = worker.context.snapshot,
                                 .key = id,
-                                .level_min = prefetch_entry.value_ptr.*,
+                                .level_min = prefetch_entry.value_ptr.level,
                             });
                         } else unreachable;
                     },
@@ -796,7 +799,7 @@ pub fn GrooveType(
                             .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .level_min = prefetch_entry.value_ptr.*,
+                            .level_min = prefetch_entry.value_ptr.level,
                         });
                     },
                 }
