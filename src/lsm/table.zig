@@ -101,8 +101,6 @@ pub fn TableType(
         }
 
         pub const layout = layout: {
-            @setEvalBranchQuota(10_000);
-
             assert(block_size % constants.sector_size == 0);
             assert(math.isPowerOfTwo(block_size));
 

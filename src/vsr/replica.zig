@@ -7842,7 +7842,7 @@ pub fn ReplicaType(
         /// - repaired the manifest blocks,
         /// - and opened the state machine.
         /// Now we sync:
-        /// - the missed LSM table blocks (index/filter/data), and
+        /// - the missed LSM table blocks (index/data), and
         /// - client reply messages.
         fn sync_content(self: *Self) void {
             assert(self.syncing == .idle);

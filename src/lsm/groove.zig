@@ -419,11 +419,10 @@ pub fn GrooveType(
         const trees_total = @as(usize, 1) + @intFromBool(has_id) + std.meta.fields(IndexTrees).len;
         const TreesBitSet = std.StaticBitSet(trees_total);
 
-        const PrefetchKey = struct { key: union(enum) {
+        const PrefetchKeys = std.AutoHashMapUnmanaged(union(enum) {
             id: PrimaryKey,
             timestamp: u64,
-        }, level: u8 };
-        const PrefetchKeys = std.AutoHashMapUnmanaged(PrefetchKey, void);
+        }, u8);
 
         compacting: ?struct {
             /// Count which tree compactions are in progress.
@@ -646,11 +645,8 @@ pub fn GrooveType(
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
-                        .{
-                            .key = .{ .id = id },
-                            .level = level,
-                        },
-                        {},
+                        .{ .id = id },
+                        level,
                     );
                 },
             }
@@ -670,11 +666,8 @@ pub fn GrooveType(
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
-                        .{
-                            .key = .{ .timestamp = timestamp },
-                            .level = level,
-                        },
-                        {},
+                        .{ .timestamp = timestamp },
+                        level,
                     );
                 },
             }
@@ -785,7 +778,7 @@ pub fn GrooveType(
                 // prefetch_enqueue() ensures that the tree's cache is checked before queueing the
                 // object for prefetching. If not in the LSM tree's cache, the object must be read
                 // from disk and added to the auxiliary prefetch_objects hash map.
-                switch (prefetch_entry.key_ptr.key) {
+                switch (prefetch_entry.key_ptr.*) {
                     .id => |id| {
                         if (has_id) {
                             worker.context.groove.ids.lookup_from_levels_storage(.{
@@ -793,7 +786,7 @@ pub fn GrooveType(
                                 .context = worker.lookup.get(.id),
                                 .snapshot = worker.context.snapshot,
                                 .key = id,
-                                .level_min = prefetch_entry.key_ptr.level,
+                                .level_min = prefetch_entry.value_ptr.*,
                             });
                         } else unreachable;
                     },
@@ -803,7 +796,7 @@ pub fn GrooveType(
                             .context = worker.lookup.get(.object),
                             .snapshot = worker.context.snapshot,
                             .key = timestamp,
-                            .level_min = prefetch_entry.key_ptr.level,
+                            .level_min = prefetch_entry.value_ptr.*,
                         });
                     },
                 }
