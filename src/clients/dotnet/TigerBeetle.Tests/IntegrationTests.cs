@@ -1128,9 +1128,16 @@ namespace TigerBeetle.Tests
         {
             CleanUp();
 
-            var format = Process.Start(TB_SERVER, FORMAT);
-            format.WaitForExit();
-            if (format.ExitCode != 0) throw new InvalidOperationException("format failed");
+            {
+                var format = new Process();
+                format.StartInfo.FileName = TB_SERVER;
+                format.StartInfo.Arguments = FORMAT;
+                format.StartInfo.RedirectStandardError = true;
+                format.Start();
+                var formatStderr = format.StandardError.ReadToEnd();
+                format.WaitForExit();
+                if (format.ExitCode != 0) throw new InvalidOperationException($"format failed, ExitCode={format.ExitCode} stderr:\n{formatStderr}");
+            }
 
             process = new Process();
             process.StartInfo.FileName = TB_SERVER;
