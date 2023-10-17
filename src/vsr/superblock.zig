@@ -459,7 +459,10 @@ const superblock_trailer_client_sessions_size_max = blk: {
 
 /// The size of a data file that has an empty grid.
 pub const data_file_size_min =
-    superblock_zone_size + constants.journal_size + constants.client_replies_size;
+    superblock_zone_size +
+    constants.journal_size +
+    constants.client_replies_size +
+    vsr.Zone.size(.grid_padding).?;
 
 /// The maximum number of blocks in the grid.
 pub const grid_blocks_max = blk: {

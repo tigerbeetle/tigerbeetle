@@ -170,13 +170,10 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
-        if (zone.size()) |zone_size| {
-            assert(offset_in_zone + buffer.len <= zone_size);
-        }
+        zone.verify_iop(buffer, offset_in_zone);
+        assert(zone != .grid_padding);
 
         const offset_in_storage = zone.offset(offset_in_zone);
-        assert_alignment(buffer, offset_in_storage);
-
         read.* = .{
             .completion = undefined,
             .callback = callback,
@@ -190,6 +187,8 @@ pub const Storage = struct {
     }
 
     fn start_read(self: *Storage, read: *Storage.Read, bytes_read: ?usize) void {
+        assert(read.offset % constants.sector_size == 0);
+
         const bytes = bytes_read orelse 0;
         assert(bytes <= read.target().len);
 
@@ -324,13 +323,10 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
-        if (zone.size()) |zone_size| {
-            assert(offset_in_zone + buffer.len <= zone_size);
-        }
+        zone.verify_iop(buffer, offset_in_zone);
+        maybe(zone == .grid_padding); // Padding is zeroed during format.
 
         const offset_in_storage = zone.offset(offset_in_zone);
-        assert_alignment(buffer, offset_in_storage);
-
         write.* = .{
             .completion = undefined,
             .callback = callback,
@@ -344,7 +340,9 @@ pub const Storage = struct {
     }
 
     fn start_write(self: *Storage, write: *Storage.Write) void {
+        assert(write.offset % constants.sector_size == 0);
         self.assert_bounds(write.buffer, write.offset);
+
         self.io.write(
             *Storage,
             self,
@@ -393,16 +391,6 @@ pub const Storage = struct {
         }
 
         self.start_write(write);
-    }
-
-    /// Ensures that the read or write is aligned correctly for Direct I/O.
-    /// If this is not the case, then the underlying syscall will return EINVAL.
-    /// We check this only at the start of a read or write because the physical sector size may be
-    /// less than our logical sector size so that partial IOs then leave us no longer aligned.
-    fn assert_alignment(buffer: []const u8, offset: u64) void {
-        assert(@intFromPtr(buffer.ptr) % constants.sector_size == 0);
-        assert(buffer.len % constants.sector_size == 0);
-        assert(offset % constants.sector_size == 0);
     }
 
     /// Ensures that the read or write is within bounds and intends to read or write some bytes.

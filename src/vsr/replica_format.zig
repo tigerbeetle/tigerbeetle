@@ -27,6 +27,9 @@ pub fn format(
     try replica_format.format_replies(allocator, storage);
     assert(!replica_format.formatting);
 
+    try replica_format.format_grid_padding(allocator, storage);
+    assert(!replica_format.formatting);
+
     superblock.format(
         ReplicaFormat.format_superblock_callback,
         &replica_format.superblock_context,
@@ -162,6 +165,38 @@ fn ReplicaFormatType(comptime Storage: type) type {
             }
         }
 
+        fn format_grid_padding(
+            self: *Self,
+            allocator: std.mem.Allocator,
+            storage: *Storage,
+        ) !void {
+            assert(!self.formatting);
+
+            const padding_size = vsr.Zone.size(.grid_padding).?;
+            assert(padding_size < constants.block_size);
+
+            if (padding_size > 0) {
+                // Direct I/O requires the buffer to be sector-aligned.
+                var padding_buffer = try allocator.alignedAlloc(
+                    u8,
+                    constants.sector_size,
+                    vsr.Zone.size(.grid_padding).?,
+                );
+                defer allocator.free(padding_buffer);
+                @memset(padding_buffer, 0);
+
+                storage.write_sectors(
+                    write_sectors_callback,
+                    &self.write,
+                    padding_buffer,
+                    .grid_padding,
+                    0,
+                );
+                self.formatting = true;
+                while (self.formatting) storage.tick();
+            }
+        }
+
         fn write_sectors_callback(write: *Storage.Write) void {
             const self = @fieldParentPtr(Self, "write", write);
             assert(self.formatting);
@@ -252,4 +287,12 @@ test "format" {
     try std.testing.expect(stdx.zeroed(
         storage.memory[vsr.Zone.client_replies.offset(0)..][0..vsr.Zone.client_replies.size().?],
     ));
+
+    // Verify grid padding.
+    const padding_size = vsr.Zone.grid_padding.size().?;
+    if (padding_size > 0) {
+        try std.testing.expect(stdx.zeroed(
+            storage.memory[vsr.Zone.grid_padding.offset(0)..][0..vsr.Zone.grid_padding.size().?],
+        ));
+    }
 }
