@@ -101,17 +101,8 @@ pub const NodeDocs = Docs{
     .current_commit_pre_install_hook = null,
     .current_commit_post_install_hook = node_current_commit_post_install_hook,
 
-    .install_documentation =
-    \\If you run into issues, check out the distribution-specific install
-    \\steps that are run in CI to test support:
-    \\
-    \\* [Alpine](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_alpine.sh)
-    \\* [Amazon Linux](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_amazonlinux.sh)
-    \\* [Debian](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_debian.sh)
-    \\* [Fedora](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_fedora.sh)
-    \\* [Ubuntu](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_ubuntu.sh)
-    \\* [RHEL](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/node/scripts/test_install_on_rhelubi.sh)
-    ,
+    .install_documentation = "",
+
     .examples =
     \\### Sidenote: `BigInt`
     \\TigerBeetle uses 64-bit integers for many fields while JavaScript's
