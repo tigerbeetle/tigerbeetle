@@ -15,6 +15,7 @@
 //!     the right defaults.
 
 const std = @import("std");
+const log = std.log;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
@@ -37,28 +38,32 @@ arena: std.heap.ArenaAllocator,
 /// eager initialization is more ergonomic.
 project_root: std.fs.Dir,
 
-pub fn create(allocator: std.mem.Allocator) !*Shell {
-    var arena = std.heap.ArenaAllocator.init(allocator);
+env: std.process.EnvMap,
+
+pub fn create(gpa: std.mem.Allocator) !*Shell {
+    var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
 
     var project_root = try discover_project_root();
     errdefer project_root.close();
 
-    var result = try allocator.create(Shell);
+    var result = try gpa.create(Shell);
     result.* = Shell{
-        .gpa = allocator,
+        .gpa = gpa,
         .arena = arena,
         .project_root = project_root,
+        .env = try std.process.getEnvMap(gpa),
     };
 
     return result;
 }
 
 pub fn destroy(shell: *Shell) void {
-    const allocator = shell.gpa;
+    const gpa = shell.gpa;
 
+    shell.env.deinit();
     shell.arena.deinit();
-    allocator.destroy(shell);
+    gpa.destroy(shell);
 }
 
 const ansi = .{
@@ -97,6 +102,18 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
     std.debug.print(fmt_ansi, fmt_args);
 }
 
+pub fn print(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) ![]const u8 {
+    return std.fmt.allocPrint(shell.arena.allocator(), fmt, fmt_args);
+}
+
+pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
+    errdefer {
+        log.err("environment variable '{s}' not defined", .{var_name});
+    }
+
+    return try std.process.getEnvVarOwned(shell.arena.allocator(), var_name);
+}
+
 /// Checks if the path exists and is a directory.
 pub fn dir_exists(shell: *Shell, path: []const u8) !bool {
     _ = shell;
@@ -114,13 +131,28 @@ fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
     return stat.kind == .directory;
 }
 
+const FindOptions = struct {
+    where: []const []const u8,
+    extension: ?[]const u8 = null,
+    extensions: ?[]const []const u8 = null,
+};
+
 /// Analogue of the `find` utility, returns a set of paths matching filtering criteria.
 ///
 /// Returned slice is stored in `Shell.arena`.
-pub fn find(shell: *Shell, options: struct {
-    where: []const []const u8,
-    ends_with: []const u8,
-}) ![]const []const u8 {
+pub fn find(shell: *Shell, options: FindOptions) ![]const []const u8 {
+    if (options.extension != null and options.extensions != null) {
+        @panic("conflicting extension filters");
+    }
+    if (options.extension) |extension| {
+        assert(extension[0] == '.');
+    }
+    if (options.extensions) |extensions| {
+        for (extensions) |extension| {
+            assert(extension[0] == '.');
+        }
+    }
+
     var result = std.ArrayList([]const u8).init(shell.arena.allocator());
 
     const cwd = std.fs.cwd();
@@ -132,7 +164,7 @@ pub fn find(shell: *Shell, options: struct {
         defer walker.deinit();
 
         while (try walker.next()) |entry| {
-            if (std.mem.endsWith(u8, entry.path, options.ends_with)) {
+            if (entry.kind == .file and find_filter_path(entry.path, options)) {
                 const full_path =
                     try std.fs.path.join(shell.arena.allocator(), &.{ base_path, entry.path });
                 try result.append(full_path);
@@ -141,6 +173,40 @@ pub fn find(shell: *Shell, options: struct {
     }
 
     return result.items;
+}
+
+fn find_filter_path(path: []const u8, options: FindOptions) bool {
+    if (options.extension == null and options.extensions == null) return true;
+    if (options.extension != null and options.extensions != null) @panic("conflicting filters");
+
+    if (options.extension) |extension| {
+        return std.mem.endsWith(u8, path, extension);
+    }
+
+    if (options.extensions) |extensions| {
+        for (extensions) |extension| {
+            if (std.mem.endsWith(u8, path, extension)) return true;
+        }
+        return false;
+    }
+
+    unreachable;
+}
+
+/// Copy file, creating the destination directory as necessary.
+pub fn copy_path(
+    src_dir: std.fs.Dir,
+    src_path: []const u8,
+    dst_dir: std.fs.Dir,
+    dst_path: []const u8,
+) !void {
+    errdefer {
+        log.err("failed to copy {s} to {s}", .{ src_path, dst_path });
+    }
+    if (std.fs.path.dirname(dst_path)) |dir| {
+        try dst_dir.makePath(dir);
+    }
+    try src_dir.copyFile(src_path, dst_dir, dst_path, .{});
 }
 
 /// Runs the given command with inherited stdout and stderr.
@@ -160,7 +226,8 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     try expand_argv(&argv, cmd, cmd_args);
 
-    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    var child = std.ChildProcess.init(argv.slice(), shell.gpa);
+    child.env_map = &shell.env;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
@@ -186,7 +253,7 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
 
     const res = std.ChildProcess.exec(.{
         .allocator = shell.gpa,
-        .argv = argv.items,
+        .argv = argv.slice(),
     }) catch return false;
     defer shell.gpa.free(res.stderr);
     defer shell.gpa.free(res.stdout);
@@ -210,7 +277,7 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
 
     const res = try std.ChildProcess.exec(.{
         .allocator = shell.arena.allocator(),
-        .argv = argv.items,
+        .argv = argv.slice(),
     });
     defer shell.arena.allocator().free(res.stderr);
     errdefer shell.arena.allocator().free(res.stdout);
@@ -250,7 +317,7 @@ pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.Chi
 
     try expand_argv(&argv, cmd, cmd_args);
 
-    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    var child = std.ChildProcess.init(argv.slice(), shell.gpa);
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
@@ -273,10 +340,10 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
-    try argv.append(zig_exe);
+    try argv.append_new_arg(zig_exe);
     try expand_argv(&argv, cmd, cmd_args);
 
-    var child = std.ChildProcess.init(argv.items, shell.gpa);
+    var child = std.ChildProcess.init(argv.slice(), shell.gpa);
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
@@ -317,39 +384,89 @@ pub fn git_tag(shell: *Shell) ![]const u8 {
     return stdout;
 }
 
-const Argv = std.ArrayList([]const u8);
+const Argv = struct {
+    args: std.ArrayList([]const u8),
+
+    fn init(gpa: std.mem.Allocator) Argv {
+        return Argv{ .args = std.ArrayList([]const u8).init(gpa) };
+    }
+
+    fn deinit(argv: *Argv) void {
+        for (argv.args.items) |arg| argv.args.allocator.free(arg);
+        argv.args.deinit();
+    }
+
+    fn slice(argv: *Argv) []const []const u8 {
+        return argv.args.items;
+    }
+
+    fn append_new_arg(argv: *Argv, arg: []const u8) !void {
+        const arg_owned = try argv.args.allocator.dupe(u8, arg);
+        errdefer argv.args.allocator.free(arg_owned);
+
+        try argv.args.append(arg_owned);
+    }
+
+    fn extend_last_arg(argv: *Argv, arg: []const u8) !void {
+        assert(argv.args.items.len > 0);
+        const arg_allocated = try std.fmt.allocPrint(argv.args.allocator, "{s}{s}", .{
+            argv.args.items[argv.args.items.len - 1],
+            arg,
+        });
+        argv.args.allocator.free(argv.args.items[argv.args.items.len - 1]);
+        argv.args.items[argv.args.items.len - 1] = arg_allocated;
+    }
+};
 
 /// Expands `cmd` into an array of command arguments, substituting values from `cmd_args`.
 ///
 /// This avoids shell injection by construction as it doesn't concatenate strings.
 fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
     // Mostly copy-paste from std.fmt.format
+
     comptime var pos: usize = 0;
 
-    comptime var args_used = 0;
+    // For arguments like `tigerbeetle-{version}.exe`, we want to concatenate literal suffix
+    // ("tigerbeetle-") and prefix (".exe") to the value of `version` interpolated argument.
+    //
+    // These two variables track the spaces around `{}` syntax.
+    comptime var concat_left: bool = false;
+    comptime var concat_right: bool = false;
+
+    const arg_count = std.meta.fields(@TypeOf(cmd_args)).len;
+    comptime var args_used = std.StaticBitSet(arg_count).initEmpty();
     inline while (pos < cmd.len) {
-        inline while (pos < cmd.len and cmd[pos] == ' ') {
+        inline while (pos < cmd.len and (cmd[pos] == ' ' or cmd[pos] == '\n')) {
             pos += 1;
         }
 
         const pos_start = pos;
         inline while (pos < cmd.len) : (pos += 1) {
             switch (cmd[pos]) {
-                ' ', '{' => break,
+                ' ', '\n', '{' => break,
                 else => {},
             }
         }
 
         const pos_end = pos;
         if (pos_start != pos_end) {
-            try argv.append(cmd[pos_start..pos_end]);
+            if (concat_right) {
+                assert(pos_start > 0 and cmd[pos_start - 1] == '}');
+                try argv.extend_last_arg(cmd[pos_start..pos_end]);
+            } else {
+                try argv.append_new_arg(cmd[pos_start..pos_end]);
+            }
         }
 
+        concat_left = false;
+        concat_right = false;
+
         if (pos >= cmd.len) break;
-        if (cmd[pos] == ' ') continue;
+        if (cmd[pos] == ' ' or cmd[pos] == '\n') continue;
 
         comptime assert(cmd[pos] == '{');
-        if (pos > 0 and cmd[pos - 1] != ' ') @compileError("Surround {} with spaces");
+        concat_left = pos > 0 and cmd[pos - 1] != ' ' and cmd[pos - 1] != '\n';
+        if (concat_left) assert(argv.slice().len > 0);
         pos += 1;
 
         const pos_arg_start = pos;
@@ -359,26 +476,34 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
         if (pos >= cmd.len) @compileError("Missing closing }");
 
         comptime assert(cmd[pos] == '}');
-        if (pos + 1 < cmd.len and cmd[pos + 1] != ' ') @compileError("Surround {} with spaces");
+        concat_right = pos + 1 < cmd.len and cmd[pos + 1] != ' ' and cmd[pos + 1] != '\n';
         pos += 1;
 
         const arg_name = comptime cmd[pos_arg_start..pos_arg_end];
         const arg_or_slice = @field(cmd_args, arg_name);
-        args_used += 1;
+        comptime args_used.set(for (std.meta.fieldNames(@TypeOf(cmd_args)), 0..) |field, index| {
+            if (std.mem.eql(u8, field, arg_name)) break index;
+        } else unreachable);
 
-        if (@TypeOf(arg_or_slice) == []const u8) {
-            try argv.append(arg_or_slice);
-        } else if (@TypeOf(arg_or_slice) == []const []const u8) {
+        const T = @TypeOf(arg_or_slice);
+
+        if (std.meta.Elem(T) == u8) {
+            if (concat_left) {
+                try argv.extend_last_arg(arg_or_slice);
+            } else {
+                try argv.append_new_arg(arg_or_slice);
+            }
+        } else if (std.meta.Elem(T) == []const u8) {
+            if (concat_left or concat_right) @compileError("Can't concatenate slices");
             for (arg_or_slice) |arg_part| {
-                try argv.append(arg_part);
+                try argv.append_new_arg(arg_part);
             }
         } else {
             @compileError("Unsupported argument type");
         }
     }
 
-    const args_provided = std.meta.fields(@TypeOf(cmd_args)).len;
-    if (args_used != args_provided) @compileError("Unused argument");
+    comptime if (args_used.count() != arg_count) @compileError("Unused argument");
 }
 
 const Snap = @import("./testing/snaptest.zig").Snap;
@@ -395,7 +520,7 @@ test "shell: expand_argv" {
             defer argv.deinit();
 
             try expand_argv(&argv, cmd, args);
-            try want.diff_json(argv.items);
+            try want.diff_json(argv.slice());
         }
     };
 

@@ -3,9 +3,6 @@ name: macOS
 on:
   workflow_call:
 
-# Our M1 runners are self hosted, and not ephemeral like standard GitHub action runners.
-# Limit the token permissions to be read - so even if they were compromised, no damage
-# could be done.
 permissions:
   contents: read
 
@@ -13,7 +10,7 @@ jobs:
   test:
     strategy:
       matrix:
-        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        target: [macos-13, macos-13-xlarge]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -25,7 +22,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        target: [macos-13, macos-13-xlarge]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -34,7 +31,7 @@ jobs:
   c_sample:
     strategy:
       matrix:
-        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        target: [macos-13, macos-13-xlarge]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -44,7 +41,7 @@ jobs:
   repl_integration:
     strategy:
       matrix:
-        target: [macos-latest, [self-hosted, ARM64, macos-12.6], [self-hosted, ARM64, macos-13.2]]
+        target: [macos-13, macos-13-xlarge]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3

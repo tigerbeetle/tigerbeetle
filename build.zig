@@ -21,7 +21,11 @@ pub fn build(b: *std.Build) !void {
 
     // The "tigerbeetle version" command includes the build-time commit hash.
     options.addOption([]const u8, "git_commit", try shell.git_commit());
-    options.addOption([]const u8, "git_tag", try shell.git_tag());
+    options.addOption(
+        []const u8,
+        "version",
+        b.option([]const u8, "version", "tigerbeetle --version") orelse try shell.git_tag(),
+    );
 
     options.addOption(
         config.ConfigBase,
@@ -350,12 +354,6 @@ pub fn build(b: *std.Build) !void {
             mode,
             target,
         );
-        client_integration(
-            b.allocator,
-            b,
-            mode,
-            target,
-        );
         client_docs(
             b.allocator,
             b,
@@ -367,6 +365,17 @@ pub fn build(b: *std.Build) !void {
             mode,
             target,
         );
+
+        const ci_exe = b.addExecutable(.{
+            .name = "client-ci",
+            .root_source_file = .{ .path = "src/clients/ci.zig" },
+            .target = target,
+            .main_pkg_path = .{ .path = "src" },
+        });
+        const client_ci_run = b.addRunArtifact(ci_exe);
+        if (b.args) |args| client_ci_run.addArgs(args);
+        const client_ci_step = b.step("client_ci", "Run CI checks for clients");
+        client_ci_step.dependOn(&client_ci_run.step);
     }
 
     {
@@ -618,6 +627,17 @@ pub fn build(b: *std.Build) !void {
         const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
         step.dependOn(&run_cmd.step);
     }
+
+    const dist_exe = b.addExecutable(.{
+        .name = "dist",
+        .root_source_file = .{ .path = "src/scripts/dist.zig" },
+        .target = target,
+        .main_pkg_path = .{ .path = "src" },
+    });
+    const dist_exe_run = b.addRunArtifact(dist_exe);
+    if (b.args) |args| dist_exe_run.addArgs(args);
+    const dist_step = b.step("dist", "build artifacts for publishing");
+    dist_step.dependOn(&dist_exe_run.step);
 }
 
 fn link_tracer_backend(
@@ -1101,30 +1121,6 @@ fn run_with_tb(
 }
 
 // See src/clients/README.md for documentation.
-fn client_integration(
-    allocator: std.mem.Allocator,
-    b: *std.Build,
-    mode: Mode,
-    target: CrossTarget,
-) void {
-    const binary = b.addExecutable(.{
-        .name = "client_integration",
-        .root_source_file = .{ .path = "src/clients/integration.zig" },
-        .target = target,
-        .optimize = mode,
-        .main_pkg_path = .{ .path = "src" },
-    });
-
-    const client_integration_build = b.step("client_integration", "Run sample integration tests for a client library");
-    client_integration_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary, .{});
-    client_integration_build.dependOn(&install_step.step);
-
-    maybe_execute(b, allocator, client_integration_build, install_step, "client_integration");
-}
-
-// See src/clients/README.md for documentation.
 fn client_docs(
     allocator: std.mem.Allocator,
     b: *std.Build,
@@ -1233,7 +1229,7 @@ const ShellcheckStep = struct {
 
         const scripts = try shell.find(.{
             .where = &.{ "src", "scripts", ".github" },
-            .ends_with = ".sh",
+            .extension = ".sh",
         });
 
         try shell.exec("shellcheck {scripts}", .{

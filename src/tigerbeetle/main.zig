@@ -247,7 +247,7 @@ const Command = struct {
         try std.fmt.format(
             stdout,
             "TigerBeetle version {s}\n",
-            .{build_options.git_tag},
+            .{build_options.version},
         );
 
         if (verbose) {

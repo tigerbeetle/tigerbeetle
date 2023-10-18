@@ -5,10 +5,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RollForward>LatestMajor</RollForward>
+    <UseCurrentRuntimeIdentifier>true</UseCurrentRuntimeIdentifier>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="tigerbeetle" Version="0.13.88" />
+    <Content Include="..\..\TigerBeetle\runtimes\$(RuntimeIdentifier)\native\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <ProjectReference Include="..\..\TigerBeetle/TigerBeetle.csproj" />
   </ItemGroup>
 
 </Project>

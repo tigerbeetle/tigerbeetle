@@ -1,113 +1,57 @@
-name: "Release (latest)"
+name: Release
 
 on:
-  workflow_dispatch:
-
-  workflow_call:
-    secrets:
-      TIGERBEETLE_NODE_PUBLISH_KEY:
-        required: true
-      NUGET_KEY:
-        required: true
-      MAVEN_GPG_SECRET_KEY:
-        required: true
-      MAVEN_CENTRAL_USERNAME:
-        required: true
-      MAVEN_CENTRAL_TOKEN:
-        required: true
-      MAVEN_GPG_SECRET_KEY_PASSWORD:
-        required: true
-      TIGERBEETLE_DOCS_DEPLOY_KEY:
-        required: true
-      TIGERBEETLE_GO_DEPLOY_KEY:
-        required: true
-      SLACK_TOKEN:
-        required: true
-    inputs:
-      version:
-        required: false
-        type: string
+  push:
+    branches:
+      - release
 
 jobs:
-  version:
-    outputs:
-      version: ${{ steps.calculate_version.outputs.version }}
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - id: calculate_version
-      # The below is not a typo. The package yq installs the xq we need, not
-      # to be confused with the package xq which is something different.
-      run: |
-        pip install yq && \
-        echo "version=$(./.github/ci/next_version.sh)" >> "$GITHUB_OUTPUT"
-  
-  draft_release:
-    runs-on: ubuntu-latest
-    needs: [version]
-    steps:
-      - uses: actions/checkout@v3
-
-      # Explicitly pass in the sha, even though it's very likely to be HEAD.
-      - run: |
-          hub release create \
-            --prerelease \
-            --draft \
-            --message "$(./.github/ci/generate_release_message.sh ${{ needs.version.outputs.version }})" \
-            -t ${{ github.sha }} \
-            "${{ needs.version.outputs.version }}"
-
-        # Propagate token into environment
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Even though the release job has an on: release trigger, actions taken by GITHUB_TOKEN
-  # don't trigger this, so we call it here
-  # https://docs.github.com/en/actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow
   release:
-    needs: [draft_release, version]
-    uses: ./.github/workflows/release_artifacts.yml
-    with:
-      version: ${{needs.version.outputs.version}}
+    runs-on: ubuntu-latest
     secrets:
-      TIGERBEETLE_NODE_PUBLISH_KEY: ${{secrets.TIGERBEETLE_NODE_PUBLISH_KEY}}
-      NUGET_KEY: ${{secrets.NUGET_KEY}}
-      MAVEN_GPG_SECRET_KEY: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
-      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-      MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
-      MAVEN_GPG_SECRET_KEY_PASSWORD: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
-      TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
 
-  finalize_release:
-    runs-on: ubuntu-latest
-    needs: [release, version]
     steps:
       - uses: actions/checkout@v3
 
-      - run: |
-          hub release edit \
-            --draft=false \
-            -m "" \
-            "${{ needs.version.outputs.version }}"
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version:
+            7.0.x
 
-        # Propagate token into environment
-        env:
-          EDITOR: vi
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.18'
 
-  docs:
-    needs: [release, version]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - run: ./.github/ci/publish_docs.sh
+      - uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          server-id: ossrh
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_CENTRAL_TOKEN
+          gpg-private-key: ${{ secrets.MAVEN_GPG_SECRET_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+
+      # No special setup for Go.
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '14.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build dist -- --build --publish --version 0.9.${{ github.run_number }} --sha ${{ github.sha }}
         env:
-          TIGERBEETLE_COMMIT: ${{needs.version.outputs.version}}
-          TIGERBEETLE_DOCS_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_DOCS_DEPLOY_KEY }}
+          NUGET_KEY: ${{ secrets.NUGET_KEY }}
+          TIGERBEETLE_GO_GITHUB_TOKEN: ${{ secrets.TIGERBEETLE_GO_GITHUB_TOKEN }}
+          MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
+          NODE_AUTH_TOKEN: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
 
   alert_failure:
     runs-on: ubuntu-latest
-    needs: [version, draft_release, release, finalize_release, docs]
+    needs: [release]
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     steps:
       - name: Alert if anything failed

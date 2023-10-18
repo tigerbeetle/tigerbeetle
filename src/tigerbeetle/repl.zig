@@ -535,7 +535,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_help(repl: *Repl) !void {
-            const version = build_options.git_tag;
+            const version = build_options.version;
             try repl.printer.print("TigerBeetle CLI Client " ++ version ++ "\n" ++
                 \\  Hit enter after a semicolon to run a command.
                 \\
