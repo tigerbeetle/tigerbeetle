@@ -138,7 +138,7 @@ const ConfigCluster = struct {
     superblock_copies: comptime_int = 4,
     storage_size_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
     block_size: comptime_int = 128 * 1024,
-    lsm_levels: u7 = 7,
+    lsm_levels: u6 = 7,
     lsm_growth_factor: u32 = 8,
     lsm_batch_multiple: comptime_int = 64,
     lsm_snapshots_max: usize = 32,
@@ -205,7 +205,10 @@ pub const configs = struct {
             .direct_io = true,
             .direct_io_required = true,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
-            .cache_transfers_size_default = 0,
+            // TODO: Currently we need a non-zero cache size, because of how our CacheMap works.
+            // We should check if optimizing it to explicitly allow a zero cache size will increase
+            // performance, since the Transfer object cache isn't useful.
+            .cache_transfers_size_default = @sizeOf(vsr.tigerbeetle.Transfer) * 2048,
             .cache_transfers_posted_size_default = @sizeOf(u256) * 256 * 1024,
             .verify = false,
         },
@@ -222,7 +225,7 @@ pub const configs = struct {
             .direct_io = true,
             .direct_io_required = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
-            .cache_transfers_size_default = 0,
+            .cache_transfers_size_default = @sizeOf(vsr.tigerbeetle.Transfer) * 2048,
             .cache_transfers_posted_size_default = @sizeOf(u256) * 256 * 1024,
             .verify = true,
         },
@@ -236,7 +239,7 @@ pub const configs = struct {
             .direct_io = false,
             .direct_io_required = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 2048,
-            .cache_transfers_size_default = 0,
+            .cache_transfers_size_default = @sizeOf(vsr.tigerbeetle.Transfer) * 2048,
             .cache_transfers_posted_size_default = @sizeOf(u256) * 2048,
             .grid_repair_request_max = 4,
             .grid_repair_reads_max = 4,
@@ -264,7 +267,7 @@ pub const configs = struct {
     /// able to max out the LSM levels.
     pub const fuzz_min = config: {
         var base = test_min;
-        base.cluster.storage_size_max = 4 * 1024 * 1024 * 1024;
+        base.cluster.storage_size_max = 1 * 1024 * 1024 * 1024;
         break :config base;
     };
 

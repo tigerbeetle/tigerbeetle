@@ -18,20 +18,11 @@
 //! │                              │ parent: schema.TableIndex.Parent,
 //! │                              │ request=@sizeOf(Key)
 //! │                              │ timestamp=snapshot_min
-//! │ [filter_block_count_max]u128 │ checksums of filter blocks
 //! │ [data_block_count_max]u128   │ checksums of data blocks
+//! │ [data_block_count_max]Key    │ the minimum/first key in the respective data block
 //! │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
-//! │ [filter_block_count_max]u64  │ addresses of filter blocks
 //! │ [data_block_count_max]u64    │ addresses of data blocks
 //! │ […]u8{0}                     │ padding (to end of block)
-//!
-//! Filter block schema:
-//! │ vsr.Header │ operation=BlockType.filter,
-//! │            │ context: schema.TableFilter.Context
-//! │            │ parent: schema.TableFilter.Parent,
-//! │            │ timestamp=snapshot_min
-//! │ […]u8      │ A split-block Bloom filter, "containing" every key from as many as
-//! │            │   `filter_data_block_count_max` data blocks.
 //!
 //! Data block schema:
 //! │ vsr.Header               │ operation=BlockType.data,
@@ -89,8 +80,7 @@ pub const BlockType = enum(u8) {
 
     manifest = 1,
     index = 2,
-    filter = 3,
-    data = 4,
+    data = 3,
 
     pub fn valid(vsr_operation: vsr.Operation) bool {
         _ = std.meta.intToEnum(BlockType, @intFromEnum(vsr_operation)) catch return false;
@@ -115,10 +105,9 @@ pub const TableIndex = struct {
     /// - Tables can be decoded without per-tree specialized decoders.
     ///   (In particular, this is useful for the scrubber and the grid repair queue).
     pub const Context = extern struct {
-        filter_block_count: u32,
-        filter_block_count_max: u32,
         data_block_count: u32,
         data_block_count_max: u32,
+        padding: [8]u8 = [_]u8{0} ** 8,
 
         comptime {
             assert(@sizeOf(Context) == @sizeOf(u128));
@@ -128,7 +117,7 @@ pub const TableIndex = struct {
 
     pub const Parent = extern struct {
         tree_id: u16,
-        reserved: [14]u8 = .{0} ** 14,
+        reserved: [14]u8 = [_]u8{0} ** 14,
 
         comptime {
             assert(@sizeOf(Parent) == @sizeOf(u128));
@@ -137,18 +126,14 @@ pub const TableIndex = struct {
     };
 
     key_size: u32,
-    filter_block_count_max: u32,
     data_block_count_max: u32,
 
     size: u32,
-    filter_checksums_offset: u32,
-    filter_checksums_size: u32,
     data_checksums_offset: u32,
     data_checksums_size: u32,
-    keys_offset: u32,
+    keys_min_offset: u32,
+    keys_max_offset: u32,
     keys_size: u32,
-    filter_addresses_offset: u32,
-    filter_addresses_size: u32,
     data_addresses_offset: u32,
     data_addresses_size: u32,
     padding_offset: u32,
@@ -156,51 +141,42 @@ pub const TableIndex = struct {
 
     const Parameters = struct {
         key_size: u32,
-        filter_block_count_max: u32,
         data_block_count_max: u32,
     };
 
     pub fn init(parameters: Parameters) TableIndex {
         assert(parameters.key_size > 0);
-        assert(parameters.filter_block_count_max > 0);
         assert(parameters.data_block_count_max > 0);
-        assert(parameters.data_block_count_max + parameters.filter_block_count_max <=
-            constants.lsm_table_content_blocks_max);
+        assert(parameters.data_block_count_max <= constants.lsm_table_data_blocks_max);
 
-        const filter_checksums_offset = @sizeOf(vsr.Header);
-        const filter_checksums_size = parameters.filter_block_count_max * checksum_size;
-
-        const data_checksums_offset = filter_checksums_offset + filter_checksums_size;
+        const data_checksums_offset = @sizeOf(vsr.Header);
         const data_checksums_size = parameters.data_block_count_max * checksum_size;
 
-        const keys_offset = data_checksums_offset + data_checksums_size;
         const keys_size = parameters.data_block_count_max * parameters.key_size;
+        const keys_min_offset = data_checksums_offset + data_checksums_size;
+        const keys_max_offset = keys_min_offset + keys_size;
 
-        const filter_addresses_offset = keys_offset + keys_size;
-        const filter_addresses_size = parameters.filter_block_count_max * address_size;
-
-        const data_addresses_offset = filter_addresses_offset + filter_addresses_size;
+        const data_addresses_offset = keys_max_offset + keys_size;
         const data_addresses_size = parameters.data_block_count_max * address_size;
 
         const padding_offset = data_addresses_offset + data_addresses_size;
+        assert(padding_offset <= constants.block_size);
         const padding_size = constants.block_size - padding_offset;
 
-        const size = @sizeOf(vsr.Header) + filter_checksums_size + data_checksums_size +
-            keys_size + filter_addresses_size + data_addresses_size;
+        // `keys_size * 2` for counting both key_min and key_max:
+        const size = @sizeOf(vsr.Header) + data_checksums_size +
+            (keys_size * 2) + data_addresses_size;
+        assert(size <= constants.block_size);
 
         return .{
             .key_size = parameters.key_size,
-            .filter_block_count_max = parameters.filter_block_count_max,
             .data_block_count_max = parameters.data_block_count_max,
             .size = size,
-            .filter_checksums_offset = filter_checksums_offset,
-            .filter_checksums_size = filter_checksums_size,
             .data_checksums_offset = data_checksums_offset,
             .data_checksums_size = data_checksums_size,
-            .keys_offset = keys_offset,
+            .keys_min_offset = keys_min_offset,
+            .keys_max_offset = keys_max_offset,
             .keys_size = keys_size,
-            .filter_addresses_offset = filter_addresses_offset,
-            .filter_addresses_size = filter_addresses_size,
             .data_addresses_offset = data_addresses_offset,
             .data_addresses_size = data_addresses_size,
             .padding_offset = padding_offset,
@@ -216,12 +192,10 @@ pub const TableIndex = struct {
         assert(header.timestamp > 0);
 
         const context = @as(Context, @bitCast(header.context));
-        assert(context.filter_block_count <= context.filter_block_count_max);
         assert(context.data_block_count <= context.data_block_count_max);
 
         return TableIndex.init(.{
             .key_size = header.request,
-            .filter_block_count_max = context.filter_block_count_max,
             .data_block_count_max = context.data_block_count_max,
         });
     }
@@ -271,86 +245,6 @@ pub const TableIndex = struct {
         return @alignCast(slice[0..index.data_blocks_used(index_block)]);
     }
 
-    pub inline fn filter_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
-        return @alignCast(mem.bytesAsSlice(
-            u64,
-            index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-        ));
-    }
-
-    pub inline fn filter_addresses_used(
-        index: *const TableIndex,
-        index_block: BlockPtrConst,
-    ) []const u64 {
-        const slice: []const u64 = @alignCast(mem.bytesAsSlice(
-            u64,
-            index_block[index.filter_addresses_offset..][0..index.filter_addresses_size],
-        ));
-        return slice[0..index.filter_blocks_used(index_block)];
-    }
-
-    pub inline fn filter_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
-        return @alignCast(mem.bytesAsSlice(
-            u128,
-            index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-        ));
-    }
-
-    pub inline fn filter_checksums_used(
-        index: *const TableIndex,
-        index_block: BlockPtrConst,
-    ) []const u128 {
-        const slice = mem.bytesAsSlice(
-            u128,
-            index_block[index.filter_checksums_offset..][0..index.filter_checksums_size],
-        );
-        return @alignCast(slice[0..index.filter_blocks_used(index_block)]);
-    }
-
-    // TODO: After filter blocks are removed, remove this function.
-    pub fn content_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        return index.filter_blocks_used(index_block) + index.data_blocks_used(index_block);
-    }
-
-    // TODO: After filter blocks are removed, remove this function.
-    pub fn content_block(
-        index: *const TableIndex,
-        index_block: BlockPtrConst,
-        content_block_index: u32,
-    ) struct {
-        block_checksum: u128,
-        block_address: u64,
-        block_type: BlockType,
-    } {
-        assert(content_block_index < index.content_blocks_used(index_block));
-
-        const filter_blocks_used_ = index.filter_blocks_used(index_block);
-        if (filter_blocks_used_ > content_block_index) {
-            const filter_block_index = content_block_index;
-            return .{
-                .block_checksum = index.filter_checksums_used(index_block)[filter_block_index],
-                .block_address = index.filter_addresses_used(index_block)[filter_block_index],
-                .block_type = .filter,
-            };
-        } else {
-            const data_block_index = content_block_index - filter_blocks_used_;
-            return .{
-                .block_checksum = index.data_checksums_used(index_block)[data_block_index],
-                .block_address = index.data_addresses_used(index_block)[data_block_index],
-                .block_type = .data,
-            };
-        }
-    }
-
-    inline fn filter_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        const header = header_from_block(index_block);
-        const context = @as(Context, @bitCast(header.context));
-        const value = @as(u32, @intCast(context.filter_block_count));
-        assert(value > 0);
-        assert(value <= index.filter_block_count_max);
-        return value;
-    }
-
     pub inline fn data_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
         const header = header_from_block(index_block);
         const context = @as(Context, @bitCast(header.context));
@@ -358,91 +252,6 @@ pub const TableIndex = struct {
         assert(value > 0);
         assert(value <= index.data_block_count_max);
         return value;
-    }
-};
-
-pub const TableFilter = struct {
-    /// Stored in every filter block's header's `context` field.
-    pub const Context = extern struct {
-        data_block_count_max: u32,
-        reserved: [12]u8 = [_]u8{0} ** 12,
-
-        comptime {
-            assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(stdx.no_padding(Context));
-        }
-    };
-
-    pub const Parent = extern struct {
-        tree_id: u16,
-        reserved: [14]u8 = .{0} ** 14,
-
-        comptime {
-            assert(@sizeOf(Parent) == @sizeOf(u128));
-            assert(stdx.no_padding(Parent));
-        }
-    };
-
-    /// The number of data blocks summarized by a single filter block.
-    data_block_count_max: u32,
-
-    filter_offset: u32,
-    filter_size: u32,
-    padding_offset: u32,
-    padding_size: u32,
-
-    pub fn init(parameters: Context) TableFilter {
-        assert(parameters.data_block_count_max > 0);
-        assert(stdx.zeroed(&parameters.reserved));
-
-        const filter_offset = @sizeOf(vsr.Header);
-        const filter_size = constants.block_size - filter_offset;
-        assert(filter_size == block_body_size);
-
-        const padding_offset = filter_offset + filter_size;
-        const padding_size = constants.block_size - padding_offset;
-        assert(padding_size == 0);
-
-        return .{
-            .data_block_count_max = parameters.data_block_count_max,
-            .filter_offset = filter_offset,
-            .filter_size = filter_size,
-            .padding_offset = padding_offset,
-            .padding_size = padding_size,
-        };
-    }
-
-    pub fn from(filter_block: BlockPtrConst) TableFilter {
-        const header = header_from_block(filter_block);
-        assert(header.command == .block);
-        assert(BlockType.from(header.operation) == .filter);
-        assert(header.op > 0);
-        assert(header.timestamp > 0);
-
-        return TableFilter.init(@as(Context, @bitCast(header.context)));
-    }
-
-    pub fn tree_id(filter_block: BlockPtrConst) u16 {
-        const header = header_from_block(filter_block);
-        assert(BlockType.from(header.operation) == .filter);
-
-        const parent = @as(Parent, @bitCast(header.parent));
-        assert(stdx.zeroed(&parent.reserved));
-        return parent.tree_id;
-    }
-
-    pub inline fn block_filter(
-        filter: *const TableFilter,
-        filter_block: BlockPtr,
-    ) []u8 {
-        return filter_block[filter.filter_offset..][0..filter.filter_size];
-    }
-
-    pub inline fn block_filter_const(
-        filter: *const TableFilter,
-        filter_block: BlockPtrConst,
-    ) []const u8 {
-        return filter_block[filter.filter_offset..][0..filter.filter_size];
     }
 };
 
@@ -541,6 +350,8 @@ pub const TableData = struct {
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
         const header = header_from_block(data_block);
+        assert(BlockType.from(header.operation) == .data);
+
         const used_values: u32 = header.request;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
@@ -569,7 +380,7 @@ pub const Manifest = struct {
         assert(labels_size_max % @alignOf(Label) == 0);
 
         // Bit 7 is reserved to indicate whether the event is an insert or remove.
-        assert(constants.lsm_levels <= std.math.maxInt(u7) + 1);
+        assert(constants.lsm_levels <= std.math.maxInt(u6) + 1);
 
         assert(@sizeOf(Label) == @sizeOf(u8));
         assert(@alignOf(Label) == 1);
@@ -618,9 +429,15 @@ pub const Manifest = struct {
         }
     };
 
+    pub const Event = enum(u2) {
+        insert = 0,
+        update = 1,
+        remove = 2,
+    };
+
     pub const Label = packed struct(u8) {
-        level: u7,
-        event: enum(u1) { insert, remove },
+        level: u6,
+        event: Event,
 
         comptime {
             assert(@bitSizeOf(Label) == @sizeOf(Label) * 8);

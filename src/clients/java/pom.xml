@@ -209,8 +209,8 @@
         <version>3.1.0</version>
         <configuration>
           <workingDirectory>${project.basedir}/../../../</workingDirectory>
-          <executable>${project.basedir}/../../../zig/zig</executable>         
-        </configuration>           
+          <executable>${project.basedir}/../../../zig/zig</executable>
+        </configuration>
         <executions>
           <execution>
             <!-- Zig test:jni -->
@@ -243,10 +243,11 @@
                 <argument>build</argument>
                 <argument>java_client</argument>
                 <argument>-Doptimize=ReleaseSafe</argument>
+                <argument>-Dconfig=production</argument>
               </arguments>
             </configuration>
           </execution>
-        </executions>          
+        </executions>
       </plugin>
 
       <!-- Formatter -->
@@ -338,7 +339,7 @@
                 </configuration>
             </execution>
         </executions>
-      </plugin>      
+      </plugin>
 
       <!-- Source code jar -->
       <plugin>
@@ -352,7 +353,7 @@
                 </goals>
             </execution>
         </executions>
-      </plugin>      
+      </plugin>
 
       <!-- Javadoc jar -->
       <plugin>
@@ -401,7 +402,7 @@
       </plugin>
     </plugins>
   </build>
-  
+
   <distributionManagement>
     <snapshotRepository>
       <id>ossrh</id>
@@ -411,5 +412,5 @@
       <id>ossrh</id>
       <url>https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/</url>
     </repository>
-  </distributionManagement>  
+  </distributionManagement>
 </project>

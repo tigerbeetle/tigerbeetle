@@ -567,6 +567,12 @@ pub const Storage = struct {
         return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
     }
 
+    pub fn client_replies(storage: *const Storage) []const MessageRaw {
+        const offset = vsr.Zone.client_replies.offset(0);
+        const size = vsr.Zone.client_replies.size().?;
+        return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
+    }
+
     pub fn grid_block(
         storage: *const Storage,
         address: u64,
@@ -630,7 +636,7 @@ pub const Storage = struct {
 
     /// Verify that the storage:
     /// - contains the given index block
-    /// - contains every filter/data block referenced by the index block
+    /// - contains every data block referenced by the index block
     pub fn verify_table(storage: *const Storage, index_address: u64, index_checksum: u128) void {
         assert(index_address > 0);
 
@@ -641,17 +647,16 @@ pub const Storage = struct {
         assert(index_block_header.checksum == index_checksum);
         assert(schema.BlockType.from(index_block_header.operation) == .index);
 
-        const content_blocks_used = index_schema.content_blocks_used(index_block);
-        var content_block_index: u32 = 0;
-        while (content_block_index < content_blocks_used) : (content_block_index += 1) {
-            const content_block_id = index_schema.content_block(index_block, content_block_index);
-            const content_block = storage.grid_block(content_block_id.block_address).?;
-            const content_block_header = schema.header_from_block(content_block);
+        for (
+            index_schema.data_addresses_used(index_block),
+            index_schema.data_checksums_used(index_block),
+        ) |address, checksum| {
+            const data_block = storage.grid_block(address).?;
+            const data_block_header = schema.header_from_block(data_block);
 
-            assert(content_block_header.op == content_block_id.block_address);
-            assert(content_block_header.checksum == content_block_id.block_checksum);
-            assert(schema.BlockType.from(content_block_header.operation) == .filter or
-                schema.BlockType.from(content_block_header.operation) == .data);
+            assert(data_block_header.op == address);
+            assert(data_block_header.checksum == checksum);
+            assert(schema.BlockType.from(data_block_header.operation) == .data);
         }
     }
 };

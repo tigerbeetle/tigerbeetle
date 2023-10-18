@@ -56,7 +56,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         const ForestTableIterator = @This();
 
         /// The level we are currently pulling tables from.
-        level: u8 = 0,
+        level: u6 = 0,
         /// The tree we are currently pulling tables from.
         tree_id: u16 = Forest.tree_id_range.min,
 
@@ -66,7 +66,10 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             break :default iterators;
         },
 
-        pub fn next(iterator: *ForestTableIterator, forest: *Forest) ?TableInfo {
+        pub fn next(iterator: *ForestTableIterator, forest: *const Forest) ?struct {
+            level: u6,
+            table: TableInfo,
+        } {
             while (iterator.level < constants.lsm_levels) : (iterator.level += 1) {
                 for (iterator.tree_id..Forest.tree_id_range.max + 1) |tree_id_runtime| {
                     iterator.tree_id = @intCast(tree_id_runtime);
@@ -76,12 +79,15 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                             const tree_info = Forest.tree_infos[tree_id - Forest.tree_id_range.min];
                             assert(tree_info.tree_id == tree_id);
 
-                            if (iterator.next_from_tree(
-                                tree_info.tree_name,
-                                tree_info.Tree,
-                                forest.tree_for_id(tree_id),
-                            )) |block| {
-                                return block;
+                            const tree_iterator = &@field(iterator.trees, tree_info.tree_name);
+                            if (tree_iterator.next(
+                                forest.tree_for_id_const(tree_id),
+                                iterator.level,
+                            )) |table| {
+                                return .{
+                                    .level = iterator.level,
+                                    .table = table.encode(tree_id),
+                                };
                             }
                         },
                         else => unreachable,
@@ -95,20 +101,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
 
             return null;
         }
-
-        fn next_from_tree(
-            iterator: *ForestTableIterator,
-            comptime iterator_field: []const u8,
-            comptime Tree: type,
-            tree: *const Tree,
-        ) ?TableInfo {
-            const tree_iterator = &@field(iterator.trees, iterator_field);
-            if (tree_iterator.next(tree, iterator.level)) |table| {
-                return table.encode(tree.config.id);
-            } else {
-                return null;
-            }
-        }
     };
 }
 
@@ -117,9 +109,10 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
 fn TreeTableIteratorType(comptime Tree: type) type {
     return struct {
         const TreeTableIterator = @This();
+        const KeyMaxSnapshotMin = Tree.Manifest.Level.KeyMaxSnapshotMin;
 
         position: ?struct {
-            level: u8,
+            level: u6,
             /// Corresponds to `ManifestLevel.generation`.
             /// Used to detect when a ManifestLevel is mutated.
             generation: u32,
@@ -132,7 +125,7 @@ fn TreeTableIteratorType(comptime Tree: type) type {
         fn next(
             iterator: *TreeTableIterator,
             tree: *const Tree,
-            level: u8,
+            level: u6,
         ) ?*const Tree.Manifest.TreeTableInfo {
             assert(tree.manifest.manifest_log.?.opened);
             assert(level < constants.lsm_levels);
@@ -157,12 +150,14 @@ fn TreeTableIteratorType(comptime Tree: type) type {
                         // The ManifestLevel was mutated since the last iteration, so our
                         // position's cursor/ManifestLevel.Iterator is invalid.
                         break :tables manifest_level.tables.iterator_from_cursor(
-                            manifest_level.tables.search(.{
-                                .key_max = position.previous.key_max,
-                                // +1 to skip past the previous table.
-                                // (The tables are ordered by (key_max,snapshot_min).)
-                                .snapshot_min = position.previous.snapshot_min + 1,
-                            }),
+                            manifest_level.tables.search(KeyMaxSnapshotMin.key_from_value(
+                                .{
+                                    // +1 to skip past the previous table.
+                                    // (The tables are ordered by (key_max,snapshot_min).)
+                                    .snapshot_min = position.previous.snapshot_min + 1,
+                                    .key_max = position.previous.key_max,
+                                },
+                            )),
                             .ascending,
                         );
                     }
@@ -177,12 +172,10 @@ fn TreeTableIteratorType(comptime Tree: type) type {
             const table = table_iterator.next() orelse return null;
 
             if (iterator.position) |position| {
-                const table_order =
-                    Tree.Table.compare_keys(position.previous.key_max, table.key_max);
-                assert(table_order.compare(.lte));
-
-                if (table_order == .eq) {
-                    assert(position.previous.snapshot_min < table.snapshot_min);
+                switch (std.math.order(position.previous.key_max, table.key_max)) {
+                    .eq => assert(position.previous.snapshot_min < table.snapshot_min),
+                    .lt => {},
+                    .gt => unreachable,
                 }
             }
 

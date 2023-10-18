@@ -164,7 +164,7 @@ public class IntegrationTest {
     public void testCreateAccounts() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 accounts.beforeFirst();
 
@@ -195,7 +195,7 @@ public class IntegrationTest {
     public void testCreateInvalidAccount() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 var zeroedAccounts = new AccountBatch(1);
                 zeroedAccounts.add();
@@ -224,7 +224,7 @@ public class IntegrationTest {
     public void testCreateAccountsAsync() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 accounts.beforeFirst();
 
@@ -261,7 +261,7 @@ public class IntegrationTest {
     public void testCreateTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 var createAccountErrors = client.createAccounts(accounts);
@@ -334,7 +334,7 @@ public class IntegrationTest {
     public void testCreateTransfersAsync() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 CompletableFuture<CreateAccountResultBatch> future =
@@ -416,7 +416,7 @@ public class IntegrationTest {
     public void testCreateInvalidTransfer() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 var zeroedTransfers = new TransferBatch(1);
                 zeroedTransfers.add();
@@ -445,7 +445,7 @@ public class IntegrationTest {
     public void testCreatePendingTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 var errors = client.createAccounts(accounts);
@@ -572,7 +572,7 @@ public class IntegrationTest {
     public void testCreatePendingTransfersAndVoid() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 var errors = client.createAccounts(accounts);
@@ -700,7 +700,7 @@ public class IntegrationTest {
     public void testCreateLinkedTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -783,7 +783,7 @@ public class IntegrationTest {
     public void testCreateAccountTooMuchData() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var accounts = new AccountBatch(TOO_MUCH_DATA);
@@ -818,7 +818,7 @@ public class IntegrationTest {
     public void testCreateAccountTooMuchDataAsync() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var accounts = new AccountBatch(TOO_MUCH_DATA);
@@ -862,7 +862,7 @@ public class IntegrationTest {
 
         try (var server = new Server()) {
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var transfers = new TransferBatch(TOO_MUCH_DATA);
@@ -899,7 +899,7 @@ public class IntegrationTest {
 
         try (var server = new Server()) {
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT})) {
+            try (var client = new Client(0, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var transfers = new TransferBatch(TOO_MUCH_DATA);
@@ -953,7 +953,7 @@ public class IntegrationTest {
             final int tasks_qty = max_concurrency;
             final var barrier = new CountDownLatch(tasks_qty);
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
+            try (var client = new Client(0, new String[] {server.getAddress()}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1016,7 +1016,7 @@ public class IntegrationTest {
             final int max_concurrency = 2;
             final var barrier = new CountDownLatch(tasks_qty);
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
+            try (var client = new Client(0, new String[] {server.getAddress()}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1101,7 +1101,7 @@ public class IntegrationTest {
             final var enterBarrier = new CountDownLatch(tasks_qty);
             final var exitBarrier = new CountDownLatch(1);
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT}, max_concurrency)) {
+            try (var client = new Client(0, new String[] {server.getAddress()}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1168,7 +1168,7 @@ public class IntegrationTest {
         try (var server = new Server()) {
             // As we call client.close() explicitly,
             // we don't need to use a try-with-resources block here.
-            var client = new Client(0, new String[] {Server.TB_PORT});
+            var client = new Client(0, new String[] {server.getAddress()});
 
             // Creating accounts.
             var createAccountErrors = client.createAccounts(accounts);
@@ -1209,7 +1209,7 @@ public class IntegrationTest {
             final int tasks_qty = 100;
             final int concurrency_max = tasks_qty;
 
-            try (var client = new Client(0, new String[] {Server.TB_PORT}, concurrency_max)) {
+            try (var client = new Client(0, new String[] {server.getAddress()}, concurrency_max)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1338,11 +1338,11 @@ public class IntegrationTest {
 
     private static class Server implements AutoCloseable {
 
-        public static final String TB_PORT = "3001";
         public static final String TB_FILE = "./0_0.tigerbeetle.tests";
         public static final String TB_SERVER = "../../../zig-out/bin/tigerbeetle";
 
-        private Process process;
+        private final Process process;
+        private String address;
 
         public Server() throws IOException, Exception, InterruptedException {
 
@@ -1366,25 +1366,47 @@ public class IntegrationTest {
                 throw new Exception("Format failed. " + error);
             }
 
-            this.process = new ProcessBuilder().command(new String[] {exe, "start",
-                    "--addresses=" + TB_PORT, TB_FILE, "--cache-grid=256MB"})
+            this.process = new ProcessBuilder().command(
+                    new String[] {exe, "start", "--addresses=0", TB_FILE, "--cache-grid=256MB"})
                     .redirectError(Redirect.PIPE).start();
 
             if (process.waitFor(100, TimeUnit.MILLISECONDS))
                 throw new Exception("Start server failed");
 
+            final var addressLoggedEvent = new CountDownLatch(1);
+            final var stderrLogged = new StringBuilder();
+            final var stderrReader = new Thread(() -> {
+                final var stderr = process.getErrorStream();
+                final var listening = "listening on ";
+                new BufferedReader(new InputStreamReader(stderr)).lines().forEach(line -> {
+                    stderrLogged.append(line);
+                    stderrLogged.append("\n");
+                    final var found = line.indexOf(listening);
+                    if (found != -1) {
+                        address = line.substring(found + listening.length()).trim();
+                        addressLoggedEvent.countDown();
+                    }
+                });
+            });
+            stderrReader.start();
             process.onExit().whenCompleteAsync((process, exception) -> {
                 // Diagnose cases when the server crashes.
-                final var stream = process.getErrorStream();
-                if (stream != null) {
-                    final var content = new BufferedReader(new InputStreamReader(stream)).lines()
-                            .collect(Collectors.joining("\n"));
-                    System.out.println(content);
-                }
+                System.out.println(stderrLogged);
 
                 System.out.printf("TigerBeetle server exited with code %d\n\n",
                         process.exitValue());
             });
+
+            if (!addressLoggedEvent.await(60L, TimeUnit.SECONDS)) {
+                process.destroy();
+                stderrReader.join();
+                throw new Exception("failed to read the port, exitValue=" + process.exitValue()
+                        + " stderr:\n" + stderrLogged.toString());
+            }
+        }
+
+        public String getAddress() {
+            return address;
         }
 
         @Override

@@ -70,6 +70,7 @@ const CommitStage = enum {
 
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
+    state_machine_opened,
     /// Called immediately after a prepare is committed by the state machine.
     committed,
     /// Called immediately after a compaction.
@@ -688,6 +689,7 @@ pub fn ReplicaType(
             });
 
             self.state_machine_opened = true;
+            if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
@@ -7840,7 +7842,7 @@ pub fn ReplicaType(
         /// - repaired the manifest blocks,
         /// - and opened the state machine.
         /// Now we sync:
-        /// - the missed LSM table blocks (index/filter/data), and
+        /// - the missed LSM table blocks (index/data), and
         /// - client reply messages.
         fn sync_content(self: *Self) void {
             assert(self.syncing == .idle);
@@ -7898,17 +7900,19 @@ pub fn ReplicaType(
             const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
             const sync_op_min = self.superblock.working.vsr_state.sync_op_min;
             const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
-            while (self.sync_tables.?.next(&self.state_machine.forest)) |table_info| {
+            while (self.sync_tables.?.next(&self.state_machine.forest)) |table_item| {
                 assert(self.grid_repair_tables.available() > 0);
 
+                const table_info = &table_item.table;
                 if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
                     table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
                 {
                     log.debug("{}: sync_enqueue_tables: " ++
-                        "request address={} checksum={} snapshot_min={} ({}..{})", .{
+                        "request address={} checksum={} level={} snapshot_min={} ({}..{})", .{
                         self.replica,
                         table_info.address,
                         table_info.checksum,
+                        table_item.level,
                         table_info.snapshot_min,
                         snapshot_from_commit(sync_op_min),
                         snapshot_from_commit(sync_op_max),

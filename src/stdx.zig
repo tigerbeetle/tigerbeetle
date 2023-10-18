@@ -206,7 +206,7 @@ pub fn timeit() TimeIt {
 const TimeIt = struct {
     inner: std.time.Timer,
 
-    /// Prints elapesed time to stderr and resets the internal timer.
+    /// Prints elapsed time to stderr and resets the internal timer.
     pub fn lap(self: *TimeIt, comptime label: []const u8) void {
         const label_alignment = comptime " " ** (1 + (12 -| label.len));
 

@@ -143,9 +143,9 @@ pub fn main() !void {
             .testing => .{ .lsm_forest_node_count = 4096 },
             .accounting => .{
                 .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = if (random.boolean()) 0 else 2048,
-                .cache_entries_transfers = 0,
-                .cache_entries_posted = if (random.boolean()) 0 else 2048,
+                .cache_entries_accounts = 2048,
+                .cache_entries_transfers = 2048,
+                .cache_entries_posted = 2048,
             },
         },
     };
@@ -706,8 +706,8 @@ pub const Simulator = struct {
 
         // Make sure that there is capacity in the client's request queue.
         if (client.messages_available == 0) return;
-        var request_message = client.get_message();
-        defer client.unref(request_message);
+        const request_message = client.get_message();
+        errdefer client.release(request_message);
 
         const request_metadata = simulator.workload.build_request(
             client_index,

@@ -1563,7 +1563,7 @@ const TestClients = struct {
                 {
                     assert(client.messages_available == constants.client_request_queue_max);
                     const message = client.get_message();
-                    defer client.unref(message);
+                    errdefer client.release(message);
 
                     const body_size = 123;
                     @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);

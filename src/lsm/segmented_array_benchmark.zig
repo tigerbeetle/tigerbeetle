@@ -89,11 +89,6 @@ pub fn main() !void {
                     return value.key;
                 }
             }.key_from_value,
-            struct {
-                inline fn compare_keys(a: Key, b: Key) std.math.Order {
-                    return std.math.order(a, b);
-                }
-            }.compare_keys,
             .{ .verify = false },
         );
 

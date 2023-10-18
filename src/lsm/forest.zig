@@ -1,10 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const math = std.math;
+const maybe = stdx.maybe;
 const mem = std.mem;
 const log = std.log.scoped(.forest);
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
@@ -251,6 +252,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn open(forest: *Forest, callback: Callback) void {
             assert(forest.progress == null);
+            assert(forest.manifest_log_progress == .idle);
+
             forest.progress = .{ .open = .{ .callback = callback } };
 
             inline for (std.meta.fields(Grooves)) |field| {
@@ -262,17 +265,18 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
-            level: u7,
+            level: u6,
             table: *const schema.Manifest.TableInfo,
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
+            assert(forest.manifest_log_progress == .idle);
             assert(level < constants.lsm_levels);
 
             switch (table.tree_id) {
                 inline tree_id_range.min...tree_id_range.max => |tree_id| {
-                    var t: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
-                    t.open_table(level, table);
+                    var tree: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
+                    tree.open_table(level, table);
                 },
                 else => {
                     log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
@@ -284,10 +288,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
+            assert(forest.manifest_log_progress == .idle);
+            forest.verify_tables_recovered();
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).open_complete();
             }
+            forest.verify_table_extents();
 
             const callback = forest.progress.?.open.callback;
             forest.progress = null;
@@ -296,6 +303,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
             assert(forest.progress == null);
+            forest.verify_table_extents();
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).compact(compact_groove_callback(field.name), op);
@@ -362,6 +370,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn compact_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
             assert(forest.manifest_log_progress != .idle);
+            forest.verify_table_extents();
 
             const progress = &forest.progress.?.compact;
             if (progress.pending.count() > 0) return;
@@ -399,6 +408,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.progress == null);
             assert(forest.manifest_log_progress == .idle);
             forest.grid.assert_only_repairing();
+            forest.verify_table_extents();
 
             forest.progress = .{ .checkpoint = .{ .callback = callback } };
 
@@ -414,6 +424,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.progress.? == .checkpoint);
             assert(forest.manifest_log_progress == .idle);
             forest.grid.assert_only_repairing();
+            forest.verify_table_extents();
+            forest.verify_tables_recovered();
 
             const callback = forest.progress.?.checkpoint.callback;
             forest.progress = null;
@@ -438,6 +450,147 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .ids => return &groove.ids,
                 .indexes => |index_name| return &@field(groove.indexes, index_name),
             }
+        }
+
+        pub fn tree_for_id_const(
+            forest: *const Forest,
+            comptime tree_id: u16,
+        ) *const TreeForIdType(tree_id) {
+            const tree_info = tree_infos[tree_id - tree_id_range.min];
+            assert(tree_info.tree_id == tree_id);
+
+            const groove = &@field(forest.grooves, tree_info.groove_name);
+
+            switch (tree_info.groove_tree) {
+                .objects => return &groove.objects,
+                .ids => return &groove.ids,
+                .indexes => |index_name| return &@field(groove.indexes, index_name),
+            }
+        }
+
+        /// Verify that `ManifestLog.table_extents` has an extent for every active table.
+        ///
+        /// (Invoked between beats.)
+        fn verify_table_extents(forest: *const Forest) void {
+            var tables_count: usize = 0;
+            inline for (tree_id_range.min..tree_id_range.max + 1) |tree_id| {
+                for (0..constants.lsm_levels) |level| {
+                    const tree_level = forest.tree_for_id_const(tree_id).manifest.levels[level];
+                    tables_count += tree_level.tables.len();
+
+                    if (constants.verify) {
+                        var tables_iterator = tree_level.tables.iterator_from_index(0, .ascending);
+                        while (tables_iterator.next()) |table| {
+                            assert(forest.manifest_log.table_extents.get(table.address) != null);
+                        }
+                    }
+                }
+            }
+            assert(tables_count == forest.manifest_log.table_extents.count());
+        }
+
+        /// Verify the tables recovered into the ManifestLevels after opening the manifest log.
+        ///
+        /// There are two strategies to reconstruct the LSM's manifest levels (i.e. the list of
+        /// tables) from a superblock manifest:
+        ///
+        /// 1. Iterate the manifest events in chronological order, replaying each
+        ///    insert/update/remove in sequence.
+        /// 2. Iterate the manifest events in reverse-chronological order, ignoring events for
+        ///    tables that have already been encountered.
+        ///
+        /// The manifest levels constructed by each strategy are identical.
+        ///
+        /// 1. This function implements strategy 1, to validate `ManifestLog.open()`.
+        /// 2. `ManifestLog.open()` implements strategy 2.
+        ///
+        /// (Strategy 2 minimizes the number of ManifestLevel mutations.)
+        ///
+        /// (Invoked immediately after open() or checkpoint()).
+        fn verify_tables_recovered(forest: *const Forest) void {
+            const ForestTableIteratorType =
+                @import("./forest_table_iterator.zig").ForestTableIteratorType;
+            const ForestTableIterator = ForestTableIteratorType(Forest);
+
+            assert(forest.grid.superblock.opened);
+            assert(forest.manifest_log.opened);
+
+            if (Forest.Storage != @import("../testing/storage.zig").Storage) return;
+
+            // The manifest log is opened, which means we have all of the manifest blocks.
+            // But if the replica is syncing, those blocks might still be writing (and thus not in
+            // the TestStorage when we go to retrieve them).
+            if (forest.grid.superblock.working.vsr_state.sync_op_max > 0) return;
+
+            // The latest version of each table, keyed by table checksum.
+            // Null when the table has been deleted.
+            var tables_latest = std.AutoHashMap(u128, struct {
+                level: u6,
+                table: schema.Manifest.TableInfo,
+                manifest_block: u64,
+                manifest_entry: u32,
+            }).init(forest.grid.superblock.storage.allocator);
+            defer tables_latest.deinit();
+
+            // Replay manifest events in chronological order.
+            // Accumulate all tables that belong in the recovered forest's ManifestLevels.
+            for (
+                forest.grid.superblock.manifest.checksums[0..forest.grid.superblock.manifest.count],
+                forest.grid.superblock.manifest.addresses[0..forest.grid.superblock.manifest.count],
+            ) |block_checksum, block_address| {
+                assert(block_address > 0);
+
+                const block = forest.grid.superblock.storage.grid_block(block_address).?;
+                const block_header = schema.header_from_block(block);
+                assert(block_header.op == block_address);
+                assert(block_header.checksum == block_checksum);
+                assert(schema.BlockType.from(block_header.operation) == .manifest);
+
+                const block_schema = schema.Manifest.from(block);
+                assert(block_schema.entry_count > 0);
+                assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
+
+                for (
+                    block_schema.labels_const(block),
+                    block_schema.tables_const(block),
+                    0..,
+                ) |label, *table, entry| {
+                    if (label.event == .remove) {
+                        maybe(tables_latest.remove(table.checksum));
+                    } else {
+                        tables_latest.put(table.checksum, .{
+                            .level = label.level,
+                            .table = table.*,
+                            .manifest_block = block_address,
+                            .manifest_entry = @intCast(entry),
+                        }) catch @panic("oom");
+                    }
+                }
+            }
+
+            // Verify that the SuperBlock Manifest's table extents are correct.
+            var tables_latest_iterator = tables_latest.valueIterator();
+            var table_extent_counts: usize = 0;
+            while (tables_latest_iterator.next()) |table| {
+                const table_extent = forest.manifest_log.table_extents.get(table.table.address).?;
+                assert(table.manifest_block == table_extent.block);
+                assert(table.manifest_entry == table_extent.entry);
+
+                table_extent_counts += 1;
+            }
+            assert(table_extent_counts == forest.manifest_log.table_extents.count());
+
+            // Verify the tables in `tables` are exactly the tables recovered by the Forest.
+            var forest_tables_iterator = ForestTableIterator{};
+            while (forest_tables_iterator.next(forest)) |forest_table_item| {
+                const table_latest = tables_latest.get(forest_table_item.table.checksum).?;
+                assert(table_latest.level == forest_table_item.level);
+                assert(std.meta.eql(table_latest.table, forest_table_item.table));
+
+                const table_removed = tables_latest.remove(forest_table_item.table.checksum);
+                assert(table_removed);
+            }
+            assert(tables_latest.count() == 0);
         }
     };
 }

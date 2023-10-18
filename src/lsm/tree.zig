@@ -14,13 +14,12 @@ const tracer = @import("../tracer.zig");
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const bloom_filter = @import("bloom_filter.zig");
 const schema = @import("schema.zig");
 
-const CompositeKey = @import("composite_key.zig").CompositeKey;
+const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
-const Fingerprint = bloom_filter.Fingerprint;
+pub const ScopeCloseMode = enum { persist, discard };
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
@@ -84,20 +83,19 @@ pub const TreeConfig = struct {
 pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     const Key = TreeTable.Key;
     const Value = TreeTable.Value;
-    const compare_keys = TreeTable.compare_keys;
     const tombstone = TreeTable.tombstone;
 
     return struct {
         const Tree = @This();
 
         pub const Table = TreeTable;
-        pub const TableMutable = @import("table_mutable.zig").TableMutableType(Table);
+        pub const TableMemory = @import("table_memory.zig").TableMemoryType(Table);
         pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
 
         const Grid = @import("../vsr/grid.zig").GridType(Storage);
         const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
         const KeyRange = Manifest.KeyRange;
-        const TableImmutable = @import("table_immutable.zig").TableImmutableType(Table);
+
         const CompactionType = @import("compaction.zig").CompactionType;
         const Compaction = CompactionType(Table, Tree, Storage);
 
@@ -111,9 +109,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         config: Config,
         options: Options,
 
-        table_mutable: TableMutable,
-        table_immutable: TableImmutable,
-        values_cache: ?*TableMutable.ValuesCache,
+        table_mutable: TableMemory,
+        table_immutable: TableMemory,
 
         manifest: Manifest,
 
@@ -152,8 +149,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         compaction_next_tick: Grid.NextTick = undefined,
 
         tracer_slot: ?tracer.SpanStart = null,
-        filter_block_hits: u64 = 0,
-        filter_block_misses: u64 = 0,
+
+        active_scope: ?TableMemory.ValueContext = null,
 
         /// The range of keys in this tree at snapshot_latest.
         key_range: ?KeyRange = null,
@@ -163,8 +160,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         /// (Constructed by the StateMachine.)
         pub const Options = struct {
-            /// The number of objects to cache in the set-associative value cache.
-            cache_entries_max: u32 = 0,
+            // No options currently.
         };
 
         pub fn init(
@@ -178,27 +174,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(config.id != 0); // id=0 is reserved.
             assert(config.name.len > 0);
 
-            var values_cache: ?*TableMutable.ValuesCache = null;
-
-            if (options.cache_entries_max > 0) {
-                // Cache is heap-allocated to pass a pointer into the mutable table.
-                values_cache = try allocator.create(TableMutable.ValuesCache);
-            }
-            errdefer if (values_cache) |c| allocator.destroy(c);
-
-            if (options.cache_entries_max > 0) {
-                values_cache.?.* = try TableMutable.ValuesCache.init(
-                    allocator,
-                    options.cache_entries_max,
-                    .{ .name = config.name },
-                );
-            }
-            errdefer if (values_cache) |c| c.deinit(allocator);
-
-            var table_mutable = try TableMutable.init(allocator, values_cache);
+            var table_mutable = try TableMemory.init(allocator, .mutable, config.name);
             errdefer table_mutable.deinit(allocator);
 
-            var table_immutable = try TableImmutable.init(allocator);
+            var table_immutable = try TableMemory.init(
+                allocator,
+                .{ .immutable = .{} },
+                config.name,
+            );
             errdefer table_immutable.deinit(allocator);
 
             var manifest = try Manifest.init(allocator, node_pool, config);
@@ -223,7 +206,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .options = options,
                 .table_mutable = table_mutable,
                 .table_immutable = table_immutable,
-                .values_cache = values_cache,
                 .manifest = manifest,
                 .compaction_table_immutable = compaction_table_immutable,
                 .compaction_table = compaction_table,
@@ -240,22 +222,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.deinit(allocator);
             tree.table_immutable.deinit(allocator);
             tree.table_mutable.deinit(allocator);
-
-            if (tree.values_cache) |cache| {
-                cache.deinit(allocator);
-                allocator.destroy(cache);
-            }
         }
 
         pub fn reset(tree: *Tree) void {
             tree.table_mutable.reset();
-            tree.table_immutable.clear();
+            tree.table_immutable.reset();
             tree.manifest.reset();
 
             tree.compaction_table_immutable.reset();
             for (&tree.compaction_table) |*compaction| compaction.reset();
-
-            if (tree.values_cache) |cache| cache.reset();
 
             tree.* = .{
                 .grid = tree.grid,
@@ -263,11 +238,28 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .options = tree.options,
                 .table_mutable = tree.table_mutable,
                 .table_immutable = tree.table_immutable,
-                .values_cache = tree.values_cache,
                 .manifest = tree.manifest,
                 .compaction_table_immutable = tree.compaction_table_immutable,
                 .compaction_table = tree.compaction_table,
             };
+        }
+
+        /// Open a new scope. Within a scope, changes can be persisted
+        /// or discarded. Only one scope can be active at a time.
+        pub fn scope_open(tree: *Tree) void {
+            assert(tree.active_scope == null);
+            tree.active_scope = tree.table_mutable.value_context;
+        }
+
+        pub fn scope_close(tree: *Tree, mode: ScopeCloseMode) void {
+            assert(tree.active_scope != null);
+            assert(tree.active_scope.?.count <= tree.table_mutable.value_context.count);
+
+            if (mode == .discard) {
+                tree.table_mutable.value_context = tree.active_scope.?;
+            }
+
+            tree.active_scope = null;
         }
 
         pub fn put(tree: *Tree, value: *const Value) void {
@@ -275,13 +267,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         }
 
         pub fn remove(tree: *Tree, value: *const Value) void {
-            tree.table_mutable.remove(value);
+            tree.table_mutable.put(&Table.tombstone_from_key(Table.key_from_value(value)));
         }
 
         pub fn key_range_update(tree: *Tree, key: Key) void {
             if (tree.key_range) |*key_range| {
-                if (compare_keys(key, key_range.key_min) == .lt) key_range.key_min = key;
-                if (compare_keys(key, key_range.key_max) == .gt) key_range.key_max = key;
+                if (key < key_range.key_min) key_range.key_min = key;
+                if (key > key_range.key_max) key_range.key_max = key;
             } else {
                 tree.key_range = KeyRange{ .key_min = key, .key_max = key };
             }
@@ -294,42 +286,20 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn key_range_contains(tree: *const Tree, snapshot: u64, key: Key) bool {
             if (snapshot == snapshot_latest) {
                 return tree.key_range != null and
-                    compare_keys(key, tree.key_range.?.key_min) != .lt and
-                    compare_keys(key, tree.key_range.?.key_max) != .gt;
+                    tree.key_range.?.key_min <= key and
+                    key <= tree.key_range.?.key_max;
             } else {
                 return true;
             }
         }
 
-        /// Returns the value from the mutable or immutable table (possibly a tombstone),
-        /// if one is available for the specified snapshot.
-        pub fn lookup_from_memory(
-            tree: *Tree,
-            snapshot: u64,
-            key: Key,
-            fingerprint: Fingerprint,
-        ) LookupMemoryResult {
-            assert(snapshot <= snapshot_latest);
+        /// This function is intended to never be called by regular code. It only
+        /// exists for fuzzing, due to the performance overhead it carries. Real
+        /// code must rely on the Groove cache for lookups.
+        pub fn lookup_from_memory(tree: *Tree, key: Key) ?*const Value {
+            assert(constants.verify);
 
-            if (snapshot == snapshot_latest) {
-                if (tree.table_mutable.get(key)) |value| return .{ .positive = value };
-            } else {
-                // TODO(Snapshots) The following is speculative...:
-                // The mutable table is converted to an immutable table when a snapshot is created.
-                // This means that a past snapshot will never be able to see the mutable table.
-                // This simplifies the mutable table and eliminates compaction for duplicate puts.
-            }
-
-            if (tree.table_immutable.snapshot_min <= snapshot) {
-                if (!tree.table_immutable.free) {
-                    if (tree.table_immutable.get(key)) |value| return .{ .positive = value };
-                }
-            } else {
-                // If the immutable table is invisible, then the mutable table is also invisible.
-                assert(snapshot != snapshot_latest);
-            }
-
-            return tree.lookup_from_levels_cache(snapshot, key, fingerprint);
+            return tree.table_mutable.get(key) orelse tree.table_immutable.get(key);
         }
 
         /// Returns:
@@ -338,16 +308,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// - .possible if the key may exist in the Manifest but its existence cannot be
         ///  ascertained without IO, along with the level number at which IO must be performed.
         ///
-        /// This function attempts to fetch the index, filter & data blocks for the tables that
+        /// This function attempts to fetch the index & data blocks for the tables that
         /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
-        /// the existence of the key in the filter/data block. If any of the blocks needed to
+        /// the existence of the key in the data block. If any of the blocks needed to
         /// ascertain the existence of the key are not in the Grid cache, it bails out.
-        fn lookup_from_levels_cache(
-            tree: *Tree,
-            snapshot: u64,
-            key: Key,
-            fingerprint: Fingerprint,
-        ) LookupMemoryResult {
+        pub fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
             var iterator = tree.manifest.lookup(snapshot, key, 0);
             while (iterator.next()) |table| {
                 const index_block = tree.grid.read_block_from_cache(
@@ -360,33 +325,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     return .{ .possible = iterator.level - 1 };
                 };
 
-                const key_blocks = Table.index_blocks_for_key(index_block, key);
-                // Only general purpose tables have filter blocks.
-                if (comptime Table.usage == .general) {
-                    switch (tree.cached_filter_block_search(
-                        key_blocks.filter_block_address,
-                        key_blocks.filter_block_checksum,
-                        fingerprint,
-                    )) {
-                        .negative => {
-                            if (constants.verify) {
-                                assert(tree.cached_data_block_search(
-                                    key_blocks.data_block_address,
-                                    key_blocks.data_block_checksum,
-                                    key,
-                                ) != .positive);
-                            }
-                            // Filter block indicates that the key is not present in the data block,
-                            // move on to the next table that could contain the key.
-                            continue;
-                        },
-                        .possible, .block_not_in_cache => {
-                            // Give yourself another fighting chance to rule out the existence of
-                            // the key; search for the data block in the grid cache.
-                        },
-                    }
-                }
-
+                const key_blocks = Table.index_blocks_for_key(index_block, key) orelse continue;
                 switch (tree.cached_data_block_search(
                     key_blocks.data_block_address,
                     key_blocks.data_block_checksum,
@@ -402,31 +341,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
             // Key not present in the Manifest.
             return .negative;
-        }
-
-        fn cached_filter_block_search(
-            tree: *Tree,
-            address: u64,
-            checksum: u128,
-            fingerprint: Fingerprint,
-        ) enum { negative, possible, block_not_in_cache } {
-            comptime assert(Table.usage == .general);
-
-            if (tree.grid.read_block_from_cache(
-                address,
-                checksum,
-                .{ .coherent = true },
-            )) |filter_block| {
-                const filter_schema = schema.TableFilter.from(filter_block);
-                const filter_bytes = filter_schema.block_filter_const(filter_block);
-                if (!bloom_filter.may_contain(fingerprint, filter_bytes)) {
-                    return .negative;
-                } else {
-                    return .possible;
-                }
-            } else {
-                return .block_not_in_cache;
-            }
         }
 
         fn cached_data_block_search(
@@ -460,7 +374,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             context: *LookupContext,
             snapshot: u64,
             key: Key,
-            fingerprint: Fingerprint,
             level_min: u8,
         }) void {
             var index_block_count: u8 = 0;
@@ -474,8 +387,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 );
                 while (it.next()) |table| : (index_block_count += 1) {
                     assert(table.visible(parameters.snapshot));
-                    assert(compare_keys(table.key_min, parameters.key) != .gt);
-                    assert(compare_keys(table.key_max, parameters.key) != .lt);
+                    assert(table.key_min <= parameters.key);
+                    assert(parameters.key <= table.key_max);
 
                     index_block_addresses[index_block_count] = table.address;
                     index_block_checksums[index_block_count] = table.checksum;
@@ -490,14 +403,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             parameters.context.* = .{
                 .tree = tree,
                 .completion = undefined,
-
                 .key = parameters.key,
-                .fingerprint = parameters.fingerprint,
-
                 .index_block_count = index_block_count,
                 .index_block_addresses = index_block_addresses,
                 .index_block_checksums = index_block_checksums,
-
                 .callback = parameters.callback,
             };
 
@@ -512,7 +421,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             completion: Read,
 
             key: Key,
-            fingerprint: Fingerprint,
 
             /// This value is an index into the index_block_addresses/checksums arrays.
             index_block: u8 = 0,
@@ -550,69 +458,24 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count <= constants.lsm_levels);
                 assert(schema.TableIndex.tree_id(index_block) == context.tree.config.id);
 
-                const blocks = Table.index_blocks_for_key(index_block, context.key);
+                const blocks = Table.index_blocks_for_key(index_block, context.key) orelse {
+                    // The key is not present in this table, check the next level.
+                    context.advance_to_next_level();
+                    return;
+                };
 
                 context.data_block = .{
                     .address = blocks.data_block_address,
                     .checksum = blocks.data_block_checksum,
                 };
 
-                // Only general purpose tables have filter blocks.
-                if (comptime Table.usage == .general) {
-                    context.tree.grid.read_block(
-                        .{ .from_local_or_global_storage = read_filter_block_callback },
-                        completion,
-                        blocks.filter_block_address,
-                        blocks.filter_block_checksum,
-                        .{ .cache_read = true, .cache_write = true },
-                    );
-                } else {
-                    context.tree.grid.read_block(
-                        .{ .from_local_or_global_storage = read_data_block_callback },
-                        completion,
-                        context.data_block.?.address,
-                        context.data_block.?.checksum,
-                        .{ .cache_read = true, .cache_write = true },
-                    );
-                }
-            }
-
-            fn read_filter_block_callback(completion: *Read, filter_block: BlockPtrConst) void {
-                comptime assert(Table.usage == .general);
-
-                const context = @fieldParentPtr(LookupContext, "completion", completion);
-                assert(context.data_block != null);
-                assert(context.index_block < context.index_block_count);
-                assert(context.index_block_count > 0);
-                assert(context.index_block_count <= constants.lsm_levels);
-                assert(schema.TableFilter.tree_id(filter_block) == context.tree.config.id);
-
-                const filter_schema = schema.TableFilter.from(filter_block);
-                const filter_bytes = filter_schema.block_filter_const(filter_block);
-                if (bloom_filter.may_contain(context.fingerprint, filter_bytes)) {
-                    context.tree.filter_block_hits += 1;
-                    tracer.plot(
-                        .{ .filter_block_hits = .{ .tree_name = context.tree.config.name } },
-                        @as(f64, @floatFromInt(context.tree.filter_block_hits)),
-                    );
-
-                    context.tree.grid.read_block(
-                        .{ .from_local_or_global_storage = read_data_block_callback },
-                        completion,
-                        context.data_block.?.address,
-                        context.data_block.?.checksum,
-                        .{ .cache_read = true, .cache_write = true },
-                    );
-                } else {
-                    context.tree.filter_block_misses += 1;
-                    tracer.plot(
-                        .{ .filter_block_misses = .{ .tree_name = context.tree.config.name } },
-                        @as(f64, @floatFromInt(context.tree.filter_block_misses)),
-                    );
-
-                    // The key is not present in this table, check the next level.
-                    context.advance_to_next_level();
-                }
+                context.tree.grid.read_block(
+                    .{ .from_local_or_global_storage = read_data_block_callback },
+                    completion,
+                    context.data_block.?.address,
+                    context.data_block.?.checksum,
+                    .{ .cache_read = true, .cache_write = true },
+                );
             }
 
             fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
@@ -632,10 +495,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn advance_to_next_level(context: *LookupContext) void {
-                assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
+
+                // Data block may be null if the key is not contained in the
+                // index block's key range.
+                maybe(context.data_block == null);
 
                 context.index_block += 1;
                 if (context.index_block == context.index_block_count) {
@@ -754,14 +620,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 //   compactions would actually perform different compactions than before,
                 //   causing the storage state of the replica to diverge from the cluster.
                 //   See also: compaction_op_min().
+                // Immutable table preparation is handled by compact_end(), even when compaction
+                // is skipped.
                 tree.compaction_phase = .skipped;
-
-                if ((op + 1) % constants.lsm_batch_multiple == 0) {
-                    // This is the last op of the skipped compaction bar.
-                    // Prepare the immutable table for the next bar — since this state is
-                    // in-memory, it cannot be skipped.
-                    tree.compact_mutable_table_into_immutable();
-                }
 
                 tree.compaction_callback = .{ .next_tick = callback };
                 tree.grid.on_next_tick(compact_finish_next_tick, &tree.compaction_next_tick);
@@ -839,11 +700,10 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(compaction_beat == half_bar_beat_count);
 
             // Do not start compaction if the immutable table does not require compaction.
-            if (tree.table_immutable.free) return;
+            if (tree.table_immutable.mutability.immutable.flushed) return;
 
-            assert(tree.table_immutable.snapshot_min % half_bar_beat_count == 0);
-
-            const values_count = tree.table_immutable.values.len;
+            const values = tree.table_immutable.values_used();
+            const values_count = values.len;
             assert(values_count > 0);
 
             const level_b: u8 = 0;
@@ -854,14 +714,13 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             // +1 to count the input table from level A.
             assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
-            assert(compare_keys(range_b.key_min, tree.table_immutable.key_min()) != .gt);
-            assert(compare_keys(range_b.key_max, tree.table_immutable.key_max()) != .lt);
+            assert(range_b.key_min <= tree.table_immutable.key_min());
+            assert(tree.table_immutable.key_max() <= range_b.key_max);
 
             log.debug("{s}: compacting immutable table to level 0 " ++
-                "(values.len={d} snapshot_min={d} compaction.op_min={d} table_count={d})", .{
+                "(snapshot_min={d} compaction.op_min={d} table_count={d})", .{
                 tree.config.name,
-                tree.table_immutable.values.len,
-                tree.table_immutable.snapshot_min,
+                tree.table_immutable.mutability.immutable.snapshot_min,
                 op_min,
                 range_b.tables.count() + 1,
             });
@@ -871,7 +730,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .grid = tree.grid,
                 .tree = tree,
                 .op_min = op_min,
-                .table_info_a = .{ .immutable = tree.table_immutable.values },
+                .table_info_a = .{ .immutable = values },
                 .level_b = level_b,
                 .range_b = range_b,
                 .callback = compact_table_finish,
@@ -892,9 +751,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             const range_b = table_range.range_b;
 
             assert(range_b.tables.count() + 1 <= compaction_tables_input_max);
-            assert(compare_keys(table_a.key_min, table_a.key_max) != .gt);
-            assert(compare_keys(range_b.key_min, table_a.key_min) != .gt);
-            assert(compare_keys(range_b.key_max, table_a.key_max) != .lt);
+            assert(table_a.key_min <= table_a.key_max);
+            assert(range_b.key_min <= table_a.key_min);
+            assert(table_a.key_max <= range_b.key_max);
 
             log.debug("{s}: compacting {d} tables from level {d} to level {d}", .{
                 tree.config.name,
@@ -1001,6 +860,18 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn compact_end(tree: *Tree) void {
             const state_old = tree.compaction_phase;
             tree.compaction_phase = .idle;
+            const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
+
+            // We still need to swap our tables even if we skip compaction for the first bar. The
+            // immutable table will be initially empty / 'flushed', so it's fine for it to be
+            // discarded.
+            if (state_old == .skipped_done and
+                compaction_beat == constants.lsm_batch_multiple - 1)
+            {
+                tree.swap_mutable_and_immutable(
+                    snapshot_min_for_table_output(compaction_op_min(tree.compaction_op.?)),
+                );
+            }
 
             switch (state_old) {
                 .running_done => {}, // Fall through.
@@ -1009,7 +880,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             // Only run at the end of each half-bar.
-            const compaction_beat = tree.compaction_op.? % constants.lsm_batch_multiple;
             const compacted_levels_odd = compaction_beat == constants.lsm_batch_multiple - 1;
             const compacted_levels_even = compaction_beat == half_bar_beat_count - 1;
             if (!compacted_levels_odd and !compacted_levels_even) return;
@@ -1024,20 +894,29 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             if (!even_levels) {
                 switch (tree.compaction_table_immutable.state) {
                     // The compaction wasn't started for this half bar.
-                    .idle => assert(tree.table_immutable.free),
+                    .idle => assert(tree.table_immutable.mutability.immutable.flushed),
                     .tables_writing_done => {
                         tree.compaction_table_immutable.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             tree.compaction_table_immutable.context.level_b,
-                            snapshot_latest,
+                            &.{},
                             tree.compaction_table_immutable.context.range_b.key_min,
                             tree.compaction_table_immutable.context.range_b.key_max,
                         );
-                        tree.table_immutable.clear();
+
+                        // Mark that the contents of our immutable table have been flushed,
+                        // so it's safe to clear them.
+                        tree.table_immutable.mutability.immutable.flushed = true;
                         tree.compaction_table_immutable.transition_to_idle();
                     },
                     else => unreachable,
                 }
+            }
+
+            if (compaction_beat == constants.lsm_batch_multiple - 1) {
+                tree.swap_mutable_and_immutable(
+                    snapshot_min_for_table_output(compaction_op_min(tree.compaction_op.?)),
+                );
             }
 
             // Close all the other Compactions.
@@ -1050,14 +929,14 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                         context.compaction.apply_to_manifest();
                         tree.manifest.remove_invisible_tables(
                             context.compaction.context.level_b,
-                            snapshot_latest,
+                            &.{},
                             context.compaction.context.range_b.key_min,
                             context.compaction.context.range_b.key_max,
                         );
                         if (context.compaction.context.level_b > 0) {
                             tree.manifest.remove_invisible_tables(
                                 context.compaction.context.level_b - 1,
-                                snapshot_latest,
+                                &.{},
                                 context.compaction.context.range_b.key_min,
                                 context.compaction.context.range_b.key_max,
                             );
@@ -1077,35 +956,30 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             if (compacted_levels_odd) {
                 // Assert all visible tables haven't overflowed their max per level.
                 tree.manifest.assert_level_table_counts();
-
-                // Convert mutable table to immutable table for next bar.
-                tree.compact_mutable_table_into_immutable();
             }
         }
 
         /// Called after the last beat of a full compaction bar.
-        fn compact_mutable_table_into_immutable(tree: *Tree) void {
-            assert(tree.table_immutable.free);
+        fn swap_mutable_and_immutable(tree: *Tree, snapshot_min: u64) void {
+            assert(tree.table_mutable.mutability == .mutable);
+            assert(tree.table_immutable.mutability == .immutable);
+            assert(tree.table_immutable.mutability.immutable.flushed);
+            assert(snapshot_min > 0);
+            assert(snapshot_min < snapshot_latest);
+
             assert((tree.compaction_op.? + 1) % constants.lsm_batch_multiple == 0);
-
-            if (tree.table_mutable.count() == 0) return;
-
-            // Sort the mutable table values directly into the immutable table's array.
-            const values_max = tree.table_immutable.values_max();
-            const values = tree.table_mutable.sort_into_values_and_clear(values_max);
-            assert(values.ptr == values_max.ptr);
 
             // The immutable table must be visible to the next bar.
             // In addition, the immutable table is conceptually an output table of this compaction
             // bar, and now its snapshot_min matches the snapshot_min of the Compactions' output
             // tables.
-            tree.table_immutable.reset_with_sorted_values(
-                snapshot_min_for_table_output(compaction_op_min(tree.compaction_op.?)),
-                values,
-            );
+            tree.table_mutable.make_immutable(snapshot_min);
+            tree.table_immutable.make_mutable();
+            std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
 
             assert(tree.table_mutable.count() == 0);
-            assert(!tree.table_immutable.free);
+            assert(tree.table_mutable.mutability == .mutable);
+            assert(tree.table_immutable.mutability == .immutable);
         }
 
         pub fn assert_between_bars(tree: *const Tree) void {
@@ -1129,7 +1003,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.assert_level_table_counts();
 
             if (constants.verify) {
-                tree.manifest.assert_no_invisible_tables(compaction_op_min(tree.compaction_op.?));
+                tree.manifest.assert_no_invisible_tables(&.{});
             }
         }
 
@@ -1264,38 +1138,6 @@ pub fn table_count_max_for_level(growth_factor: u32, level: u32) u32 {
     return math.pow(u32, growth_factor, level + 1);
 }
 
-pub inline fn key_fingerprint(key: anytype) Fingerprint {
-    return Fingerprint.create(stdx.hash_inline(
-        // Composite keys are filtered by the prefix only.
-        if (comptime is_composite_key(@TypeOf(key)))
-            key.field
-        else
-            key,
-    ));
-}
-
-fn is_composite_key(comptime Key: type) bool {
-    if (@typeInfo(Key) == .Struct and
-        @hasField(Key, "field") and
-        @hasField(Key, "timestamp"))
-    {
-        const Field = std.meta.fieldInfo(Key, .field).type;
-        return Key == CompositeKey(Field);
-    }
-
-    return false;
-}
-
-test "is_composite_key" {
-    const expect = std.testing.expect;
-
-    try expect(is_composite_key(CompositeKey(u128)));
-    try expect(!is_composite_key(u128));
-
-    try expect(is_composite_key(CompositeKey(u64)));
-    try expect(!is_composite_key(u64));
-}
-
 test "table_count_max_for_level/tree" {
     const expectEqual = std.testing.expectEqual;
 
@@ -1316,15 +1158,14 @@ test "table_count_max_for_level/tree" {
 }
 
 test "TreeType" {
-    const Key = @import("composite_key.zig").CompositeKey(u64);
+    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);
     const Table = @import("table.zig").TableType(
-        Key,
-        Key.Value,
-        Key.compare_keys,
-        Key.key_from_value,
-        Key.sentinel_key,
-        Key.tombstone,
-        Key.tombstone_from_key,
+        CompositeKey.Key,
+        CompositeKey,
+        CompositeKey.key_from_value,
+        CompositeKey.sentinel_key,
+        CompositeKey.tombstone,
+        CompositeKey.tombstone_from_key,
         constants.state_machine_config.lsm_batch_multiple * 1024,
         .secondary_index,
     );

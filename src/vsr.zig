@@ -1412,6 +1412,7 @@ pub fn parse_address_and_port(string: []const u8) !std.net.Address {
 }
 
 fn parse_address(string: []const u8, port: u16) !std.net.Address {
+    if (string.len == 0) return error.AddressInvalid;
     if (string[string.len - 1] == ':') return error.AddressHasMoreThanOneColon;
 
     if (string[0] == '[' and string[string.len - 1] == ']') {
@@ -1494,6 +1495,9 @@ test "parse_addresses" {
         err: anyerror![]std.net.Address,
     }{
         .{ .raw = "", .err = error.AddressHasTrailingComma },
+        .{ .raw = ".", .err = error.AddressInvalid },
+        .{ .raw = ":", .err = error.PortInvalid },
+        .{ .raw = ":92", .err = error.AddressInvalid },
         .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
         .{ .raw = "1.2.3.4:7777,", .err = error.AddressHasTrailingComma },
         .{ .raw = "1.2.3.4:7777,2.3.4.5::8888", .err = error.AddressHasMoreThanOneColon },
@@ -1522,6 +1526,29 @@ test "parse_addresses" {
 
     for (vectors_negative) |vector| {
         try std.testing.expectEqual(vector.err, parse_addresses(std.testing.allocator, vector.raw, 2));
+    }
+}
+
+test "parse_addresses: fuzz" {
+    const test_count = 1024;
+    const len_max = 32;
+    const alphabet = " \t\n,:[]0123456789abcdefgABCDEFGXx";
+
+    const seed = std.crypto.random.int(u64);
+
+    var prng = std.rand.DefaultPrng.init(seed);
+    const random = prng.random();
+
+    var input_max: [len_max]u8 = .{0} ** len_max;
+    for (0..test_count) |_| {
+        const len = random.uintAtMost(usize, len_max);
+        var input = input_max[0..len];
+        for (input) |*c| {
+            c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
+        }
+        if (parse_addresses(std.testing.allocator, input, 3)) |addresses| {
+            std.testing.allocator.free(addresses);
+        } else |_| {}
     }
 }
 
@@ -1683,11 +1710,11 @@ pub const Headers = struct {
     pub const ViewChangeArray = ViewChangeHeadersArray;
 
     fn dvc_blank(op: u64) Header {
-        return std.mem.zeroInit(Header, .{
-            .command = .reserved,
-            .op = op,
-            .checksum = 0,
-        });
+        var header: Header = undefined;
+        @memset(std.mem.asBytes(&header), 0);
+        header.command = .reserved;
+        header.op = op;
+        return header;
     }
 
     pub fn dvc_header_type(header: *const Header) enum { blank, valid } {

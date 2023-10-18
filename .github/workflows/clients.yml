@@ -1,0 +1,128 @@
+name: Clients
+
+concurrency:
+  group: clients-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_call:
+
+jobs:
+  client-dotnet:
+    strategy:
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      # Our M1 runners are self hosted, and not ephemeral like standard GitHub action runners.
+      # Limit the token permissions to be read - so even if they were compromised, no damage
+      # could be done.
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version:
+            7.0.x
+
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./zig/zig build client_ci -- --language=dotnet
+      # - run: ./zig/zig build client_docs -- --language=dotnet
+      # - if: matrix.os == 'ubuntu-latest-large'
+        # run: ./.github/ci/fail_on_diff.sh
+
+  client-go:
+    strategy:
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.18'
+
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./zig/zig build client_ci -- --language=go
+      # - run: ./zig/zig build client_docs -- --language=go
+      # - if: matrix.os == 'ubuntu-latest-large'
+        # run: ./.github/ci/fail_on_diff.sh
+
+  client-java:
+    strategy:
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        java-version: ['11']
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-java@v3
+        with:
+          java-version: ${{ matrix.java-version }}
+          distribution: 'temurin'
+
+      # Maven is pre-installed on GHA runners, but it is **not** installed by `setup-java` action,
+      # so it is missing on self-hosted runners. Install manually.
+      - run: |
+          curl -o maven.zip https://archive.apache.org/dist/maven/maven-3/3.9.3/binaries/apache-maven-3.9.3-bin.zip
+          unzip maven.zip
+      -  if: matrix.os != 'windows-latest-large'
+         run: echo "$GITHUB_WORKSPACE/apache-maven-3.9.3/bin" >> $GITHUB_PATH
+      -  if: matrix.os == 'windows-latest-large'
+         run: '"$env:GITHUB_WORKSPACE/apache-maven-3.9.3/bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
+
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./zig/zig build client_ci -- --language=java
+      # - run: ./zig/zig build client_docs -- --language=java
+      # - if: matrix.os == 'ubuntu-latest-large'
+        # run: ./.github/ci/fail_on_diff.sh
+
+  client-node:
+    strategy:
+      max-parallel: 2
+      matrix:
+        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        node-version: ['14.x', '18.x']
+        exclude:
+          - os: macos-13
+            node-version: '14.x'
+          - os: macos-13-xlarge
+            node-version: '14.x'
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./zig/zig build client_ci -- --language=node
+      # - run: ./zig/zig build client_docs -- --language=node
+      # - if: matrix.os == 'ubuntu-latest-large'
+        # run: ./.github/ci/fail_on_diff.sh
+
+  clients-pipeline:
+    needs:
+      - client-dotnet
+      - client-go
+      - client-java
+      - client-node
+
+    runs-on: ubuntu-latest-large
+    steps:
+      - name: All Client CI Jobs Passed
+        working-directory: ./
+        run: exit 0

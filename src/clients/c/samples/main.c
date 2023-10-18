@@ -60,7 +60,9 @@ int main(int argc, char **argv) {
     printf("TigerBeetle C Sample\n");
     printf("Connecting...\n");
     tb_client_t client;
-    const char *address = "127.0.0.1:3000";
+    
+    const char *address = getenv("TB_ADDRESS");
+    if (address == NULL) address = "3000";
 
     TB_STATUS status = tb_client_init(
         &client,              // Output client.

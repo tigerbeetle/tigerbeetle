@@ -11,7 +11,7 @@ const schema = @import("../lsm/schema.zig");
 const SuperBlockType = vsr.SuperBlockType;
 const FIFO = @import("../fifo.zig").FIFO;
 const IOPS = @import("../iops.zig").IOPS;
-const SetAssociativeCache = @import("../lsm/set_associative_cache.zig").SetAssociativeCache;
+const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
 const stdx = @import("../stdx.zig");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 
@@ -141,20 +141,15 @@ pub fn GridType(comptime Storage: type) type {
                 assert(address > 0);
                 return stdx.hash_inline(address);
             }
-
-            inline fn equal_addresses(a: u64, b: u64) bool {
-                return a == b;
-            }
         };
 
         const set_associative_cache_ways = 16;
 
-        pub const Cache = SetAssociativeCache(
+        pub const Cache = SetAssociativeCacheType(
             u64,
             u64,
             cache_interface.address_from_address,
             cache_interface.hash_address,
-            cache_interface.equal_addresses,
             .{
                 .ways = set_associative_cache_ways,
                 .value_alignment = @alignOf(u64),
@@ -645,7 +640,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Insert the write block into the cache, and give the evicted block to the writer.
-            const cache_index = grid.cache.insert_index(&completed_write.address);
+            const cache_index = grid.cache.upsert(&completed_write.address).index;
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
             @memset(completed_write.block.*, 0);
@@ -888,7 +883,7 @@ pub fn GridType(comptime Storage: type) type {
 
             // Insert the block into the cache, and give the evicted block to `iop`.
             const cache_index =
-                if (read.cache_write) grid.cache.insert_index(&read.address) else null;
+                if (read.cache_write) grid.cache.upsert(&read.address).index else null;
             const block = block: {
                 if (read.cache_write) {
                     const cache_block = &grid.cache_blocks[cache_index.?];
@@ -938,7 +933,8 @@ pub fn GridType(comptime Storage: type) type {
 
                 if (read.cache_write) {
                     // Don't cache a corrupt or incorrect block.
-                    grid.cache.remove(read.address);
+                    const removed = grid.cache.remove(read.address);
+                    assert(removed != null);
                 }
             }
 

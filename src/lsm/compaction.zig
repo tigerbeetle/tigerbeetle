@@ -70,7 +70,6 @@ pub fn CompactionType(
 
         const Key = Table.Key;
         const Value = Table.Value;
-        const compare_keys = Table.compare_keys;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
@@ -163,7 +162,6 @@ pub fn CompactionType(
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
         write_data_block: Grid.Write = undefined,
-        write_filter_block: Grid.Write = undefined,
         write_index_block: Grid.Write = undefined,
 
         tracer_slot: ?tracer.SpanStart,
@@ -387,8 +385,7 @@ pub fn CompactionType(
                 });
 
                 switch (context.table_info_a) {
-                    .immutable => |values| {
-                        compaction.values_in[0] = values;
+                    .immutable => {
                         compaction.loop_start();
                     },
                     .disk => |table_ref| {
@@ -449,7 +446,21 @@ pub fn CompactionType(
                 // Still have values on this input_level, no need to refill.
                 compaction.iterator_check_finish(input_level);
             } else if (input_level == .a and compaction.context.table_info_a == .immutable) {
-                // No iterator to call next on.
+                // Potentially fill our immutable values from the immutable TableMemory.
+                // TODO: Currently, this copies the values to compaction.data_blocks[0], but in
+                // future we can make it use a KWayMergeIterator.
+                if (compaction.context.table_info_a.immutable.len > 0) {
+                    var target = Table.data_block_values(compaction.data_blocks[0]);
+
+                    const filled = compaction.fill_immutable_values(target);
+                    assert(filled > 0);
+
+                    // The immutable table is always considered "Table A", which maps to 0.
+                    compaction.values_in[0] = target[0..filled];
+                } else {
+                    assert(compaction.values_in[0].len == 0);
+                }
+
                 compaction.iterator_check_finish(input_level);
             } else {
                 compaction.state = .{ .iterator_next = input_level };
@@ -461,6 +472,75 @@ pub fn CompactionType(
                     }),
                 }
             }
+        }
+
+        // TODO: We need to reimplement the .secondary_index optimization here (or at a higher
+        // level). The original optimization is described at
+        // https://github.com/tigerbeetle/tigerbeetle/pull/337/files.
+        // When updating a secondary index for a single object multiple times within a bar,
+        // redundant tombstones and puts are generated, and these are tricky to filter out without
+        // either using a HashMap or having to do extra sorting. They are eventually filtered out
+        // by our compaction merge() however.
+        //
+        /// Copies values to `target` from our immutable table input, taking the last
+        /// matching value to resolve duplicates, and updating the immutable table slice.
+        fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
+            var source = compaction.context.table_info_a.immutable;
+            assert(source.len > 0);
+
+            if (constants.verify) {
+                // The input may have duplicate keys (last one wins), but keys must be
+                // non-decreasing.
+                // A source length of 1 is always non-decreasing.
+                for (source[0 .. source.len - 1], source[1..source.len]) |*value, *value_next| {
+                    assert(key_from_value(value) <= key_from_value(value_next));
+                }
+            }
+
+            var source_index: usize = 0;
+            var target_index: usize = 0;
+            while (target_index < target.len and source_index < source.len) : (source_index += 1) {
+                // The last value in a run of duplicates needs to be the one that ends up in
+                // target.
+                target[target_index] = source[source_index];
+
+                // If we're at the end of the source, there is no next value, so the next value
+                // can't be equal.
+                const value_next_equal = source_index + 1 < source.len and
+                    key_from_value(&source[source_index]) ==
+                    key_from_value(&source[source_index + 1]);
+
+                if (!value_next_equal) {
+                    target_index += 1;
+                }
+            }
+
+            // At this point, source_index and target_index are actually counts.
+            // source_index will always be incremented after the final iteration as part of the
+            // continue expression.
+            // target_index will always be incremented, since either source_index runs out first
+            // so value_next_equal is false, or a new value is hit, which will increment it.
+            const source_count = source_index;
+            const target_count = target_index;
+
+            assert(target_count <= source_count);
+            assert(target_count > 0);
+
+            compaction.context.table_info_a.immutable =
+                compaction.context.table_info_a.immutable[source_count..];
+
+            if (constants.verify) {
+                // Our output must be strictly increasing.
+                // An output length of 1 is always strictly increasing.
+                for (
+                    target[0 .. target_count - 1],
+                    target[1..target_count],
+                ) |*value, *value_next| {
+                    assert(key_from_value(value_next) > key_from_value(value));
+                }
+            }
+
+            return target_count;
         }
 
         fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {
@@ -480,7 +560,6 @@ pub fn CompactionType(
             const grid = compaction.context.grid;
             const index_schema = schema.TableIndex.from(index_block);
             for (index_schema.data_addresses_used(index_block)) |address| grid.release(address);
-            for (index_schema.filter_addresses_used(index_block)) |address| grid.release(address);
             grid.release(Table.block_address(index_block));
         }
 
@@ -513,16 +592,16 @@ pub fn CompactionType(
                 assert(values_in.len > 0);
                 if (constants.verify) {
                     for (values_in[0 .. values_in.len - 1], values_in[1..]) |*value, *value_next| {
-                        assert(compare_keys(key_from_value(value), key_from_value(value_next)) == .lt);
+                        assert(key_from_value(value) < key_from_value(value_next));
                     }
                 }
                 const first_key = key_from_value(&values_in[0]);
                 const last_key = key_from_value(&values_in[values_in.len - 1]);
                 if (compaction.last_keys_in[index]) |last_key_prev| {
-                    assert(compare_keys(last_key_prev, first_key) == .lt);
+                    assert(last_key_prev < first_key);
                 }
                 if (values_in.len > 1) {
-                    assert(compare_keys(first_key, last_key) == .lt);
+                    assert(first_key < last_key);
                 }
                 compaction.last_keys_in[index] = last_key;
             } else {
@@ -621,6 +700,7 @@ pub fn CompactionType(
                 values_out_index < values_out.len)
             {
                 const value_a = &values_in_a[values_in_a_index];
+
                 values_in_a_index += 1;
                 if (tombstone(value_a)) {
                     continue;
@@ -654,7 +734,7 @@ pub fn CompactionType(
             {
                 const value_a = &values_in_a[values_in_a_index];
                 const value_b = &values_in_b[values_in_b_index];
-                switch (compare_keys(key_from_value(value_a), key_from_value(value_b))) {
+                switch (std.math.order(key_from_value(value_a), key_from_value(value_b))) {
                     .lt => {
                         values_in_a_index += 1;
                         if (compaction.drop_tombstones and
@@ -673,16 +753,11 @@ pub fn CompactionType(
                     .eq => {
                         values_in_a_index += 1;
                         values_in_b_index += 1;
-                        if (Table.usage == .secondary_index) {
-                            if (tombstone(value_a)) {
-                                assert(!tombstone(value_b));
-                                continue;
-                            }
-                            if (tombstone(value_b)) {
-                                assert(!tombstone(value_a));
-                                continue;
-                            }
-                        } else if (compaction.drop_tombstones) {
+
+                        // Due to our table_memory no longer performing the secondary_index
+                        // optimizations, we relax the assertions that were here about tombstones
+                        // alternating.
+                        if (compaction.drop_tombstones) {
                             if (tombstone(value_a)) {
                                 continue;
                             }
@@ -708,9 +783,6 @@ pub fn CompactionType(
 
             // Flush the data block if needed.
             if (table_builder.data_block_full() or
-                // If the filter or index blocks need to be flushed,
-                // the data block has to be flushed first.
-                table_builder.filter_block_full() or
                 table_builder.index_block_full() or
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.data_block_empty()))
@@ -722,23 +794,6 @@ pub fn CompactionType(
                     .tree_id = compaction.tree_config.id,
                 });
                 WriteBlock(.data).write_block(compaction);
-            }
-
-            // Flush the filter block if needed.
-            if (table_builder.filter_block_full() or
-                // If the index block need to be flushed,
-                // the filter block has to be flushed first.
-                table_builder.index_block_full() or
-                // If the input is exhausted then we need to flush all blocks before finishing.
-                (input_exhausted and !table_builder.filter_block_empty()))
-            {
-                table_builder.filter_block_finish(.{
-                    .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
-                    .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
-                    .tree_id = compaction.tree_config.id,
-                });
-                WriteBlock(.filter).write_block(compaction);
             }
 
             // Flush the index block if needed.
@@ -765,7 +820,7 @@ pub fn CompactionType(
             }
         }
 
-        const WriteBlockField = enum { data, filter, index };
+        const WriteBlockField = enum { data, index };
         fn WriteBlock(comptime write_block_field: WriteBlockField) type {
             return struct {
                 fn write_block(compaction: *Compaction) void {
@@ -773,12 +828,10 @@ pub fn CompactionType(
 
                     const write = switch (write_block_field) {
                         .data => &compaction.write_data_block,
-                        .filter => &compaction.write_filter_block,
                         .index => &compaction.write_index_block,
                     };
                     const block = switch (write_block_field) {
                         .data => &compaction.table_builder.data_block,
-                        .filter => &compaction.table_builder.filter_block,
                         .index => &compaction.table_builder.index_block,
                     };
                     compaction.state.tables_writing.pending += 1;
@@ -790,7 +843,6 @@ pub fn CompactionType(
                         Compaction,
                         switch (write_block_field) {
                             .data => "write_data_block",
-                            .filter => "write_filter_block",
                             .index => "write_index_block",
                         },
                         write,

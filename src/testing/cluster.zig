@@ -21,6 +21,7 @@ const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
 const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
 const SyncCheckerType = @import("cluster/sync_checker.zig").SyncCheckerType;
 const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
+const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestCheckerType;
 
 const vsr = @import("../vsr.zig");
 pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
@@ -54,6 +55,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const SyncChecker = SyncCheckerType(Replica);
+        pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
 
         pub const Options = struct {
             cluster_id: u32,
@@ -99,6 +101,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         storage_checker: StorageChecker,
         sync_checker: SyncChecker,
         grid_checker: *GridChecker,
+        manifest_checker: ManifestChecker,
 
         context: ?*anyopaque = null,
 
@@ -232,6 +235,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var sync_checker = SyncChecker.init(allocator);
             errdefer sync_checker.deinit();
 
+            var manifest_checker = ManifestChecker.init(allocator);
+            errdefer manifest_checker.deinit();
+
             // Format each replica's storage (equivalent to "tigerbeetle format ...").
             for (storages, 0..) |*storage, replica_index| {
                 var superblock = try SuperBlock.init(allocator, .{
@@ -278,6 +284,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .storage_checker = storage_checker,
                 .sync_checker = sync_checker,
                 .grid_checker = grid_checker,
+                .manifest_checker = manifest_checker,
             };
 
             for (cluster.replicas, 0..) |_, replica_index| {
@@ -304,6 +311,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         pub fn deinit(cluster: *Self) void {
+            cluster.manifest_checker.deinit();
             cluster.sync_checker.deinit();
             cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
@@ -501,20 +509,18 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .message_sent => |message| {
                     cluster.state_checker.on_message(message);
                 },
+                .state_machine_opened => {
+                    if (!cluster.replica_diverged.isSet(replica.replica)) {
+                        cluster.manifest_checker.forest_open(&replica.state_machine.forest);
+                    }
+                },
                 .committed => {
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
                 },
-                .compaction_completed => {
-                    if (cluster.replica_diverged.isSet(replica.replica)) {
-                        // This replica's storage intentionally does not match the cluster.
-                        log.debug("{}: on_compact: skipping StorageChecker; diverged", .{
-                            replica.replica,
-                        });
-                    }
-                },
+                .compaction_completed => {},
                 .checkpoint_commenced => {
                     cluster.log_replica(.checkpoint_commenced, replica.replica);
                 },
@@ -525,6 +531,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                             replica.replica,
                         });
                     } else {
+                        cluster.manifest_checker.forest_checkpoint(&replica.state_machine.forest);
                         cluster.storage_checker.replica_checkpoint(
                             &replica.superblock,
                         ) catch |err| {

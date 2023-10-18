@@ -39,10 +39,6 @@ const Value = struct {
     tombstone: bool,
 };
 
-inline fn compare_keys(a: Key, b: Key) std.math.Order {
-    return std.math.order(a, b);
-}
-
 inline fn key_from_value(value: *const Value) Key {
     return value.key;
 }
@@ -58,7 +54,6 @@ inline fn tombstone(value: *const Value) bool {
 const Table = @import("table.zig").TableType(
     Key,
     Value,
-    compare_keys,
     key_from_value,
     std.math.maxInt(Key),
     tombstone,
@@ -236,7 +231,6 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             NodePool,
             Key,
             TableInfo,
-            compare_keys,
             table_count_max,
         );
         pub const TableInfo = @import("manifest.zig").TableInfoType(Table);
@@ -321,7 +315,6 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                     Key,
                     TableInfo,
                     key_min_from_table,
-                    compare_keys,
                     env.tables.items,
                     table.key_max,
                     .{},
@@ -338,26 +331,25 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
 
         fn generate_non_overlapping_table(env: *Environment, key: Key) TableInfo {
             var new_key_min = key + env.random.uintLessThanBiased(Key, 31) + 1;
-            assert(compare_keys(new_key_min, key) == .gt);
+            assert(new_key_min > key);
 
             var i = binary_search.binary_search_values_upsert_index(
                 Key,
                 TableInfo,
                 key_min_from_table,
-                compare_keys,
                 env.tables.items,
                 new_key_min,
                 .{},
             );
 
             if (i > 0) {
-                if (compare_keys(new_key_min, env.tables.items[i - 1].key_max) != .gt) {
+                if (new_key_min <= env.tables.items[i - 1].key_max) {
                     new_key_min = env.tables.items[i - 1].key_max + 1;
                 }
             }
 
             const next_key_min = for (env.tables.items[i..]) |table| {
-                switch (compare_keys(new_key_min, table.key_min)) {
+                switch (std.math.order(new_key_min, table.key_min)) {
                     .lt => break table.key_min,
                     .eq => new_key_min = table.key_max + 1,
                     .gt => unreachable,
@@ -420,7 +412,6 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 Key,
                 TableInfo,
                 key_min_from_table,
-                compare_keys,
                 env.tables.items,
                 level_table.key_min,
                 .{},
@@ -429,9 +420,9 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             assert(index < env.tables.items.len);
             const tables = env.tables.items[index..];
 
-            assert(compare_keys(tables[0].key_min, level_table.key_min) == .eq);
+            assert(tables[0].key_min == level_table.key_min);
             for (tables) |*env_table| {
-                if (compare_keys(env_table.key_max, level_table.key_max) == .eq) {
+                if (env_table.key_max == level_table.key_max) {
                     return env_table;
                 }
             }

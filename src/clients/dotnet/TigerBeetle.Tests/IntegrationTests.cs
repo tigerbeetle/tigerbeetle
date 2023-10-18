@@ -4,14 +4,16 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
+using System.Text;
 
 namespace TigerBeetle.Tests
 {
     [TestClass]
     public class IntegrationTests
     {
-        private static Client GetClient(int concurrencyMax = 32) => new(0, new string[] { TBServer.TB_PORT }, concurrencyMax);
+        private static Client GetClient(string address, int concurrencyMax = 32) => new(0, new string[] { address }, concurrencyMax);
 
         private static readonly Account[] accounts = new[]
         {
@@ -19,19 +21,19 @@ namespace TigerBeetle.Tests
             {
                 Id = 100,
                 UserData128 = 1000,
-				UserData64 = 1001,
-				UserData32 = 1002,
-				Flags = AccountFlags.None,
+                UserData64 = 1001,
+                UserData32 = 1002,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 1,
             },
             new Account
             {
                 Id = 101,
-				UserData128 = 1000,
-				UserData64 = 1001,
-				UserData32 = 1002,
-				Flags = AccountFlags.None,
+                UserData128 = 1000,
+                UserData64 = 1001,
+                UserData32 = 1002,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 2,
             }
@@ -144,7 +146,7 @@ namespace TigerBeetle.Tests
         public void CreateAccount()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var okResult = client.CreateAccount(accounts[0]);
             Assert.IsTrue(okResult == CreateAccountResult.Ok);
@@ -162,7 +164,7 @@ namespace TigerBeetle.Tests
         public async Task CreateAccountAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var okResult = await client.CreateAccountAsync(accounts[0]);
             Assert.IsTrue(okResult == CreateAccountResult.Ok);
@@ -180,7 +182,7 @@ namespace TigerBeetle.Tests
         public void CreateAccounts()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = client.CreateAccounts(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -194,7 +196,7 @@ namespace TigerBeetle.Tests
         public async Task CreateAccountsAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = await client.CreateAccountsAsync(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -208,7 +210,7 @@ namespace TigerBeetle.Tests
         public void CreateTransfers()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var accountResults = client.CreateAccounts(accounts);
             Assert.IsTrue(accountResults.Length == 0);
@@ -218,8 +220,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -245,7 +247,7 @@ namespace TigerBeetle.Tests
         public async Task CreateTransfersAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var accountResults = await client.CreateAccountsAsync(accounts);
             Assert.IsTrue(accountResults.Length == 0);
@@ -255,8 +257,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -282,7 +284,7 @@ namespace TigerBeetle.Tests
         public void CreateTransfer()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = client.CreateAccounts(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -292,8 +294,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -313,7 +315,7 @@ namespace TigerBeetle.Tests
         public async Task CreateTransferAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = await client.CreateAccountsAsync(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -323,8 +325,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -344,7 +346,7 @@ namespace TigerBeetle.Tests
         public void CreatePendingTransfers()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = client.CreateAccounts(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -354,9 +356,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -382,9 +384,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				PendingId = transfer.Id,
-				Ledger = 1,
+                Amount = 100,
+                PendingId = transfer.Id,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.PostPendingTransfer,
             };
@@ -411,7 +413,7 @@ namespace TigerBeetle.Tests
         public async Task CreatePendingTransfersAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = await client.CreateAccountsAsync(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -421,9 +423,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -449,9 +451,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				PendingId = transfer.Id,
-				Ledger = 1,
+                Amount = 100,
+                PendingId = transfer.Id,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.PostPendingTransfer,
             };
@@ -478,7 +480,7 @@ namespace TigerBeetle.Tests
         public void CreatePendingTransfersAndVoid()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = client.CreateAccounts(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -488,9 +490,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -516,8 +518,8 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.VoidPendingTransfer,
                 PendingId = transfer.Id,
@@ -545,7 +547,7 @@ namespace TigerBeetle.Tests
         public async Task CreatePendingTransfersAndVoidAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = await client.CreateAccountsAsync(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -555,9 +557,9 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Timeout = uint.MaxValue,
-				Ledger = 1,
+                Amount = 100,
+                Timeout = uint.MaxValue,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Pending,
             };
@@ -583,9 +585,9 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				PendingId = transfer.Id,
-				Ledger = 1,
+                Amount = 100,
+                PendingId = transfer.Id,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.VoidPendingTransfer,
             };
@@ -612,7 +614,7 @@ namespace TigerBeetle.Tests
         public void CreateLinkedTransfers()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = client.CreateAccounts(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -622,8 +624,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Linked,
             };
@@ -633,8 +635,8 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
-				Amount = 49,
-				Ledger = 1,
+                Amount = 49,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.None,
             };
@@ -666,7 +668,7 @@ namespace TigerBeetle.Tests
         public async Task CreateLinkedTransfersAsync()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var results = await client.CreateAccountsAsync(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -676,8 +678,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.Linked,
             };
@@ -687,8 +689,8 @@ namespace TigerBeetle.Tests
                 Id = 2,
                 CreditAccountId = accounts[1].Id,
                 DebitAccountId = accounts[0].Id,
-				Amount = 49,
-				Ledger = 1,
+                Amount = 49,
+                Ledger = 1,
                 Code = 1,
                 Flags = TransferFlags.None,
             };
@@ -715,6 +717,130 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfer1.Amount);
         }
 
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void CreateAccountTooMuchData()
+        {
+            using var server = new TBServer();
+            using var client = GetClient(server.Address);
+
+            const int TOO_MUCH_DATA = 10000;
+            var accounts = new Account[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                accounts[i] = new Account
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    Code = 1,
+                    Ledger = 1
+                };
+            }
+
+            try
+            {
+                _ = client.CreateAccounts(accounts);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public async Task CreateAccountTooMuchDataAsync()
+        {
+            using var server = new TBServer();
+            using var client = GetClient(server.Address);
+
+            const int TOO_MUCH_DATA = 10000;
+            var accounts = new Account[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                accounts[i] = new Account
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    Code = 1,
+                    Ledger = 1
+                };
+            }
+
+            try
+            {
+                _ = await client.CreateAccountsAsync(accounts);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void CreateTransferTooMuchData()
+        {
+            using var server = new TBServer();
+            using var client = GetClient(server.Address);
+
+            const int TOO_MUCH_DATA = 10000;
+            var transfers = new Transfer[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                transfers[i] = new Transfer
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    Code = 1,
+                    Ledger = 1
+                };
+            }
+
+            try
+            {
+                _ = client.CreateTransfers(transfers);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
+        [TestMethod]
+        [DoNotParallelize]
+        public async Task CreateTransferTooMuchDataAsync()
+        {
+            using var server = new TBServer();
+            using var client = GetClient(server.Address);
+
+            const int TOO_MUCH_DATA = 10000;
+            var transfers = new Transfer[TOO_MUCH_DATA];
+            for (int i = 0; i < TOO_MUCH_DATA; i++)
+            {
+                transfers[i] = new Transfer
+                {
+                    Id = Guid.NewGuid().ToUInt128(),
+                    DebitAccountId = accounts[0].Id,
+                    CreditAccountId = accounts[1].Id,
+                    Code = 1,
+                    Ledger = 1,
+                    Amount = 100,
+                };
+            }
+
+            try
+            {
+                _ = await client.CreateTransfersAsync(transfers);
+                Assert.IsTrue(false);
+            }
+            catch (RequestException requestException)
+            {
+                Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+            }
+        }
+
         /// <summary>
         /// This test asserts that a single Client can be shared by multiple concurrent tasks
         /// </summary>
@@ -733,7 +859,7 @@ namespace TigerBeetle.Tests
             int MAX_CONCURRENCY = 32;
 
             using var server = new TBServer();
-            using var client = GetClient(MAX_CONCURRENCY);
+            using var client = GetClient(server.Address, MAX_CONCURRENCY);
 
             var errors = client.CreateAccounts(accounts);
             Assert.IsTrue(errors.Length == 0);
@@ -747,8 +873,8 @@ namespace TigerBeetle.Tests
                     Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
-					Amount = 100,
-					Ledger = 1,
+                    Amount = 100,
+                    Ledger = 1,
                     Code = 1,
                 };
 
@@ -792,7 +918,7 @@ namespace TigerBeetle.Tests
             int MAX_CONCURRENCY = 2;
 
             using var server = new TBServer();
-            using var client = GetClient(MAX_CONCURRENCY);
+            using var client = GetClient(server.Address, MAX_CONCURRENCY);
 
             var errors = client.CreateAccounts(accounts);
             Assert.IsTrue(errors.Length == 0);
@@ -865,7 +991,7 @@ namespace TigerBeetle.Tests
             int MAX_CONCURRENCY = 32;
 
             using var server = new TBServer();
-            using var client = GetClient(MAX_CONCURRENCY);
+            using var client = GetClient(server.Address, MAX_CONCURRENCY);
 
             var results = client.CreateAccounts(accounts);
             Assert.IsTrue(results.Length == 0);
@@ -879,8 +1005,8 @@ namespace TigerBeetle.Tests
                     Id = (UInt128)(i + 1),
                     CreditAccountId = accounts[0].Id,
                     DebitAccountId = accounts[1].Id,
-					Amount = 100,
-					Ledger = 1,
+                    Amount = 100,
+                    Ledger = 1,
                     Code = 1,
                 };
 
@@ -914,7 +1040,7 @@ namespace TigerBeetle.Tests
         public void DisposedClient()
         {
             using var server = new TBServer();
-            using var client = GetClient();
+            using var client = GetClient(server.Address);
 
             var accountResults = client.CreateAccounts(accounts);
             Assert.IsTrue(accountResults.Length == 0);
@@ -926,8 +1052,8 @@ namespace TigerBeetle.Tests
                 Id = 1,
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-				Amount = 100,
-				Ledger = 1,
+                Amount = 100,
+                Ledger = 1,
                 Code = 1,
             };
 
@@ -949,9 +1075,9 @@ namespace TigerBeetle.Tests
         {
             Assert.AreEqual(a.Id, b.Id);
             Assert.AreEqual(a.UserData128, b.UserData128);
-			Assert.AreEqual(a.UserData64, b.UserData64);
-			Assert.AreEqual(a.UserData32, b.UserData32);
-			Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.UserData64, b.UserData64);
+            Assert.AreEqual(a.UserData32, b.UserData32);
+            Assert.AreEqual(a.Flags, b.Flags);
             Assert.AreEqual(a.Code, b.Code);
             Assert.AreEqual(a.Ledger, b.Ledger);
         }
@@ -961,13 +1087,13 @@ namespace TigerBeetle.Tests
             Assert.AreEqual(a.Id, b.Id);
             Assert.AreEqual(a.DebitAccountId, b.DebitAccountId);
             Assert.AreEqual(a.CreditAccountId, b.CreditAccountId);
-			Assert.AreEqual(a.Amount, b.Amount);
-			Assert.AreEqual(a.PendingId, b.PendingId);
-			Assert.AreEqual(a.UserData128, b.UserData128);
-			Assert.AreEqual(a.UserData64, b.UserData64);
-			Assert.AreEqual(a.UserData32, b.UserData32);
-			Assert.AreEqual(a.Timeout, b.Timeout);
-			Assert.AreEqual(a.Flags, b.Flags);
+            Assert.AreEqual(a.Amount, b.Amount);
+            Assert.AreEqual(a.PendingId, b.PendingId);
+            Assert.AreEqual(a.UserData128, b.UserData128);
+            Assert.AreEqual(a.UserData64, b.UserData64);
+            Assert.AreEqual(a.UserData32, b.UserData32);
+            Assert.AreEqual(a.Timeout, b.Timeout);
+            Assert.AreEqual(a.Flags, b.Flags);
             Assert.AreEqual(a.Code, b.Code);
             Assert.AreEqual(a.Ledger, b.Ledger);
         }
@@ -985,8 +1111,6 @@ namespace TigerBeetle.Tests
 
     internal class TBServer : IDisposable
     {
-        public const string TB_PORT = "3001";
-
         // Path relative from /TigerBeetle.Test/bin/<framework>/<release>/<platform> :
         private const string PROJECT_ROOT = "../../../../..";
         private const string TB_PATH = PROJECT_ROOT + "/../../../zig-out/bin";
@@ -994,20 +1118,63 @@ namespace TigerBeetle.Tests
         private const string TB_FILE = "dotnet-tests.tigerbeetle";
         private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
         private const string FORMAT = $"format --cluster=0 --replica=0 --replica-count=1 ./" + TB_FILE;
-        private const string START = $"start --addresses=" + TB_PORT + " --cache-grid=256MB ./" + TB_FILE;
+        private const string START = $"start --addresses=0  --cache-grid=256MB ./" + TB_FILE;
 
         private readonly Process process;
+
+        public string Address { get; }
 
         public TBServer()
         {
             CleanUp();
 
-            var format = Process.Start(TB_SERVER, FORMAT);
-            format.WaitForExit();
-            if (format.ExitCode != 0) throw new InvalidOperationException("format failed");
+            {
+                var format = new Process();
+                format.StartInfo.FileName = TB_SERVER;
+                format.StartInfo.Arguments = FORMAT;
+                format.StartInfo.RedirectStandardError = true;
+                format.Start();
+                var formatStderr = format.StandardError.ReadToEnd();
+                format.WaitForExit();
+                if (format.ExitCode != 0) throw new InvalidOperationException($"format failed, ExitCode={format.ExitCode} stderr:\n{formatStderr}");
+            }
 
-            process = Process.Start(TB_SERVER, START);
+            process = new Process();
+            process.StartInfo.FileName = TB_SERVER;
+            process.StartInfo.Arguments = START;
+            process.StartInfo.RedirectStandardError = true;
+            process.Start();
             if (process.WaitForExit(100)) throw new InvalidOperationException("Tigerbeetle server failed to start");
+
+            var readPortEvent = new AutoResetEvent(false);
+            var addressLogged = "";
+            var stderrLogged = new StringBuilder();
+            process.ErrorDataReceived += (sender, e) =>
+            {
+                var line = e.Data;
+                if (line == null) return;
+                stderrLogged.Append(line);
+                const string listening = "listening on ";
+                var found = line.IndexOf(listening);
+                if (found != -1)
+                {
+                    if (addressLogged != "") throw new InvalidOperationException("have already read the port");
+                    addressLogged = line.Substring(found + listening.Length).Trim();
+                    readPortEvent.Set();
+                }
+            };
+            process.BeginErrorReadLine();
+            readPortEvent.WaitOne(60_000);
+
+            if (addressLogged == "")
+            {
+                process.Kill();
+                process.WaitForExit();
+                throw new InvalidOperationException($"failed to read the port, ExitCode={process.ExitCode} stderr:\n{stderrLogged.ToString()}");
+            }
+
+            process.CancelErrorRead();
+            Address = addressLogged;
         }
 
         public void Dispose()
@@ -1017,18 +1184,6 @@ namespace TigerBeetle.Tests
 
         private void CleanUp()
         {
-            try
-            {
-                if (Process.GetProcessesByName(TB_EXE) is Process[] runningList)
-                {
-                    foreach (var runningProcess in runningList)
-                    {
-                        runningProcess.Kill();
-                    }
-                }
-            }
-            catch { }
-
             try
             {
                 if (process != null && !process.HasExited)

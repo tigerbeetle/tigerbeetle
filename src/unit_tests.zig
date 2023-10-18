@@ -18,7 +18,8 @@ test {
     _ = @import("clients/node/node_bindings.zig");
 
     _ = @import("lsm/binary_search.zig");
-    _ = @import("lsm/bloom_filter.zig");
+    _ = @import("lsm/cache_map.zig");
+    _ = @import("lsm/composite_key.zig");
     _ = @import("lsm/forest.zig");
     _ = @import("lsm/forest_table_iterator.zig");
     _ = @import("lsm/groove.zig");
@@ -28,6 +29,7 @@ test {
     _ = @import("lsm/segmented_array.zig");
     _ = @import("lsm/set_associative_cache.zig");
     _ = @import("lsm/table.zig");
+    _ = @import("lsm/table_memory.zig");
     _ = @import("lsm/tree.zig");
 
     _ = @import("state_machine.zig");

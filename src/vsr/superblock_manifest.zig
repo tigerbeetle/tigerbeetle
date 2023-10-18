@@ -24,40 +24,18 @@ pub const Manifest = struct {
     count: u32,
     count_max: u32,
 
-    /// A map from table address to the manifest block and entry that is the latest extent version.
-    /// Used to determine whether a table should be dropped in a compaction.
-    /// Shared by all trees and sized to accommodate all possible tables.
-    tables: Tables,
-
     /// A set of block addresses that have free entries.
     /// Used to determine whether a block should be compacted.
     /// Note: Some of these block addresses may yet to be appended to the manifest through a flush.
     /// This enables us to track fragmentation even in unflushed blocks.
     compaction_set: std.AutoHashMapUnmanaged(u64, void),
 
-    pub const Tables = std.AutoHashMapUnmanaged(u64, TableExtent);
-
-    pub const TableExtent = struct {
-        block: u64, // ManifestLog block address.
-        entry: u32, // Index within the ManifestLog Label/TableInfo arrays.
-    };
-
-    pub fn init(
-        allocator: mem.Allocator,
-        manifest_block_count_max: u32,
-        // The maximum number of tables in a tree when fully loaded.
-        // The same number is the limit for all tables across the forest since most trees are small.
-        forest_table_count_max: u32,
-    ) !Manifest {
+    pub fn init(allocator: mem.Allocator, manifest_block_count_max: u32) !Manifest {
         const checksums = try allocator.alloc(u128, manifest_block_count_max);
         errdefer allocator.free(checksums);
 
         const addresses = try allocator.alloc(u64, manifest_block_count_max);
         errdefer allocator.free(addresses);
-
-        var tables = Tables{};
-        try tables.ensureTotalCapacity(allocator, forest_table_count_max);
-        errdefer tables.deinit(allocator);
 
         var compaction_set = std.AutoHashMapUnmanaged(u64, void){};
         try compaction_set.ensureTotalCapacity(allocator, manifest_block_count_max);
@@ -71,7 +49,6 @@ pub const Manifest = struct {
             .addresses = addresses,
             .count = 0,
             .count_max = manifest_block_count_max,
-            .tables = tables,
             .compaction_set = compaction_set,
         };
     }
@@ -79,7 +56,6 @@ pub const Manifest = struct {
     pub fn deinit(manifest: *Manifest, allocator: mem.Allocator) void {
         allocator.free(manifest.checksums);
         allocator.free(manifest.addresses);
-        manifest.tables.deinit(allocator);
         manifest.compaction_set.deinit(allocator);
 
         manifest.* = undefined;
@@ -90,7 +66,6 @@ pub const Manifest = struct {
         @memset(manifest.addresses, 0);
 
         manifest.count = 0;
-        manifest.tables.clearRetainingCapacity();
         manifest.compaction_set.clearRetainingCapacity();
     }
 
@@ -129,7 +104,6 @@ pub const Manifest = struct {
 
     pub fn decode(manifest: *Manifest, source: []align(@alignOf(u128)) const u8) void {
         assert(manifest.count == 0);
-        assert(manifest.tables.count() == 0);
         assert(manifest.compaction_set.count() == 0);
 
         manifest.count = @as(u32, @intCast(@divExact(source.len, BlockReference.size)));
@@ -273,72 +247,6 @@ pub const Manifest = struct {
         return null;
     }
 
-    /// Inserts the table extent if it does not yet exist, and returns true.
-    /// Otherwise, returns false.
-    pub fn insert_table_extent(
-        manifest: *Manifest,
-        table: u64,
-        block: u64,
-        entry: u32,
-    ) bool {
-        assert(table > 0);
-        assert(block > 0);
-
-        var extent = manifest.tables.getOrPutAssumeCapacity(table);
-        if (extent.found_existing) return false;
-
-        extent.value_ptr.* = .{
-            .block = block,
-            .entry = entry,
-        };
-
-        return true;
-    }
-
-    /// Inserts or updates the table extent, and returns the previous block address if any.
-    /// The table extent must be updated immediately when appending, without delay.
-    /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-    pub fn update_table_extent(
-        manifest: *Manifest,
-        table: u64,
-        block: u64,
-        entry: u32,
-    ) ?u64 {
-        assert(table > 0);
-        assert(block > 0);
-
-        var extent = manifest.tables.getOrPutAssumeCapacity(table);
-        const previous_block = if (extent.found_existing) extent.value_ptr.block else null;
-
-        extent.value_ptr.* = .{
-            .block = block,
-            .entry = entry,
-        };
-
-        return previous_block;
-    }
-
-    /// Removes the table extent if { block, entry } is the latest version, and returns true.
-    /// Otherwise, returns false.
-    pub fn remove_table_extent(
-        manifest: *Manifest,
-        table: u64,
-        block: u64,
-        entry: u32,
-    ) bool {
-        assert(table > 0);
-        assert(block > 0);
-
-        const extent = manifest.tables.getPtr(table).?;
-        if (extent.block == block and extent.entry == entry) {
-            assert(manifest.tables.remove(table));
-
-            return true;
-        } else {
-            return false;
-        }
-    }
-
     /// Reference to a ManifestLog block.
     pub const BlockReference = struct {
         checksum: u128,
@@ -376,7 +284,7 @@ pub const Manifest = struct {
     /// Return all block references in reverse order, latest-appended-first-out.
     /// Using a reverse iterator is an optimization to avoid redundant updates to tree manifests.
     pub fn iterator_reverse(manifest: *const Manifest) IteratorReverse {
-        return IteratorReverse{
+        return .{
             .manifest = manifest,
             .count = manifest.count,
         };
@@ -414,16 +322,14 @@ fn test_iterator_reverse(
 ) !void {
     const expectEqualSlices = std.testing.expectEqualSlices;
 
-    var reverse: [3]Manifest.BlockReference = undefined;
-    var reverse_count: usize = 0;
+    var result = stdx.BoundedArray(Manifest.BlockReference, 3){};
 
     var it = manifest.iterator_reverse();
     while (it.next()) |block| {
-        reverse[reverse_count] = block;
-        reverse_count += 1;
+        result.append_assume_capacity(block);
     }
 
-    try expectEqualSlices(Manifest.BlockReference, expect, reverse[0..reverse_count]);
+    try expectEqualSlices(Manifest.BlockReference, expect, result.const_slice());
 }
 
 fn test_codec(manifest: *Manifest) !void {
@@ -436,7 +342,7 @@ fn test_codec(manifest: *Manifest) !void {
     try expectEqual(@as(u64, manifest.count * (@sizeOf(u128) + @sizeOf(u64))), size_a);
 
     // The decoded instance must match the original instance:
-    var decoded = try Manifest.init(testing.allocator, manifest.count_max, 8);
+    var decoded = try Manifest.init(testing.allocator, manifest.count_max);
     defer decoded.deinit(testing.allocator);
 
     decoded.decode(mem.sliceAsBytes(&target_a)[0..size_a]);
@@ -462,7 +368,7 @@ test "SuperBlockManifest" {
     const expectEqual = testing.expectEqual;
     const BlockReference = Manifest.BlockReference;
 
-    var manifest = try Manifest.init(testing.allocator, 3, 8);
+    var manifest = try Manifest.init(testing.allocator, 3);
     defer manifest.deinit(testing.allocator);
 
     for (manifest.checksums) |checksum| try expectEqual(@as(u128, 0), checksum);
