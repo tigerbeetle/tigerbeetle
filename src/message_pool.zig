@@ -50,9 +50,6 @@ pub const messages_max_client = messages_max: {
     // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
     sum += 1;
 
-    // TODO: Hack for now until https://github.com/tigerbeetle/tigerbeetle/pull/1209 is merged.
-    sum += 100;
-
     break :messages_max sum;
 };
 
