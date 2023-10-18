@@ -12,7 +12,8 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -37,7 +38,8 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -58,7 +60,8 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        os: [ubuntu-latest]
         java-version: ['11']
 
     runs-on: ${{ matrix.os }}
@@ -91,7 +94,8 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
+        os: [ubuntu-latest]
         node-version: ['14.x', '18.x']
         exclude:
           - os: macos-13
@@ -121,7 +125,7 @@ jobs:
       - client-java
       - client-node
 
-    runs-on: ubuntu-latest-large
+    runs-on: ubuntu-latest
     steps:
       - name: All Client CI Jobs Passed
         working-directory: ./
