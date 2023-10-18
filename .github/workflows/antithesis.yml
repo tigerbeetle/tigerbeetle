@@ -41,6 +41,6 @@ jobs:
           curl -o tools/antithesis/lib/libvoidstar.so https://${{ secrets.ANTITHESIS_HTTP_AUTH }}@antithesis.com/assets/instrumentation/libvoidstar.so && \
           sudo cp tools/antithesis/lib/libvoidstar.so /usr/local/lib
       - run: /tmp/zig-0.11.0/build/stage3/bin/zig build -Dantithesis antithesis_workload antithesis_api install
-      - run: ./tools/antithesis/scripts/build.sh ${{ github.sha }}
+      - run: ./tools/antithesis/scripts/build.sh antithesis-latest
       - run: echo "${{ secrets.ANTITHESIS_KEY }}" > /tmp/key
-      - run: ./tools/antithesis/scripts/push.sh ${{ github.sha }}
+      - run: ./tools/antithesis/scripts/push.sh antithesis-latest
