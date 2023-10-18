@@ -25,6 +25,9 @@ jobs:
   linux:
     uses: ./.github/workflows/linux.yml
 
+  clients:
+    uses: ./.github/workflows/clients.yml
+
   # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
   # See also:
   # https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches#require-status-checks-before-merging
@@ -34,15 +37,16 @@ jobs:
     needs:
       - smoke
       - linux
+      - clients
 
     runs-on: ubuntu-latest
     steps:
       - name: All Core CI Jobs Passed
-        if: needs.smoke.result == 'success' && needs.linux.result == 'success'
+        if: needs.smoke.result == 'success' && needs.linux.result == 'success' && needs.clients.result == 'success'
         working-directory: ./
         run: exit 0
 
       - name: A Core CI Job Failed
-        if: needs.smoke.result != 'success' || needs.linux.result != 'success'
+        if: needs.smoke.result != 'success' || needs.linux.result != 'success' || needs.clients.result != 'success'
         working-directory: ./
         run: exit 1

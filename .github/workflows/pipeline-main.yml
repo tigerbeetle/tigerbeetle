@@ -6,8 +6,6 @@ on:
       - 'main'
 
 jobs:
-  clients:
-    uses: ./.github/workflows/pipeline-clients.yml
   core:
     uses: ./.github/workflows/pipeline-core.yml
   other:
