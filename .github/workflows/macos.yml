@@ -10,7 +10,7 @@ jobs:
   test:
     strategy:
       matrix:
-        target: [macos-13, macos-13-xlarge]
+        target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        target: [macos-13, macos-13-xlarge]
+        target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -31,7 +31,7 @@ jobs:
   c_sample:
     strategy:
       matrix:
-        target: [macos-13, macos-13-xlarge]
+        target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
@@ -41,7 +41,7 @@ jobs:
   repl_integration:
     strategy:
       matrix:
-        target: [macos-13, macos-13-xlarge]
+        target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v3
