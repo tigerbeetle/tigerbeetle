@@ -63,7 +63,7 @@ Each compaction compacts a [single table](#compaction-selection-policy) from `le
 
 Invariants:
 * At the end of every beat, there is space in mutable table for the next beat.
-* The manifest log is compacted at the end of every beat.
+* The manifest log is compacted during every half-bar.
 * The compactions' output tables are not [visible](#snapshots-and-compaction) until the compaction has finished.
 
 1. First half-bar, first beat ("first beat"):
@@ -228,15 +228,14 @@ At the end of the last beat of the compaction bar (`23`):
 ## Manifest
 
 The manifest is a tree's index of table locations and metadata.
-(Not to be confused with the [SuperBlock Manifest](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/vsr/superblock_manifest.zig)).
 
 Each manifest has two components:
-- a single [`ManifestLog`](#manifest-log) shared by all levels, and
+- a single [`ManifestLog`](#manifest-log) shared by all trees and levels, and
 - one [`ManifestLevel`](#manifest-level) for each on-disk level.
 
 ### Manifest Log
 
-The manifest log is an on-disk log of all updates to the tree's table index.
+The manifest log is an on-disk log of all updates to the trees' table indexes.
 
 The manifest log tracks:
 
@@ -254,7 +253,8 @@ The manifest log is periodically compacted to remove older entries that have bee
 newer entries. For example, if a table is created and later deleted, manifest log compaction
 will eventually remove any reference to the table from the log blocks.
 
-All manifest blocks are tracked in the superblock manifest.
+Each manifest block has a reference to the (chronologically) previous manifest block.
+The superblock stores the head and tail address/checksum of this linked list.
 
 ### Manifest Level
 

@@ -29,28 +29,18 @@ pub const Stage = union(enum) {
 
         target: Target,
         trailers: Trailers = Trailers.initFill(.{}),
-        /// Our new superblock's `vsr_state.previous_checkpoint_id`.
-        /// Arrives with command=sync_free_set.
-        previous_checkpoint_id: ?u128 = null,
-        /// The checksum of the prepare corresponding to checkpoint_op.
-        /// Arrives with command=sync_client_sessions.
-        checkpoint_op_checksum: ?u128 = null,
 
         pub fn done(self: *const @This()) bool {
             for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
                 if (!self.trailers.get(trailer).done) return false;
             }
-
-            assert(self.previous_checkpoint_id != null);
-            assert(self.checkpoint_op_checksum != null);
             return true;
         }
     };
 
     pub const UpdatingSuperBlock = struct {
         target: Target,
-        previous_checkpoint_id: u128,
-        checkpoint_op_checksum: u128,
+        checkpoint_state: vsr.CheckpointState,
     };
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {
@@ -160,13 +150,11 @@ pub const Trailer = struct {
     final: ?struct { size: u32, checksum: u128 } = null,
 
     pub const requests = std.enums.EnumArray(vsr.SuperBlockTrailer, vsr.Command).init(.{
-        .manifest = .request_sync_manifest,
         .free_set = .request_sync_free_set,
         .client_sessions = .request_sync_client_sessions,
     });
 
     pub const responses = std.enums.EnumArray(vsr.SuperBlockTrailer, vsr.Command).init(.{
-        .manifest = .sync_manifest,
         .free_set = .sync_free_set,
         .client_sessions = .sync_client_sessions,
     });

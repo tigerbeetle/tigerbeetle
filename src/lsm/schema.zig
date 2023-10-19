@@ -36,6 +36,8 @@
 //! Manifest block schema:
 //! │ vsr.Header                  │ operation=BlockType.manifest
 //! │                             │ context: schema.Manifest.Context
+//! │                             │ parent=previous_manifest_block.checksum else 0
+//! │                             │ commit=previous_manifest_block.address else 0
 //! │ [entry_count]TableInfo      │
 //! │ [entry_count]Label          │ level index, insert|remove
 //! │ […]u8{0}                    │ padding (to end of block)
@@ -458,7 +460,27 @@ pub const Manifest = struct {
         assert(context.entry_count == @divExact(header.size - @sizeOf(vsr.Header), entry_size));
         assert(stdx.zeroed(&context.reserved));
 
+        if (header.commit == 0) {
+            assert(header.parent == 0);
+        }
+
         return .{ .entry_count = context.entry_count };
+    }
+
+    pub fn previous(manifest_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
+        _ = from(manifest_block); // Validation only.
+
+        const header = header_from_block(manifest_block);
+        if (header.commit == 0) {
+            assert(header.parent == 0);
+
+            return null;
+        } else {
+            return .{
+                .checksum = header.parent,
+                .address = header.commit,
+            };
+        }
     }
 
     pub fn size(schema: *const Manifest) u32 {

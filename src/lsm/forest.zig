@@ -534,10 +534,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             // Replay manifest events in chronological order.
             // Accumulate all tables that belong in the recovered forest's ManifestLevels.
-            for (
-                forest.grid.superblock.manifest.checksums[0..forest.grid.superblock.manifest.count],
-                forest.grid.superblock.manifest.addresses[0..forest.grid.superblock.manifest.count],
-            ) |block_checksum, block_address| {
+            for (0..forest.manifest_log.log_block_checksums.count) |i| {
+                const block_checksum = forest.manifest_log.log_block_checksums.get(i).?;
+                const block_address = forest.manifest_log.log_block_addresses.get(i).?;
                 assert(block_address > 0);
 
                 const block = forest.grid.superblock.storage.grid_block(block_address).?;
@@ -565,6 +564,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                             .manifest_entry = @intCast(entry),
                         }) catch @panic("oom");
                     }
+                }
+
+                if (i > 0) {
+                    // Verify the linked-list.
+                    const block_previous = schema.Manifest.previous(block).?;
+                    assert(block_previous.checksum ==
+                        forest.manifest_log.log_block_checksums.get(i - 1).?);
+                    assert(block_previous.address ==
+                        forest.manifest_log.log_block_addresses.get(i - 1).?);
                 }
             }
 

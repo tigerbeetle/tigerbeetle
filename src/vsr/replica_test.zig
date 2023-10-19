@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const log = std.log.scoped(.test_replica);
 const expectEqual = std.testing.expectEqual;
 const allocator = std.testing.allocator;
@@ -444,7 +445,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
 
     // Allow repair, but ensure that state sync doesn't run.
     r_lag.pass_all(.__, .bidirectional);
-    r_lag.drop(.__, .bidirectional, .sync_manifest);
+    r_lag.drop(.__, .bidirectional, .sync_checkpoint);
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -856,7 +857,7 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
         try expectEqual(t.replica(.R_).commit(), checkpoint_3_trigger);
 
         t.run(); // (Wait for grid sync to finish.)
-        try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
+        try TestReplicas.expect_sync_done(t.replica(.R_));
     }
 }
 
@@ -874,7 +875,7 @@ test "Cluster: sync: sync, bump target, sync" {
     // Allow R2 to complete SyncStage.requesting_trailers, but get stuck
     // during SyncStage.requesting_trailers.
     t.replica(.R2).pass_all(.R_, .bidirectional);
-    t.replica(.R2).drop(.R_, .outgoing, .request_sync_manifest);
+    t.replica(.R2).drop(.R_, .outgoing, .request_sync_checkpoint);
     t.run();
     try expectEqual(t.replica(.R2).sync_status(), .requesting_trailers);
     try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_2);
@@ -884,7 +885,7 @@ test "Cluster: sync: sync, bump target, sync" {
     try expectEqual(t.replica(.R2).sync_status(), .requesting_trailers);
     try expectEqual(t.replica(.R2).sync_target_checkpoint_op(), checkpoint_3);
 
-    t.replica(.R2).pass(.R_, .bidirectional, .request_sync_manifest);
+    t.replica(.R2).pass(.R_, .bidirectional, .request_sync_checkpoint);
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -892,7 +893,7 @@ test "Cluster: sync: sync, bump target, sync" {
     try expectEqual(t.replica(.R_).sync_status(), .idle);
 
     t.run(); // (Wait for grid sync to finish.)
-    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
+    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 test "Cluster: sync: R=2" {
@@ -935,7 +936,7 @@ test "Cluster: sync: R=2" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 2);
     try expectEqual(c.replies(), checkpoint_1_trigger + 2);
 
-    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
+    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
@@ -952,7 +953,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
-    a0.drop(.R_, .bidirectional, .request_sync_manifest); // (Prevent sync for now.)
+    a0.drop(.R_, .bidirectional, .request_sync_checkpoint); // (Prevent sync for now.)
     a0.diverge();
 
     // Prior to the checkpoint, the cluster has not realized that A0 diverged.
@@ -979,7 +980,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     try expectEqual(a0.sync_target_checkpoint_id(), b1.op_checkpoint_id());
     try expectEqual(a0.sync_target_checkpoint_id(), b2.op_checkpoint_id());
 
-    a0.pass(.R_, .bidirectional, .request_sync_manifest); // Allow sync again.
+    a0.pass(.R_, .bidirectional, .request_sync_checkpoint); // Allow sync again.
     t.run();
 
     // After syncing, A0 is back to the correct checkpoint.
@@ -988,7 +989,7 @@ test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
     try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
 
-    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
+    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
@@ -1021,7 +1022,7 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 
-    try TestReplicas.expect_equal_grid(t.replica(.A0), t.replica(.R_));
+    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 const ProcessSelector = enum {
@@ -1506,29 +1507,18 @@ const TestReplicas = struct {
         return paths;
     }
 
-    fn expect_equal_grid(want: TestReplicas, got: TestReplicas) !void {
-        assert(want.replicas.count() == 1);
-        assert(got.replicas.count() > 0);
+    fn expect_sync_done(t: TestReplicas) !void {
+        assert(t.replicas.count() > 0);
 
-        const want_replica: *const Cluster.Replica = &want.cluster.replicas[want.replicas.get(0)];
+        for (t.replicas.const_slice()) |replica_index| {
+            const replica: *const Cluster.Replica = &t.cluster.replicas[replica_index];
+            assert(replica.sync_content_done());
 
-        for (got.replicas.const_slice()) |replica_index| {
-            const got_replica: *const Cluster.Replica = &got.cluster.replicas[replica_index];
+            // If the replica has finished syncing, but not yet checkpointed, then it might not have
+            // updated its sync_op_max.
+            maybe(replica.superblock.staging.vsr_state.sync_op_max > 0);
 
-            var address: u64 = 1;
-            while (address <= vsr.superblock.grid_blocks_max) : (address += 1) {
-                const address_free = want_replica.superblock.free_set.is_free(address);
-                assert(address_free == got_replica.superblock.free_set.is_free(address));
-                if (address_free) continue;
-
-                const block_want = want_replica.superblock.storage.grid_block(address).?;
-                const block_got = got_replica.superblock.storage.grid_block(address).?;
-
-                try expectEqual(
-                    std.mem.bytesToValue(vsr.Header, block_want[0..@sizeOf(vsr.Header)]),
-                    std.mem.bytesToValue(vsr.Header, block_got[0..@sizeOf(vsr.Header)]),
-                );
-            }
+            try t.cluster.storage_checker.replica_sync(&replica.superblock);
         }
     }
 };
