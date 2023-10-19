@@ -291,6 +291,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 manifest_log.log_block_checksums.buffer.len);
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
+            assert(manifest_log.log_block_checksums.count <
+                manifest_log.superblock.working.vsr_state.checkpoint.manifest_count);
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.entry_count == 0);
@@ -321,8 +323,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(!manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.log_block_checksums.count > 0);
             assert(manifest_log.log_block_addresses.count > 0);
+            assert(manifest_log.log_block_checksums.count > 0);
             assert(manifest_log.superblock.working.manifest_references() != null);
 
             const block_checksum = manifest_log.log_block_checksums.head().?;
@@ -399,6 +401,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.tables_removed.count() <= tree.table_count_max);
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
+            assert(manifest_log.log_block_checksums.count ==
+                manifest_log.superblock.working.vsr_state.checkpoint.manifest_count);
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.entry_count == 0);
@@ -825,6 +829,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                     .head_address = manifest_log.log_block_addresses.head().?,
                     .tail_checksum = manifest_log.log_block_checksums.tail().?,
                     .tail_address = manifest_log.log_block_addresses.tail().?,
+                    .count = @intCast(manifest_log.log_block_addresses.count),
                 };
             }
         }
