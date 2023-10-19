@@ -35,6 +35,7 @@ const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
 const schema = @import("../lsm/schema.zig");
 const stdx = @import("../stdx.zig");
+const maybe = stdx.maybe;
 const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
 const hash_log = @import("./hash_log.zig");
@@ -318,9 +319,9 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        zone.verify_iop(buffer, offset_in_zone);
+        assert(zone != .grid_padding);
         hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
-
-        verify_alignment(buffer);
 
         switch (zone) {
             .superblock,
@@ -330,9 +331,8 @@ pub const Storage = struct {
                 var sectors = SectorRange.from_zone(zone, offset_in_zone, buffer.len);
                 while (sectors.next()) |sector| assert(storage.memory_written.isSet(sector));
             },
-            .client_replies,
-            .grid,
-            => {
+            .grid_padding => unreachable,
+            .client_replies, .grid => {
                 // ClientReplies/Grid repairs can read blocks that have not ever been written.
                 // (The former case is possible if we sync to a new superblock and someone requests
                 // a client reply that we haven't repaired yet.)
@@ -391,9 +391,9 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        zone.verify_iop(buffer, offset_in_zone);
+        maybe(zone == .grid_padding); // Padding is zeroed during format.
         hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
-
-        verify_alignment(buffer);
 
         // Verify that there are no concurrent overlapping writes.
         var iterator = storage.writes.iterator();
@@ -466,6 +466,8 @@ pub const Storage = struct {
             .wal_headers => atlas.faulty_wal_headers(replica_index, offset_in_zone, size),
             .wal_prepares => atlas.faulty_wal_prepares(replica_index, offset_in_zone, size),
             .client_replies => atlas.faulty_client_replies(replica_index, offset_in_zone, size),
+            // We assert that the padding is never read, so there's no need to fault it.
+            .grid_padding => return,
             .grid => atlas.faulty_grid(replica_index, offset_in_zone, size),
         } orelse return;
 
@@ -503,6 +505,7 @@ pub const Storage = struct {
                         .{ replica_index, zone, offset, slot_min, slot_max },
                     );
                 },
+                .grid_padding => unreachable,
                 .grid => {
                     comptime assert(constants.block_size % @sizeOf(vsr.Header) == 0);
                     const address = @divFloor(offset, constants.block_size) + 1;
@@ -660,15 +663,6 @@ pub const Storage = struct {
         }
     }
 };
-
-fn verify_alignment(buffer: []const u8) void {
-    assert(buffer.len > 0);
-
-    // Ensure that the read or write is aligned correctly for Direct I/O:
-    // If this is not the case, the underlying syscall will return EINVAL.
-    assert(@mod(@intFromPtr(buffer.ptr), constants.sector_size) == 0);
-    assert(@mod(buffer.len, constants.sector_size) == 0);
-}
 
 pub const Area = union(enum) {
     superblock: struct { zone: superblock.SuperBlockZone, copy: u8 },
