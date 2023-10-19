@@ -628,16 +628,16 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&run_cmd.step);
     }
 
-    const dist_exe = b.addExecutable(.{
-        .name = "dist",
-        .root_source_file = .{ .path = "src/scripts/dist.zig" },
+    const release_exe = b.addExecutable(.{
+        .name = "release",
+        .root_source_file = .{ .path = "src/scripts/release.zig" },
         .target = target,
         .main_pkg_path = .{ .path = "src" },
     });
-    const dist_exe_run = b.addRunArtifact(dist_exe);
-    if (b.args) |args| dist_exe_run.addArgs(args);
-    const dist_step = b.step("dist", "build artifacts for publishing");
-    dist_step.dependOn(&dist_exe_run.step);
+    const release_exe_run = b.addRunArtifact(release_exe);
+    if (b.args) |args| release_exe_run.addArgs(args);
+    const release_step = b.step("release", "build and publish release artifacts");
+    release_step.dependOn(&release_exe_run.step);
 }
 
 fn link_tracer_backend(
