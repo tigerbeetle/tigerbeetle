@@ -66,7 +66,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
             try shell.exec(
                 \\docker run
                 \\--security-opt seccomp=unconfined
-                \\--volume ./TigerBeetle/bin/Release:/nuget
+                \\--volume ./TigerBeetle/bin/Release:/host
                 \\{image}
                 \\sh
                 \\-c {script}
@@ -75,9 +75,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
                 .script =
                 \\set -ex
                 \\mkdir test-project && cd test-project
-                \\dotnet nuget add source /nuget
+                \\dotnet nuget add source /host
                 \\dotnet new console
-                \\dotnet add package tigerbeetle --source /nuget > /dev/null
+                \\dotnet add package tigerbeetle --source /host > /dev/null
                 \\cat <<EOF > Program.cs
                 \\using System;
                 \\public class Program {
