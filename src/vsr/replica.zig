@@ -863,7 +863,7 @@ pub fn ReplicaType(
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
                 .op = undefined,
-                .commit_min = self.superblock.working.vsr_state.commit_min,
+                .commit_min = self.superblock.working.vsr_state.checkpoint.commit_min,
                 .commit_max = self.superblock.working.vsr_state.commit_max,
                 .pipeline = .{ .cache = .{} },
                 .view_headers = vsr.Headers.ViewChangeArray.init_from_slice(
@@ -1111,10 +1111,10 @@ pub fn ReplicaType(
                 .headers => self.on_headers(message),
                 .request_blocks => self.on_request_blocks(message),
                 .block => self.on_block(message),
-                .request_sync_manifest => self.on_request_sync_trailer(message),
+                .request_sync_checkpoint => self.on_request_sync_checkpoint(message),
+                .sync_checkpoint => self.on_sync_checkpoint(message),
                 .request_sync_free_set => self.on_request_sync_trailer(message),
                 .request_sync_client_sessions => self.on_request_sync_trailer(message),
-                .sync_manifest => self.on_sync_trailer(.manifest, message),
                 .sync_free_set => self.on_sync_trailer(.free_set, message),
                 .sync_client_sessions => self.on_sync_trailer(.client_sessions, message),
                 // A replica should never handle misdirected messages intended for a client:
@@ -2402,13 +2402,48 @@ pub fn ReplicaType(
             self.sync_reclaim_tables();
         }
 
+        fn on_request_sync_checkpoint(self: *Self, message: *Message) void {
+            assert(message.header.command == .request_sync_checkpoint);
+            if (self.ignore_sync_request_message(message)) return;
+
+            assert(message.header.op ==
+                self.superblock.staging.vsr_state.checkpoint.commit_min);
+            assert(message.header.parent == self.superblock.staging.checkpoint_id());
+
+            self.send_sync_checkpoint(.{ .replica = message.header.replica });
+        }
+
+        fn on_sync_checkpoint(self: *Self, message: *const Message) void {
+            assert(message.header.replica < self.replica_count);
+            assert(message.header.command == .sync_checkpoint);
+            if (self.ignore_sync_response_message(message)) return;
+
+            const stage: *SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
+            assert(stage.target.checkpoint_id == message.header.parent);
+
+            log.debug("{}: on_sync_checkpoint: checkpoint_op={} checkpoint_id={x:0>32}", .{
+                self.replica,
+                stage.target.checkpoint_op,
+                stage.target.checkpoint_id,
+            });
+
+            const checkpoint_state = std.mem.bytesAsValue(
+                vsr.CheckpointState,
+                message.body()[0..@sizeOf(vsr.CheckpointState)],
+            );
+
+            if (stage.done()) {
+                self.sync_requesting_trailers_callback(checkpoint_state);
+            }
+        }
+
         fn on_request_sync_trailer(self: *Self, message: *Message) void {
-            assert(message.header.command == .request_sync_manifest or
-                message.header.command == .request_sync_free_set or
+            assert(message.header.command == .request_sync_free_set or
                 message.header.command == .request_sync_client_sessions);
             if (self.ignore_sync_request_message(message)) return;
 
-            assert(message.header.op == self.superblock.staging.vsr_state.commit_min);
+            assert(message.header.op ==
+                self.superblock.staging.vsr_state.checkpoint.commit_min);
             assert(message.header.parent == self.superblock.staging.checkpoint_id());
 
             self.send_sync_trailer(message.header.command, .{
@@ -2436,21 +2471,6 @@ pub fn ReplicaType(
                 stage.target.checkpoint_id,
             });
 
-            // TODO(256-byte headers): Include both values on all 3 headers to avoid this switch.
-            switch (trailer) {
-                .manifest => {},
-                .free_set => {
-                    assert(stage.previous_checkpoint_id == null or
-                        stage.previous_checkpoint_id.? == message.header.client);
-                    stage.previous_checkpoint_id = message.header.client;
-                },
-                .client_sessions => {
-                    assert(stage.checkpoint_op_checksum == null or
-                        stage.checkpoint_op_checksum.? == message.header.client);
-                    stage.checkpoint_op_checksum = message.header.client;
-                },
-            }
-
             const target_buffer = self.superblock.trailer_buffer(trailer);
             const target_size = @as(u32, @intCast(message.header.commit));
             const progress = stage.trailers.getPtr(trailer).write_chunk(.{
@@ -2469,11 +2489,6 @@ pub fn ReplicaType(
                 stage.trailers.get(trailer).offset,
                 target_size,
             });
-
-            if (stage.done()) {
-                assert(progress == .complete);
-                self.sync_requesting_trailers_callback();
-            }
         }
 
         fn on_ping_timeout(self: *Self) void {
@@ -2627,8 +2642,8 @@ pub fn ReplicaType(
             }
 
             const latest_committed_entry = checksum: {
-                if (self.commit_max == self.superblock.working.vsr_state.commit_min) {
-                    break :checksum self.superblock.working.vsr_state.commit_min_checksum;
+                if (self.commit_max == self.superblock.working.vsr_state.checkpoint.commit_min) {
+                    break :checksum self.superblock.working.vsr_state.checkpoint.commit_min_checksum;
                 } else {
                     break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
                 }
@@ -2642,7 +2657,7 @@ pub fn ReplicaType(
                 .view = self.view,
                 .commit = self.commit_max,
                 .timestamp = self.clock.monotonic(),
-                .op = self.superblock.working.vsr_state.commit_min,
+                .op = self.superblock.working.vsr_state.checkpoint.commit_min,
                 .parent = self.superblock.working.checkpoint_id(),
             });
         }
@@ -2830,6 +2845,8 @@ pub fn ReplicaType(
                 => return,
 
                 .requesting_trailers => |*stage| {
+                    self.send_request_sync_checkpoint();
+
                     for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
                         if (!stage.trailers.get(trailer).done) {
                             self.send_request_sync_trailer(
@@ -3417,8 +3434,8 @@ pub fn ReplicaType(
         fn commit_op_compact_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
             assert(self.commit_stage == .compact_state_machine);
-            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
-            assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.checkpoint.commit_min);
+            assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.commit_min);
 
             if (self.event_callback) |hook| hook(self, .compaction_completed);
 
@@ -3531,6 +3548,8 @@ pub fn ReplicaType(
                     .commit_max = self.commit_max,
                     .sync_op_min = vsr_state_sync_op.min,
                     .sync_op_max = vsr_state_sync_op.max,
+                    .manifest_references =
+                        self.state_machine.forest.manifest_log.checkpoint_references(),
                 },
             );
         }
@@ -3542,8 +3561,8 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
 
             assert(self.op_checkpoint() == self.commit_min - constants.lsm_batch_multiple);
-            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.commit_min);
-            assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+            assert(self.op_checkpoint() == self.superblock.staging.vsr_state.checkpoint.commit_min);
+            assert(self.op_checkpoint() == self.superblock.working.vsr_state.checkpoint.commit_min);
             self.grid.assert_only_repairing();
 
             log.debug("{}: commit_op_compact_callback: checkpoint done (op={} new_checkpoint={})", .{
@@ -3600,7 +3619,7 @@ pub fn ReplicaType(
                 // op_checkpoint's slot may have been overwritten in the WAL — but we can
                 // always use the VSRState to anchor the hash chain.
                 assert(prepare.header.parent ==
-                    self.superblock.working.vsr_state.commit_min_checksum);
+                    self.superblock.working.vsr_state.checkpoint.commit_min_checksum);
             } else {
                 assert(prepare.header.parent ==
                     self.journal.header_with_op(self.commit_min).?.checksum);
@@ -3694,7 +3713,8 @@ pub fn ReplicaType(
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
                 // We are recovering from a checkpoint. Prior to the crash, the client table was
                 // updated with entries for one bar beyond the op_checkpoint.
-                assert(self.op_checkpoint() == self.superblock.working.vsr_state.commit_min);
+                assert(self.op_checkpoint() ==
+                    self.superblock.working.vsr_state.checkpoint.commit_min);
                 if (self.client_sessions().get(prepare.header.client)) |entry| {
                     assert(entry.header.command == .reply);
                     assert(entry.header.op >= prepare.header.op);
@@ -4024,6 +4044,7 @@ pub fn ReplicaType(
             assert(
                 header.view == self.view or
                     header.command == .request_start_view or
+                    header.command == .request_sync_checkpoint or
                     header.command == .reply or
                     header.command == .ping or header.command == .pong,
             );
@@ -4737,7 +4758,7 @@ pub fn ReplicaType(
         }
 
         fn ignore_sync_request_message(self: *const Self, message: *const Message) bool {
-            assert(message.header.command == .request_sync_manifest or
+            assert(message.header.command == .request_sync_checkpoint or
                 message.header.command == .request_sync_free_set or
                 message.header.command == .request_sync_client_sessions);
 
@@ -4761,7 +4782,7 @@ pub fn ReplicaType(
                 return true;
             }
 
-            if (self.superblock.staging.vsr_state.commit_min != message.header.op) {
+            if (self.superblock.staging.vsr_state.checkpoint.commit_min != message.header.op) {
                 log.debug("{}: on_{s}: ignoring different checkpoint (local={} message={})", .{
                     self.replica,
                     command,
@@ -4786,7 +4807,7 @@ pub fn ReplicaType(
         }
 
         fn ignore_sync_response_message(self: *const Self, message: *const Message) bool {
-            assert(message.header.command == .sync_manifest or
+            assert(message.header.command == .sync_checkpoint or
                 message.header.command == .sync_free_set or
                 message.header.command == .sync_client_sessions);
             assert(message.header.replica < self.replica_count);
@@ -4969,7 +4990,7 @@ pub fn ReplicaType(
 
         /// The op of the highest checkpointed message.
         pub fn op_checkpoint(self: *const Self) u64 {
-            return self.superblock.working.vsr_state.commit_min;
+            return self.superblock.working.vsr_state.checkpoint.commit_min;
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
@@ -5004,7 +5025,7 @@ pub fn ReplicaType(
                 const op_checkpoint_next_trigger_previous =
                     vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
                 if (op <= op_checkpoint_next_trigger_previous) {
-                    return self.superblock.working.vsr_state.previous_checkpoint_id;
+                    return self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
                 }
             }
             return self.superblock.working.checkpoint_id();
@@ -6508,7 +6529,7 @@ pub fn ReplicaType(
                 .block => {
                     assert(!self.standby());
                 },
-                .request_sync_manifest,
+                .request_sync_checkpoint,
                 .request_sync_free_set,
                 .request_sync_client_sessions,
                 => {
@@ -6517,7 +6538,7 @@ pub fn ReplicaType(
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
-                .sync_manifest,
+                .sync_checkpoint,
                 .sync_free_set,
                 .sync_client_sessions,
                 => {
@@ -6701,7 +6722,7 @@ pub fn ReplicaType(
             assert(!self.view_durable_updating());
             assert(self.superblock.working.vsr_state.view <= self.view);
             assert(self.superblock.working.vsr_state.log_view <= self.log_view);
-            assert(self.superblock.working.vsr_state.commit_min <= self.commit_min);
+            assert(self.superblock.working.vsr_state.checkpoint.commit_min <= self.commit_min);
             assert(self.superblock.working.vsr_state.commit_max <= self.commit_max);
 
             log.debug("{}: view_durable_update_callback: " ++
@@ -7696,7 +7717,10 @@ pub fn ReplicaType(
             self.sync_dispatch(.requesting_target);
         }
 
-        fn sync_requesting_trailers_callback(self: *Self) void {
+        fn sync_requesting_trailers_callback(
+            self: *Self,
+            checkpoint_state: *const vsr.CheckpointState,
+        ) void {
             assert(!self.solo());
             assert(self.syncing == .requesting_trailers);
             assert(!self.superblock.updating(.checkpoint));
@@ -7715,13 +7739,19 @@ pub fn ReplicaType(
 
             log.debug("{[replica]}: sync_requesting_trailers_callback: " ++
                 "checkpoint_op={[checkpoint_op]} checkpoint_id={[checkpoint_id]x:0>32} " ++
-                "manifest_checksum={[manifest_checksum]x:0>32} " ++
+                "manifest_head_checksum={[manifest_head_checksum]} " ++
+                "manifest_head_address={[manifest_head_address]} " ++
+                "manifest_tail_checksum={[manifest_tail_checksum]} " ++
+                "manifest_tail_address={[manifest_tail_address]} " ++
                 "free_set_checksum={[free_set_checksum]x:0>32} " ++
                 "client_sessions_checksum={[client_sessions_checksum]x:0>32}", .{
                 .replica = self.replica,
                 .checkpoint_op = stage.target.checkpoint_op,
                 .checkpoint_id = stage.target.checkpoint_id,
-                .manifest_checksum = stage.trailers.get(.manifest).final.?.checksum,
+                .manifest_head_checksum = checkpoint_state.manifest_head_checksum,
+                .manifest_head_address = checkpoint_state.manifest_head_address,
+                .manifest_tail_checksum = checkpoint_state.manifest_tail_checksum,
+                .manifest_tail_address = checkpoint_state.manifest_tail_address,
                 .free_set_checksum = stage.trailers.get(.free_set).final.?.checksum,
                 .client_sessions_checksum = stage.trailers.get(.client_sessions).final.?.checksum,
             });
@@ -7740,8 +7770,7 @@ pub fn ReplicaType(
 
             self.sync_dispatch(.{ .updating_superblock = .{
                 .target = stage.target,
-                .previous_checkpoint_id = stage.previous_checkpoint_id.?,
-                .checkpoint_op_checksum = stage.checkpoint_op_checksum.?,
+                .checkpoint_state = checkpoint_state.*,
             } });
         }
 
@@ -7797,10 +7826,8 @@ pub fn ReplicaType(
                 sync_superblock_update_callback,
                 &self.superblock_context,
                 .{
+                    .checkpoint = stage.checkpoint_state,
                     .commit_max = self.commit_max,
-                    .commit_min = stage.target.checkpoint_op,
-                    .commit_min_checksum = stage.checkpoint_op_checksum,
-                    .previous_checkpoint_id = stage.previous_checkpoint_id,
                     .sync_op_max = sync_op_max,
                     .sync_op_min = sync_op_min,
                 },
@@ -7820,14 +7847,13 @@ pub fn ReplicaType(
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
-            assert(self.superblock.working.vsr_state.commit_min == stage.target.checkpoint_op);
             assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
-            assert(self.superblock.working.vsr_state.previous_checkpoint_id ==
-                stage.previous_checkpoint_id);
-            assert(self.superblock.working.vsr_state.commit_min_checksum ==
-                stage.checkpoint_op_checksum);
+            assert(std.meta.eql(
+                self.superblock.working.vsr_state.checkpoint,
+                stage.checkpoint_state,
+            ));
 
-            self.commit_min = self.superblock.working.vsr_state.commit_min;
+            self.commit_min = self.superblock.working.vsr_state.checkpoint.commit_min;
             if (self.op < self.commit_min) {
                 self.transition_to_recovering_head();
             }
@@ -8052,8 +8078,9 @@ pub fn ReplicaType(
 
             // The op immediately after the checkpoint always connects to the checkpoint.
             if (op_min <= self.op_checkpoint() + 1 and op_max > self.op_checkpoint()) {
-                assert(self.superblock.working.vsr_state.commit_min == self.op_checkpoint());
-                assert(self.superblock.working.vsr_state.commit_min_checksum ==
+                assert(self.superblock.working.vsr_state.checkpoint.commit_min ==
+                    self.op_checkpoint());
+                assert(self.superblock.working.vsr_state.checkpoint.commit_min_checksum ==
                     self.journal.header_with_op(self.op_checkpoint() + 1).?.parent);
             }
 
@@ -8394,12 +8421,59 @@ pub fn ReplicaType(
             self.send_message_to_replica(self.choose_any_other_replica(), message);
         }
 
+        fn send_request_sync_checkpoint(self: *Self) void {
+            assert(!self.solo());
+            assert(self.syncing == .requesting_trailers);
+            assert(self.sync_message_timeout.ticking);
+
+            const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
+
+            self.send_header_to_replica(self.choose_any_other_replica(), .{
+                .command = .request_sync_checkpoint,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .size = @sizeOf(Header),
+                .parent = stage.target.checkpoint_id,
+                .op = stage.target.checkpoint_op,
+            });
+        }
+
+        fn send_sync_checkpoint(self: *Self, parameters: struct { replica: u8 }) void {
+            assert(!self.standby());
+            assert(self.syncing == .idle);
+            assert(self.replica != parameters.replica);
+
+            const reply = self.message_bus.get_message();
+            defer self.message_bus.unref(reply);
+
+            stdx.copy_disjoint(
+                .inexact,
+                u8,
+                reply.buffer[@sizeOf(Header)..],
+                std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
+            );
+
+            reply.header.* = .{
+                .command = .sync_checkpoint,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .size = @sizeOf(Header) + @sizeOf(vsr.CheckpointState),
+                .parent = self.superblock.working.checkpoint_id(),
+                .op = self.op_checkpoint(),
+            };
+            reply.header.set_checksum_body(reply.body());
+            reply.header.set_checksum();
+
+            // Note that our checkpoint may not be canonical — that is the syncing replica's
+            // responsibility to check.
+            self.send_message_to_replica(parameters.replica, reply);
+        }
+
         fn send_request_sync_trailer(self: *Self, command: vsr.Command, offset: u32) void {
             assert(!self.solo());
             assert(self.syncing == .requesting_trailers);
             assert(self.sync_message_timeout.ticking);
-            assert(command == .request_sync_manifest or
-                command == .request_sync_free_set or
+            assert(command == .request_sync_free_set or
                 command == .request_sync_client_sessions);
             assert(@mod(offset, SyncTrailer.chunk_size_max) == 0);
 
@@ -8429,8 +8503,7 @@ pub fn ReplicaType(
             assert(!self.standby());
             assert(self.syncing == .idle);
             assert(self.replica != parameters.replica);
-            assert(command == .request_sync_manifest or
-                command == .request_sync_free_set or
+            assert(command == .request_sync_free_set or
                 command == .request_sync_client_sessions);
 
             const reply = self.message_bus.get_message();
@@ -8471,11 +8544,6 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .size = @sizeOf(Header) + body_size,
                 .parent = self.superblock.staging.checkpoint_id(),
-                .client = switch (trailer) {
-                    .manifest => 0,
-                    .free_set => self.superblock.staging.vsr_state.previous_checkpoint_id,
-                    .client_sessions => self.superblock.staging.vsr_state.commit_min_checksum,
-                },
                 .op = self.op_checkpoint(),
                 .request = parameters.offset,
                 .context = trailer_checksum,

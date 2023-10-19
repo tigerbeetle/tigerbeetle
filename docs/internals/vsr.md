@@ -23,7 +23,7 @@ Storage:
 - _zone_: The TigerBeetle data file is made up of zones. The superblock is one zone.
 - _grid_: The zone on disk where LSM trees and metadata for them reside.
 - _WAL_: Write-ahead log. It is implemented as two on-disk ring buffers. Entries are only overwritten after they have been checkpointed.
-- _state sync_: The process of syncing checkpointed data (the _grid_, the superblock manifest, and the superblock freeset). When a replica lags behind the cluster far enough that their WALs no longer intersect, the lagging replica must state sync to catch up.
+- _state sync_: The process of syncing checkpointed data (LSM root information, the _grid_, and the superblock freeset). When a replica lags behind the cluster far enough that their WALs no longer intersect, the lagging replica must state sync to catch up.
 
 # Protocols
 
@@ -49,12 +49,12 @@ Storage:
 |                `request_reply` | replica |      replica | [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                      `headers` | replica |      replica | [Repair Journal](#protocol-repair-journal)                                       |
 |                     `eviction` | primary |       client | [Client](#protocol-client)                                                       |
-|               `request_blocks` | replica |      replica | [Sync Tables](#protocol-sync-tables), [Repair Grid](#protocol-repair-grid)       |
-|                        `block` | replica |      replica | [Sync Tables](#protocol-sync-tables), [Repair Grid](#protocol-repair-grid)       |
-|        `request_sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|               `request_blocks` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)       |
+|                        `block` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)       |
+|      `request_sync_checkpoint` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
+|              `sync_checkpoint` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 |        `request_sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 | `request_sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|                `sync_manifest` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 |                `sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 |         `sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 
@@ -271,9 +271,9 @@ Sync missed client replies using [Protocol: Repair Grid](#protocol-repair-client
 (Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
 See [State Sync](./sync.md) for details.
 
-## Protocol: Sync Tables
+## Protocol: Sync Forest
 
-Sync missed LSM table blocks using [Protocol: Repair Grid](#protocol-repair-grid).
+Sync missed LSM manifest and table blocks using [Protocol: Repair Grid](#protocol-repair-grid).
 
 (Runs immediately after [Protocol: Sync Superblock](#protocol-sync-superblock).)
 See [State Sync](./sync.md) for details.

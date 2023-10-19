@@ -48,7 +48,7 @@ atomically by swapping the pointer to the root node. This is the classic copy-on
 commonly used in filesystems. In fact, you can think of TigerBeetle's data file as a filesystem.
 
 The superblock is what holds this logical "root pointer". Physically, the "root pointer" is comprised
-from many block references. These blocks, taken together, specify the manifests of all LSM trees.
+of a couple of block references. These blocks, taken together, specify the manifests of all LSM trees.
 
 Superblock is located at a fixed position in the data file, so, when a replica starts up, it can
 read the superblock, read root block indexes and hashes from the superblock, and through those get
@@ -57,7 +57,8 @@ compressed bitset of all grid blocks which are not currently allocated.
 
 ```zig
 pub const SuperBlock = struct {
-    manifest: BlockReference[],
+    manifest_head: BlockReference,
+    manifest_tail: BlockReference,
     free_set: BitSet,
 };
 ```
@@ -173,17 +174,23 @@ The log consists of a sequence of `ManifestBlock`s:
 
 ```zig
 const ManifestBlock = struct {
+  previous_manifest_block: BlockReference,
   labels: [entry_count_max]Label,
   tables: [entry_count_max]TableInfo,
 };
 ```
 
-The superblock then stores all manifest log blocks for all trees:
+The manifest is an on-disk (in-grid) linked list, where each manifest block holds a reference to the
+previous block.
+
+The superblock then stores the head and tail manifest log blocks for all trees:
 
 ```zig
 const Superblock = {
-  manifest_block_index: [count]u64,
-  manifest_block_checksum: [count]u128,
+  manifest_block_head_address: u64,
+  manifest_block_head_checksum: u128,
+  manifest_block_tail_address: u64,
+  manifest_block_tail_checksum: u128,
   free_set: BitSet,
 };
 ```

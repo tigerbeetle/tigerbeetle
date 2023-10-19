@@ -9,7 +9,8 @@
 //!  the block, this check will need to be removed or use a different strategy.
 //!
 //! Areas verified at checkpoint:
-//! - SuperBlock trailers (Manifest, FreeSet, ClientSessions)
+//! - SuperBlock CheckpointState
+//! - SuperBlock trailers (FreeSet, ClientSessions)
 //! - ClientReplies (when repair finishes)
 //! - Acquired Grid blocks (when syncing finishes)
 //!
@@ -45,7 +46,7 @@ const Compactions = std.ArrayList(u128);
 const Checkpoints = std.AutoHashMap(u64, Checkpoint);
 
 const CheckpointArea = enum {
-    superblock_manifest,
+    superblock_checkpoint,
     superblock_free_set,
     superblock_client_sessions,
     client_replies,
@@ -86,59 +87,115 @@ pub const StorageChecker = struct {
     }
 
     pub fn replica_checkpoint(checker: *StorageChecker, superblock: *const SuperBlock) !void {
-        const replica_checkpoint_op = superblock.working.vsr_state.commit_min;
-
-        var checkpoint_actual = std.enums.EnumMap(CheckpointArea, u128).init(.{
-            .superblock_manifest = checksum_trailer(superblock, .manifest),
-            .superblock_free_set = checksum_trailer(superblock, .free_set),
-            .superblock_client_sessions = checksum_trailer(superblock, .client_sessions),
-        });
-
         const syncing = superblock.working.vsr_state.sync_op_max > 0;
-        if (!syncing) {
-            checkpoint_actual.put(.client_replies, checksum_client_replies(superblock));
-            checkpoint_actual.put(.grid, checker.checksum_grid(superblock));
-        }
 
+        try checker.check(
+            "replica_checkpoint",
+            superblock,
+            std.enums.EnumSet(CheckpointArea).init(.{
+                .superblock_checkpoint = true,
+                .superblock_free_set = true,
+                .superblock_client_sessions = true,
+                .client_replies = !syncing,
+                .grid = !syncing,
+            }),
+        );
+
+        if (!syncing) assert(checker.checkpoints.count() > 0);
+    }
+
+    /// Invoked when both superblock and content sync is complete.
+    pub fn replica_sync(checker: *StorageChecker, superblock: *const SuperBlock) !void {
+        try checker.check(
+            "replica_sync",
+            superblock,
+            std.enums.EnumSet(CheckpointArea).init(.{
+                .superblock_checkpoint = true,
+                .superblock_free_set = true,
+                .superblock_client_sessions = true,
+                // The replica may have have already committed some addition prepares atop the
+                // checkpoint, so its client-replies zone will have mutated.
+                .client_replies = false,
+                .grid = true,
+            }),
+        );
+    }
+
+    fn check(
+        checker: *StorageChecker,
+        caller: []const u8,
+        superblock: *const SuperBlock,
+        areas: std.enums.EnumSet(CheckpointArea),
+    ) !void {
+        const checkpoint_actual = checkpoint: {
+            var checkpoint = std.enums.EnumMap(CheckpointArea, u128).init(.{});
+            if (areas.contains(.superblock_checkpoint)) {
+                checkpoint.put(
+                    .superblock_checkpoint,
+                    vsr.checksum(std.mem.asBytes(&superblock.working.vsr_state.checkpoint)),
+                );
+            }
+            if (areas.contains(.superblock_free_set)) {
+                checkpoint.put(.superblock_free_set, checksum_trailer(superblock, .free_set));
+            }
+            if (areas.contains(.superblock_client_sessions)) {
+                checkpoint.put(
+                    .superblock_client_sessions,
+                    checksum_trailer(superblock, .client_sessions),
+                );
+            }
+            if (areas.contains(.client_replies)) {
+                checkpoint.put(.client_replies, checksum_client_replies(superblock));
+            }
+            if (areas.contains(.grid)) {
+                checkpoint.put(.grid, checker.checksum_grid(superblock));
+            }
+            break :checkpoint checkpoint;
+        };
+
+        const replica_checkpoint_op = superblock.working.vsr_state.checkpoint.commit_min;
         for (std.enums.values(CheckpointArea)) |area| {
-            log.debug("{}: replica_checkpoint: checkpoint={} area={s} value={?x:0>32}", .{
+            log.debug("{}: {s}: checkpoint={} area={s} value={?x:0>32}", .{
                 superblock.replica_index.?,
+                caller,
                 replica_checkpoint_op,
                 @tagName(area),
                 checkpoint_actual.get(area),
             });
         }
 
-        const checkpoint_expect = checker.checkpoints.get(replica_checkpoint_op) orelse {
-            if (!syncing) {
-                // This replica is the first to reach op_checkpoint.
-                // Save its state for other replicas to check themselves against.
-                var checkpoint: Checkpoint = undefined;
-                for (std.enums.values(CheckpointArea)) |area| {
-                    checkpoint.set(area, checkpoint_actual.get(area).?);
+        if (checker.checkpoints.get(replica_checkpoint_op)) |checkpoint_expect| {
+            var mismatch: bool = false;
+            for (std.enums.values(CheckpointArea)) |area| {
+                const checksum_actual = checkpoint_actual.get(area) orelse continue;
+                const checksum_expect = checkpoint_expect.get(area);
+                if (checksum_expect != checksum_actual) {
+                    log.warn("{}: {s}: mismatch " ++
+                        "area={s} expect={x:0>32} actual={x:0>32}", .{
+                        superblock.replica_index.?,
+                        caller,
+                        @tagName(area),
+                        checksum_expect,
+                        checksum_actual,
+                    });
+
+                    mismatch = true;
                 }
-                try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint);
             }
-            return;
-        };
-
-        var mismatch: bool = false;
-        for (std.enums.values(CheckpointArea)) |area| {
-            const checksum_actual = checkpoint_actual.get(area) orelse continue;
-            const checksum_expect = checkpoint_expect.get(area);
-            if (checksum_expect != checksum_actual) {
-                log.warn("{}: replica_checkpoint: mismatch " ++
-                    "area={s} expect={x:0>32} actual={x:0>32}", .{
-                    superblock.replica_index.?,
-                    @tagName(area),
-                    checksum_expect,
-                    checksum_actual,
-                });
-
-                mismatch = true;
+            if (mismatch) return error.StorageMismatch;
+        } else {
+            // This replica is the first to reach op_checkpoint.
+            // Save its state for other replicas to check themselves against.
+            var checkpoint: Checkpoint = undefined;
+            for (std.enums.values(CheckpointArea)) |area| {
+                if (checkpoint_actual.get(area)) |area_checksum| {
+                    checkpoint.set(area, area_checksum);
+                } else {
+                    return;
+                }
             }
+            try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint);
         }
-        if (mismatch) return error.StorageMismatch;
     }
 
     fn checksum_trailer(superblock: *const SuperBlock, trailer: vsr.SuperBlockTrailer) u128 {
@@ -179,8 +236,6 @@ pub const StorageChecker = struct {
     }
 
     fn checksum_grid(checker: *StorageChecker, superblock: *const SuperBlock) u128 {
-        assert(superblock.working.vsr_state.sync_op_max == 0);
-
         const free_set_zone = vsr.SuperBlockTrailer.free_set.zone();
         const free_set_offset = vsr.Zone.superblock.offset(free_set_zone.start_for_copy(0));
         const free_set_size = superblock.working.free_set_size;

@@ -100,10 +100,16 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .superblock = &superblock,
         .superblock_verify = &superblock_verify,
         .latest_vsr_state = SuperBlockHeader.VSRState{
-            .previous_checkpoint_id = 0,
-            .commit_min_checksum = 0,
+            .checkpoint = .{
+                .previous_checkpoint_id = 0,
+                .commit_min_checksum = 0,
+                .commit_min = 0,
+                .manifest_head_checksum = 0,
+                .manifest_tail_checksum = 0,
+                .manifest_head_address = 0,
+                .manifest_tail_address = 0,
+            },
             .commit_min_canonical = 0,
-            .commit_min = 0,
             .commit_max = 0,
             .sync_op_min = 0,
             .sync_op_max = 0,
@@ -334,10 +340,8 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = VSRState{
-            .previous_checkpoint_id = env.superblock.staging.vsr_state.previous_checkpoint_id,
-            .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum,
+            .checkpoint = env.superblock.staging.vsr_state.checkpoint,
             .commit_min_canonical = env.superblock.staging.vsr_state.commit_min_canonical,
-            .commit_min = env.superblock.staging.vsr_state.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
             .sync_op_min = 0,
             .sync_op_max = 0,
@@ -354,7 +358,7 @@ const Environment = struct {
             .request = 1,
             .command = .prepare,
             .operation = @as(vsr.Operation, @enumFromInt(constants.vsr_operations_reserved + 1)),
-            .op = env.superblock.staging.vsr_state.commit_min + 1,
+            .op = env.superblock.staging.vsr_state.checkpoint.commit_min + 1,
             .timestamp = 1,
         });
         vsr_head.set_checksum_body(&.{});
@@ -391,10 +395,17 @@ const Environment = struct {
         assert(env.pending.count() < 2);
 
         const vsr_state = VSRState{
-            .previous_checkpoint_id = env.superblock.staging.checkpoint_id(),
-            .commit_min_checksum = env.superblock.staging.vsr_state.commit_min_checksum + 1,
-            .commit_min_canonical = env.superblock.staging.vsr_state.commit_min,
-            .commit_min = env.superblock.staging.vsr_state.commit_min + 1,
+            .checkpoint = .{
+                .previous_checkpoint_id = env.superblock.staging.checkpoint_id(),
+                .commit_min_checksum =
+                    env.superblock.staging.vsr_state.checkpoint.commit_min_checksum + 1,
+                .commit_min = env.superblock.staging.vsr_state.checkpoint.commit_min + 1,
+                .manifest_head_checksum = 0,
+                .manifest_tail_checksum = 0,
+                .manifest_head_address = 0,
+                .manifest_tail_address = 0,
+            },
+            .commit_min_canonical = env.superblock.staging.vsr_state.checkpoint.commit_min,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,
@@ -412,7 +423,7 @@ const Environment = struct {
             .cluster = cluster,
             .command = .reply,
             .client = 456,
-            .commit = vsr_state.commit_min,
+            .commit = vsr_state.checkpoint.commit_min,
         };
         reply.set_checksum_body(&.{});
         reply.set_checksum();
@@ -430,8 +441,14 @@ const Environment = struct {
 
         env.pending.insert(.checkpoint);
         env.superblock.checkpoint(checkpoint_callback, &env.context_checkpoint, .{
-            .commit_min_checksum = vsr_state.commit_min_checksum,
-            .commit_min = vsr_state.commit_min,
+            .manifest_references = .{
+                .head_checksum = 0,
+                .tail_checksum = 0,
+                .head_address = 0,
+                .tail_address = 0,
+            },
+            .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum,
+            .commit_min = vsr_state.checkpoint.commit_min,
             .commit_max = vsr_state.commit_max,
             .sync_op_min = 0,
             .sync_op_max = 0,
