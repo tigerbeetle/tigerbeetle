@@ -5,13 +5,20 @@
 //!     - vsr_state.checkpoint.commit_min is initially 0 (for a newly-formatted replica).
 //!     - vsr_state.checkpoint.commit_min ≤ vsr_state.commit_max
 //!     - vsr_state.checkpoint.commit_min_before ≤ vsr_state.checkpoint.commit_min
-//!     - vsr_state.checkpoint.manifest_head_address=0 implies
-//!       vsr_state.checkpoint.manifest_head_checksum=0
-//!     - vsr_state.checkpoint.manifest_tail_address=0 implies
-//!       vsr_state.checkpoint.manifest_tail_checksum=0 and
-//!       vsr_state.checkpoint.manifest_head_address=0
 //!     - vsr_state.log_view ≤ vsr_state.view
 //!     - vsr_state.sync_op_min ≤ vsr_state.sync_op_max
+//!
+//!     - vsr_state.checkpoint.manifest_count = 0 implies:
+//!       vsr_state.checkpoint.manifest_head_address=0
+//!       vsr_state.checkpoint.manifest_head_checksum=0
+//!       vsr_state.checkpoint.manifest_tail_address=0
+//!       vsr_state.checkpoint.manifest_tail_checksum=0
+//!       vsr_state.checkpoint.manifest_head_address=0
+//!
+//!     - vsr_state.checkpoint.manifest_count > 0 implies:
+//!       vsr_state.checkpoint.manifest_head_address>0
+//!       vsr_state.checkpoint.manifest_tail_address>0
+//!
 //!     - checkpoint() must advance the superblock's vsr_state.checkpoint.commit_min.
 //!     - view_change() must not advance the superblock's vsr_state.checkpoint.commit_min.
 //!     - The following are monotonically increasing:
@@ -179,6 +186,7 @@ pub const SuperBlockHeader = extern struct {
                     .manifest_tail_checksum = 0,
                     .manifest_head_address = 0,
                     .manifest_tail_address = 0,
+                    .manifest_count = 0,
                 },
                 .replica_id = options.replica_id,
                 .members = options.members,
@@ -201,15 +209,18 @@ pub const SuperBlockHeader = extern struct {
             assert(state.replica_count <= constants.replicas_max);
             assert(vsr.member_index(&state.members, state.replica_id) != null);
 
+            if (state.checkpoint.manifest_count == 0) {
+                assert(state.checkpoint.manifest_head_address == 0);
+                assert(state.checkpoint.manifest_tail_address == 0);
+            }
+
             if (state.checkpoint.manifest_head_address == 0) {
                 assert(state.checkpoint.manifest_head_checksum == 0);
             }
 
             if (state.checkpoint.manifest_tail_address == 0) {
                 assert(state.checkpoint.manifest_tail_checksum == 0);
-
                 assert(state.checkpoint.manifest_head_address == 0);
-                assert(state.checkpoint.manifest_head_checksum == 0);
             }
         }
 
@@ -283,8 +294,10 @@ pub const SuperBlockHeader = extern struct {
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
 
+        manifest_count: u32,
+
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [8]u8 = [_]u8{0} ** 8,
+        reserved: [4]u8 = [_]u8{0} ** 4,
 
         comptime {
             assert(@sizeOf(CheckpointState) == 96);
@@ -424,8 +437,9 @@ pub const SuperBlockHeader = extern struct {
 
     pub fn manifest_references(superblock: *const SuperBlockHeader) ?ManifestReferences {
         const checkpoint_state = &superblock.vsr_state.checkpoint;
-        if (checkpoint_state.manifest_tail_address == 0) {
+        if (checkpoint_state.manifest_count == 0) {
             // No manifest blocks; LSM is empty.
+            assert(checkpoint_state.manifest_tail_address == 0);
             assert(checkpoint_state.manifest_tail_checksum == 0);
             assert(checkpoint_state.manifest_head_address == 0);
             assert(checkpoint_state.manifest_head_checksum == 0);
@@ -433,22 +447,28 @@ pub const SuperBlockHeader = extern struct {
             return null;
         } else {
             assert(checkpoint_state.manifest_head_address != 0);
+            assert(checkpoint_state.manifest_tail_address != 0);
 
             return .{
                 .head_address = checkpoint_state.manifest_head_address,
                 .head_checksum = checkpoint_state.manifest_head_checksum,
                 .tail_address = checkpoint_state.manifest_tail_address,
                 .tail_checksum = checkpoint_state.manifest_tail_checksum,
+                .count = checkpoint_state.manifest_count,
             };
         }
     }
 };
 
 pub const ManifestReferences = struct {
+    /// The chronologically first manifest block in the chain.
     head_checksum: u128,
     head_address: u64,
+    /// The chronologically last manifest block in the chain.
     tail_checksum: u128,
     tail_address: u64,
+    /// The number if manifest blocks in the chain.
+    count: u32,
 };
 
 comptime {
@@ -763,6 +783,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .manifest_head_address = 0,
                         .manifest_tail_checksum = 0,
                         .manifest_tail_address = 0,
+                        .manifest_count = 0,
                     },
                     .replica_id = replica_id,
                     .members = members,
@@ -857,6 +878,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .manifest_head_address = update.manifest_references.head_address,
                 .manifest_tail_checksum = update.manifest_references.tail_checksum,
                 .manifest_tail_address = update.manifest_references.tail_address,
+                .manifest_count = update.manifest_references.count,
             };
             vsr_state.commit_min_canonical =
                 superblock.staging.vsr_state.checkpoint.commit_min;
@@ -1338,7 +1360,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "manifest_head_checksum={[manifest_head_checksum]} " ++
                         "manifest_head_address={[manifest_head_address]} " ++
                         "manifest_tail_checksum={[manifest_tail_checksum]} " ++
-                        "manifest_tail_address={[manifest_tail_address]}",
+                        "manifest_tail_address={[manifest_tail_address]} " ++
+                        "manifest_count={[manifest_count]}",
                     .{
                         .replica = superblock.replica_index,
                         .caller = @tagName(context.caller),
@@ -1364,6 +1387,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                             superblock.working.vsr_state.checkpoint.manifest_tail_checksum,
                         .manifest_tail_address =
                             superblock.working.vsr_state.checkpoint.manifest_tail_address,
+                        .manifest_count = superblock.working.vsr_state.checkpoint.manifest_count,
                     },
                 );
                 for (superblock.working.vsr_headers().slice) |*header| {
