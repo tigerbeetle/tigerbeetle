@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Numerics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;

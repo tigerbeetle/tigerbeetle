@@ -1,4 +1,4 @@
-﻿using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 
 namespace TigerBeetle.Tests
@@ -79,4 +79,3 @@ namespace TigerBeetle.Tests
         }
     }
 }
-
