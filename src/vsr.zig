@@ -61,12 +61,25 @@ pub const Zone = enum {
     wal_headers,
     wal_prepares,
     client_replies,
+    // Add padding between `client_replies` and `grid`, to make sure grid blocks are aligned to
+    // block size and not just to sector size. Aligning blocks this way makes it more likely that
+    // they are aligned to the underlying physical sector size. This padding is zeroed during
+    // format, but isn't used otherwise.
+    grid_padding,
     grid,
 
     const size_superblock = superblock.superblock_zone_size;
     const size_wal_headers = constants.journal_size_headers;
     const size_wal_prepares = constants.journal_size_prepares;
     const size_client_replies = constants.client_replies_size;
+    const size_grid_padding = size_grid_padding: {
+        const grid_start_unaligned = size_superblock +
+            size_wal_headers +
+            size_wal_prepares +
+            size_client_replies;
+        const grid_start_aligned = std.mem.alignForward(usize, grid_start_unaligned, constants.block_size);
+        break :size_grid_padding grid_start_aligned - grid_start_unaligned;
+    };
 
     comptime {
         for (.{
@@ -74,9 +87,15 @@ pub const Zone = enum {
             size_wal_headers,
             size_wal_prepares,
             size_client_replies,
+            size_grid_padding,
         }) |zone_size| {
             assert(zone_size % constants.sector_size == 0);
         }
+
+        for (std.enums.values(Zone)) |zone| {
+            assert(Zone.start(zone) % constants.sector_size == 0);
+        }
+        assert(Zone.start(.grid) % constants.block_size == 0);
     }
 
     pub fn offset(zone: Zone, offset_logical: u64) u64 {
@@ -102,8 +121,25 @@ pub const Zone = enum {
             .wal_headers => size_wal_headers,
             .wal_prepares => size_wal_prepares,
             .client_replies => size_client_replies,
+            .grid_padding => size_grid_padding,
             .grid => null,
         };
+    }
+
+    /// Ensures that the read or write is aligned correctly for Direct I/O.
+    /// If this is not the case, then the underlying syscall will return EINVAL.
+    /// We check this only at the start of a read or write because the physical sector size may be
+    /// less than our logical sector size so that partial IOs then leave us no longer aligned.
+    pub fn verify_iop(zone: Zone, buffer: []const u8, offset_in_zone: u64) void {
+        if (zone.size()) |zone_size| {
+            assert(offset_in_zone + buffer.len <= zone_size);
+        }
+        assert(@intFromPtr(buffer.ptr) % constants.sector_size == 0);
+        assert(buffer.len % constants.sector_size == 0);
+        assert(buffer.len > 0);
+        const offset_in_storage = zone.offset(offset_in_zone);
+        assert(offset_in_storage % constants.sector_size == 0);
+        if (zone == .grid) assert(offset_in_storage % constants.block_size == 0);
     }
 };
 
