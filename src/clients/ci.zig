@@ -7,7 +7,8 @@ const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
 
-const Languages = .{
+const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
+const LanguageCI = .{
     .dotnet = @import("./dotnet/ci.zig"),
     .go = @import("./go/ci.zig"),
     .java = @import("./java/ci.zig"),
@@ -15,7 +16,7 @@ const Languages = .{
 };
 
 const CliArgs = struct {
-    language: std.meta.FieldEnum(@TypeOf(Languages)),
+    language: ?Language = null,
     verify_release: bool = false,
 };
 
@@ -39,10 +40,9 @@ pub fn main() !void {
     assert(args.skip());
     const cli_args = flags.parse_flags(&args, CliArgs);
 
-    switch (cli_args.language) {
-        inline else => |language| {
-            const ci = @field(Languages, @tagName(language));
-
+    inline for (comptime std.enums.values(Language)) |language| {
+        if (cli_args.language == language or cli_args.language == null) {
+            const ci = @field(LanguageCI, @tagName(language));
             if (cli_args.verify_release) {
                 var tmp_dir = std.testing.tmpDir(.{});
                 defer tmp_dir.cleanup();
@@ -61,6 +61,6 @@ pub fn main() !void {
 
                 try ci.tests(shell, gpa);
             }
-        },
+        }
     }
 }
