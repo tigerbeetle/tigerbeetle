@@ -964,9 +964,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.checkpoint.commit_min <= update.commit_max);
             assert(
                 (update.checkpoint.commit_min ==
-                superblock.staging.vsr_state.checkpoint.commit_min) ==
-                (update.checkpoint.commit_min_checksum ==
-                superblock.staging.vsr_state.checkpoint.commit_min_checksum),
+                    superblock.staging.vsr_state.checkpoint.commit_min) ==
+                    (update.checkpoint.commit_min_checksum ==
+                    superblock.staging.vsr_state.checkpoint.commit_min_checksum),
             );
             assert(update.sync_op_min <= update.sync_op_max);
             assert(update.sync_op_max > update.checkpoint.commit_min);
@@ -1373,20 +1373,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .checkpoint_id = superblock.working.checkpoint_id(),
                         .free_set_checksum = superblock.working.free_set_checksum,
                         .client_sessions_checksum = superblock.working.client_sessions_checksum,
-                        .commit_min_checksum =
-                            superblock.working.vsr_state.checkpoint.commit_min_checksum,
+                        .commit_min_checksum = superblock.working.vsr_state.checkpoint.commit_min_checksum,
                         .commit_min = superblock.working.vsr_state.checkpoint.commit_min,
                         .commit_max = superblock.working.vsr_state.commit_max,
                         .log_view = superblock.working.vsr_state.log_view,
                         .view = superblock.working.vsr_state.view,
-                        .manifest_head_checksum =
-                            superblock.working.vsr_state.checkpoint.manifest_head_checksum,
-                        .manifest_head_address =
-                            superblock.working.vsr_state.checkpoint.manifest_head_address,
-                        .manifest_tail_checksum =
-                            superblock.working.vsr_state.checkpoint.manifest_tail_checksum,
-                        .manifest_tail_address =
-                            superblock.working.vsr_state.checkpoint.manifest_tail_address,
+                        .manifest_head_checksum = superblock.working.vsr_state.checkpoint.manifest_head_checksum,
+                        .manifest_head_address = superblock.working.vsr_state.checkpoint.manifest_head_address,
+                        .manifest_tail_checksum = superblock.working.vsr_state.checkpoint.manifest_tail_checksum,
+                        .manifest_tail_address = superblock.working.vsr_state.checkpoint.manifest_tail_address,
                         .manifest_count = superblock.working.vsr_state.checkpoint.manifest_count,
                     },
                 );
@@ -1695,8 +1690,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .commit_max_old = superblock.staging.vsr_state.commit_max,
                 .commit_max_new = context.vsr_state.?.commit_max,
 
-                .commit_min_checksum_old =
-                    superblock.staging.vsr_state.checkpoint.commit_min_checksum,
+                .commit_min_checksum_old = superblock.staging.vsr_state.checkpoint.commit_min_checksum,
                 .commit_min_checksum_new = context.vsr_state.?.checkpoint.commit_min_checksum,
 
                 .log_view_old = superblock.staging.vsr_state.log_view,

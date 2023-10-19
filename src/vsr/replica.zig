@@ -3548,8 +3548,7 @@ pub fn ReplicaType(
                     .commit_max = self.commit_max,
                     .sync_op_min = vsr_state_sync_op.min,
                     .sync_op_max = vsr_state_sync_op.max,
-                    .manifest_references =
-                        self.state_machine.forest.manifest_log.checkpoint_references(),
+                    .manifest_references = self.state_machine.forest.manifest_log.checkpoint_references(),
                 },
             );
         }

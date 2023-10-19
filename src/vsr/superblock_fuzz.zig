@@ -395,24 +395,24 @@ const Environment = struct {
         assert(!env.pending.contains(.checkpoint));
         assert(env.pending.count() < 2);
 
+        const vsr_state_old = env.superblock.staging.vsr_state;
         const vsr_state = VSRState{
             .checkpoint = .{
                 .previous_checkpoint_id = env.superblock.staging.checkpoint_id(),
-                .commit_min_checksum =
-                    env.superblock.staging.vsr_state.checkpoint.commit_min_checksum + 1,
-                .commit_min = env.superblock.staging.vsr_state.checkpoint.commit_min + 1,
+                .commit_min_checksum = vsr_state_old.checkpoint.commit_min_checksum + 1,
+                .commit_min = vsr_state_old.checkpoint.commit_min + 1,
                 .manifest_head_checksum = 0,
                 .manifest_tail_checksum = 0,
                 .manifest_head_address = 0,
                 .manifest_tail_address = 0,
                 .manifest_count = 0,
             },
-            .commit_min_canonical = env.superblock.staging.vsr_state.checkpoint.commit_min,
-            .commit_max = env.superblock.staging.vsr_state.commit_max + 1,
+            .commit_min_canonical = vsr_state_old.checkpoint.commit_min,
+            .commit_max = vsr_state_old.commit_max + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,
-            .log_view = env.superblock.staging.vsr_state.log_view,
-            .view = env.superblock.staging.vsr_state.view,
+            .log_view = vsr_state_old.log_view,
+            .view = vsr_state_old.view,
             .replica_id = env.members[replica],
             .members = env.members,
             .replica_count = replica_count,
