@@ -8,7 +8,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    secrets:
+    environment: release
 
     steps:
       - uses: actions/checkout@v3
@@ -39,15 +39,19 @@ jobs:
           node-version: '14.x'
           registry-url: 'https://registry.npmjs.org'
 
+      # We need llvm-lipo utility from LLVM to build a universal mac binary.
+      - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build dist -- --build --publish --version 0.9.${{ github.run_number }} --sha ${{ github.sha }}
+      - run: ./zig/zig build release -- --build --publish --version=0.14.${{ github.run_number }} --sha=${{ github.sha }}
         env:
           NUGET_KEY: ${{ secrets.NUGET_KEY }}
-          TIGERBEETLE_GO_GITHUB_TOKEN: ${{ secrets.TIGERBEETLE_GO_GITHUB_TOKEN }}
+          TIGERBEETLE_GO_PAT: ${{ secrets.TIGERBEETLE_GO_PAT }}
           MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           MAVEN_CENTRAL_TOKEN: ${{ secrets.MAVEN_CENTRAL_TOKEN }}
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_SECRET_KEY_PASSWORD }}
           NODE_AUTH_TOKEN: ${{ secrets.TIGERBEETLE_NODE_PUBLISH_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   alert_failure:
     runs-on: ubuntu-latest
