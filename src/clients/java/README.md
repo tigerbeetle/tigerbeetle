@@ -132,10 +132,12 @@ replica. The address is read from the `TB_ADDRESS`
 environment variable and defaults to port `3000`.
 
 ```java
-var tbAddress = System.getenv("TB_ADDRESS");
+var replicaAddress = System.getenv("TB_ADDRESS");
+int clusterID = 0;
+String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
 Client client = new Client(
-  0,
-  new String[] {tbAddress.length() > 0 ? tbAddress : "3000"}
+  clusterID,
+  replicaAddresses,
 );
 ```
 
@@ -147,8 +149,6 @@ syntax:
 ```java
 try (var client = new Client(...)) {
   // Use client
-} catch (Exception e) {
-  // Handle exception
 }
 ```
 
