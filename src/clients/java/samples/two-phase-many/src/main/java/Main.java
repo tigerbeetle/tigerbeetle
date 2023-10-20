@@ -8,12 +8,11 @@ import com.tigerbeetle.*;
 public final class Main {
 	public static void main(String[] args)
 			throws RequestException, ConcurrencyExceededException {
-		var port = System.getenv("TB_ADDRESS");
-		if (port == null || port == "") {
-			port = "3000";
-		}
+		String replicaAddress = System.getenv("TB_ADDRESS");
 
-		try (var client = new Client(0, new String[] { port })) {
+		int clusterID = 0;
+		String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
+		try (var client = new Client(clusterID, replicaAddresses)) {
 			// Create two accounts
 			AccountBatch accounts = new AccountBatch(2);
 			accounts.add();
@@ -356,8 +355,6 @@ public final class Main {
 					assert false;
 				}
 			}
-		} catch (Exception e) {
-			assert e == null;
 		}
 	}
 }
