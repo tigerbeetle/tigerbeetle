@@ -529,7 +529,11 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.open_commence(manifest_log);
         }
 
-        pub fn open_table(tree: *Tree, level: u8, table: *const schema.Manifest.TableInfo) void {
+        pub fn open_table(
+            tree: *Tree,
+            level: u8,
+            table: *const schema.ManifestNode.TableInfo,
+        ) void {
             assert(tree.compaction_op == null);
             assert(tree.key_range == null);
 

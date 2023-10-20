@@ -25,7 +25,7 @@ const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
 const BlockType = schema.BlockType;
-const TableInfo = schema.Manifest.TableInfo;
+const TableInfo = schema.ManifestNode.TableInfo;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
@@ -33,7 +33,7 @@ const manifest_log_options = ManifestLogOptions{
     .tree_id_min = 1,
     .tree_id_max = 1,
 };
-const entries_max_block = schema.Manifest.entry_count_max;
+const entries_max_block = schema.ManifestNode.entry_count_max;
 const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
 

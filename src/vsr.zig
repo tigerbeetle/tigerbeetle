@@ -871,7 +871,9 @@ pub const Header = extern struct {
 
     fn invalid_sync_checkpoint(self: *const Header) ?[]const u8 {
         assert(self.command == .sync_checkpoint);
-        if (self.size != @sizeOf(Header) + @sizeOf(CheckpointState)) return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
+        if (self.size != @sizeOf(Header) + @sizeOf(CheckpointState)) {
+            return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
+        }
         if (self.client != 0) return "client != 0";
         if (self.context != 0) return "context != 0";
         if (self.request != 0) return "request != 0";

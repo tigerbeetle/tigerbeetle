@@ -216,7 +216,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
             level: u6,
-            table: *const schema.Manifest.TableInfo,
+            table: *const schema.ManifestNode.TableInfo,
         ) void {
             _ = manifest_log;
             _ = level;

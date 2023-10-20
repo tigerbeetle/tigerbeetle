@@ -2418,7 +2418,7 @@ pub fn ReplicaType(
             assert(message.header.command == .sync_checkpoint);
             if (self.ignore_sync_response_message(message)) return;
 
-            const stage: *SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
+            const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
             assert(stage.target.checkpoint_id == message.header.parent);
 
             log.debug("{}: on_sync_checkpoint: checkpoint_op={} checkpoint_id={x:0>32}", .{
@@ -7569,7 +7569,7 @@ pub fn ReplicaType(
 
                 // We had a sync target already, but we discovered a newer one.
                 // Re-sync to the new target.
-                .requesting_trailers => |stage| {
+                .requesting_trailers => |*stage| {
                     assert(self.commit_stage == .idle);
                     assert(self.sync_target_max.?.checkpoint_op >= stage.target.checkpoint_op);
                     if (self.sync_target_max.?.checkpoint_op == stage.target.checkpoint_op) return;
@@ -7738,19 +7738,19 @@ pub fn ReplicaType(
 
             log.debug("{[replica]}: sync_requesting_trailers_callback: " ++
                 "checkpoint_op={[checkpoint_op]} checkpoint_id={[checkpoint_id]x:0>32} " ++
-                "manifest_head_checksum={[manifest_head_checksum]} " ++
-                "manifest_head_address={[manifest_head_address]} " ++
-                "manifest_tail_checksum={[manifest_tail_checksum]} " ++
-                "manifest_tail_address={[manifest_tail_address]} " ++
+                "manifest_oldest_checksum={[manifest_oldest_checksum]} " ++
+                "manifest_oldest_address={[manifest_oldest_address]} " ++
+                "manifest_newest_checksum={[manifest_newest_checksum]} " ++
+                "manifest_newest_address={[manifest_newest_address]} " ++
                 "free_set_checksum={[free_set_checksum]x:0>32} " ++
                 "client_sessions_checksum={[client_sessions_checksum]x:0>32}", .{
                 .replica = self.replica,
                 .checkpoint_op = stage.target.checkpoint_op,
                 .checkpoint_id = stage.target.checkpoint_id,
-                .manifest_head_checksum = checkpoint_state.manifest_head_checksum,
-                .manifest_head_address = checkpoint_state.manifest_head_address,
-                .manifest_tail_checksum = checkpoint_state.manifest_tail_checksum,
-                .manifest_tail_address = checkpoint_state.manifest_tail_address,
+                .manifest_oldest_checksum = checkpoint_state.manifest_oldest_checksum,
+                .manifest_oldest_address = checkpoint_state.manifest_oldest_address,
+                .manifest_newest_checksum = checkpoint_state.manifest_newest_checksum,
+                .manifest_newest_address = checkpoint_state.manifest_newest_address,
                 .free_set_checksum = stage.trailers.get(.free_set).final.?.checksum,
                 .client_sessions_checksum = stage.trailers.get(.client_sessions).final.?.checksum,
             });
@@ -7847,9 +7847,10 @@ pub fn ReplicaType(
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
             assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
-            assert(std.meta.eql(
-                self.superblock.working.vsr_state.checkpoint,
-                stage.checkpoint_state,
+            assert(stdx.equal_bytes(
+                vsr.CheckpointState,
+                &self.superblock.working.vsr_state.checkpoint,
+                &stage.checkpoint_state,
             ));
 
             self.commit_min = self.superblock.working.vsr_state.checkpoint.commit_min;
@@ -8445,13 +8446,6 @@ pub fn ReplicaType(
             const reply = self.message_bus.get_message();
             defer self.message_bus.unref(reply);
 
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                reply.buffer[@sizeOf(Header)..],
-                std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
-            );
-
             reply.header.* = .{
                 .command = .sync_checkpoint,
                 .cluster = self.cluster,
@@ -8460,6 +8454,14 @@ pub fn ReplicaType(
                 .parent = self.superblock.working.checkpoint_id(),
                 .op = self.op_checkpoint(),
             };
+
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                reply.body(),
+                std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
+            );
+
             reply.header.set_checksum_body(reply.body());
             reply.header.set_checksum();
 
