@@ -51,6 +51,9 @@ pub fn main() !void {
 
                 try ci.verify_release(shell, gpa, tmp_dir.dir);
             } else {
+                var section = try shell.open_section(@tagName(language) ++ " ci");
+                defer section.close();
+
                 var client_src_dir = try shell.project_root.openDir(
                     "src/clients/" ++ @tagName(language),
                     .{},
