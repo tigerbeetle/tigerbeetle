@@ -298,10 +298,10 @@ pub const Header = extern struct {
     /// * A `prepare_ok` sets this to the checkpoint id. (TODO(Big headers): Use a separate field.)
     /// * A `commit` sets this to the checkpoint id. (Possibly uncanonical.)
     /// * A `ping` sets this to the checkpoint id. (Possibly uncanonical.)
-    /// * A `request_sync_manifest` sets this to the requested checkpoint id.
+    /// * A `request_sync_checkpoint` sets this to the requested checkpoint id.
     /// * A `request_sync_free_set` sets this to the requested checkpoint id.
     /// * A `request_sync_client_sessions` sets this to the requested checkpoint id.
-    /// * A `sync_manifest` sets this to the checkpoint id.
+    /// * A `sync_checkpoint` sets this to the checkpoint id.
     /// * A `sync_free_set` sets this to the checkpoint id.
     /// * A `sync_client_sessions` sets this to the checkpoint id.
     parent: u128 = 0,
@@ -345,6 +345,7 @@ pub const Header = extern struct {
     /// * A `request_prepare` sets this to the checksum of the prepare being requested.
     /// * A `request_reply` sets this to the checksum of the reply being requested.
     /// * A `sync_free_set` sets this to the complete FreeSet's checksum.
+    /// * A `sync_client_sessions` sets this to the complete ClientSessions's checksum.
     ///
     /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
     /// low entropy and may otherwise collide in the event of any correctness bugs.
@@ -356,10 +357,8 @@ pub const Header = extern struct {
     /// A client is allowed to have at most one request inflight at a time.
     ///
     /// * A `do_view_change` sets this to its latest log_view number.
-    /// * A `request_sync_manifest` sets this to the requested offset within the encoded Manifest.
     /// * A `request_sync_free_set` sets this to the requested offset within the encoded FreeSet.
     /// * A `request_sync_client_sessions` sets this to the requested offset within the encoded ClientSessions.
-    /// * A `sync_manifest` sets this to the offset within the encoded Manifest.
     /// * A `sync_free_set` sets this to the offset within the encoded FreeSet.
     /// * A `sync_client_sessions` sets this to the offset within the encoded ClientSessions.
     request: u32 = 0,
@@ -384,10 +383,10 @@ pub const Header = extern struct {
     /// * A `request_headers` sets this to the maximum op requested (inclusive).
     /// * A `request_prepare` sets this to the requested op.
     /// * A `request_reply` sets this to the requested op.
-    /// * A `request_sync_manifest` sets this to the requested checkpoint op.
+    /// * A `request_sync_checkpoint` sets this to the requested checkpoint op.
     /// * A `request_sync_free_set` sets this to the requested checkpoint op.
     /// * A `request_sync_client_sessions` sets this to the requested checkpoint op.
-    /// * A `sync_manifest` sets this to the checkpoint op.
+    /// * A `sync_checkpoint` sets this to the checkpoint op.
     /// * A `sync_free_set` sets this to the checkpoint op.
     /// * A `sync_client_sessions` sets this to the checkpoint op.
     op: u64 = 0,
@@ -398,7 +397,6 @@ pub const Header = extern struct {
     ///   The sending replica may continue to commit after sending the DVC.
     /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
     /// * A `request_headers` sets this to the minimum op requested (inclusive).
-    /// * A `sync_manifest` sets this to the complete Manifest's size.
     /// * A `sync_free_set` sets this to the complete FreeSet's size.
     /// * A `sync_client_sessions` sets this to the complete ClientSessions's size.
     /// * A `ping` sets this to its monotonic timestamp.

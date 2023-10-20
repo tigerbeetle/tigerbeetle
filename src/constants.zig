@@ -183,7 +183,6 @@ comptime {
 }
 
 /// The maximum body size of:
-/// - command=sync_manifest
 /// - command=sync_free_set
 /// - command=sync_client_sessions
 ///
