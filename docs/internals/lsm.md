@@ -255,6 +255,7 @@ will eventually remove any reference to the table from the log blocks.
 
 Each manifest block has a reference to the (chronologically) previous manifest block.
 The superblock stores the head and tail address/checksum of this linked list.
+The reference on the header of the head manifest block "dangles" – the block it references has already been compacted.
 
 ### Manifest Level
 

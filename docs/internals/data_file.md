@@ -57,8 +57,8 @@ compressed bitset of all grid blocks which are not currently allocated.
 
 ```zig
 pub const SuperBlock = struct {
-    manifest_head: BlockReference,
-    manifest_tail: BlockReference,
+    manifest_oldest: BlockReference,
+    manifest_newest: BlockReference,
     free_set: BitSet,
 };
 ```
@@ -183,14 +183,14 @@ const ManifestBlock = struct {
 The manifest is an on-disk (in-grid) linked list, where each manifest block holds a reference to the
 previous block.
 
-The superblock then stores the head and tail manifest log blocks for all trees:
+The superblock then stores the oldest and newest manifest log blocks for all trees:
 
 ```zig
 const Superblock = {
-  manifest_block_head_address: u64,
-  manifest_block_head_checksum: u128,
-  manifest_block_tail_address: u64,
-  manifest_block_tail_checksum: u128,
+  manifest_block_oldest_address: u64,
+  manifest_block_oldest_checksum: u128,
+  manifest_block_newest_address: u64,
+  manifest_block_newest_checksum: u128,
   free_set: BitSet,
 };
 ```
