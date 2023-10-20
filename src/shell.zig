@@ -40,6 +40,9 @@ project_root: std.fs.Dir,
 
 env: std.process.EnvMap,
 
+/// True if the process is run in CI (the CI env var is set)
+ci: bool,
+
 pub fn create(gpa: std.mem.Allocator) !*Shell {
     var arena = std.heap.ArenaAllocator.init(gpa);
     errdefer arena.deinit();
@@ -47,12 +50,20 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
     var project_root = try discover_project_root();
     errdefer project_root.close();
 
+    var env = try std.process.getEnvMap(gpa);
+    errdefer env.deinit();
+
+    const ci = env.get("CI") != null;
+
     var result = try gpa.create(Shell);
+    errdefer gpa.destroy(result);
+
     result.* = Shell{
         .gpa = gpa,
         .arena = arena,
         .project_root = project_root,
-        .env = try std.process.getEnvMap(gpa),
+        .env = env,
+        .ci = ci,
     };
 
     return result;
@@ -101,6 +112,46 @@ pub fn echo(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) void {
 
     std.debug.print(fmt_ansi, fmt_args);
 }
+
+/// Opens a logical, named section of the script.
+/// When the section is subsequently closed, its name and timing are printed.
+/// Additionally on CI output from a section gets into a named, foldable group.
+pub fn open_section(shell: *Shell, name: []const u8) !Section {
+    return Section.open(shell.ci, name);
+}
+
+const Section = struct {
+    ci: bool,
+    name: []const u8,
+    start: std.time.Instant,
+
+    fn open(ci: bool, name: []const u8) !Section {
+        const start = try std.time.Instant.now();
+        if (ci) {
+            // See
+            // https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#grouping-log-lines
+            // https://github.com/actions/toolkit/issues/1001
+            try std.io.getStdOut().writer().print("::group::{s}\n", .{name});
+        }
+
+        return .{
+            .ci = ci,
+            .name = name,
+            .start = start,
+        };
+    }
+
+    pub fn close(section: *Section) void {
+        if (std.time.Instant.now()) |now| {
+            const elapsed_nanos = now.since(section.start);
+            std.debug.print("{s}: {}\n", .{ section.name, std.fmt.fmtDuration(elapsed_nanos) });
+        } else |_| {}
+        if (section.ci) {
+            std.io.getStdOut().writer().print("::endgroup::\n", .{}) catch {};
+        }
+        section.* = undefined;
+    }
+};
 
 pub fn print(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) ![]const u8 {
     return std.fmt.allocPrint(shell.arena.allocator(), fmt, fmt_args);
