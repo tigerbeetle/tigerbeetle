@@ -252,7 +252,7 @@ public final class Client implements AutoCloseable {
      * @see java.lang.AutoCloseable#close()
      */
     @Override
-    public void close() throws Exception {
+    public void close() {
         nativeClient.close();
     }
 }
