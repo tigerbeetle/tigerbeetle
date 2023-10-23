@@ -19,6 +19,7 @@ const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
 const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
@@ -80,7 +81,7 @@ pub fn main() !void {
 }
 
 fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
-    const section = try shell.open_section("build all");
+    var section = try shell.open_section("build all");
     defer section.close();
 
     try shell.project_root.deleteTree("dist");
@@ -128,7 +129,7 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 }
 
 fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    const section = try shell.open_section("build tigerbeetle");
+    var section = try shell.open_section("build tigerbeetle");
     defer section.close();
 
     try shell.project_root.setAsCwd();
@@ -216,7 +217,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    const section = try shell.open_section("build dotnet");
+    var section = try shell.open_section("build dotnet");
     defer section.close();
 
     var client_src_dir = try shell.project_root.openDir("src/clients/dotnet", .{});
@@ -243,7 +244,7 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    const section = try shell.open_section("build go");
+    var section = try shell.open_section("build go");
     defer section.close();
 
     var client_src_dir = try shell.project_root.openDir("src/clients/go", .{});
@@ -287,7 +288,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    const section = try shell.open_section("build java");
+    var section = try shell.open_section("build java");
     defer section.close();
 
     var client_src_dir = try shell.project_root.openDir("src/clients/java", .{});
@@ -323,7 +324,7 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    const section = try shell.open_section("build node");
+    var section = try shell.open_section("build node");
     defer section.close();
 
     var client_src_dir = try shell.project_root.openDir("src/clients/node", .{});
@@ -355,7 +356,7 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
-    const section = try shell.open_section("publish all");
+    var section = try shell.open_section("publish all");
     defer section.close();
 
     try shell.project_root.setAsCwd();
@@ -367,6 +368,12 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             fatal("can't find gh", .{});
         };
         log.info("gh version {s}", .{gh_version});
+
+        const full_changelog = try shell.project_root.readFileAlloc(
+            shell.arena.allocator(),
+            "CHANGELOG.md",
+            1024 * 1024,
+        );
 
         const notes = try shell.print(
             \\{[version]s}
@@ -381,7 +388,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             \\
             \\* Binary: Download the zip for your OS and architecture from this page and unzip.
             \\* Docker: `docker pull ghcr.io/tigerbeetle/tigerbeetle:{[version]s}`
-            \\* Docker (debug image): \`docker pull ghcr.io/tigerbeetle/tigerbeetle:{[version]s}-debug`
+            \\* Docker (debug image): `docker pull ghcr.io/tigerbeetle/tigerbeetle:{[version]s}-debug`
             \\
             \\## Clients
             \\
@@ -393,7 +400,14 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
             \\* Go: `go mod edit -require github.com/tigerbeetle/tigerbeetle-go@v{[version]s}`
             \\* Java: Update the version of `com.tigerbeetle.tigerbeetle-java` in `pom.xml` to `{[version]s}`.
             \\* Node.js: `npm install tigerbeetle-node@{[version]s}`
-        , .{ .version = info.version });
+            \\
+            \\## Changelog
+            \\
+            \\{[changelog]s}
+        , .{
+            .version = info.version,
+            .changelog = latest_changelog_entry(full_changelog),
+        });
 
         try shell.exec(
             \\gh release create --draft --prerelease
@@ -435,8 +449,39 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 }
 
+fn latest_changelog_entry(changelog: []const u8) []const u8 {
+    // Extract the first entry between two `## ` headers, excluding the header itself
+    const changelog_with_header = stdx.cut(stdx.cut(changelog, "\n## ").?.suffix, "\n## ").?.prefix;
+    return stdx.cut(changelog_with_header, "\n\n").?.suffix;
+}
+
+test latest_changelog_entry {
+    const changelog =
+        \\# TigerBeetle Changelog
+        \\
+        \\## 2023-10-23
+        \\
+        \\This is the start of the changelog.
+        \\
+        \\### Features
+        \\
+        \\
+        \\## 1970-01-01
+        \\
+        \\ The beginning.
+        \\
+    ;
+    try std.testing.expectEqualStrings(latest_changelog_entry(changelog),
+        \\This is the start of the changelog.
+        \\
+        \\### Features
+        \\
+        \\
+    );
+}
+
 fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
-    const section = try shell.open_section("publish dotnet");
+    var section = try shell.open_section("publish dotnet");
     defer section.close();
 
     try shell.project_root.setAsCwd();
@@ -455,7 +500,7 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
 }
 
 fn publish_go(shell: *Shell, info: VersionInfo) !void {
-    const section = try shell.open_section("publish go");
+    var section = try shell.open_section("publish go");
     defer section.close();
 
     try shell.project_root.setAsCwd();
@@ -512,7 +557,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
 }
 
 fn publish_java(shell: *Shell, info: VersionInfo) !void {
-    const section = try shell.open_section("publish java");
+    var section = try shell.open_section("publish java");
     defer section.close();
 
     try shell.project_root.setAsCwd();
@@ -552,7 +597,7 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
 }
 
 fn publish_node(shell: *Shell, info: VersionInfo) !void {
-    const section = try shell.open_section("publish node");
+    var section = try shell.open_section("publish node");
     defer section.close();
 
     try shell.project_root.setAsCwd();

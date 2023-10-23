@@ -54,4 +54,6 @@ test {
     _ = @import("vsr/superblock_manifest.zig");
     _ = @import("vsr/superblock_quorums.zig");
     _ = @import("vsr/sync.zig");
+
+    _ = @import("scripts/release.zig");
 }
