@@ -37,7 +37,7 @@ func WithClient(s testing.TB, withClient func(Client)) {
 	}
 
 	addressArg := "--addresses=" + TIGERBEETLE_PORT
-	cacheSizeArg := "--cache-grid=256MB"
+	cacheSizeArg := "--cache-grid=512MB"
 	replicaArg := fmt.Sprintf("--replica=%d", TIGERBEETLE_REPLICA_ID)
 	replicaCountArg := fmt.Sprintf("--replica-count=%d", TIGERBEETLE_REPLICA_COUNT)
 	clusterArg := fmt.Sprintf("--cluster=%d", TIGERBEETLE_CLUSTER_ID)

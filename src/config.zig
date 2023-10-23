@@ -137,10 +137,10 @@ const ConfigCluster = struct {
     message_size_max: usize = 1 * 1024 * 1024,
     superblock_copies: comptime_int = 4,
     storage_size_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
-    block_size: comptime_int = 128 * 1024,
+    block_size: comptime_int = 1024 * 1024,
     lsm_levels: u6 = 7,
     lsm_growth_factor: u32 = 8,
-    lsm_batch_multiple: comptime_int = 64,
+    lsm_batch_multiple: comptime_int = 32,
     lsm_snapshots_max: usize = 32,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them all to
