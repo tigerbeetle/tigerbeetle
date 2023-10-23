@@ -40,13 +40,40 @@ synchronization:
   is pushed to <https://github.com/tigerbeetle/tigerbeetle-go>
 - if publishing to all registries were successfully, the release is marked as non-draft.
 
-All publishing keys are stored as GitHub Actions secrets.
+All publishing keys are stored as GitHub Actions in the `release` environment.
 
 ## Triggering a Release
 
-Releases are triggered manually, on Monday, by pushing the the current tip of `origin/main` to
-`origin/release`. This triggers the `release.yml` workflow. The workflow doesn't run unit-tests,
-[not rocket science](https://graydon2.dreamwidth.org/1597.html) rule is assumed.
+Releases are triggered manually, on Monday, by pushing a commit from `origin/main` to
+`origin/release`:
+
+```console
+$ git push origin origin/main:origin/release
+```
+
+This triggers the `release.yml` workflow. The workflow doesn't run unit-tests,
+[not rocket science](https://graydon2.dreamwidth.org/1597.html) rule is assumed. The workflow
+requires an approval of at least one other person.
+
+## Changelog
+
+Before triggering a release, update CHANGELOG.md with the changes since the last release. The merge
+commit for the changelog PR is what is pushed to the `release` branch.
+
+For the time being, changelogs are authored manually and centrally. We are likely to switch to
+something more automated in the future. You can use the following command to see all merges since
+the last release:
+
+```console
+$ git fetch origin && git log --merges origin/release..origin/main
+```
+
+Purposes of the changelog:
+
+- For everyone: give project a visible "pulse".
+- For TigerBeetle developers: tell fine grained project evolution story, form shared context,
+  provide material for the monthly newsletter.
+- For TigerBeetle users: inform about all visible and potentially relevant changes.
 
 ## Versioning
 
