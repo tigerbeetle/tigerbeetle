@@ -863,10 +863,12 @@ pub fn GrooveType(
             }
         };
 
-        /// Insert the value into the objects tree and associated index trees, asserting that it doesn't
-        /// already exist.
+        /// Insert the value into the objects tree and associated index trees. It's up to the
+        /// caller to ensure it doesn't already exist.
         pub fn insert(groove: *Groove, object: *const Object) void {
-            assert(!groove.objects_cache.has(@field(object, primary_field)));
+            if (constants.verify) {
+                assert(!groove.objects_cache.has(@field(object, primary_field)));
+            }
 
             groove.objects_cache.upsert(object);
 
@@ -886,37 +888,43 @@ pub fn GrooveType(
             }
         }
 
-        /// Insert the value (or update it, if it exists).
+        /// Update the value. Requires the old object to be provided.
         /// Update the object and index trees by diff'ing the old and new values.
-        pub fn upsert(groove: *Groove, new: *const Object) void {
-            // Explicit stack copy needed - otherwise old will == new!
-            const old: Object = (groove.objects_cache.get(@field(new, primary_field)) orelse {
-                return groove.insert(new);
-            }).*;
+        pub fn update(groove: *Groove, new: *const Object, old: *const Object) void {
+            if (constants.verify) {
+                const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
+                assert(@field(old_from_cache, primary_field) == @field(old, primary_field));
+                assert(old_from_cache.timestamp == old.timestamp);
+            }
 
+            // Sanity check to ensure the caller didn't accidentally pass in an alias.
+            assert(new != old);
+
+            // TODO: This will assert timestamp twice if `has_id` is false.
             assert(@field(old, primary_field) == @field(new, primary_field));
             assert(old.timestamp == new.timestamp);
 
-            groove.objects_cache.upsert(new);
-
             // The ID can't change, so no need to update the ID tree.
-
             // Update the object tree entry if any of the fields (even ignored) are different.
-            if (!std.mem.eql(u8, std.mem.asBytes(&old), std.mem.asBytes(new))) {
+            if (!stdx.equal_bytes(Object, old, new)) {
                 // Unlike the index trees, the new and old values in the object tree share the
                 // same key. Therefore put() is sufficient to overwrite the old value.
                 groove.objects.put(new);
+                groove.objects_cache.upsert(new);
+            } else {
+                // TODO: Should we assert we actually updated something...?
+                return;
             }
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
-                const old_index = Helper.derive_index(&old);
+                const old_index = Helper.derive_index(old);
                 const new_index = Helper.derive_index(new);
 
                 // Only update the indexes that change.
                 if (!std.meta.eql(old_index, new_index)) {
                     if (old_index) |index| {
-                        const old_index_value = Helper.derive_value(&old, index);
+                        const old_index_value = Helper.derive_value(old, index);
                         @field(groove.indexes, field.name).remove(&old_index_value);
                     }
 
