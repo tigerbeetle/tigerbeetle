@@ -152,6 +152,10 @@ pub fn GridType(comptime Storage: type) type {
             cache_interface.hash_address,
             .{
                 .ways = set_associative_cache_ways,
+                // TODO: This is temporary, until compaction pacing is merged. Use a sub-optimal
+                // cache line size, since combined with the large block size of 1MB, we would
+                // require a 2GB grid cache minimum otherwise.
+                .cache_line_size = 16,
                 .value_alignment = @alignOf(u64),
             },
         );

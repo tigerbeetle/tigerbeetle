@@ -1367,7 +1367,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder().command(
-                    new String[] {exe, "start", "--addresses=0", TB_FILE, "--cache-grid=256MB"})
+                    new String[] {exe, "start", "--addresses=0", TB_FILE, "--cache-grid=512MB"})
                     .redirectError(Redirect.PIPE).start();
 
             if (process.waitFor(100, TimeUnit.MILLISECONDS))
