@@ -80,16 +80,16 @@ pub fn main() !void {
 }
 
 fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
+    const section = try shell.open_section("build all");
+    defer section.close();
+
     try shell.project_root.deleteTree("dist");
     var dist_dir = try shell.project_root.makeOpenPath("dist", .{});
     defer dist_dir.close();
 
-    var timer_total = try std.time.Timer.start();
     log.info("building TigerBeetle distribution into {s}", .{
         try dist_dir.realpathAlloc(shell.arena.allocator(), "."),
     });
-
-    var timer_per_step = try std.time.Timer.start();
 
     if (languages.contains(.zig)) {
         var dist_dir_tigerbeetle = try dist_dir.makeOpenPath("tigerbeetle", .{});
@@ -97,7 +97,6 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
         try build_tigerbeetle(shell, info, dist_dir_tigerbeetle);
     }
-    const elapsed_tigerbeetle_ns = timer_per_step.lap();
 
     if (languages.contains(.dotnet)) {
         var dist_dir_dotnet = try dist_dir.makeOpenPath("dotnet", .{});
@@ -105,7 +104,6 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
         try build_dotnet(shell, info, dist_dir_dotnet);
     }
-    const elapsed_dotnet_ns = timer_per_step.lap();
 
     if (languages.contains(.go)) {
         var dist_dir_go = try dist_dir.makeOpenPath("go", .{});
@@ -113,7 +111,6 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
         try build_go(shell, info, dist_dir_go);
     }
-    const elapsed_go_ns = timer_per_step.lap();
 
     if (languages.contains(.java)) {
         var dist_dir_java = try dist_dir.makeOpenPath("java", .{});
@@ -121,7 +118,6 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
         try build_java(shell, info, dist_dir_java);
     }
-    const elapsed_java_ns = timer_per_step.lap();
 
     if (languages.contains(.node)) {
         var dist_dir_node = try dist_dir.makeOpenPath("node", .{});
@@ -129,28 +125,12 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
         try build_node(shell, info, dist_dir_node);
     }
-    const elapsed_node_ns = timer_per_step.lap();
-
-    const elapsed_total_ns = timer_total.lap();
-    log.info(
-        \\build distribution in {d}
-        \\  tigerbeetle {d}
-        \\  dotnet      {d}
-        \\  go          {d}
-        \\  java        {d}
-        \\  node        {d}
-    , .{
-        std.fmt.fmtDuration(elapsed_total_ns),
-        std.fmt.fmtDuration(elapsed_tigerbeetle_ns),
-        std.fmt.fmtDuration(elapsed_dotnet_ns),
-        std.fmt.fmtDuration(elapsed_go_ns),
-        std.fmt.fmtDuration(elapsed_java_ns),
-        std.fmt.fmtDuration(elapsed_node_ns),
-    });
 }
 
 fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    log.info("building tigerbeetle", .{});
+    const section = try shell.open_section("build tigerbeetle");
+    defer section.close();
+
     try shell.project_root.setAsCwd();
 
     const llvm_lipo = for (@as([2][]const u8, .{ "llvm-lipo-16", "llvm-lipo" })) |llvm_lipo| {
@@ -236,7 +216,9 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    log.info("building dotnet client", .{});
+    const section = try shell.open_section("build dotnet");
+    defer section.close();
+
     var client_src_dir = try shell.project_root.openDir("src/clients/dotnet", .{});
     defer client_src_dir.close();
 
@@ -261,7 +243,9 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    log.info("building go client", .{});
+    const section = try shell.open_section("build go");
+    defer section.close();
+
     var client_src_dir = try shell.project_root.openDir("src/clients/go", .{});
     defer client_src_dir.close();
 
@@ -303,7 +287,9 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    log.info("building java client", .{});
+    const section = try shell.open_section("build java");
+    defer section.close();
+
     var client_src_dir = try shell.project_root.openDir("src/clients/java", .{});
     defer client_src_dir.close();
 
@@ -337,7 +323,9 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    log.info("building node client", .{});
+    const section = try shell.open_section("build node");
+    defer section.close();
+
     var client_src_dir = try shell.project_root.openDir("src/clients/node", .{});
     defer client_src_dir.close();
 
@@ -367,6 +355,9 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
 }
 
 fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
+    const section = try shell.open_section("publish all");
+    defer section.close();
+
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist"));
 
@@ -445,6 +436,9 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 }
 
 fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
+    const section = try shell.open_section("publish dotnet");
+    defer section.close();
+
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/dotnet"));
 
@@ -461,6 +455,9 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
 }
 
 fn publish_go(shell: *Shell, info: VersionInfo) !void {
+    const section = try shell.open_section("publish go");
+    defer section.close();
+
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/go"));
 
@@ -515,6 +512,9 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
 }
 
 fn publish_java(shell: *Shell, info: VersionInfo) !void {
+    const section = try shell.open_section("publish java");
+    defer section.close();
+
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/java"));
 
@@ -552,6 +552,9 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
 }
 
 fn publish_node(shell: *Shell, info: VersionInfo) !void {
+    const section = try shell.open_section("publish node");
+    defer section.close();
+
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/node"));
 
