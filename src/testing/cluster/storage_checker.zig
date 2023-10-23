@@ -53,7 +53,7 @@ const CheckpointArea = enum {
     grid,
 };
 
-const Checkpoint = std.enums.EnumArray(CheckpointArea, u128);
+const Checkpoint = std.enums.EnumMap(CheckpointArea, u128);
 
 pub const StorageChecker = struct {
     const SuperBlock = vsr.SuperBlockType(Storage);
@@ -128,7 +128,7 @@ pub const StorageChecker = struct {
         areas: std.enums.EnumSet(CheckpointArea),
     ) !void {
         const checkpoint_actual = checkpoint: {
-            var checkpoint = std.enums.EnumMap(CheckpointArea, u128).init(.{});
+            var checkpoint = Checkpoint.init(.{});
             if (areas.contains(.superblock_checkpoint)) {
                 checkpoint.put(
                     .superblock_checkpoint,
@@ -164,37 +164,30 @@ pub const StorageChecker = struct {
             });
         }
 
-        if (checker.checkpoints.get(replica_checkpoint_op)) |checkpoint_expect| {
+        if (checker.checkpoints.getPtr(replica_checkpoint_op)) |checkpoint_expect| {
             var mismatch: bool = false;
             for (std.enums.values(CheckpointArea)) |area| {
                 const checksum_actual = checkpoint_actual.get(area) orelse continue;
-                const checksum_expect = checkpoint_expect.get(area);
-                if (checksum_expect != checksum_actual) {
-                    log.warn("{}: {s}: mismatch " ++
-                        "area={s} expect={x:0>32} actual={x:0>32}", .{
-                        superblock.replica_index.?,
-                        caller,
-                        @tagName(area),
-                        checksum_expect,
-                        checksum_actual,
-                    });
+                if (checkpoint_expect.fetchPut(area, checksum_actual)) |checksum_expect| {
+                    if (checksum_expect != checksum_actual) {
+                        log.warn("{}: {s}: mismatch " ++
+                            "area={s} expect={x:0>32} actual={x:0>32}", .{
+                            superblock.replica_index.?,
+                            caller,
+                            @tagName(area),
+                            checksum_expect,
+                            checksum_actual,
+                        });
 
-                    mismatch = true;
+                        mismatch = true;
+                    }
                 }
             }
             if (mismatch) return error.StorageMismatch;
         } else {
             // This replica is the first to reach op_checkpoint.
             // Save its state for other replicas to check themselves against.
-            var checkpoint: Checkpoint = undefined;
-            for (std.enums.values(CheckpointArea)) |area| {
-                if (checkpoint_actual.get(area)) |area_checksum| {
-                    checkpoint.set(area, area_checksum);
-                } else {
-                    return;
-                }
-            }
-            try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint);
+            try checker.checkpoints.putNoClobber(replica_checkpoint_op, checkpoint_actual);
         }
     }
 
