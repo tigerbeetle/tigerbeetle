@@ -83,8 +83,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
         superblock: *SuperBlock,
         grid: *Grid,
         options: Options,
+        pace: Pace,
 
         grid_reservation: ?Grid.Reservation = null,
+
+        /// The number of blocks (remaining) to compact during the current half-bar.
+        compact_blocks: ?u32 = null,
 
         /// This is a struct-of-arrays of `BlockReference`s.
         /// It includes:
@@ -149,20 +153,41 @@ pub fn ManifestLogType(comptime Storage: type) type {
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !ManifestLog {
             assert(options.tree_id_min <= options.tree_id_max);
 
-            // TODO Replace with the actual computed upper-bound.
-            const log_blocks_max = 65536;
+            const pace = Pace.init(.{
+                .tree_count = options.forest_tree_count(),
+                .tables_max = options.forest_table_count_max,
+                .compact_extra_blocks = constants.lsm_manifest_compact_extra_blocks,
+            });
+
+            inline for (std.meta.fields(Pace)) |pace_field| {
+                log.debug("{?}: Manifest.Pace.{s} = {d}", .{
+                    grid.superblock.replica_index,
+                    pace_field.name,
+                    @field(pace, pace_field.name),
+                });
+            }
 
             var log_block_checksums =
-                try RingBuffer(u128, .slice).init(allocator, log_blocks_max);
+                try RingBuffer(u128, .slice).init(allocator, pace.log_blocks_max);
             errdefer log_block_checksums.deinit(allocator);
 
             var log_block_addresses =
-                try RingBuffer(u64, .slice).init(allocator, log_blocks_max);
+                try RingBuffer(u64, .slice).init(allocator, pace.log_blocks_max);
             errdefer log_block_addresses.deinit(allocator);
+
+            // The upper-bound of manifest blocks we must buffer.
+            //
+            // `blocks` must have sufficient capacity for:
+            // - a leftover open block from the previous ops (+1 block)
+            // - table updates copied from a half bar of manifest compactions
+            // - table updates from a half bar of table compactions
+            const half_bar_buffer_blocks_max =
+                1 + pace.half_bar_compact_blocks_max + pace.half_bar_append_blocks_max;
+            assert(half_bar_buffer_blocks_max >= 3);
 
             // TODO RingBuffer for .slice should be extended to take care of alignment:
             var blocks =
-                try RingBuffer(BlockPtr, .slice).init(allocator, options.blocks_count_max());
+                try RingBuffer(BlockPtr, .slice).init(allocator, half_bar_buffer_blocks_max);
             errdefer blocks.deinit(allocator);
 
             for (blocks.buffer, 0..) |*block, i| {
@@ -171,7 +196,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             }
             errdefer for (blocks.buffer) |b| allocator.free(b);
 
-            var writes = try allocator.alloc(Write, options.blocks_count_max());
+            var writes = try allocator.alloc(Write, half_bar_buffer_blocks_max);
             errdefer allocator.free(writes);
             @memset(writes, undefined);
 
@@ -187,6 +212,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .superblock = grid.superblock,
                 .grid = grid,
                 .options = options,
+                .pace = pace,
                 .log_block_checksums = log_block_checksums,
                 .log_block_addresses = log_block_addresses,
                 .blocks = blocks,
@@ -220,6 +246,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .superblock = manifest_log.superblock,
                 .grid = manifest_log.grid,
                 .options = manifest_log.options,
+                .pace = manifest_log.pace,
                 .log_block_checksums = manifest_log.log_block_checksums,
                 .log_block_addresses = manifest_log.log_block_addresses,
                 .blocks = .{ .buffer = manifest_log.blocks.buffer },
@@ -630,6 +657,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         /// `compact` does not close a partial block; that is only necessary during `checkpoint`.
+        ///
+        /// The (production) block size is large, so the number of blocks compacted per half-bar is
+        /// relatively small (e.g. ~4). We read them in sequence rather than parallel to spread the
+        /// work more evenly across the half-bar's beats.
         // TODO Make sure block reservation cannot fail — before compaction begins verify that
         // enough free blocks are available for all reservations.
         pub fn compact(manifest_log: *ManifestLog, callback: Callback, op: u64) void {
@@ -641,6 +672,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.grid_reservation == null);
             assert(manifest_log.blocks.count ==
                 manifest_log.blocks_closed + @intFromBool(manifest_log.entry_count > 0));
+            assert(manifest_log.compact_blocks == null);
             assert(op % @divExact(constants.lsm_batch_multiple, 2) == 0);
 
             if (op < constants.lsm_batch_multiple or
@@ -651,12 +683,22 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 return;
             }
 
-            // +1: During manifest-log compaction, we will create at most one block.
-            manifest_log.grid_reservation =
-                manifest_log.grid.reserve(1 + manifest_log.options.blocks_count_appends()).?;
+            manifest_log.compact_blocks = @min(
+                manifest_log.pace.half_bar_compact_blocks(.{
+                    .log_blocks_count = @intCast(manifest_log.log_block_checksums.count),
+                }),
+                // Never compact closed blocks. (They haven't even been written yet.)
+                manifest_log.log_block_checksums.count - manifest_log.blocks_closed,
+            );
+            assert(manifest_log.compact_blocks.? <= manifest_log.pace.half_bar_compact_blocks_max);
+
+            manifest_log.grid_reservation = manifest_log.grid.reserve(
+                manifest_log.compact_blocks.? +
+                    manifest_log.pace.half_bar_append_blocks_max,
+            ).?;
 
             manifest_log.read_callback = callback;
-            manifest_log.flush(compact_flush_callback);
+            manifest_log.flush(compact_next_block);
         }
 
         fn compact_tick_callback(next_tick: *Grid.NextTick) void {
@@ -666,25 +708,29 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.blocks.count == 0);
             assert(manifest_log.entry_count == 0);
+            assert(manifest_log.compact_blocks == null);
 
             const callback = manifest_log.read_callback.?;
             manifest_log.read_callback = null;
             callback(manifest_log);
         }
 
-        fn compact_flush_callback(manifest_log: *ManifestLog) void {
+        fn compact_next_block(manifest_log: *ManifestLog) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.read_callback != null);
             assert(manifest_log.grid_reservation != null);
 
-            if (manifest_log.blocks.count < manifest_log.log_block_checksums.count) {
+            const compact_blocks = manifest_log.compact_blocks.?;
+            if (compact_blocks == 0) {
+                manifest_log.compact_done_callback();
+            } else {
                 const oldest_checksum = manifest_log.log_block_checksums.head().?;
                 const oldest_address = manifest_log.log_block_addresses.head().?;
                 assert(oldest_address > 0);
 
+                manifest_log.compact_blocks.? -= 1;
                 manifest_log.reading = true;
                 manifest_log.grid.read_block(
                     .{ .from_local_or_global_storage = compact_read_block_callback },
@@ -693,8 +739,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
                     oldest_checksum,
                     .{ .cache_read = true, .cache_write = true },
                 );
-            } else {
-                manifest_log.compact_done_callback();
             }
         }
 
@@ -703,7 +747,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.opened);
             assert(manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.blocks_closed == 0);
             assert(manifest_log.read_callback != null);
             assert(manifest_log.grid_reservation != null);
 
@@ -762,23 +805,26 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // (That should be rare though, since blocks are large.)
             // This is necessary to update the block's "previous block" pointer in the header.
             maybe(frees == 0);
-            assert(manifest_log.blocks_closed <= 1);
+            assert(manifest_log.blocks_closed <= manifest_log.pace.half_bar_compact_blocks_max);
 
             manifest_log.grid.release(oldest_address);
             manifest_log.reading = false;
-            manifest_log.compact_done_callback();
+
+            manifest_log.compact_next_block();
         }
 
         fn compact_done_callback(manifest_log: *ManifestLog) void {
             assert(manifest_log.opened);
             assert(!manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.blocks_closed <= 1);
+            assert(manifest_log.blocks_closed <= manifest_log.pace.half_bar_compact_blocks_max);
             assert(manifest_log.read_callback != null);
             assert(manifest_log.grid_reservation != null);
+            assert(manifest_log.compact_blocks.? == 0);
 
             const callback = manifest_log.read_callback.?;
             manifest_log.read_callback = null;
+            manifest_log.compact_blocks = null;
 
             callback(manifest_log);
         }
@@ -954,47 +1000,237 @@ pub fn ManifestLogType(comptime Storage: type) type {
 pub const Options = struct {
     tree_id_min: u16, // inclusive
     tree_id_max: u16, // inclusive
+    forest_table_count_max: u32,
 
     /// The total number of trees in the forest.
-    pub fn forest_tree_count(options: *const Options) usize {
+    pub fn forest_tree_count(options: *const Options) u32 {
         assert(options.tree_id_min <= options.tree_id_max);
 
         return (options.tree_id_max - options.tree_id_min) + 1;
     }
+};
 
-    /// The maximum number of table updates to the manifest by a half-measure of table
-    /// compaction.
+/// The goals of manifest log compaction are (in no particular order):
+///
+/// 1. Free enough manifest blocks such that there are always enough free slots in the manifest
+///    trailer to accommodate the appends by table compaction.
+/// 2. Shrink the manifest: A smaller manifest means that fewer blocks need to be replayed during
+///    recovery, or repaired during state sync.
+/// 3. Don't shrink the manifest too much: The more manifest compaction work is deferred, the more
+///    "efficient" compaction is. Put another way: deferring manifest compaction means that more
+///    entries are freed per block compacted.
+/// 4. Spread compaction work evenly between half-bars, to avoid latency spikes.
+///
+/// To address goal 1, we must (on average) "remove" as many blocks from the manifest log as we add.
+/// But when we compact a block, only a subset of its entries can be freed/dropped – the remainder
+/// must be re-appended to the manifest log.
+///
+/// The upper-bound number of manifest blocks is related to the rate at which we compact blocks.
+/// Put simply, the more compaction work we do, the smaller the upper bound.
+///
+///
+/// To reason about this relation mathematically, and compute the upper-bound number of manifest
+/// blocks in terms of the compaction rate:
+///
+/// - Let `A` be the maximum number of manifest blocks that may be created by any single half-bar
+///   due to appends via table compaction. (In other words, `A` does not count manifest compaction.)
+/// - Let `T` be the minimum number of manifest blocks to hold `table_count_max` tables (inserts).
+/// - Let `C` be the maximum number of manifest blocks to compact (i.e. read) during any half-bar.
+///   - In the worst case, compacting a block frees no entries.
+///   - (Then `C` is also the worst-case number of manifest blocks *written* due to manifest
+///     compaction during each half-bar.)
+///
+/// Suppose that at a certain point in time `t₀`, there are `M₀` manifest blocks total.
+///
+/// If we compact at least `C` manifest blocks for each of `⌈M₀/C⌉` half-bars, then any of the
+/// initial `M₀` manifest blocks that required compaction at time `t₀` have been compacted.
+/// In the worst case (where all of those `M₀` blocks were full of live entries) we now have as
+/// many as `M₁ = min(M₀,T) + A×⌈M₀/C⌉` manifest blocks:
+///
+///   - `min(M₀,T)`: After compacting the original `M₀` blocks, we may produce as many as `M₀`
+///     blocks (if no entries were freed). But if there are more than `T` blocks then some *must* be
+///     dropped, since `T` is the upper-bound of a fully-compacted manifest.
+///   - `⌈M₀/C⌉` is the number of half-bars that it takes to compact the initial `M₀` manifest
+///     blocks.
+///   - `A×⌈M₀/C⌉` is the maximum number of manifest blocks produced by table compaction while
+///     compacting the original `M₀` manifest blocks.
+///
+/// If we cycle again, starting with `M₁` manifest blocks this time, then at the end of the cycle
+/// there are at most `M₂ = min(M₁,T) + A×⌈M₁/C⌉` manifest blocks.
+///
+/// To generalize, at the beginning of any cycle `c`, the maximum number of manifest blocks
+/// (`MC(c)`) is:
+///
+///   MC(c) = min(T, MC(c-1)) + A×⌈MC(c-1)/C⌉
+///
+///
+/// However, *within* a cycle the manifest block count may "burst" temporarily beyond this limit.
+/// We compact chronologically. If the blocks early in the manifest have no/few free entries, we
+/// must still compact them anyway, shifting their entries from the prefix of the log to its suffix.
+/// During that time, the table-compact appends still occur, so the net manifest log size grows.
+///
+/// The lower-bound for the number of blocks freed (`F(k)`) in terms of the number of blocks
+/// compacted (`k`) is:
+///
+///   F(k) ≥ max(0, k - (T + 1))
+///
+/// In other words:
+/// - After compacting `T` or fewer blocks, we may not have freed any whole blocks.
+/// - After compacting `T+1` blocks, we must have freed at least 1 whole block.
+/// - After compacting `T+2` blocks, we must have freed at least 2 whole blocks.
+/// - Etc.
+///
+/// Then the upper-bound number of manifest blocks (`MB(b)`) at any half-bar boundary (`b`) is:
+///
+///   MB(b) = min(T, MB(b-1)) + A×⌈M(b-1)/C⌉ + A×⌈(T+1)/C⌉
+///
+/// As `b` approaches infinity, this recurrence relation converges (iff `C > A`) to the absolute
+/// upper-bound number of manifest blocks.
+///
+/// As `C` increases (relative to `A`), the manifest block upper-bound decreases, but the amount of
+/// compaction work performed increases.
+///
+/// NOTE: Both the algorithm above and the implementation below make several simplifications:
+///
+///   - The calculation is performed at the granularity of blocks, not entries. In particular, this
+///     means that "A" might in truth be fractional, but we would round up. For example, if "A" is
+///     2.1, for the purposes of the upper-bound it is 3. Because `C` is computed (below) as
+///     "A + compact_extra_blocks", the result is that we perform more compaction (relative to
+///     appends) than the block-granular constants indicate.
+///     As a result, we overestimate the upper-bound (or, equivalently, perform compaction more
+///     quickly than strictly necessary).
+///   - The calculation does *not* consider the "padding" appends in to a partial block written
+///     during a checkpoint. This oversight is masked because "A" is overestimated (see previous
+///     bullet).
+///
+const Pace = struct {
+    /// "A":
+    /// The maximum number of manifest blocks appended during a single half-bar by table appends.
     ///
     /// This counts:
     /// - Input tables are updated in the manifest (snapshot_max is reduced).
     /// - Input tables are removed from the manifest (if not held by a persistent snapshot).
     /// - Output tables are inserted into the manifest.
-    /// This does not count:
+    /// This does *not* count:
     /// - Manifest log compaction.
     /// - Releasing persistent snapshots.
-    // TODO If insert-then-remove can update in-memory, then we can only count input tables once.
-    pub fn compaction_appends_max(options: *const Options) usize {
-        return options.forest_tree_count() *
+    half_bar_append_blocks_max: u32,
+
+    /// "C":
+    /// The maximum number of manifest blocks to compact (i.e. read) during a single half-bar.
+    half_bar_compact_blocks_max: u32,
+
+    /// "T":
+    /// The maximum number of blocks in a fully-compacted manifest.
+    /// (Exposed by the struct only for the purpose of logging.)
+    log_blocks_full_max: u32,
+
+    /// "limit of MC(c) as c approaches ∞"
+    log_blocks_cycle_max: u32,
+    /// "limit of MB(b) as b approaches ∞"
+    log_blocks_max: u32,
+
+    comptime {
+        const log_pace = false;
+        if (log_pace) {
+            const pace = Pace.init(.{
+                .tree_count = 24,
+                .tables_max = 2_300_000,
+                .compact_extra_blocks = constants.lsm_manifest_compact_extra_blocks,
+            });
+
+            inline for (std.meta.fields(Pace)) |pace_field| {
+                @compileLog(std.fmt.comptimePrint("ManifestLog.Pace.{s} = {d}", .{
+                    pace_field.name,
+                    @field(pace, pace_field.name),
+                }));
+            }
+        }
+    }
+
+    fn init(options: struct {
+        tree_count: u32,
+        tables_max: u32,
+        compact_extra_blocks: u32,
+    }) Pace {
+        assert(options.tree_count > 0);
+        assert(options.tables_max > 0);
+        assert(options.tables_max > options.tree_count);
+        assert(options.compact_extra_blocks > 0);
+
+        const block_entries_max = schema.ManifestNode.entry_count_max;
+
+        const half_bar_append_entries_max = options.tree_count *
             tree.compactions_max *
             (tree.compaction_tables_input_max + // Update snapshot_max.
             tree.compaction_tables_input_max + // Remove.
-            tree.compaction_tables_output_max);
+            tree.compaction_tables_output_max); // Insert.
+
+        // "A":
+        const half_bar_append_blocks_max =
+            stdx.div_ceil(half_bar_append_entries_max, block_entries_max);
+
+        const half_bar_compact_blocks_extra = options.compact_extra_blocks;
+        assert(half_bar_compact_blocks_extra > 0);
+
+        // "C":
+        const half_bar_compact_blocks_max =
+            half_bar_append_blocks_max + half_bar_compact_blocks_extra;
+        assert(half_bar_compact_blocks_max > half_bar_append_blocks_max);
+
+        // "T":
+        const log_blocks_full_max = stdx.div_ceil(options.tables_max, block_entries_max);
+
+        // "limit of MC(c) as c approaches ∞":
+        // Working out this recurrence relation's limit with a closed-form solution is complicated.
+        // Just compute the limit iteratively instead. (1024 is an arbitrary safety counter.)
+        var log_blocks_before: u32 = 0;
+        const log_blocks_cycle_max = for (0..1024) |_| {
+            const log_blocks_after =
+                log_blocks_full_max +
+                half_bar_append_blocks_max *
+                stdx.div_ceil(log_blocks_before, half_bar_compact_blocks_max);
+
+            if (log_blocks_before == log_blocks_after) {
+                break log_blocks_after;
+            }
+            log_blocks_before = log_blocks_after;
+        } else {
+            // If the value does not converge within the given number of steps,
+            // constants.lsm_manifest_compact_blocks_extra should probably be raised.
+            @panic("ManifestLog.Pace.log_blocks_cycle_max: no convergence");
+        };
+
+        const log_blocks_burst_max = half_bar_append_blocks_max *
+            stdx.div_ceil(log_blocks_full_max + 1, half_bar_compact_blocks_max);
+
+        // "limit of MB(b) as b approaches ∞":
+        const log_blocks_max = log_blocks_cycle_max + log_blocks_burst_max;
+
+        return .{
+            .half_bar_append_blocks_max = half_bar_append_blocks_max,
+            .half_bar_compact_blocks_max = half_bar_compact_blocks_max,
+            .log_blocks_full_max = log_blocks_full_max,
+            .log_blocks_max = log_blocks_max,
+            .log_blocks_cycle_max = log_blocks_cycle_max,
+        };
     }
 
-    fn blocks_count_appends(options: *const Options) usize {
-        return stdx.div_ceil(options.compaction_appends_max(), schema.ManifestNode.entry_count_max);
-    }
-
-    /// The upper-bound of manifest blocks we must buffer.
-    ///
-    /// `blocks` must have sufficient capacity for:
-    /// - a manifest log compaction (+1 block in the worst case)
-    /// - a leftover open block from the previous ops (+1 block)
-    /// - table updates from a half bar of compactions
-    fn blocks_count_max(options: *const Options) usize {
-        const count = 1 + 1 + options.blocks_count_appends();
-        assert(count >= 3);
-
-        return count;
+    fn half_bar_compact_blocks(pace: Pace, options: struct {
+        /// The number of manifest blocks that *currently* exist.
+        log_blocks_count: u32,
+    }) u32 {
+        if (options.log_blocks_count < pace.log_blocks_cycle_max) {
+            // We have enough free manifest blocks that we could go a whole "cycle" without
+            // compacting any. It doesn't strictly matter how much compaction we do in this case, so
+            // just try to pace the work evenly, erring on the side of doing less work than
+            // necessary.
+            return @divFloor(
+                pace.half_bar_compact_blocks_max * options.log_blocks_count,
+                pace.log_blocks_cycle_max,
+            );
+        } else {
+            return pace.half_bar_compact_blocks_max;
+        }
     }
 };
