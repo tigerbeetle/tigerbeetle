@@ -48,7 +48,7 @@ Releases are triggered manually, on Monday, by pushing a commit from `origin/mai
 `origin/release`:
 
 ```console
-$ git push origin origin/main:origin/release
+$ git push origin origin/main:release
 ```
 
 This triggers the `release.yml` workflow. The workflow doesn't run unit-tests,
