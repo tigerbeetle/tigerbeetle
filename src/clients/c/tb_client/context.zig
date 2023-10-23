@@ -108,8 +108,8 @@ pub fn ContextType(
             cluster_id: u32,
             addresses: []const u8,
             concurrency_max: u32,
-            on_completion_ctx: usize,
-            on_completion_fn: tb_completion_t,
+            completion_ctx: usize,
+            completion_fn: tb_completion_t,
         ) Error!*Context {
             var context = try allocator.create(Context);
             errdefer allocator.destroy(context);
@@ -178,9 +178,9 @@ pub fn ContextType(
             );
             errdefer context.client.deinit(context.allocator);
 
-            context.on_completion_fn = on_completion_fn;
+            context.completion_fn = completion_fn;
             context.implementation = .{
-                .completion_ctx = on_completion_ctx,
+                .completion_ctx = completion_ctx,
                 .acquire_packet_fn = Context.on_acquire_packet,
                 .release_packet_fn = Context.on_release_packet,
                 .submit_fn = Context.on_submit,
@@ -297,7 +297,7 @@ pub fn ContextType(
             packet: *Packet,
             result: PacketError![]const u8,
         ) void {
-            const on_completion_ctx = self.implementation.completion_ctx;
+            const completion_ctx = self.implementation.completion_ctx;
             assert(self.client.messages_available <= constants.client_request_queue_max);
 
             // Signal to resume sending requests that was waiting for available messages.
@@ -310,12 +310,12 @@ pub fn ContextType(
                     error.InvalidOperation => .invalid_operation,
                     error.InvalidDataSize => .invalid_data_size,
                 };
-                return (self.on_completion_fn)(on_completion_ctx, tb_client, packet, null, 0);
+                return (self.completion_fn)(completion_ctx, tb_client, packet, null, 0);
             };
 
             // The packet completed normally.
             packet.status = .ok;
-            (self.on_completion_fn)(on_completion_ctx, tb_client, packet, bytes.ptr, @as(u32, @intCast(bytes.len)));
+            (self.completion_fn)(completion_ctx, tb_client, packet, bytes.ptr, @as(u32, @intCast(bytes.len)));
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {

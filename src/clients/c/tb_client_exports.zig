@@ -7,8 +7,8 @@ comptime {
         @compileError("Must be built with libc to export tb_client symbols");
     }
 
-    @export(ffi_init, .{ .name = "tb_client_init", .linkage = .Strong });
-    @export(ffi_init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
+    @export(init, .{ .name = "tb_client_init", .linkage = .Strong });
+    @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .Strong });
     @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .Strong });
     @export(tb.acquire_packet, .{ .name = "tb_client_acquire_packet", .linkage = .Strong });
     @export(tb.release_packet, .{ .name = "tb_client_release_packet", .linkage = .Strong });
@@ -16,20 +16,7 @@ comptime {
     @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .Strong });
 }
 
-fn ffi_allocator() std.mem.Allocator {
-    return if (builtin.is_test)
-        std.testing.allocator
-    else if (builtin.link_libc)
-        std.heap.c_allocator
-    else if (builtin.target.os.tag == .windows)
-        (struct {
-            var gpa = std.heap.HeapAllocator.init();
-        }).gpa.allocator()
-    else
-        @compileError("tb_client must be built with libc");
-}
-
-fn ffi_init(
+fn init(
     out_client: *tb.tb_client_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
@@ -40,7 +27,7 @@ fn ffi_init(
 ) callconv(.C) tb.tb_status_t {
     const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
     const client = tb.init(
-        ffi_allocator(),
+        std.heap.c_allocator,
         cluster_id,
         addresses,
         packets_count,
@@ -52,7 +39,7 @@ fn ffi_init(
     return .success;
 }
 
-fn ffi_init_echo(
+fn init_echo(
     out_client: *tb.tb_client_t,
     cluster_id: u32,
     addresses_ptr: [*:0]const u8,
@@ -63,7 +50,7 @@ fn ffi_init_echo(
 ) callconv(.C) tb.tb_status_t {
     const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
     const client = tb.init_echo(
-        ffi_allocator(),
+        std.heap.c_allocator,
         cluster_id,
         addresses,
         packets_count,
