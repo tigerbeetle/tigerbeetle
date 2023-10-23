@@ -900,21 +900,27 @@ pub fn GrooveType(
             // Sanity check to ensure the caller didn't accidentally pass in an alias.
             assert(new != old);
 
-            // TODO: This will assert timestamp twice if `has_id` is false.
-            assert(@field(old, primary_field) == @field(new, primary_field));
+            if (has_id) {
+                assert(old.id == new.id);
+            }
             assert(old.timestamp == new.timestamp);
 
-            // The ID can't change, so no need to update the ID tree.
-            // Update the object tree entry if any of the fields (even ignored) are different.
-            if (!stdx.equal_bytes(Object, old, new)) {
-                // Unlike the index trees, the new and old values in the object tree share the
-                // same key. Therefore put() is sufficient to overwrite the old value.
-                groove.objects.put(new);
-                groove.objects_cache.upsert(new);
-            } else {
-                // TODO: Should we assert we actually updated something...?
-                return;
+            // The ID can't change, so no need to update the ID tree. Update the object tree entry
+            // if any of the fields (even ignored) are different. We assume the caller will pass in
+            // an object that has changes.
+            // Unlike the index trees, the new and old values in the object tree share the same
+            // key. Therefore put() is sufficient to overwrite the old value.
+            if (constants.verify) {
+                const tombstone = ObjectTreeHelpers(Object).tombstone;
+                const key_from_value = ObjectTreeHelpers(Object).key_from_value;
+
+                assert(!stdx.equal_bytes(Object, old, new));
+                assert(key_from_value(old) == key_from_value(new));
+                assert(!tombstone(old) and !tombstone(new));
             }
+
+            groove.objects.put(new);
+            groove.objects_cache.upsert(new);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
