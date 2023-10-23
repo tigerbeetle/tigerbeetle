@@ -98,10 +98,10 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 
     request(
         env,
-        args[0],
+        args[0], // tb_client
         @enumFromInt(@as(u8, @intCast(operation_int))),
-        args[2],
-        args[3],
+        args[2], // request array
+        args[3], // callback
     ) catch {};
     return null;
 }
@@ -141,13 +141,12 @@ fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const
         return translate.throw(env, "Failed to acquire reference to thread-safe function.");
     }
 
-    const on_completion_ctx = @intFromPtr(on_completion_tsfn);
     const client = tb.init(
         allocator,
         cluster_id,
         addresses,
         concurrency,
-        on_completion_ctx,
+        @intFromPtr(on_completion_tsfn),
         on_completion,
     ) catch |err| switch (err) {
         error.OutOfMemory => return translate.throw(env, "Failed to allocate memory for Client."),
@@ -198,7 +197,7 @@ fn request(
         var packet_ptr: ?*tb.tb_packet_t = undefined;
         switch (tb.acquire_packet(client, &packet_ptr)) {
             .ok => break :blk packet_ptr.?,
-            .shutdown => return translate.throw(env, "Client was prematurely shutdown."),
+            .shutdown => return translate.throw(env, "Client was shutdown."),
             .concurrency_max_exceeded => return translate.throw(env, "Too many concurrent requests."),
         }
     };
@@ -247,7 +246,7 @@ fn on_completion(
         .invalid_data_size => unreachable, // We set correct data size during request().
     }
 
-    // Copy the results given to use into the packet dataa.
+    // Copy the results given to use into the packet data.
     const events = @as([*]align(16) u8, @ptrCast(@alignCast(packet.data.?)))[0..packet.data_size];
     const results = result_ptr.?[0..result_len];
     const data_size = switch (@as(Operation, @enumFromInt(packet.operation))) {
@@ -394,6 +393,14 @@ fn decode_array_into_data(
     return std.mem.sliceAsBytes(events);
 }
 
+// For a given op, packet memory is allocated to hold 
+// `max(sizeof(Event/Request) * n, sizeof(Result/Response))`. As long as the op and n are known, the 
+// allocation size can be computed.
+//
+// When submitting the packet, the data_size is `sizeof(Event) * n`. On packet results, we overwrite 
+// the memory with `sizeof(Result) * completed` where completed <= n. If less Results are completed 
+// than Events, the completed size no longer reflects "n". So instead, data_size stores 
+// `packed(n, completed)`: arg1 to know alloc size, arg2 to know what to parse back to JS.
 const DataSize = packed struct(u32) {
     event_count: u16,
     result_count: u16,
