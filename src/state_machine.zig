@@ -876,8 +876,8 @@ pub fn StateMachineType(
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
-            self.forest.grooves.accounts.upsert(&dr_account_new);
-            self.forest.grooves.accounts.upsert(&cr_account_new);
+            self.forest.grooves.accounts.update(&dr_account_new, dr_account);
+            self.forest.grooves.accounts.update(&cr_account_new, cr_account);
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1006,8 +1006,8 @@ pub fn StateMachineType(
                 cr_account_new.credits_posted += amount;
             }
 
-            self.forest.grooves.accounts.upsert(&dr_account_new);
-            self.forest.grooves.accounts.upsert(&cr_account_new);
+            self.forest.grooves.accounts.update(&dr_account_new, dr_account);
+            self.forest.grooves.accounts.update(&cr_account_new, cr_account);
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1399,11 +1399,13 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null);
 
                 var account = context.state_machine.forest.grooves.accounts.get(b.account).?.*;
-                account.debits_pending = b.debits_pending;
-                account.debits_posted = b.debits_posted;
-                account.credits_pending = b.credits_pending;
-                account.credits_posted = b.credits_posted;
-                context.state_machine.forest.grooves.accounts.upsert(&account);
+                var account_new = account;
+
+                account_new.debits_pending = b.debits_pending;
+                account_new.debits_posted = b.debits_posted;
+                account_new.credits_pending = b.credits_pending;
+                account_new.credits_posted = b.credits_posted;
+                context.state_machine.forest.grooves.accounts.update(&account_new, &account);
             },
 
             .tick => |ticks| {
