@@ -876,8 +876,8 @@ pub fn StateMachineType(
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
-            self.forest.grooves.accounts.update(&dr_account_new, dr_account);
-            self.forest.grooves.accounts.update(&cr_account_new, cr_account);
+            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1006,8 +1006,8 @@ pub fn StateMachineType(
                 cr_account_new.credits_posted += amount;
             }
 
-            self.forest.grooves.accounts.update(&dr_account_new, dr_account);
-            self.forest.grooves.accounts.update(&cr_account_new, cr_account);
+            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1406,7 +1406,10 @@ fn check(test_table: []const u8) !void {
                 account_new.credits_pending = b.credits_pending;
                 account_new.credits_posted = b.credits_posted;
                 if (!stdx.equal_bytes(Account, &account_new, &account)) {
-                    context.state_machine.forest.grooves.accounts.update(&account_new, &account);
+                    context.state_machine.forest.grooves.accounts.update(.{
+                        .old = &account,
+                        .new = &account_new,
+                    });
                 }
             },
 

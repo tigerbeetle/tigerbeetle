@@ -890,7 +890,13 @@ pub fn GrooveType(
 
         /// Update the value. Requires the old object to be provided.
         /// Update the object and index trees by diff'ing the old and new values.
-        pub fn update(groove: *Groove, new: *const Object, old: *const Object) void {
+        pub fn update(
+            groove: *Groove,
+            values: struct { old: *const Object, new: *const Object },
+        ) void {
+            const old = values.old;
+            const new = values.new;
+
             if (constants.verify) {
                 const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
                 assert(@field(old_from_cache, primary_field) == @field(old, primary_field));
