@@ -242,7 +242,7 @@ else
 ///   - `T` doesn't have any non-deterministic padding,
 ///   - `T` doesn't embed any pointers.
 pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
-    comptime assert(std.meta.trait.hasUniqueRepresentation(T));
+    comptime assert(hasUniqueRepresentation(T));
     comptime assert(!has_pointers(T));
     comptime assert(@sizeOf(T) * 8 == @bitSizeOf(T));
 
@@ -339,7 +339,7 @@ test no_padding {
 pub inline fn hash_inline(value: anytype) u64 {
     comptime {
         assert(no_padding(@TypeOf(value)));
-        assert(std.meta.trait.hasUniqueRepresentation(@TypeOf(value)));
+        assert(hasUniqueRepresentation(@TypeOf(value)));
     }
     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
         .Struct, .Int => std.mem.asBytes(&value),
@@ -519,4 +519,47 @@ pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
         @as(usize, @bitCast(@as(isize, fd))),
         @intFromPtr(statfs_buf),
     );
+}
+
+// TODO(Zig): https://github.com/ziglang/zig/issues/17592.
+/// True if every value of the type `T` has a unique bit pattern representing it.
+/// In other words, `T` has no unused bits and no padding.
+pub fn hasUniqueRepresentation(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        else => return false, // TODO can we know if it's true for some of these types ?
+
+        .AnyFrame,
+        .Enum,
+        .ErrorSet,
+        .Fn,
+        => return true,
+
+        .Bool => return false,
+
+        .Int => |info| return @sizeOf(T) * 8 == info.bits,
+
+        .Pointer => |info| return info.size != .Slice,
+
+        .Array => |info| return comptime hasUniqueRepresentation(info.child),
+
+        .Struct => |info| {
+            // Packed structs are always unique.
+            if (info.backing_integer != null) {
+                return true;
+            }
+
+            var sum_size = @as(usize, 0);
+
+            inline for (info.fields) |field| {
+                const FieldType = field.type;
+                if (comptime !hasUniqueRepresentation(FieldType)) return false;
+                sum_size += @sizeOf(FieldType);
+            }
+
+            return @sizeOf(T) == sum_size;
+        },
+
+        .Vector => |info| return comptime hasUniqueRepresentation(info.child) and
+            @sizeOf(T) == @sizeOf(info.child) * info.len,
+    }
 }
