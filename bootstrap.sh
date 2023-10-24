@@ -33,8 +33,8 @@
 	    exit 1
 	fi
 
-	curl -sLO "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-$arch-$os-$version.zip"
-	unzip -qo "tigerbeetle-$arch-$os-$version.zip"
+	curl -sLO "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-$arch-$os.zip"
+	unzip -qo "tigerbeetle-$arch-$os.zip"
 	chmod +x tigerbeetle
     else
 	echo "Building TigerBeetle binary from source for your machine."
