@@ -545,7 +545,7 @@ pub fn has_unique_representation(comptime T: type) bool {
         .Struct => |info| {
             // Only consider packed structs unique if they are byte aligned.
             if (info.backing_integer) |backing_integer| {
-                return @sizeOf(@Type(.{ .Struct = info })) * 8 == @bitSizeOf(backing_integer);
+                return @sizeOf(T) * 8 == @bitSizeOf(backing_integer);
             }
 
             var sum_size = @as(usize, 0);
