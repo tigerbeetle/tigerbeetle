@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
+const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const allocator = fuzz.allocator;
 
@@ -425,14 +426,10 @@ const Environment = struct {
                 while (log_index < log_size) : (log_index += 1) {
                     const entry = model.log.peekItem(log_index);
                     const id = entry.account.id;
-                    if (model.checkpointed.get(id)) |checkpointed_account| {
+                    if (model.checkpointed.get(id)) |*checkpointed_account| {
                         try env.prefetch_account(id);
                         if (env.get_account(id)) |lsm_account| {
-                            assert(std.mem.eql(
-                                u8,
-                                std.mem.asBytes(&lsm_account),
-                                std.mem.asBytes(&checkpointed_account),
-                            ));
+                            assert(stdx.equal_bytes(Account, lsm_account, checkpointed_account));
                         } else {
                             std.debug.panic("Account checkpointed but not in lsm after crash.\n {}\n", .{checkpointed_account});
                         }
@@ -481,11 +478,7 @@ const Environment = struct {
                 if (model_account == null) {
                     assert(lsm_account == null);
                 } else {
-                    assert(std.mem.eql(
-                        u8,
-                        std.mem.asBytes(&model_account.?),
-                        std.mem.asBytes(&lsm_account.?),
-                    ));
+                    assert(stdx.equal_bytes(Account, &model_account.?, lsm_account.?));
                 }
             },
         }
