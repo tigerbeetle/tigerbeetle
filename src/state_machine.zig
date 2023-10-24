@@ -1398,16 +1398,16 @@ fn check(test_table: []const u8) !void {
             .setup => |b| {
                 assert(operation == null);
 
-                var account = context.state_machine.forest.grooves.accounts.get(b.account).?.*;
-                var account_new = account;
+                var account = context.state_machine.forest.grooves.accounts.get(b.account).?;
+                var account_new = account.*;
 
                 account_new.debits_pending = b.debits_pending;
                 account_new.debits_posted = b.debits_posted;
                 account_new.credits_pending = b.credits_pending;
                 account_new.credits_posted = b.credits_posted;
-                if (!stdx.equal_bytes(Account, &account_new, &account)) {
+                if (!stdx.equal_bytes(Account, &account_new, account)) {
                     context.state_machine.forest.grooves.accounts.update(.{
-                        .old = &account,
+                        .old = account,
                         .new = &account_new,
                     });
                 }
