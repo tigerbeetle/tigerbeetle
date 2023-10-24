@@ -266,7 +266,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
             level: u6,
-            table: *const schema.Manifest.TableInfo,
+            table: *const schema.ManifestNode.TableInfo,
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
@@ -526,7 +526,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // Null when the table has been deleted.
             var tables_latest = std.AutoHashMap(u128, struct {
                 level: u6,
-                table: schema.Manifest.TableInfo,
+                table: schema.ManifestNode.TableInfo,
                 manifest_block: u64,
                 manifest_entry: u32,
             }).init(forest.grid.superblock.storage.allocator);
@@ -534,10 +534,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             // Replay manifest events in chronological order.
             // Accumulate all tables that belong in the recovered forest's ManifestLevels.
-            for (
-                forest.grid.superblock.manifest.checksums[0..forest.grid.superblock.manifest.count],
-                forest.grid.superblock.manifest.addresses[0..forest.grid.superblock.manifest.count],
-            ) |block_checksum, block_address| {
+            for (0..forest.manifest_log.log_block_checksums.count) |i| {
+                const block_checksum = forest.manifest_log.log_block_checksums.get(i).?;
+                const block_address = forest.manifest_log.log_block_addresses.get(i).?;
                 assert(block_address > 0);
 
                 const block = forest.grid.superblock.storage.grid_block(block_address).?;
@@ -546,9 +545,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 assert(block_header.checksum == block_checksum);
                 assert(schema.BlockType.from(block_header.operation) == .manifest);
 
-                const block_schema = schema.Manifest.from(block);
+                const block_schema = schema.ManifestNode.from(block);
                 assert(block_schema.entry_count > 0);
-                assert(block_schema.entry_count <= schema.Manifest.entry_count_max);
+                assert(block_schema.entry_count <= schema.ManifestNode.entry_count_max);
 
                 for (
                     block_schema.labels_const(block),
@@ -565,6 +564,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                             .manifest_entry = @intCast(entry),
                         }) catch @panic("oom");
                     }
+                }
+
+                if (i > 0) {
+                    // Verify the linked-list.
+                    const block_previous = schema.ManifestNode.previous(block).?;
+                    assert(block_previous.checksum ==
+                        forest.manifest_log.log_block_checksums.get(i - 1).?);
+                    assert(block_previous.address ==
+                        forest.manifest_log.log_block_addresses.get(i - 1).?);
                 }
             }
 

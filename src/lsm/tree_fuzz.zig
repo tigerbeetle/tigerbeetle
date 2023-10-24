@@ -216,7 +216,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
             level: u6,
-            table: *const schema.Manifest.TableInfo,
+            table: *const schema.ManifestNode.TableInfo,
         ) void {
             _ = manifest_log;
             _ = level;
@@ -284,7 +284,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             const checkpoint_op = op - constants.lsm_batch_multiple;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
-                .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
+                .manifest_references = std.mem.zeroes(vsr.SuperBlockManifestReferences),
+                .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
                 .commit_min = checkpoint_op,
                 .commit_max = checkpoint_op + 1,
                 .sync_op_min = 0,

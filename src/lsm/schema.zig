@@ -33,9 +33,11 @@
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
-//! Manifest block schema:
+//! ManifestNode block schema:
 //! │ vsr.Header                  │ operation=BlockType.manifest
-//! │                             │ context: schema.Manifest.Context
+//! │                             │ context: schema.ManifestNode.Context
+//! │                             │ parent=previous_manifest_block.checksum else 0
+//! │                             │ commit=previous_manifest_block.address else 0
 //! │ [entry_count]TableInfo      │
 //! │ [entry_count]Label          │ level index, insert|remove
 //! │ […]u8{0}                    │ padding (to end of block)
@@ -366,7 +368,7 @@ pub const TableData = struct {
 /// A Manifest block's body is a SoA of Labels and TableInfos.
 /// Each Label/TableInfo pair is an "entry".
 // TODO Store timestamp (snapshot) in header.
-pub const Manifest = struct {
+pub const ManifestNode = struct {
     const entry_size = @sizeOf(TableInfo) + @sizeOf(Label);
 
     pub const entry_count_max = @divFloor(block_body_size, entry_size);
@@ -394,7 +396,7 @@ pub const Manifest = struct {
         // However, we still store Label ahead of TableInfo to save space on the network.
         // This means we store fewer entries per manifest block, to gain less padding,
         // since we must store entry_count_max of whichever array is first in the layout.
-        // For a better understanding of this decision, see schema.Manifest.size().
+        // For a better understanding of this decision, see schema.ManifestNode.size().
         assert(@sizeOf(TableInfo) % alignment == 0);
     }
 
@@ -446,7 +448,7 @@ pub const Manifest = struct {
 
     entry_count: u32,
 
-    pub fn from(manifest_block: BlockPtrConst) Manifest {
+    pub fn from(manifest_block: BlockPtrConst) ManifestNode {
         const header = header_from_block(manifest_block);
         assert(header.command == .block);
         assert(BlockType.from(header.operation) == .manifest);
@@ -458,10 +460,32 @@ pub const Manifest = struct {
         assert(context.entry_count == @divExact(header.size - @sizeOf(vsr.Header), entry_size));
         assert(stdx.zeroed(&context.reserved));
 
+        if (header.commit == 0) {
+            assert(header.parent == 0);
+        }
+
         return .{ .entry_count = context.entry_count };
     }
 
-    pub fn size(schema: *const Manifest) u32 {
+    /// Note that the returned block reference is no longer be part of the manifest if
+    /// `manifest_block` is the oldest block in the superblock's CheckpointState.
+    pub fn previous(manifest_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
+        _ = from(manifest_block); // Validation only.
+
+        const header = header_from_block(manifest_block);
+        if (header.commit == 0) {
+            assert(header.parent == 0);
+
+            return null;
+        } else {
+            return .{
+                .checksum = header.parent,
+                .address = header.commit,
+            };
+        }
+    }
+
+    pub fn size(schema: *const ManifestNode) u32 {
         assert(schema.entry_count > 0);
         assert(schema.entry_count <= entry_count_max);
 
@@ -471,21 +495,21 @@ pub const Manifest = struct {
         return @sizeOf(vsr.Header) + tables_size + labels_size;
     }
 
-    pub fn tables(schema: *const Manifest, block: BlockPtr) []TableInfo {
+    pub fn tables(schema: *const ManifestNode, block: BlockPtr) []TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
             block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
         );
     }
 
-    pub fn tables_const(schema: *const Manifest, block: BlockPtrConst) []const TableInfo {
+    pub fn tables_const(schema: *const ManifestNode, block: BlockPtrConst) []const TableInfo {
         return mem.bytesAsSlice(
             TableInfo,
             block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
         );
     }
 
-    pub fn labels(schema: *const Manifest, block: BlockPtr) []Label {
+    pub fn labels(schema: *const ManifestNode, block: BlockPtr) []Label {
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
         const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(
@@ -494,7 +518,7 @@ pub const Manifest = struct {
         );
     }
 
-    pub fn labels_const(schema: *const Manifest, block: BlockPtrConst) []const Label {
+    pub fn labels_const(schema: *const ManifestNode, block: BlockPtrConst) []const Label {
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
         const labels_size = schema.entry_count * @sizeOf(Label);
         return mem.bytesAsSlice(

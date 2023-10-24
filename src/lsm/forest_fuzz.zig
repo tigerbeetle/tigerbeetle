@@ -232,7 +232,8 @@ const Environment = struct {
 
         env.change_state(.forest_checkpoint, .superblock_checkpoint);
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
-            .commit_min_checksum = env.superblock.working.vsr_state.commit_min_checksum + 1,
+            .manifest_references = forest.manifest_log.checkpoint_references(),
+            .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
             .commit_min = op,
             .commit_max = op + 1,
             .sync_op_min = 0,
@@ -441,8 +442,7 @@ const Environment = struct {
                             env.forest.grooves.accounts.objects_cache.options.map_value_count_max;
 
                         if (log_index % groove_map_value_count_max == 0) {
-                            env.forest.grooves.accounts_immutable.objects_cache.compact();
-                            env.forest.grooves.accounts_mutable.objects_cache.compact();
+                            env.forest.grooves.accounts.objects_cache.compact();
                         }
                     }
                 }
