@@ -1118,7 +1118,7 @@ namespace TigerBeetle.Tests
         private const string TB_FILE = "dotnet-tests.tigerbeetle";
         private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
         private const string FORMAT = $"format --cluster=0 --replica=0 --replica-count=1 ./" + TB_FILE;
-        private const string START = $"start --addresses=0  --cache-grid=256MB ./" + TB_FILE;
+        private const string START = $"start --addresses=0  --cache-grid=512MB ./" + TB_FILE;
 
         private readonly Process process;
 
