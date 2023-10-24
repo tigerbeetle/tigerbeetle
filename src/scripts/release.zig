@@ -24,7 +24,7 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
-const Language = enum { dotnet, go, java, node, zig };
+const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 const CliArgs = struct {
     version: []const u8,
@@ -362,6 +362,9 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist"));
 
+    // Note: for the time being, publish docker first to let it fail fast for faster debugging.
+    if (languages.contains(.docker)) try publish_docker(shell, info);
+
     if (languages.contains(.zig)) {
         _ = try shell.env_get("GITHUB_TOKEN");
         const gh_version = shell.exec_stdout("gh --version", .{}) catch {
@@ -613,6 +616,54 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     try shell.exec("npm publish {package}", .{
         .package = try shell.print("dist/node/tigerbeetle-node-{s}.tgz", .{info.version}),
     });
+}
+
+fn publish_docker(shell: *Shell, info: VersionInfo) !void {
+    var section = try shell.open_section("publish docker");
+    defer section.close();
+
+    try shell.project_root.setAsCwd();
+    assert(try shell.dir_exists("dist/tigerbeetle"));
+
+    try shell.exec(
+        \\docker login --username tigerbeetle --password {password} ghcr.io
+    , .{
+        .password = try shell.env_get("GITHUB_TOKEN"),
+    });
+
+    for ([_]bool{ true, false }) |debug| {
+        const triples = [_][]const u8{ "aarch64-linux", "x86_64-linux" };
+        const docker_arches = [_][]const u8{ "arm64", "amd64" };
+        for (triples, docker_arches) |triple, docker_arch| {
+            // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
+            // directory.
+            shell.project_root.deleteFile("tigerbeetle") catch {};
+            try shell.exec("unzip ./dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
+                .triple = triple,
+                .debug = if (debug) "-debug" else "",
+            });
+            try shell.project_root.rename(
+                "tigerbeetle",
+                try shell.print("tigerbeetle-{s}", .{docker_arch}),
+            );
+        }
+        try shell.exec(
+            \\docker buildx build --file tools/docker/Dockerfile . --platform linux/amd64,linux/arm64
+            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{version} --push
+        , .{ .version = info.version });
+
+        // Sadly, there isn't an easy way to locally build & test a multiplatform image without
+        // pushing it out to the registry first. As docker testing isn't covered under not rocket
+        // science rule, let's do a best effort after-the-fact testing here.
+        const version_verbose = try shell.exec_stdout(
+            \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version} version --verbose
+        , .{
+            .version = info.version,
+        });
+        const mode = if (debug) "Debug" else "ReleaseSafe";
+        assert(std.mem.indexOf(u8, version_verbose, mode) != null);
+        assert(std.mem.indexOf(u8, version_verbose, info.version) != null);
+    }
 }
 
 fn backup_create(dir: std.fs.Dir, comptime file: []const u8) !void {
