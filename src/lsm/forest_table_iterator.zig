@@ -25,7 +25,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const TableInfo = @import("./schema.zig").Manifest.TableInfo;
+const TableInfo = @import("./schema.zig").ManifestNode.TableInfo;
 
 pub fn ForestTableIteratorType(comptime Forest: type) type {
     // struct { (Tree.name) → TreeTableIteratorType(Tree) }

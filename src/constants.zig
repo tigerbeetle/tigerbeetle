@@ -179,10 +179,10 @@ comptime {
 
     assert(message_body_size_max >= @sizeOf(vsr.ReconfigurationRequest));
     assert(message_body_size_max >= @sizeOf(vsr.BlockRequest));
+    assert(message_body_size_max >= @sizeOf(vsr.CheckpointState));
 }
 
 /// The maximum body size of:
-/// - command=sync_manifest
 /// - command=sync_free_set
 /// - command=sync_client_sessions
 ///

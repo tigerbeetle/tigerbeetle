@@ -3,13 +3,10 @@
 //! Invariants checked:
 //!
 //! - Checkpoint flushes all buffered log blocks (including partial blocks).
-//! - The state of the ManifestLog/SuperBlock.Manifest immediately after recovery matches
-//!   the state of the ManifestLog/SuperBlock.Manifest immediately after the latest checkpoint.
-//! - SuperBlock.Manifest.open() only returns the latest version of each table.
-//! - SuperBlock.Manifest's compaction queue contains any blocks which:
-//!   - contain fewer than entry_count_max entries, or
-//!   - contain a "remove" entry, or
-//!   - contain an overridden entry.
+//! - The state of the ManifestLog immediately after recovery matches
+//!   the state of the ManifestLog immediately after the latest checkpoint.
+//! - ManifestLog.open() only returns the latest version of each table.
+//! - The ManifestLog performs enough compaction to not "fall behind" (i.e. run out of blocks).
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -28,7 +25,7 @@ const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
 const BlockType = schema.BlockType;
-const TableInfo = schema.Manifest.TableInfo;
+const TableInfo = schema.ManifestNode.TableInfo;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
@@ -36,7 +33,7 @@ const manifest_log_options = ManifestLogOptions{
     .tree_id_min = 1,
     .tree_id_max = 1,
 };
-const entries_max_block = schema.Manifest.entry_count_max;
+const entries_max_block = schema.ManifestNode.entry_count_max;
 const entries_max_buffered = entries_max_block *
     std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
 
@@ -403,7 +400,7 @@ const Environment = struct {
         env.manifest_log.compact(
             manifest_log_compact_callback,
             vsr.Checkpoint.checkpoint_after(
-                env.manifest_log.superblock.working.vsr_state.commit_min,
+                env.manifest_log.superblock.working.vsr_state.checkpoint.commit_min,
             ) + 1,
         );
         env.wait(&env.manifest_log);
@@ -436,8 +433,8 @@ const Environment = struct {
             var reply = std.mem.zeroInit(vsr.Header, .{
                 .cluster = 0,
                 .command = .reply,
-                .op = vsr_state.commit_min + 1,
-                .commit = vsr_state.commit_min + 1,
+                .op = vsr_state.checkpoint.commit_min + 1,
+                .commit = vsr_state.checkpoint.commit_min + 1,
             });
             reply.set_checksum_body(&.{});
             reply.set_checksum();
@@ -450,8 +447,9 @@ const Environment = struct {
             checkpoint_superblock_callback,
             &env.superblock_context,
             .{
-                .commit_min_checksum = vsr_state.commit_min_checksum + 1,
-                .commit_min = vsr.Checkpoint.checkpoint_after(vsr_state.commit_min),
+                .manifest_references = env.manifest_log.checkpoint_references(),
+                .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum + 1,
+                .commit_min = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.commit_min),
                 .commit_max = vsr.Checkpoint.checkpoint_after(vsr_state.commit_max),
                 .sync_op_min = 0,
                 .sync_op_max = 0,
@@ -523,13 +521,11 @@ const Environment = struct {
         test_manifest_log.open(verify_manifest_open_event, verify_manifest_open_callback);
         env.wait(test_manifest_log);
 
-        try verify_manifest(&test_superblock.manifest, &env.manifest_log.superblock.manifest);
-        try verify_manifest_compaction_set(test_superblock, &env.manifest_log_model);
         try std.testing.expect(hash_map_equals(
             u64,
             ManifestLog.TableExtent,
-            &env.manifest_log.tables,
-            &test_manifest_log.tables,
+            &env.manifest_log.table_extents,
+            &test_manifest_log.table_extents,
         ));
     }
 
@@ -648,69 +644,6 @@ const ManifestLogModel = struct {
         model.appends.clearRetainingCapacity();
     }
 };
-
-fn verify_manifest(
-    expect: *const SuperBlock.Manifest,
-    actual: *const SuperBlock.Manifest,
-) !void {
-    try std.testing.expectEqual(expect.count, actual.count);
-    try std.testing.expectEqual(expect.count_max, actual.count_max);
-
-    const c = expect.count;
-    try std.testing.expect(std.mem.eql(u128, expect.checksums[0..c], actual.checksums[0..c]));
-    try std.testing.expect(std.mem.eql(u64, expect.addresses[0..c], actual.addresses[0..c]));
-
-    try std.testing.expect(hash_map_equals(
-        u64,
-        void,
-        &expect.compaction_set,
-        &actual.compaction_set,
-    ));
-}
-
-fn verify_manifest_compaction_set(
-    superblock: *const SuperBlock,
-    manifest_log_model: *const ManifestLogModel,
-) !void {
-    var compact_blocks_checked: u32 = 0;
-
-    // This test doesn't include any actual table blocks, so all blocks are manifest blocks.
-    var blocks = superblock.free_set.blocks.iterator(.{ .kind = .set });
-    while (blocks.next()) |block_index| {
-        const block_address = block_index + 1;
-        const block = superblock.storage.grid_block(block_address).?;
-        const block_header = schema.header_from_block(block);
-        try std.testing.expectEqual(BlockType.manifest.operation(), block_header.operation);
-
-        const block_schema = schema.Manifest.from(block);
-        var compact_soon: bool = block_schema.entry_count < schema.Manifest.entry_count_max;
-        for (
-            block_schema.labels_const(block),
-            block_schema.tables_const(block),
-        ) |label, *table| {
-            compact_soon = compact_soon or switch (label.event) {
-                .remove => true,
-                .insert,
-                .update,
-                => blk: {
-                    const table_current = manifest_log_model.current(table.address);
-                    break :blk table_current == null or
-                        table_current.?.level != label.level or
-                        table_current.?.table.snapshot_min != table.snapshot_min or
-                        table_current.?.table.snapshot_max != table.snapshot_max;
-                },
-            };
-        }
-        try std.testing.expectEqual(
-            compact_soon,
-            superblock.manifest.compaction_set.contains(block_address),
-        );
-        compact_blocks_checked += @intFromBool(compact_soon);
-    }
-
-    // There are no blocks queued for compaction which were not allocated in the FreeSet.
-    try std.testing.expectEqual(superblock.manifest.compaction_set.count(), compact_blocks_checked);
-}
 
 fn hash_map_equals(
     comptime K: type,

@@ -132,6 +132,19 @@ pub fn RingBuffer(
             self.count -= 1;
         }
 
+        pub inline fn retreat_head(self: *Self) void {
+            assert(self.count < self.buffer.len);
+
+            // This condition is covered by the above assert, but it is necessary to make it
+            // explicitly unreachable so that the compiler doesn't error when computing (at
+            // comptime) `buffer.len - 1` for a zero-capacity array-backed ring buffer.
+            if (self.buffer.len == 0) unreachable;
+
+            self.index += self.buffer.len - 1;
+            self.index %= self.buffer.len;
+            self.count += 1;
+        }
+
         pub inline fn advance_tail(self: *Self) void {
             assert(self.count < self.buffer.len);
             self.count += 1;
@@ -152,6 +165,18 @@ pub fn RingBuffer(
         }
 
         // Higher level, less error-prone wrappers:
+
+        pub fn push_head(self: *Self, item: T) error{NoSpaceLeft}!void {
+            if (self.count == self.buffer.len) return error.NoSpaceLeft;
+            self.push_head_assume_capacity(item);
+        }
+
+        pub fn push_head_assume_capacity(self: *Self, item: T) void {
+            assert(self.count < self.buffer.len);
+
+            self.retreat_head();
+            self.head_ptr().?.* = item;
+        }
 
         /// Add an element to the RingBuffer. Returns an error if the buffer
         /// is already full and the element could not be added.
@@ -416,6 +441,19 @@ test "RingBuffer: pop_tail" {
     try testing.expectEqual(@as(?u32, 1), lifo.pop_tail());
     try testing.expectEqual(@as(?u32, null), lifo.pop_tail());
     try testing.expect(lifo.empty());
+}
+
+test "RingBuffer: push_head" {
+    var ring = RingBuffer(u32, .{ .array = 3 }).init();
+    try ring.push_head(1);
+    try ring.push(2);
+    try ring.push_head(3);
+    try testing.expect(ring.full());
+
+    try testing.expectEqual(@as(?u32, 3), ring.pop());
+    try testing.expectEqual(@as(?u32, 1), ring.pop());
+    try testing.expectEqual(@as(?u32, 2), ring.pop());
+    try testing.expect(ring.empty());
 }
 
 test "RingBuffer: count_max=0" {

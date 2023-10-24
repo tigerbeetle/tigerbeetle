@@ -12,18 +12,18 @@ State sync is used when when a lagging replica's log no longer intersects with t
 (VRR refers to state sync as "state transfer", but we already have [transfers](../reference/transfers.md) elsewhere.)
 
 In the context of state sync, "state" refers to:
-1. the superblock manifest
-2. the superblock free set
-3. the superblock client sessions
-4. the superblock `vsr_state.commit_min`
-5. the superblock `vsr_state.commit_min_checksum`
+1. the superblock free set
+1. the superblock client sessions
+3. the superblock `vsr_state.checkpoint.manifest_{head,tail}_{address,checksum}`
+4. the superblock `vsr_state.checkpoint.commit_min`
+5. the superblock `vsr_state.checkpoint.commit_min_checksum`
 6. the grid (manifest blocks)
 7. the grid (LSM table data; acquired blocks only)
 8. client replies
 
 State sync consists of three protocols:
-- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-6)
-- [Sync Tables](./vsr.md#protocol-sync-tables) (syncs 7)
+- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
+- [Sync Forest](./vsr.md#protocol-sync-forest) (syncs 6-7)
 - [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 8)
 
 The target of superblock-sync is the latest checkpoint of the healthy cluster.
@@ -53,8 +53,8 @@ Checkpoints:
 5. Begin [sync-superblock protocol](./vsr.md#protocol-sync-superblock).
 6. [Request superblock trailers](#6-request-superblock-trailers).
 7. Update superblock headers:
-    - Bump `vsr_state.commit_min`/`vsr_state.commit_min_checksum` to the sync target op/op-checksum.
-    - Bump `vsr_state.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
+    - Bump `vsr_state.checkpoint.commit_min`/`vsr_state.checkpoint.commit_min_checksum` to the sync target op/op-checksum.
+    - Bump `vsr_state.checkpoint.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
     - Write the target checkpoint's trailers.
 8. Request and write manifest blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
@@ -62,7 +62,7 @@ Checkpoints:
     - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
     - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
 10. Sync-superblock protocol is done.
-11. Repair [replies](./vsr.md#protocol-sync-client-replies) and [tables](./vsr.md#protocol-sync-tables) that were created within the `sync_op_{min,max}` range.
+11. Repair [replies](./vsr.md#protocol-sync-client-replies), [manifest blocks, and table blocks](./vsr.md#protocol-sync-forest) that were created within the `sync_op_{min,max}` range.
 12. Update the superblock with:
     - Set `vsr_state.sync_op_min = 0`
     - Set `vsr_state.sync_op_max = 0`
@@ -100,13 +100,13 @@ State sync is initially triggered by any of the following:
 
 The replica concurrently sends out three request messages, with the sync target identifier attached to each:
 
-1. `command=request_sync_manifest`
+1. `command=request_sync_checkpoint`
 2. `command=request_sync_free_set`
 3. `command=request_sync_client_sessions`
 
 Replicas with a matching checkpoint identifier reply (respectively) with:
 
-1. `command=sync_manifest`
+1. `command=sync_checkpoint`
 2. `command=sync_free_set`
 3. `command=sync_client_sessions`
 
@@ -159,10 +159,10 @@ A checkpoint identifier is attached to the following message types:
 - `command=commit`: Current checkpoint identifier of sender.
 - `command=ping`: Current checkpoint identifier of sender.
 - `command=prepare_ok`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
-- `command=request_sync_manifest`: Requested checkpoint identifier.
+- `command=request_sync_checkpoint`: Requested checkpoint identifier.
 - `command=request_sync_free_set`: Requested checkpoint identifier.
 - `command=request_sync_client_sessions`: Requested checkpoint identifier.
-- `command=sync_manifest`: Current checkpoint identifier of sender.
+- `command=sync_checkpoint`: Current checkpoint identifier of sender.
 - `command=sync_free_set`: Current checkpoint identifier of sender.
 - `command=sync_client_sessions`: Current checkpoint identifier of sender.
 

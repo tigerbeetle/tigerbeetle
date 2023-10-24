@@ -7,7 +7,7 @@
 //! Each zone can tolerate a different pattern of faults.
 //!
 //! - superblock:
-//!   - One read/write fault is permitted per area (section, manifest, …).
+//!   - One read/write fault is permitted per area (section, free set, …).
 //!   - An additional fault is permitted at the target of a pending write during a crash.
 //!
 //! - wal_headers, wal_prepares:
@@ -765,11 +765,11 @@ pub const ClusterFaultAtlas = struct {
     /// For SuperBlockHeader, checkpoint() and view_change() require 3/4 valid headers (1
     /// fault). Trailers are likewise 3/4 + 1 fault — consider if two faults were injected:
     /// 1. `SuperBlock.checkpoint()` for sequence=6.
-    ///   - write copy 0, corrupt manifest (fault_count=1)
-    ///   - write copy 1, corrupt manifest (fault_count=2) !
+    ///   - write copy 0, corrupt freeset (fault_count=1)
+    ///   - write copy 1, corrupt freeset (fault_count=2) !
     /// 2. Crash. Recover.
     /// 3. `SuperBlock.open()`. The highest valid quorum is sequence=6, but there is no
-    ///    valid manifest.
+    ///    valid freeset.
     const superblock_trailer_faults_max = @divExact(constants.superblock_copies, 2) - 1;
 
     comptime {
@@ -880,7 +880,6 @@ pub const ClusterFaultAtlas = struct {
         const offset_in_copy = offset_in_zone % superblock.superblock_copy_size;
         const area: superblock.SuperBlockZone = switch (offset_in_copy) {
             superblock.SuperBlockZone.header.start() => .header,
-            superblock.SuperBlockZone.manifest.start() => .manifest,
             superblock.SuperBlockZone.free_set.start() => .free_set,
             superblock.SuperBlockZone.client_sessions.start() => .client_sessions,
             else => unreachable,
