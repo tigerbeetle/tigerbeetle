@@ -15,11 +15,6 @@ if [ -n "${target}" ]; then
     target="-Dtarget=${target}"
 fi
 
-cpu="${CPU:-}"
-if [ -n "${cpu}" ]; then
-    cpu="-Dcpu=${cpu}"
-fi
-
 if [ "${TARGETPLATFORM:-}" = "linux/arm64" ]; then
     target="-Dtarget=aarch64-linux-gnu"
 fi
@@ -34,8 +29,8 @@ fi
 # shellcheck disable=SC2086
 if [ "$debug" = "true" ]; then
     echo "Building Tigerbeetle debug..."
-    zig/zig build install $cpu $target
+    zig/zig build install $target
 else
     echo "Building TigerBeetle..."
-    zig/zig build install -Doptimize=ReleaseSafe $cpu $target
+    zig/zig build install -Doptimize=ReleaseSafe $target
 fi
