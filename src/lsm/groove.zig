@@ -910,9 +910,7 @@ pub fn GrooveType(
             // Sanity check to ensure the caller didn't accidentally pass in an alias.
             assert(new != old);
 
-            if (has_id) {
-                assert(old.id == new.id);
-            }
+            if (has_id) assert(old.id == new.id);
             assert(old.timestamp == new.timestamp);
 
             // The ID can't change, so no need to update the ID tree. Update the object tree entry
@@ -950,8 +948,8 @@ pub fn GrooveType(
 
             // Putting the objects_cache upsert after the index tree updates is critical:
             // We diff the old and new objects, but the old object will be a pointer into the
-            // objects_cache. If we upsert first, old.* == new.* and no secondary indexes will
-            // be updated!
+            // objects_cache. If we upsert first, there's a high chance old.* == new.* (always,
+            // unless old comes from the stash) and no secondary indexes will be updated!
             groove.objects_cache.upsert(new);
             groove.objects.put(new);
         }
