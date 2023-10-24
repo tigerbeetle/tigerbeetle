@@ -1,37 +1,11 @@
-# Since we support arm64, take advantage of Docker and Zig's cross
-# compilation, rather than running under qemu.
-# https://www.docker.com/blog/faster-multi-platform-builds-dockerfile-cross-compilation-guide/
-FROM --platform=$BUILDPLATFORM ubuntu:22.04 AS build
+# We _could_ use `FROM scratch` here, but let's use alpine to ease debugging in case someone needs
+# to poke inside the container.
+FROM alpine:3.17
 
-RUN  apt-get update \
-  && apt-get install -y wget xz-utils git
-
-WORKDIR /opt/beta-beetle
-
-# Copy install_zig by itself, to try and keep cache hits as high as possible.
-RUN mkdir scripts
-COPY scripts/install_zig.sh ./scripts
-
-ENV PATH="${PATH}:/opt/beta-beetle/zig"
-
-# Allows passing in --build-arg DEBUG=true during builds (needed by Github CI for generating debug image)
-ARG DEBUG=false
-
-# With our multiplatform builds, Docker will only repeat steps after the ARG TARGETPLATFORM.
-# So, explicitly install zig before then, to not need to do it twice.
-RUN ./scripts/install_zig.sh
-
-COPY .git .git
-COPY scripts ./scripts
-COPY src ./src
-COPY build.zig ./build.zig
-
-ARG TARGETPLATFORM
-RUN test ${TARGETPLATFORM} = "linux/arm64" && CPU="baseline+aes+neon" || CPU="x86_64_v3+aes"; CI=true ./scripts/install.sh
-
-FROM alpine:3.17 AS release
-WORKDIR /
-
-COPY --from=build /opt/beta-beetle/tigerbeetle ./tigerbeetle
+# NB: We are doing something unconventional here. To ensure that docker images contain the exact
+# same TigreBeetle binary we publish as our release, we don't build inside a container, and copy a
+# pre-existing binary instead.
+ARG TARGETARCH
+COPY tigerbeetle-${TARGETARCH} /tigerbeetle
 
 ENTRYPOINT ["/tigerbeetle"]
