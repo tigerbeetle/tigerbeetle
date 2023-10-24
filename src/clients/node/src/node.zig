@@ -393,13 +393,13 @@ fn decode_array_into_data(
     return std.mem.sliceAsBytes(events);
 }
 
-// For a given op, packet memory is allocated to hold 
-// `max(sizeof(Event/Request) * n, sizeof(Result/Response))`. As long as the op and n are known, the 
+// For a given op, packet memory is allocated to hold
+// `max(sizeof(Event/Request) * n, sizeof(Result/Response))`. As long as the op and n are known, the
 // allocation size can be computed.
 //
-// When submitting the packet, the data_size is `sizeof(Event) * n`. On packet results, we overwrite 
-// the memory with `sizeof(Result) * completed` where completed <= n. If less Results are completed 
-// than Events, the completed size no longer reflects "n". So instead, data_size stores 
+// When submitting the packet, the data_size is `sizeof(Event) * n`. On packet results, we overwrite
+// the memory with `sizeof(Result) * completed` where completed <= n. If less Results are completed
+// than Events, the completed size no longer reflects "n". So instead, data_size stores
 // `packed(n, completed)`: arg1 to know alloc size, arg2 to know what to parse back to JS.
 const DataSize = packed struct(u32) {
     event_count: u16,
