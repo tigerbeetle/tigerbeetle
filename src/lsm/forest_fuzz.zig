@@ -283,13 +283,17 @@ const Environment = struct {
         }
     }
 
-    fn put_account(env: *Environment, a: *const Account) void {
-        env.forest.grooves.accounts.upsert(a);
+    fn put_account(env: *Environment, a: *const Account, maybe_old: ?*const Account) void {
+        if (maybe_old) |old| {
+            env.forest.grooves.accounts.update(.{ .old = old, .new = a });
+        } else {
+            env.forest.grooves.accounts.insert(a);
+        }
     }
 
-    fn get_account(env: *Environment, id: u128) ?Account {
+    fn get_account(env: *Environment, id: u128) ?*const Account {
         const account = env.forest.grooves.accounts.get(id) orelse return null;
-        return account.*;
+        return account;
     }
 
     // The forest should behave like a simple key-value data-structure.
@@ -441,8 +445,7 @@ const Environment = struct {
                             env.forest.grooves.accounts.objects_cache.options.map_value_count_max;
 
                         if (log_index % groove_map_value_count_max == 0) {
-                            env.forest.grooves.accounts_immutable.objects_cache.compact();
-                            env.forest.grooves.accounts_mutable.objects_cache.compact();
+                            env.forest.grooves.accounts.objects_cache.compact();
                         }
                     }
                 }
@@ -463,7 +466,8 @@ const Environment = struct {
             .put_account => |put| {
                 // The forest requires prefetch before put.
                 try env.prefetch_account(put.account.id);
-                env.put_account(&put.account);
+                const lsm_account = env.get_account(put.account.id);
+                env.put_account(&put.account, lsm_account);
                 try model.put_account(&put.account, put.op);
             },
             .get_account => |id| {

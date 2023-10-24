@@ -899,8 +899,12 @@ pub fn GrooveType(
 
             if (constants.verify) {
                 const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
-                assert(@field(old_from_cache, primary_field) == @field(old, primary_field));
-                assert(old_from_cache.timestamp == old.timestamp);
+
+                // While all that's actually required is that the _contents_ of the old_from_cache
+                // and old objects are identical, in current usage they're always the same piece of
+                // memory. We'll assert that for now, and this can be weakened in future if
+                // required.
+                assert(old_from_cache == old);
             }
 
             // Sanity check to ensure the caller didn't accidentally pass in an alias.
@@ -925,9 +929,6 @@ pub fn GrooveType(
                 assert(!tombstone(old) and !tombstone(new));
             }
 
-            groove.objects.put(new);
-            groove.objects_cache.upsert(new);
-
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
                 const old_index = Helper.derive_index(old);
@@ -946,6 +947,13 @@ pub fn GrooveType(
                     }
                 }
             }
+
+            // Putting the objects_cache upsert after the index tree updates is critical:
+            // We diff the old and new objects, but the old object will be a pointer into the
+            // objects_cache. If we upsert first, old.* == new.* and no secondary indexes will
+            // be updated!
+            groove.objects_cache.upsert(new);
+            groove.objects.put(new);
         }
 
         /// Asserts that the object with the given PrimaryKey exists.
