@@ -167,7 +167,7 @@ pub fn StateMachineType(
                     const thing = state_machine.forest.grooves.things.get(op);
                     assert(thing == null);
 
-                    state_machine.forest.grooves.things.upsert(&.{
+                    state_machine.forest.grooves.things.insert(&.{
                         .timestamp = timestamp,
                         .id = op,
                         .value = @as(u64, @truncate(vsr.checksum(input))),

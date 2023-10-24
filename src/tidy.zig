@@ -64,6 +64,11 @@ fn banned(source: []const u8) ?[]const u8 {
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
         return "use stdx." ++ "BoundedArray instead of std version";
     }
+
+    if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
+        return "use stdx." ++ "has_unique_representation instead of std version";
+    }
+
     return null;
 }
 

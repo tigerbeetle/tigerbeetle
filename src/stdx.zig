@@ -242,7 +242,7 @@ else
 ///   - `T` doesn't have any non-deterministic padding,
 ///   - `T` doesn't embed any pointers.
 pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
-    comptime assert(std.meta.trait.hasUniqueRepresentation(T));
+    comptime assert(has_unique_representation(T));
     comptime assert(!has_pointers(T));
     comptime assert(@sizeOf(T) * 8 == @bitSizeOf(T));
 
@@ -339,7 +339,7 @@ test no_padding {
 pub inline fn hash_inline(value: anytype) u64 {
     comptime {
         assert(no_padding(@TypeOf(value)));
-        assert(std.meta.trait.hasUniqueRepresentation(@TypeOf(value)));
+        assert(has_unique_representation(@TypeOf(value)));
     }
     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
         .Struct, .Int => std.mem.asBytes(&value),
@@ -519,4 +519,154 @@ pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
         @as(usize, @bitCast(@as(isize, fd))),
         @intFromPtr(statfs_buf),
     );
+}
+
+// TODO(Zig): https://github.com/ziglang/zig/issues/17592.
+/// True if every value of the type `T` has a unique bit pattern representing it.
+/// In other words, `T` has no unused bits and no padding.
+pub fn has_unique_representation(comptime T: type) bool {
+    switch (@typeInfo(T)) {
+        else => return false, // TODO can we know if it's true for some of these types ?
+
+        .AnyFrame,
+        .Enum,
+        .ErrorSet,
+        .Fn,
+        => return true,
+
+        .Bool => return false,
+
+        .Int => |info| return @sizeOf(T) * 8 == info.bits,
+
+        .Pointer => |info| return info.size != .Slice,
+
+        .Array => |info| return comptime has_unique_representation(info.child),
+
+        .Struct => |info| {
+            // Only consider packed structs unique if they are byte aligned.
+            if (info.backing_integer) |backing_integer| {
+                return @sizeOf(T) * 8 == @bitSizeOf(backing_integer);
+            }
+
+            var sum_size = @as(usize, 0);
+
+            inline for (info.fields) |field| {
+                const FieldType = field.type;
+                if (comptime !has_unique_representation(FieldType)) return false;
+                sum_size += @sizeOf(FieldType);
+            }
+
+            return @sizeOf(T) == sum_size;
+        },
+
+        .Vector => |info| return comptime has_unique_representation(info.child) and
+            @sizeOf(T) == @sizeOf(info.child) * info.len,
+    }
+}
+
+// Test vectors mostly from upstream, with some added to test the packed struct case.
+test "has_unique_representation" {
+    const TestStruct1 = struct {
+        a: u32,
+        b: u32,
+    };
+
+    try std.testing.expect(has_unique_representation(TestStruct1));
+
+    const TestStruct2 = struct {
+        a: u32,
+        b: u16,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestStruct2));
+
+    const TestStruct3 = struct {
+        a: u32,
+        b: u32,
+    };
+
+    try std.testing.expect(has_unique_representation(TestStruct3));
+
+    const TestStruct4 = struct { a: []const u8 };
+
+    try std.testing.expect(!has_unique_representation(TestStruct4));
+
+    const TestStruct5 = struct { a: TestStruct4 };
+
+    try std.testing.expect(!has_unique_representation(TestStruct5));
+
+    const TestStruct6 = packed struct {
+        a: u32,
+        b: u31,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestStruct6));
+
+    const TestStruct7 = struct {
+        a: u64,
+        b: TestStruct6,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestStruct7));
+
+    const TestStruct8 = packed struct {
+        a: u32,
+        b: u32,
+    };
+
+    try std.testing.expect(has_unique_representation(TestStruct8));
+
+    const TestStruct9 = struct {
+        a: u64,
+        b: TestStruct8,
+    };
+
+    try std.testing.expect(has_unique_representation(TestStruct9));
+
+    const TestStruct10 = packed struct {
+        a: TestStruct8,
+        b: TestStruct8,
+    };
+
+    try std.testing.expect(has_unique_representation(TestStruct10));
+
+    const TestUnion1 = packed union {
+        a: u32,
+        b: u16,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestUnion1));
+
+    const TestUnion2 = extern union {
+        a: u32,
+        b: u16,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestUnion2));
+
+    const TestUnion3 = union {
+        a: u32,
+        b: u16,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestUnion3));
+
+    const TestUnion4 = union(enum) {
+        a: u32,
+        b: u16,
+    };
+
+    try std.testing.expect(!has_unique_representation(TestUnion4));
+
+    inline for ([_]type{ i0, u8, i16, u32, i64 }) |T| {
+        try std.testing.expect(has_unique_representation(T));
+    }
+    inline for ([_]type{ i1, u9, i17, u33, i24 }) |T| {
+        try std.testing.expect(!has_unique_representation(T));
+    }
+
+    try std.testing.expect(!has_unique_representation([]u8));
+    try std.testing.expect(!has_unique_representation([]const u8));
+
+    try std.testing.expect(has_unique_representation(@Vector(4, u16)));
 }
