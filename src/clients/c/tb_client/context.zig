@@ -98,7 +98,7 @@ pub fn ContextType(
         message_pool: MessagePool,
         client: Client,
 
-        on_completion_fn: tb_completion_t,
+        completion_fn: tb_completion_t,
         implementation: ContextImplementation,
         thread: Thread,
         shutdown: Atomic(bool) = Atomic(bool).init(false),
