@@ -631,9 +631,9 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         .password = try shell.env_get("GITHUB_TOKEN"),
     });
 
-    for (@as([]const bool, &.{ true, false })) |debug| {
-        const triples: []const []const u8 = &.{ "aarch64-linux", "x86_64-linux" };
-        const docker_arches: []const []const u8 = &.{ "arm64", "amd64" };
+    for ([_]bool{ true, false }) |debug| {
+        const triples = [_][]const u8{ "aarch64-linux", "x86_64-linux" };
+        const docker_arches = [_][]const u8{ "arm64", "amd64" };
         for (triples, docker_arches) |triple, docker_arch| {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
