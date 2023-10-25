@@ -653,8 +653,11 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         }
         try shell.exec(
             \\docker buildx build --file tools/docker/Dockerfile . --platform linux/amd64,linux/arm64
-            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{version} --push
-        , .{ .version = info.version });
+            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{version}{debug} --push
+        , .{
+            .version = info.version,
+            .debug = if (debug) "-debug" else "",
+        });
 
         // Sadly, there isn't an easy way to locally build & test a multiplatform image without
         // pushing it out to the registry first. As docker testing isn't covered under not rocket
