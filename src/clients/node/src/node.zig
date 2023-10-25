@@ -241,12 +241,12 @@ fn request(
 }
 
 // Packet only has one size field which normally tracks `BufferType(op).events().len`.
-// However, completion of the packet can write completed.len < `BufferType(op).results().len`.
-// Therefore, we stuff both `BufferType(op).count` and completed.len into the packet's size field.
+// However, completion of the packet can write results.len < `BufferType(op).results().len`.
+// Therefore, we stuff both `BufferType(op).count` and results.len into the packet's size field.
 // Storing both allows reconstruction of `BufferType(op)` while knowing how many results completed.
 const BufferSize = packed struct(u32) {
-    allocated: u16,
-    completed: u16,
+    event_count: u16,
+    result_count: u16,
 };
 
 fn on_completion(
@@ -263,7 +263,6 @@ fn on_completion(
         .invalid_data_size => unreachable, // We set correct data size during request().
     }
 
-    const results = result_ptr.?[0..result_len];
     switch (@as(Operation, @enumFromInt(packet.operation))) {
         inline else => |op| {
             const event_count = @divExact(packet.data_size, @sizeOf(StateMachine.Event(op)));
@@ -273,12 +272,15 @@ fn on_completion(
             };
 
             const Result = StateMachine.Result(op);
-            const completed: []const Result = @alignCast(std.mem.bytesAsSlice(Result, results));
-            @memcpy(buffer.results()[0..completed.len], completed);
+            const results: []const Result = @alignCast(std.mem.bytesAsSlice(
+                Result,
+                result_ptr.?[0..result_len],
+            ));
+            @memcpy(buffer.results()[0..results.len], results);
 
             packet.data_size = @bitCast(BufferSize{
-                .allocated = @intCast(event_count),
-                .completed = @intCast(completed.len),
+                .event_count = @intCast(event_count),
+                .result_count = @intCast(results.len),
             });
         },
     }
@@ -308,16 +310,16 @@ fn on_completion_js(
     assert(packet.status == .ok);
 
     // Decode the packet's Buffer results into an array then free the Buffer.
-    const buffer_size: BufferSize = @bitCast(packet.data_size);
     const array_or_error = switch (@as(Operation, @enumFromInt(packet.operation))) {
         inline else => |op| blk: {
+            const buffer_size: BufferSize = @bitCast(packet.data_size);
             const buffer: BufferType(op) = .{
                 .ptr = @ptrCast(packet.data.?),
-                .count = buffer_size.allocated,
+                .count = buffer_size.event_count,
             };
             defer buffer.free();
 
-            const results = buffer.results()[0..buffer_size.completed];
+            const results = buffer.results()[0..buffer_size.result_count];
             break :blk encode_array(StateMachine.Result(op), env, results);
         },
     };
