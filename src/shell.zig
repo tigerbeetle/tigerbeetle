@@ -283,7 +283,7 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
-    echo_command(&child);
+    echo_command(argv.slice());
     const term = try child.spawnAndWait();
 
     switch (term) {
@@ -326,35 +326,27 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
 
     try expand_argv(&argv, cmd, cmd_args);
 
-    const res = try std.ChildProcess.exec(.{
+    const child = try std.ChildProcess.exec(.{
         .allocator = shell.arena.allocator(),
         .argv = argv.slice(),
     });
-    defer shell.arena.allocator().free(res.stderr);
-    errdefer shell.arena.allocator().free(res.stdout);
+    defer shell.arena.allocator().free(child.stderr);
+    errdefer {
+        log.err("command failed", .{});
+        echo_command(argv.slice());
+        log.err("stdout:\n{s}\nstderr:\n{s}", .{ child.stdout, child.stderr });
+    }
 
-    switch (res.term) {
-        .Exited => |code| if (code != 0) {
-            std.debug.print(
-                \\Debugging failure (stdout): {s}
-                \\Debugging failure (stderr): {s}
-                \\
-            , .{
-                res.stdout,
-                res.stderr,
-            });
-            return error.NonZeroExitStatus;
-        },
+    switch (child.term) {
+        .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
         else => return error.CommandFailed,
     }
 
-    if (res.stderr.len > 0) return error.NonEmptyStderr;
-
-    const trailing_newline = if (std.mem.indexOf(u8, res.stdout, "\n")) |first_newline|
-        first_newline == res.stdout.len - 1
+    const trailing_newline = if (std.mem.indexOf(u8, child.stdout, "\n")) |first_newline|
+        first_newline == child.stdout.len - 1
     else
         false;
-    return res.stdout[0 .. res.stdout.len - if (trailing_newline) @as(usize, 1) else 0];
+    return child.stdout[0 .. child.stdout.len - if (trailing_newline) @as(usize, 1) else 0];
 }
 
 /// Spawns the process, piping its stdout and stderr.
@@ -399,7 +391,7 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
 
-    echo_command(&child);
+    echo_command(argv.slice());
     const term = try child.spawnAndWait();
 
     switch (term) {
@@ -410,11 +402,9 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
 
 /// If we inherit `stdout` to show the output to the user, it's also helpful to echo the command
 /// itself.
-fn echo_command(child: *const std.ChildProcess) void {
-    assert(child.stdout_behavior == .Inherit);
-
+fn echo_command(argv: []const []const u8) void {
     std.debug.print("$ ", .{});
-    for (child.argv, 0..) |arg, i| {
+    for (argv, 0..) |arg, i| {
         if (i != 0) std.debug.print(" ", .{});
         std.debug.print("{s}", .{arg});
     }
