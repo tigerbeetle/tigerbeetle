@@ -29,23 +29,39 @@ pub fn throw(env: c.napi_env, comptime message: [:0]const u8) TranslationError {
     return TranslationError.ExceptionThrown;
 }
 
-pub fn capture_undefined(env: c.napi_env) !c.napi_value {
+pub fn capture_null(env: c.napi_env) !c.napi_value {
     var result: c.napi_value = undefined;
-    if (c.napi_get_undefined(env, &result) != c.napi_ok) {
-        return throw(env, "Failed to capture the value of \"undefined\".");
+    if (c.napi_get_null(env, &result) != c.napi_ok) {
+        return throw(env, "Failed to capture the value of \"null\".");
     }
 
     return result;
 }
 
-pub fn set_instance_data(
-    env: c.napi_env,
-    data: *anyopaque,
-    finalize_callback: *const fn (env: c.napi_env, data: ?*anyopaque, hint: ?*anyopaque) callconv(.C) void,
-) !void {
-    if (c.napi_set_instance_data(env, data, finalize_callback, null) != c.napi_ok) {
-        return throw(env, "Failed to initialize environment.");
+pub fn extract_args(env: c.napi_env, info: c.napi_callback_info, comptime args: struct {
+    count: usize,
+    function: []const u8,
+}) ![args.count]c.napi_value {
+    var argc = args.count;
+    var argv: [args.count]c.napi_value = undefined;
+    if (c.napi_get_cb_info(env, info, &argc, &argv, null, null) != c.napi_ok) {
+        return throw(
+            env,
+            std.fmt.comptimePrint("Failed to get args for {s}()\x00", .{args.function}),
+        );
     }
+
+    if (argc != args.count) {
+        return throw(
+            env,
+            std.fmt.comptimePrint("Function {s}() requires exactly {} arguments.\x00", .{
+                args.function,
+                args.count,
+            }),
+        );
+    }
+
+    return argv;
 }
 
 pub fn create_external(env: c.napi_env, context: *anyopaque) !c.napi_value {
@@ -68,40 +84,6 @@ pub fn value_external(
     }
 
     return result;
-}
-
-pub const UserData = extern struct {
-    env: c.napi_env,
-    callback_reference: c.napi_ref,
-};
-
-/// This will create a reference in V8 with a ref_count of 1.
-/// This reference will be destroyed when we return the server response to JS.
-pub fn user_data_from_value(env: c.napi_env, value: c.napi_value) !UserData {
-    var callback_type: c.napi_valuetype = undefined;
-    if (c.napi_typeof(env, value, &callback_type) != c.napi_ok) {
-        return throw(env, "Failed to check callback type.");
-    }
-    if (callback_type != c.napi_function) return throw(env, "Callback must be a Function.");
-
-    var callback_reference: c.napi_ref = undefined;
-    if (c.napi_create_reference(env, value, 1, &callback_reference) != c.napi_ok) {
-        return throw(env, "Failed to create reference to callback.");
-    }
-
-    return UserData{
-        .env = env,
-        .callback_reference = callback_reference,
-    };
-}
-
-pub fn globals(env: c.napi_env) !?*anyopaque {
-    var data: ?*anyopaque = null;
-    if (c.napi_get_instance_data(env, &data) != c.napi_ok) {
-        return throw(env, "Failed to decode globals.");
-    }
-
-    return data;
 }
 
 pub fn slice_from_object(
@@ -134,49 +116,6 @@ pub fn slice_from_value(
     if (data_length < 1) return throw(env, key ++ " must not be empty");
 
     return @as([*]u8, @ptrCast(data.?))[0..data_length];
-}
-
-pub fn bytes_from_object(
-    env: c.napi_env,
-    object: c.napi_value,
-    comptime length: u8,
-    comptime key: [:0]const u8,
-) ![length]u8 {
-    var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, @as([*c]const u8, @ptrCast(key)), &property) != c.napi_ok) {
-        return throw(env, key ++ " must be defined");
-    }
-
-    const data = try slice_from_value(env, property, key);
-    if (data.len != length) {
-        return throw(env, key ++ " has incorrect length.");
-    }
-
-    // Copy this out of V8 as the underlying data lifetime is not guaranteed.
-    var result: [length]u8 = undefined;
-    std.mem.copy(u8, result[0..], data[0..]);
-
-    return result;
-}
-
-pub fn bytes_from_buffer(
-    env: c.napi_env,
-    buffer: c.napi_value,
-    output: []u8,
-    comptime key: [:0]const u8,
-) !usize {
-    const data = try slice_from_value(env, buffer, key);
-    if (data.len < 1) {
-        return throw(env, key ++ " must not be empty.");
-    }
-    if (data.len > output.len) {
-        return throw(env, key ++ " exceeds max message size.");
-    }
-
-    // Copy this out of V8 as the underlying data lifetime is not guaranteed.
-    std.mem.copy(u8, output[0..], data[0..]);
-
-    return data.len;
 }
 
 pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
@@ -261,24 +200,6 @@ pub fn u32_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]c
     return result;
 }
 
-pub fn byte_slice_into_object(
-    env: c.napi_env,
-    object: c.napi_value,
-    comptime key: [:0]const u8,
-    value: []const u8,
-    comptime error_message: [:0]const u8,
-) !void {
-    var result: c.napi_value = undefined;
-    // create a copy that is managed by V8.
-    if (c.napi_create_buffer_copy(env, value.len, value.ptr, null, &result) != c.napi_ok) {
-        return throw(env, error_message ++ " Failed to allocate Buffer in V8.");
-    }
-
-    if (c.napi_set_named_property(env, object, @as([*c]const u8, @ptrCast(key)), result) != c.napi_ok) {
-        return throw(env, error_message);
-    }
-}
-
 pub fn u128_into_object(
     env: c.napi_env,
     object: c.napi_value,
@@ -359,22 +280,6 @@ pub fn create_object(env: c.napi_env, comptime error_message: [:0]const u8) !c.n
     return result;
 }
 
-fn create_buffer(
-    env: c.napi_env,
-    value: []const u8,
-    comptime error_message: [:0]const u8,
-) !c.napi_value {
-    var data: ?*anyopaque = undefined;
-    var result: c.napi_value = undefined;
-    if (c.napi_create_buffer(env, value.len, &data, &result) != c.napi_ok) {
-        return throw(env, error_message);
-    }
-
-    std.mem.copy(u8, @as([*]u8, @ptrCast(data.?))[0..value.len], value[0..value.len]);
-
-    return result;
-}
-
 pub fn create_array(
     env: c.napi_env,
     length: u32,
@@ -430,25 +335,16 @@ pub fn call_function(
     env: c.napi_env,
     this: c.napi_value,
     callback: c.napi_value,
-    argc: usize,
-    argv: [*]c.napi_value,
-) !void {
-    const result = c.napi_call_function(env, this, callback, argc, argv, null);
-    switch (result) {
+    args: []c.napi_value,
+) !c.napi_value {
+    var result: c.napi_value = undefined;
+    switch (c.napi_call_function(env, this, callback, args.len, args.ptr, &result)) {
         c.napi_ok => {},
         // the user's callback may throw a JS exception or call other functions that do so. We
         // therefore don't throw another error.
         c.napi_pending_exception => {},
         else => return throw(env, "Failed to invoke results callback."),
     }
-}
-
-pub fn scope(env: c.napi_env, comptime error_message: [:0]const u8) !c.napi_value {
-    var result: c.napi_value = undefined;
-    if (c.napi_get_global(env, &result) != c.napi_ok) {
-        return throw(env, error_message);
-    }
-
     return result;
 }
 
