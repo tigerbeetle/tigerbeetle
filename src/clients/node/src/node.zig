@@ -114,7 +114,7 @@ fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const
         return translate.throw(env, "Failed to create resource name for thread-safe function.");
     }
 
-    var on_completion_tsfn: c.napi_threadsafe_function = undefined;
+    var completion_tsfn: c.napi_threadsafe_function = undefined;
     if (c.napi_create_threadsafe_function(
         env,
         null, // No javascript function to call directly from here.
@@ -126,18 +126,18 @@ fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const
         null, // No finalization callback.
         null, // No custom context.
         on_completion_js, // Function to call on JS thread when TSFN is called.
-        &on_completion_tsfn, // TSFN out handle.
+        &completion_tsfn, // TSFN out handle.
     ) != c.napi_ok) {
         return translate.throw(env, "Failed to create thread-safe function.");
     }
     errdefer if (c.napi_release_threadsafe_function(
-        on_completion_tsfn,
+        completion_tsfn,
         c.napi_tsfn_abort,
     ) != c.napi_ok) {
         std.log.warn("Failed to release allocated thread-safe function on error.", .{});
     };
 
-    if (c.napi_acquire_threadsafe_function(on_completion_tsfn) != c.napi_ok) {
+    if (c.napi_acquire_threadsafe_function(completion_tsfn) != c.napi_ok) {
         return translate.throw(env, "Failed to acquire reference to thread-safe function.");
     }
 
@@ -146,7 +146,7 @@ fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const
         cluster_id,
         addresses,
         concurrency,
-        @intFromPtr(on_completion_tsfn),
+        @intFromPtr(completion_tsfn),
         on_completion,
     ) catch |err| switch (err) {
         error.OutOfMemory => return translate.throw(env, "Failed to allocate memory for Client."),
@@ -171,10 +171,10 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
     const client: tb.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
     defer tb.deinit(client);
 
-    const on_completion_ctx = tb.completion_context(client);
-    const on_completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(on_completion_ctx);
+    const completion_ctx = tb.completion_context(client);
+    const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
 
-    if (c.napi_release_threadsafe_function(on_completion_tsfn, c.napi_tsfn_abort) != c.napi_ok) {
+    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_abort) != c.napi_ok) {
         return translate.throw(env, "Failed to release allocated thread-safe function on error.");
     }
 }
@@ -182,7 +182,7 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
 fn request(
     env: c.napi_env,
     context: c.napi_value,
-    op: Operation,
+    operation: Operation,
     array: c.napi_value,
     callback: c.napi_value,
 ) !void {
@@ -212,28 +212,45 @@ fn request(
         std.log.warn("Failed to delete reference to callback on error.", .{});
     };
 
-    // NOTE: No error returns allowed after this call as data can't be `errdefer free()` on its own.
-    const data = switch (op) {
-        .create_accounts => try decode_array_into_data(Account, CreateAccountsResult, env, array),
-        .create_transfers => try decode_array_into_data(Transfer, CreateTransfersResult, env, array),
-        .lookup_accounts => try decode_array_into_data(u128, Account, env, array),
-        .lookup_transfers => try decode_array_into_data(u128, Transfer, env, array),
+    const array_length = try translate.array_length(env, array);
+    if (array_length < 1) {
+        return translate.throw(env, "Batch must contain at least one event.");
+    }
+
+    const packet_data = switch (operation) {
+        inline else => |op| blk: {
+            const buffer = try BufferType(op).alloc(env, array_length);
+            errdefer buffer.free();
+
+            const events = buffer.events();
+            try decode_array(StateMachine.Event(op), env, array, events);
+            break :blk std.mem.sliceAsBytes(events);
+        },
     };
 
     packet.* = .{
         .next = null,
         .user_data = callback_ref,
-        .operation = @intFromEnum(op),
+        .operation = @intFromEnum(operation),
         .status = .ok,
-        .data_size = @intCast(data.len),
-        .data = data.ptr,
+        .data_size = @intCast(packet_data.len),
+        .data = packet_data.ptr,
     };
 
     tb.submit(client, packet);
 }
 
+// Packet only has one size field which normally tracks `BufferType(op).events().len`.
+// However, completion of the packet can write completed.len < `BufferType(op).results().len`.
+// Therefore, we stuff both `BufferType(op).count` and completed.len into the packet's size field.
+// Storing both allows reconstruction of `BufferType(op)` while knowing how many results completed.
+const BufferSize = packed struct(u32) {
+    allocated: u16,
+    completed: u16,
+};
+
 fn on_completion(
-    on_completion_ctx: usize,
+    completion_ctx: usize,
     client: tb.tb_client_t,
     packet: *tb.tb_packet_t,
     result_ptr: ?[*]const u8,
@@ -246,27 +263,32 @@ fn on_completion(
         .invalid_data_size => unreachable, // We set correct data size during request().
     }
 
-    // Copy the results given to use into the packet data.
-    const events = @as([*]align(16) u8, @ptrCast(@alignCast(packet.data.?)))[0..packet.data_size];
     const results = result_ptr.?[0..result_len];
-    const data_size = switch (@as(Operation, @enumFromInt(packet.operation))) {
-        .create_accounts => encode_results_into_data(Account, CreateAccountsResult, results, events),
-        .create_transfers => encode_results_into_data(Transfer, CreateTransfersResult, results, events),
-        .lookup_accounts => encode_results_into_data(u128, Account, results, events),
-        .lookup_transfers => encode_results_into_data(u128, Transfer, results, events),
-    };
+    switch (@as(Operation, @enumFromInt(packet.operation))) {
+        inline else => |op| {
+            const event_count = @divExact(packet.data_size, @sizeOf(StateMachine.Event(op)));
+            const buffer: BufferType(op) = .{
+                .ptr = @ptrCast(packet.data.?),
+                .count = event_count,
+            };
 
-    // Stuff the event size along with the packet result size into the packet.
-    // The former is needed to know the full heap allocation size in packet.data.
-    // The latter is needed to know how many Results in packet.data to serialize for JS.
-    packet.data_size = @bitCast(data_size);
+            const Result = StateMachine.Result(op);
+            const completed: []const Result = @alignCast(std.mem.bytesAsSlice(Result, results));
+            @memcpy(buffer.results()[0..completed.len], completed);
+
+            packet.data_size = @bitCast(BufferSize{
+                .allocated = @intCast(event_count),
+                .completed = @intCast(completed.len),
+            });
+        },
+    }
 
     // Stuff client pointer into packet.next to store it until the packet arrives on the JS thread.
     @as(*usize, @ptrCast(&packet.next)).* = @intFromPtr(client);
 
     // Queue the packet to be processed on the JS thread to invoke its JS callback.
-    const on_completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(on_completion_ctx);
-    switch (c.napi_call_threadsafe_function(on_completion_tsfn, packet, c.napi_tsfn_nonblocking)) {
+    const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
+    switch (c.napi_call_threadsafe_function(completion_tsfn, packet, c.napi_tsfn_nonblocking)) {
         c.napi_ok => {},
         c.napi_queue_full => @panic("ThreadSafe Function queue is full when created with no limit."),
         else => unreachable,
@@ -285,23 +307,30 @@ fn on_completion_js(
     const packet: *tb.tb_packet_t = @ptrCast(@alignCast(packet_argument.?));
     assert(packet.status == .ok);
 
-    // Extract all the packet information and release it back to the client.
+    // Decode the packet's Buffer results into an array then free the Buffer.
+    const buffer_size: BufferSize = @bitCast(packet.data_size);
+    const array_or_error = switch (@as(Operation, @enumFromInt(packet.operation))) {
+        inline else => |op| blk: {
+            const buffer: BufferType(op) = .{
+                .ptr = @ptrCast(packet.data.?),
+                .count = buffer_size.allocated,
+            };
+            defer buffer.free();
+
+            const results = buffer.results()[0..buffer_size.completed];
+            break :blk encode_array(StateMachine.Result(op), env, results);
+        },
+    };
+
+    // Extract the remaining packet information and release it back to the client.
     const client: tb.tb_client_t = @ptrFromInt(@as(*usize, @ptrCast(&packet.next)).*);
     const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
-    const data: [*]align(16) u8 = @ptrCast(@alignCast(packet.data.?));
-    const data_size: DataSize = @bitCast(packet.data_size);
-    const op: Operation = @enumFromInt(packet.operation);
     tb.release_packet(client, packet);
 
     // Parse Result array out of packet data, freeing it in the process.
     // NOTE: Ensure this is called before anything that could early-return to avoid a alloc leak.
     var callback_error = napi_null;
-    const callback_result = (switch (op) {
-        .create_accounts => encode_data_into_array(Account, CreateAccountsResult, env, data, data_size),
-        .create_transfers => encode_data_into_array(Transfer, CreateTransfersResult, env, data, data_size),
-        .lookup_accounts => encode_data_into_array(u128, Account, env, data, data_size),
-        .lookup_transfers => encode_data_into_array(u128, Transfer, env, data, data_size),
-    }) catch |err| switch (err) {
+    const callback_result = array_or_error catch |err| switch (err) {
         error.ExceptionThrown => blk: {
             if (c.napi_get_and_clear_last_exception(env, &callback_error) != c.napi_ok) {
                 std.log.warn("Failed to capture callback error from thrown Exception.", .{});
@@ -327,33 +356,7 @@ fn on_completion_js(
 
 // (De)Serialization
 
-fn decode_array_into_data(
-    comptime Event: type,
-    comptime Result: type,
-    env: c.napi_env,
-    array: c.napi_value,
-) ![]u8 {
-    const array_length = try translate.array_length(env, array);
-    if (array_length < 1) {
-        return translate.throw(env, "Batch must contain at least one event.");
-    }
-
-    // Allocate enough memory to contain the Events and the Results.
-    const alloc_size = @max(@sizeOf(Event) * array_length, @sizeOf(Result) * array_length);
-    if (@sizeOf(vsr.Header) + alloc_size > constants.message_size_max) {
-        return translate.throw(env, "Batch is larger than the maximum message size.");
-    }
-
-    const alloc_align = @max(@alignOf(Event), @alignOf(Result));
-    comptime assert(alloc_align <= 16); // Assume 16-byte alignment. Makes free() simpler.
-
-    const data = allocator.alignedAlloc(u8, 16, alloc_size) catch |err| switch (err) {
-        error.OutOfMemory => return translate.throw(env, "Batch allocation ran out of memory."),
-    };
-    errdefer allocator.free(data);
-
-    // Parse the event objects from the array.
-    const events = std.mem.bytesAsSlice(Event, data[0 .. @sizeOf(Event) * array_length]);
+fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, events: []Event) !void {
     for (events, 0..) |*event, i| {
         const object = try translate.array_element(env, array, @intCast(i));
         switch (Event) {
@@ -387,65 +390,12 @@ fn decode_array_into_data(
             else => @compileError("invalid Event type"),
         }
     }
-
-    // Return only the memory for the Events. The total size of the bytes allocation can be inferred
-    // via `bytes[0..max(bytes.len, events.len * ResultFrom(Event))]`.
-    return std.mem.sliceAsBytes(events);
 }
 
-// For a given op, packet memory is allocated to hold
-// `max(sizeof(Event/Request) * n, sizeof(Result/Response))`. As long as the op and n are known, the
-// allocation size can be computed.
-//
-// When submitting the packet, the data_size is `sizeof(Event) * n`. On packet results, we overwrite
-// the memory with `sizeof(Result) * completed` where completed <= n. If less Results are completed
-// than Events, the completed size no longer reflects "n". So instead, data_size stores
-// `packed(n, completed)`: arg1 to know alloc size, arg2 to know what to parse back to JS.
-const DataSize = packed struct(u32) {
-    event_count: u16,
-    result_count: u16,
-};
-
-fn encode_results_into_data(
-    comptime Event: type,
-    comptime Result: type,
-    result_bytes: []const u8,
-    event_data: []align(16) u8,
-) DataSize {
-    // Event data should have been allocated with enough space to also contain the Results.
-    const event_count = @divExact(event_data.len, @sizeOf(Event));
-    const results = std.mem.bytesAsSlice(Result, event_data.ptr[0 .. @sizeOf(Result) * event_count]);
-
-    const packet_results = std.mem.bytesAsSlice(Result, result_bytes);
-    assert(packet_results.len <= results.len);
-    @memcpy(results[0..packet_results.len], packet_results);
-
-    return .{
-        .event_count = @intCast(event_count),
-        .result_count = @intCast(packet_results.len),
-    };
-}
-
-fn encode_data_into_array(
-    comptime Event: type,
-    comptime Result: type,
-    env: c.napi_env,
-    data: [*]align(16) u8,
-    data_size: DataSize,
-) !c.napi_value {
-    // Make sure to deallocate the data memory at the end.
-    defer {
-        const alloc_size = @max(
-            @sizeOf(Result) * data_size.result_count,
-            @sizeOf(Event) * data_size.event_count,
-        );
-        allocator.free(data[0..alloc_size]);
-    }
-
-    const results = std.mem.bytesAsSlice(Result, data[0 .. @sizeOf(Result) * data_size.result_count]);
+fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result) !c.napi_value {
     const array = try translate.create_array(
         env,
-        @as(u32, @intCast(results.len)),
+        @intCast(results.len),
         "Failed to allocate array for results.",
     );
 
@@ -487,4 +437,52 @@ fn encode_data_into_array(
     }
 
     return array;
+}
+
+/// Each packet allocates enough room to hold both its Events and its Results.
+/// Buffer is an abstraction over the memory management for this.
+fn BufferType(comptime op: Operation) type {
+    return struct {
+        const Buffer = @This();
+        const Event = StateMachine.Event(op);
+        const Result = StateMachine.Result(op);
+        const max_align: u29 = @max(@alignOf(Event), @alignOf(Result));
+
+        ptr: [*]u8,
+        count: u32,
+
+        fn alloc(env: c.napi_env, count: u32) !Buffer {
+            // Allocate enough bytes to hold memory for the Events and the Results.
+            const max_bytes = @max(@sizeOf(Event) * count, @sizeOf(Result) * count);
+            if (@sizeOf(vsr.Header) + max_bytes > constants.message_size_max) {
+                return translate.throw(env, "Batch is larger than the maximum message size.");
+            }
+
+            const bytes = allocator.alignedAlloc(u8, max_align, max_bytes) catch |e| switch (e) {
+                error.OutOfMemory => return translate.throw(env, "Batch allocation ran out of memory."),
+            };
+            errdefer allocator.free(bytes);
+
+            return Buffer{
+                .ptr = bytes.ptr,
+                .count = count,
+            };
+        }
+
+        fn free(buffer: Buffer) void {
+            const max_bytes = @max(@sizeOf(Event) * buffer.count, @sizeOf(Result) * buffer.count);
+            const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
+            allocator.free(bytes);
+        }
+
+        fn events(buffer: Buffer) []Event {
+            const event_bytes = buffer.ptr[0 .. @sizeOf(Event) * buffer.count];
+            return @alignCast(std.mem.bytesAsSlice(Event, event_bytes));
+        }
+
+        fn results(buffer: Buffer) []Result {
+            const result_bytes = buffer.ptr[0 .. @sizeOf(Result) * buffer.count];
+            return @alignCast(std.mem.bytesAsSlice(Result, result_bytes));
+        }
+    };
 }
