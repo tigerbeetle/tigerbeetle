@@ -663,9 +663,10 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         // pushing it out to the registry first. As docker testing isn't covered under not rocket
         // science rule, let's do a best effort after-the-fact testing here.
         const version_verbose = try shell.exec_stdout(
-            \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version} version --verbose
+            \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version}{debug} version --verbose
         , .{
             .version = info.version,
+            .debug = if (debug) "-debug" else "",
         });
         const mode = if (debug) "Debug" else "ReleaseSafe";
         assert(std.mem.indexOf(u8, version_verbose, mode) != null);
