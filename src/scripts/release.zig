@@ -631,6 +631,10 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         .password = try shell.env_get("GITHUB_TOKEN"),
     });
 
+    try shell.exec(
+        \\docker buildx create --use
+    , .{});
+
     for ([_]bool{ true, false }) |debug| {
         const triples = [_][]const u8{ "aarch64-linux", "x86_64-linux" };
         const docker_arches = [_][]const u8{ "arm64", "amd64" };
