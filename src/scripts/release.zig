@@ -362,9 +362,6 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist"));
 
-    // Note: for the time being, publish docker first to let it fail fast for faster debugging.
-    if (languages.contains(.docker)) try publish_docker(shell, info);
-
     if (languages.contains(.zig)) {
         _ = try shell.env_get("GITHUB_TOKEN");
         const gh_version = shell.exec_stdout("gh --version", .{}) catch {
@@ -439,6 +436,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         });
     }
 
+    if (languages.contains(.docker)) try publish_docker(shell, info);
     if (languages.contains(.dotnet)) try publish_dotnet(shell, info);
     if (languages.contains(.go)) try publish_go(shell, info);
     if (languages.contains(.java)) try publish_java(shell, info);
