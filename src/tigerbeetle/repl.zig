@@ -406,6 +406,37 @@ pub const Parser = struct {
     }
 };
 
+fn handleSignal(comptime handler: *const fn () void) !void {
+    const handle_struct = struct {
+        fn handler_win(dwCtrlType: std.os.windows.DWORD) callconv(std.os.windows.WINAPI) std.os.windows.BOOL {
+            if (dwCtrlType == std.os.windows.CTRL_C_EVENT) {
+                handler();
+                return std.os.windows.TRUE;
+            } else {
+                return std.os.windows.FALSE;
+            }
+        }
+        fn handler_unix(sig: c_int) callconv(.C) void {
+            assert(sig == std.os.SIG.INT);
+            handler();
+        }
+    };
+    if (builtin.os.tag == .windows) {
+        try std.os.windows.SetConsoleCtrlHandler(handle_struct.handler_win, true);
+    } else {
+        const act = std.os.Sigaction{
+            .handler = .{ .handler = handle_struct.handler_unix },
+            .mask = std.os.empty_sigset,
+            .flags = 0,
+        };
+        try std.os.sigaction(std.os.SIG.INT, &act, null);
+    }
+}
+
+fn onCtrlC() void {
+    _ = std.io.getStdOut().write("\n> ") catch {};
+}
+
 pub fn ReplType(comptime MessageBus: type) type {
     const Client = vsr.Client(StateMachine, MessageBus);
 
@@ -645,6 +676,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             } else {
                 try repl.display_help();
             }
+
+            try handleSignal(onCtrlC);
 
             while (!repl.event_loop_done) {
                 if (repl.request_done and repl.interactive) {
