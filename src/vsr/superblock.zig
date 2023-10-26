@@ -94,10 +94,6 @@ pub const SuperBlockHeader = extern struct {
     /// Reserved for future minor features (e.g. changing the compression algorithm of the trailer).
     flags: u64 = 0,
 
-    /// A listing of persistent read snapshots that have been issued to clients.
-    /// A snapshot.created timestamp of 0 indicates that the snapshot is null.
-    snapshots: [constants.lsm_snapshots_max]Snapshot,
-
     /// The size of the block free set stored in the superblock trailer.
     free_set_size: u32,
 
@@ -108,7 +104,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [2844]u8 = [_]u8{0} ** 2844,
+    reserved: [3580]u8 = [_]u8{0} ** 3580,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -166,7 +162,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [23]u8 = [_]u8{0} ** 23,
 
         comptime {
-            assert(@sizeOf(VSRState) == 368);
+            assert(@sizeOf(VSRState) == 400);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -182,9 +178,11 @@ pub const SuperBlockHeader = extern struct {
                     .previous_checkpoint_id = 0,
                     .commit_min_checksum = vsr.Header.root_prepare(options.cluster).checksum,
                     .commit_min = 0,
+                    .snapshots_block_checksum = 0,
+                    .snapshots_block_address = 0,
                     .manifest_oldest_checksum = 0,
-                    .manifest_newest_checksum = 0,
                     .manifest_oldest_address = 0,
+                    .manifest_newest_checksum = 0,
                     .manifest_newest_address = 0,
                     .manifest_block_count = 0,
                 },
@@ -208,6 +206,10 @@ pub const SuperBlockHeader = extern struct {
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
             assert(vsr.member_index(&state.members, state.replica_id) != null);
+
+            // These fields are unused at the moment:
+            assert(state.checkpoint.snapshots_block_checksum == 0);
+            assert(state.checkpoint.snapshots_block_address == 0);
 
             if (state.checkpoint.manifest_block_count == 0) {
                 assert(state.checkpoint.manifest_oldest_address == 0);
@@ -298,8 +300,11 @@ pub const SuperBlockHeader = extern struct {
 
         manifest_oldest_checksum: u128,
         manifest_newest_checksum: u128,
+        snapshots_block_checksum: u128,
+
         manifest_oldest_address: u64,
         manifest_newest_address: u64,
+        snapshots_block_address: u64,
 
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
@@ -308,41 +313,12 @@ pub const SuperBlockHeader = extern struct {
         manifest_block_count: u32,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [4]u8 = [_]u8{0} ** 4,
+        reserved: [12]u8 = [_]u8{0} ** 12,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 96);
+            assert(@sizeOf(CheckpointState) == 128);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(stdx.no_padding(CheckpointState));
-        }
-    };
-
-    pub const Snapshot = extern struct {
-        /// A creation timestamp of 0 indicates that the snapshot is null.
-        created: u64,
-
-        /// When a read query last used the snapshot.
-        queried: u64,
-
-        /// Snapshots may auto-expire after a timeout of inactivity.
-        /// A timeout of 0 indicates that the snapshot must be explicitly released by the user.
-        timeout: u64,
-
-        comptime {
-            assert(@sizeOf(Snapshot) == 24);
-            // Assert that there is no implicit padding in the struct.
-            assert(stdx.no_padding(Snapshot));
-        }
-
-        pub fn exists(snapshot: Snapshot) bool {
-            if (snapshot.created == 0) {
-                assert(snapshot.queried == 0);
-                assert(snapshot.timeout == 0);
-
-                return false;
-            } else {
-                return true;
-            }
         }
     };
 
@@ -406,11 +382,6 @@ pub const SuperBlockHeader = extern struct {
         if (a.free_set_checksum != b.free_set_checksum) return false;
         if (a.client_sessions_checksum != b.client_sessions_checksum) return false;
         if (!stdx.equal_bytes(VSRState, &a.vsr_state, &b.vsr_state)) return false;
-        if (!stdx.equal_bytes(
-            [constants.lsm_snapshots_max]Snapshot,
-            &a.snapshots,
-            &b.snapshots,
-        )) return false;
         if (a.free_set_size != b.free_set_size) return false;
         if (a.vsr_headers_count != b.vsr_headers_count) return false;
         if (!stdx.equal_bytes(
@@ -796,6 +767,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .manifest_newest_checksum = 0,
                         .manifest_newest_address = 0,
                         .manifest_block_count = 0,
+                        .snapshots_block_checksum = 0,
+                        .snapshots_block_address = 0,
                     },
                     .replica_id = replica_id,
                     .members = members,
@@ -807,18 +780,11 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .view = 0,
                     .replica_count = options.replica_count,
                 },
-                .snapshots = undefined,
                 .free_set_size = 0,
                 .client_sessions_size = 0,
                 .vsr_headers_count = 0,
                 .vsr_headers_all = mem.zeroes([constants.view_change_headers_max]vsr.Header),
             };
-
-            @memset(&superblock.working.snapshots, .{
-                .created = 0,
-                .queried = 0,
-                .timeout = 0,
-            });
 
             superblock.working.set_checksum();
 
@@ -891,6 +857,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .manifest_newest_checksum = update.manifest_references.newest_checksum,
                 .manifest_newest_address = update.manifest_references.newest_address,
                 .manifest_block_count = update.manifest_references.block_count,
+                .snapshots_block_checksum = vsr_state.checkpoint.snapshots_block_checksum,
+                .snapshots_block_address = vsr_state.checkpoint.snapshots_block_address,
             };
             vsr_state.commit_min_canonical =
                 superblock.staging.vsr_state.checkpoint.commit_min;
@@ -1373,7 +1341,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "manifest_oldest_address={[manifest_oldest_address]} " ++
                         "manifest_newest_checksum={[manifest_newest_checksum]} " ++
                         "manifest_newest_address={[manifest_newest_address]} " ++
-                        "manifest_block_count={[manifest_block_count]}",
+                        "manifest_block_count={[manifest_block_count]} " ++
+                        "snapshots_block_checksum={[snapshots_block_checksum]} " ++
+                        "snapshots_block_address={[snapshots_block_address]}",
                     .{
                         .replica = superblock.replica_index,
                         .caller = @tagName(context.caller),
@@ -1395,6 +1365,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .manifest_newest_checksum = superblock.working.vsr_state.checkpoint.manifest_newest_checksum,
                         .manifest_newest_address = superblock.working.vsr_state.checkpoint.manifest_newest_address,
                         .manifest_block_count = superblock.working.vsr_state.checkpoint.manifest_block_count,
+                        .snapshots_block_checksum = superblock.working.vsr_state.checkpoint.snapshots_block_checksum,
+                        .snapshots_block_address = superblock.working.vsr_state.checkpoint.snapshots_block_address,
                     },
                 );
                 for (superblock.working.vsr_headers().slice) |*header| {
