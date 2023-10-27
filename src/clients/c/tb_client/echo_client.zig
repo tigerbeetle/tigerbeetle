@@ -22,6 +22,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 pub const StateMachine = Client.StateMachine;
                 pub const Error = Client.Error;
                 pub const Request = Client.Request;
+                pub const BatchError = Client.BatchError;
             };
         };
 
@@ -29,6 +30,8 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             .array = constants.client_request_queue_max,
         });
 
+        id: u128,
+        cluster: u32,
         messages_available: u32 = constants.client_request_queue_max,
         request_queue: RequestQueue = RequestQueue.init(),
         message_pool: *MessagePool,
@@ -42,12 +45,12 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             message_bus_options: MessageBus.Options,
         ) !Self {
             _ = allocator;
-            _ = id;
-            _ = cluster;
             _ = replica_count;
             _ = message_bus_options;
 
             return Self{
+                .id = id,
+                .cluster = cluster,
                 .message_pool = message_pool,
             };
         }
@@ -62,31 +65,53 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             self.reply();
         }
 
-        pub fn request(
+        pub fn batch_get(
+            self: *Self,
+            operation: Self.StateMachine.Operation,
+            event_count: usize,
+        ) Self.BatchError!Batch {
+            const body_size = switch (operation) {
+                inline else => |op| @sizeOf(Self.StateMachine.Event(op)) * event_count,
+            };
+            assert(body_size <= constants.message_body_size_max);
+
+            if (self.messages_available == 0) return error.TooManyOutstanding;
+            const message = self.get_message();
+            errdefer self.release(message);
+
+            message.header.* = .{
+                .client = self.id,
+                .request = 0,
+                .cluster = self.cluster,
+                .command = .request,
+                .operation = vsr.Operation.from(Self.StateMachine, operation),
+                .size = @intCast(@sizeOf(Header) + body_size),
+            };
+
+            return Batch{ .message = message };
+        }
+
+        pub const Batch = struct {
+            message: *Message,
+
+            pub fn slice(batch: Batch) []u8 {
+                return batch.message.body();
+            }
+        };
+
+        pub fn batch_submit(
             self: *Self,
             user_data: u128,
             callback: Self.Request.Callback,
-            operation: Self.StateMachine.Operation,
-            message: *Message,
-            message_body_size: usize,
+            batch: Batch,
         ) void {
-            const message_request = message.build(.request);
-
-            message_request.header.* = .{
-                .client = 0,
-                .request = 0,
-                .cluster = 0,
-                .command = .request,
-                .operation = vsr.Operation.from(Self.StateMachine, operation),
-                .size = @as(u32, @intCast(@sizeOf(Header) + message_body_size)),
-            };
+            const message = batch.message;
 
             assert(!self.request_queue.full());
 
             self.request_queue.push_assume_capacity(.{
-                .user_data = user_data,
-                .callback = callback,
-                .message = message_request,
+                .info = .{ .user_data = user_data, .callback = callback },
+                .message = message,
             });
         }
 
@@ -118,8 +143,8 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 // callback. This necessitates a `copy_disjoint` above.
                 self.release(inflight.message.base());
 
-                inflight.callback.?(
-                    inflight.user_data,
+                inflight.info.callback.?(
+                    inflight.info.user_data,
                     reply_message.header.operation.cast(Self.StateMachine),
                     reply_message.body(),
                 );

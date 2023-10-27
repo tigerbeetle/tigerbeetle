@@ -33,7 +33,7 @@ pub fn StateMachineType(
             operation: Operation,
             results: []const u8,
             demuxed: []u8,
-            event: struct { index: u32, size: u32 },
+            event: struct { index: u32, count: u32 },
         ) u32 {
             _ = .{ operation, results, demuxed, event };
             unreachable;
