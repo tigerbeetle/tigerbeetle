@@ -65,23 +65,6 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
-        fn operation_event_size(op: u8) ?usize {
-            const allowed_operations = [_]Client.StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-            };
-
-            inline for (allowed_operations) |operation| {
-                if (op == @intFromEnum(operation)) {
-                    return @sizeOf(Client.StateMachine.Event(operation));
-                }
-            }
-
-            return null;
-        }
-
         const PacketError = error{
             TooMuchData,
             InvalidOperation,
@@ -241,12 +224,16 @@ pub fn ContextType(
             }
         }
 
-        pub fn request(self: *Context, packet: *Packet) void {
-            assert(self.client.messages_available > 0);
-
+        pub fn request(self: *Context, packet: *Packet) Client.BatchError!void {
             // Get the size of each request structure in the packet.data:
-            const event_size: usize = operation_event_size(packet.operation) orelse {
-                return self.on_complete(packet, error.InvalidOperation);
+            const operation: Client.StateMachine.Operation = @enumFromInt(packet.operation);
+            const event_size = switch (operation) {
+                inline .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+                => |op| @sizeOf(StateMachine.Event(op)),
+                else => return self.on_complete(packet, error.InvalidOperation),
             };
 
             // Make sure the packet.data size is correct:
@@ -260,24 +247,18 @@ pub fn ContextType(
                 return self.on_complete(packet, error.TooMuchData);
             }
 
-            const message = self.client.get_message();
-            errdefer self.client.release(message);
-
-            // Write the packet data to the message:
-            const writable = message.buffer[@sizeOf(Header)..][0..constants.message_body_size_max];
-            stdx.copy_disjoint(.inexact, u8, writable, readable);
-            const wrote = readable.len;
+            const event_count = @divExact(readable.len, event_size);
+            const batch = try self.client.batch_get(operation, event_count);
+            stdx.copy_disjoint(.exact, u8, batch.slice(), readable);
 
             // Submit the message for processing:
-            self.client.request(
+            self.client.batch_submit(
                 @as(u128, @bitCast(UserData{
                     .self = self,
                     .packet = packet,
                 })),
                 Context.on_result,
-                @as(Client.StateMachine.Operation, @enumFromInt(packet.operation)),
-                message,
-                wrote,
+                batch,
             );
         }
 
