@@ -65,6 +65,21 @@ pub fn ContextType(
             assert(@sizeOf(UserData) == @sizeOf(u128));
         }
 
+        fn operation_event_size(op: u8) ?usize {
+            const allowed_operations = [_]Client.StateMachine.Operation{
+                .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+            };
+            inline for (allowed_operations) |operation| {
+                if (op == @intFromEnum(operation)) {
+                    return @sizeOf(Client.StateMachine.Event(operation));
+                }
+            }
+            return null;
+        }
+
         const PacketError = error{
             TooMuchData,
             InvalidOperation,
@@ -226,14 +241,8 @@ pub fn ContextType(
 
         pub fn request(self: *Context, packet: *Packet) Client.BatchError!void {
             // Get the size of each request structure in the packet.data:
-            const operation: Client.StateMachine.Operation = @enumFromInt(packet.operation);
-            const event_size = switch (operation) {
-                inline .create_accounts,
-                .create_transfers,
-                .lookup_accounts,
-                .lookup_transfers,
-                => |op| @sizeOf(StateMachine.Event(op)),
-                else => return self.on_complete(packet, error.InvalidOperation),
+            const event_size: usize = operation_event_size(packet.operation) orelse {
+                return self.on_complete(packet, error.InvalidOperation);
             };
 
             // Make sure the packet.data size is correct:
@@ -247,8 +256,11 @@ pub fn ContextType(
                 return self.on_complete(packet, error.TooMuchData);
             }
 
-            const event_count = @divExact(readable.len, event_size);
-            const batch = try self.client.batch_get(operation, event_count);
+            const batch = try self.client.batch_get(
+                @enumFromInt(packet.operation),
+                @divExact(readable.len, event_size),
+            );
+
             stdx.copy_disjoint(.exact, u8, batch.slice(), readable);
 
             // Submit the message for processing:

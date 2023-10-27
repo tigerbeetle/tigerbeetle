@@ -460,7 +460,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             request_body_size: usize,
         ) void {
             const client = &cluster.clients[client_index];
-            request_message.* = .{
+            request_message.header.* = .{
                 .client = client.id,
                 .request = undefined, // Set by client.raw_request.
                 .cluster = client.cluster,
