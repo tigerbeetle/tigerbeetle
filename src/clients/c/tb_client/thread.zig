@@ -64,9 +64,13 @@ pub fn ThreadType(
             self.context.tick();
 
             // Process packets from either pending or submitted as long as we have messages.
-            while (self.context.client.messages_available > 0) {
-                const packet = self.submitted.pop() orelse break;
-                self.context.request(packet);
+            while (self.submitted.pop()) |packet| {
+                self.context.request(packet) catch |err| switch (err) {
+                    error.TooManyOutstanding => {
+                        self.submitted.push(packet);
+                        break;
+                    },
+                };
             }
         }
     };

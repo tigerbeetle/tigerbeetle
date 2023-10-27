@@ -22,6 +22,23 @@ pub fn StateMachineType(
             echo = config.vsr_operations_reserved + 0,
         };
 
+        /// TODO: Support batching in test StateMachine (?)
+        pub fn batch_logical(operation: Operation) bool {
+            _ = operation;
+            return false;
+        }
+
+        /// TODO: Support batching in test StateMachine (?)
+        pub fn batch_demux(
+            operation: Operation,
+            results: []const u8,
+            demuxed: []u8,
+            event: struct { index: u32, size: u32 },
+        ) u32 {
+            _ = .{ operation, results, demuxed, event };
+            unreachable;
+        }
+
         pub const Options = struct {
             lsm_forest_node_count: u32,
         };

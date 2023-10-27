@@ -459,12 +459,20 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             request_message: *Message,
             request_body_size: usize,
         ) void {
-            cluster.clients[client_index].request(
+            const client = &cluster.clients[client_index];
+            request_message.* = .{
+                .client = client.id,
+                .request = undefined, // Set by client.raw_request.
+                .cluster = client.cluster,
+                .command = .request,
+                .operation = vsr.Operation.from(StateMachine, request_operation),
+                .size = @intCast(@sizeOf(vsr.Header) + request_body_size),
+            };
+
+            client.raw_request(
                 undefined,
                 request_callback,
-                request_operation,
                 request_message,
-                request_body_size,
             );
         }
 

@@ -397,22 +397,17 @@ const Benchmark = struct {
     ) void {
         b.callback = callback;
 
-        const message = b.client.get_message();
-        errdefer b.client.release(message);
+        const event_size = switch (operation) {
+            inline else => |op| @divExact(payload.len, @sizeOf(StateMachine.Event(op))),
+        };
 
-        stdx.copy_disjoint(
-            .inexact,
-            u8,
-            message.buffer[@sizeOf(vsr.Header)..],
-            payload,
-        );
+        const batch = b.client.batch_get(operation, event_size) catch unreachable;
+        stdx.copy_disjoint(.exact, u8, batch.slice(), payload);
 
-        b.client.request(
+        b.client.batch_sumit(
             @intCast(@intFromPtr(b)),
             send_complete,
-            operation,
-            message,
-            payload.len,
+            batch,
         );
     }
 
