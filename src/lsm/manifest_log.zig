@@ -686,6 +686,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.compact_blocks = @min(
                 manifest_log.pace.half_bar_compact_blocks(.{
                     .log_blocks_count = @intCast(manifest_log.log_block_checksums.count),
+                    .tables_count = manifest_log.table_extents.count(),
                 }),
                 // Never compact closed blocks. (They haven't even been written yet.)
                 manifest_log.log_block_checksums.count - manifest_log.blocks_closed,
@@ -1013,9 +1014,9 @@ pub const Options = struct {
 /// The goals of manifest log compaction are (in no particular order):
 ///
 /// 1. Free enough manifest blocks such that there are always enough free slots in the manifest
-///    trailer to accommodate the appends by table compaction.
-/// 2. Shrink the manifest: A smaller manifest means that fewer blocks need to be replayed during
-///    recovery, or repaired during state sync.
+///    log checksums/addresses ring buffers to accommodate the appends by table compaction.
+/// 2. Shrink the manifest log: A smaller manifest means that fewer blocks need to be replayed
+///    during recovery, or repaired during state sync.
 /// 3. Don't shrink the manifest too much: The more manifest compaction work is deferred, the more
 ///    "efficient" compaction is. Put another way: deferring manifest compaction means that more
 ///    entries are freed per block compacted.
@@ -1090,6 +1091,9 @@ pub const Options = struct {
 /// As `C` increases (relative to `A`), the manifest block upper-bound decreases, but the amount of
 /// compaction work performed increases.
 ///
+/// If, for any half-bar that the manifest log contains at least `MC(∞)` blocks we compact at least
+/// `C` blocks, then the total size of the manifest log will never exceed `MB(∞)` blocks.
+///
 /// NOTE: Both the algorithm above and the implementation below make several simplifications:
 ///
 ///   - The calculation is performed at the granularity of blocks, not entries. In particular, this
@@ -1129,6 +1133,8 @@ const Pace = struct {
     log_blocks_cycle_max: u32,
     /// "limit of MB(b) as b approaches ∞"
     log_blocks_max: u32,
+
+    tables_max: u32,
 
     comptime {
         const log_pace = false;
@@ -1180,6 +1186,7 @@ const Pace = struct {
 
         // "T":
         const log_blocks_full_max = stdx.div_ceil(options.tables_max, block_entries_max);
+        assert(log_blocks_full_max > 0);
 
         // "limit of MC(c) as c approaches ∞":
         // Working out this recurrence relation's limit with a closed-form solution is complicated.
@@ -1207,30 +1214,53 @@ const Pace = struct {
         // "limit of MB(b) as b approaches ∞":
         const log_blocks_max = log_blocks_cycle_max + log_blocks_burst_max;
 
+        assert(log_blocks_cycle_max > log_blocks_full_max);
+        assert(log_blocks_cycle_max < log_blocks_max);
+
         return .{
             .half_bar_append_blocks_max = half_bar_append_blocks_max,
             .half_bar_compact_blocks_max = half_bar_compact_blocks_max,
             .log_blocks_full_max = log_blocks_full_max,
             .log_blocks_max = log_blocks_max,
             .log_blocks_cycle_max = log_blocks_cycle_max,
+            .tables_max = options.tables_max,
         };
     }
 
     fn half_bar_compact_blocks(pace: Pace, options: struct {
         /// The number of manifest blocks that *currently* exist.
         log_blocks_count: u32,
+        /// The number of live tables.
+        tables_count: u32,
     }) u32 {
-        if (options.log_blocks_count < pace.log_blocks_cycle_max) {
-            // We have enough free manifest blocks that we could go a whole "cycle" without
-            // compacting any. It doesn't strictly matter how much compaction we do in this case, so
-            // just try to pace the work evenly, erring on the side of doing less work than
-            // necessary.
-            return @divFloor(
-                pace.half_bar_compact_blocks_max * options.log_blocks_count,
-                pace.log_blocks_cycle_max,
-            );
-        } else {
+        assert(options.tables_count <= pace.tables_max);
+
+        // Pretend we have an extra half_bar_append_blocks_max blocks so that we always switch to
+        // the maximum compaction rate before we exceed the cycle-max.
+        if (pace.log_blocks_cycle_max <=
+            options.log_blocks_count + pace.half_bar_append_blocks_max)
+        {
             return pace.half_bar_compact_blocks_max;
         }
+
+        // We have enough free manifest blocks that we could go a whole "cycle" without
+        // compacting any. It doesn't strictly matter how much compaction we do in this case, so
+        // just try to pace the work evenly, maintaining a constant load factor with respect to
+        // the cycle-max.
+
+        // Our "target" block count extrapolates a log block count from our table count and the
+        // log's maximum load factor.
+        const log_blocks_target = @max(1, @divFloor(
+            pace.log_blocks_cycle_max * options.tables_count,
+            pace.tables_max,
+        ));
+
+        return @min(
+            pace.half_bar_compact_blocks_max,
+            @divFloor(
+                pace.half_bar_compact_blocks_max * options.log_blocks_count,
+                log_blocks_target,
+            ),
+        );
     }
 };
