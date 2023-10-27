@@ -404,7 +404,7 @@ const Benchmark = struct {
         const batch = b.client.batch_get(operation, event_size) catch unreachable;
         stdx.copy_disjoint(.exact, u8, batch.slice(), payload);
 
-        b.client.batch_sumit(
+        b.client.batch_submit(
             @intCast(@intFromPtr(b)),
             send_complete,
             batch,
