@@ -13,6 +13,7 @@ const schema = @import("schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
+const table_count_max = @import("tree.zig").table_count_max;
 
 pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     var groove_fields: []const std.builtin.Type.StructField = &.{};
@@ -194,6 +195,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             var manifest_log = try ManifestLog.init(allocator, grid, .{
                 .tree_id_min = tree_id_range.min,
                 .tree_id_max = tree_id_range.max,
+                // TODO Make this a runtime argument (from the CLI, derived from storage-size-max if
+                // possible).
+                .forest_table_count_max = table_count_max,
             });
             errdefer manifest_log.deinit(allocator);
 

@@ -508,6 +508,25 @@ pub const lsm_growth_factor = config.cluster.lsm_growth_factor;
 /// TODO Double-check this with our "LSM Manifest" spreadsheet.
 pub const lsm_manifest_node_size = config.process.lsm_manifest_node_size;
 
+/// The number of manifest blocks to compact *beyond the minimum*, per half-bar.
+///
+/// In the worst case, we still compact entries faster than we produce them (by a margin of
+/// "extra" blocks). This is necessary to ensure that the manifest has a bounded number of entries.
+/// (Or in other words, that Pace's recurrence relation converges.)
+///
+/// This specific choice of value is somewhat arbitrary, but yields a decent balance between
+/// "compaction work performed" and "total manifest size".
+///
+/// As this value increases, the manifest must perform more compaction work, but the manifest
+/// upper-bound shrinks (and therefore manifest recovery time decreases).
+///
+/// See ManifestLog.Pace for more detail.
+pub const lsm_manifest_compact_extra_blocks = config.cluster.lsm_manifest_compact_extra_blocks;
+
+comptime {
+    assert(lsm_manifest_compact_extra_blocks > 0);
+}
+
 /// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
 /// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
 /// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
