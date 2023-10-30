@@ -41,6 +41,7 @@ const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
+pub const SuperBlockFreeList = @import("superblock_free_list.zig").FreeList;
 pub const SuperBlockClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
@@ -594,6 +595,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         const SuperBlock = @This();
 
         pub const FreeSet = SuperBlockFreeSet;
+        pub const FreeList = SuperBlockFreeList;
         pub const ClientSessions = SuperBlockClientSessions;
 
         pub const Context = struct {
@@ -651,6 +653,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// Staging trailers. These are modified between checkpoints, and are persisted on
         /// checkpoint and sync.
         free_set: FreeSet,
+        free_list: FreeList,
         client_sessions: ClientSessions,
 
         /// Updated when:
@@ -706,6 +709,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             var free_set = try FreeSet.init(allocator, block_count_limit);
             errdefer free_set.deinit(allocator);
 
+            var free_list = try FreeList.init(allocator, constants.free_list_capacity);
+            errdefer free_list.deinit(allocator);
+
             var client_sessions = try ClientSessions.init(allocator);
             errdefer client_sessions.deinit(allocator);
 
@@ -730,6 +736,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .staging = &b[0],
                 .reading = &reading[0],
                 .free_set = free_set,
+                .free_list = free_list,
                 .client_sessions = client_sessions,
                 .free_set_buffer = free_set_buffer,
                 .client_sessions_buffer = client_sessions_buffer,

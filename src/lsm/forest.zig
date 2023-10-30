@@ -158,6 +158,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             .min = tree_infos[0].tree_id,
             .max = tree_infos[tree_infos.len - 1].tree_id,
         };
+        const free_list_round_reserved_max: u32 = free_list_round_reserved_max: {
+            var count: u32 = 0;
+            for (tree_infos) |tree_info| {
+                count += tree_info.Tree.Table.block_count_max * constants.lsm_growth_factor * constants.lsm_levels;
+            }
+            break :free_list_round_reserved_max count;
+        };
 
         progress: ?union(enum) {
             open: struct { callback: Callback },
@@ -304,6 +311,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub fn compact(forest: *Forest, callback: Callback, op: u64) void {
             assert(forest.progress == null);
             forest.verify_table_extents();
+
+            forest.grid.superblock.free_list.set_round_reserved_max(free_list_round_reserved_max);
 
             inline for (std.meta.fields(Grooves)) |field| {
                 @field(forest.grooves, field.name).compact(compact_groove_callback(field.name), op);

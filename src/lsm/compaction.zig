@@ -116,8 +116,24 @@ pub fn CompactionType(
 
         /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
         /// they are applied deterministically relative to other concurrent compactions.
+        manifest_entries_updates: stdx.BoundedArray(struct {
+            operation: enum {
+                update_level_a,
+                update_level_b,
+            },
+            table: TableInfoReference,
+        }, manifest_entries_max: {
+            // Worst-case manifest updates:
+            // See docs/internals/lsm.md "Compaction Table Overlap" for more detail.
+            var count = 0;
+            count += constants.lsm_growth_factor + 1; // Insert the output tables to level B.
+            // (In the move-table case, only a single TableInfo is inserted, and none are updated.)
+            break :manifest_entries_max count;
+        }) = .{},
         manifest_entries: stdx.BoundedArray(struct {
             operation: enum {
+                remove_from_level_b,
+                remove_from_level_a,
                 insert_to_level_b,
                 move_to_level_b,
             },
@@ -265,7 +281,7 @@ pub fn CompactionType(
             assert(compaction.state == .applied_to_manifest);
 
             compaction.state = .idle;
-            if (compaction.grid_reservation) |grid_reservation| {
+            if (compaction.grid_reservation) |*grid_reservation| {
                 compaction.context.grid.forfeit(grid_reservation);
                 compaction.grid_reservation = null;
             } else {
@@ -310,11 +326,15 @@ pub fn CompactionType(
             // end of each half-bar).
             const grid_reservation = if (move_table)
                 null
-            else
-                // +1 to count the input table from level A.
-                context.grid.reserve(
-                    (context.range_b.tables.count() + 1) * Table.block_count_max,
-                ).?;
+            else grid_reservation: {
+                const level_b: u32 = @intCast(context.range_b.tables.count() * Table.block_count_max);
+                const level_a: u32 = @intCast(Table.block_count_max);
+
+                break :grid_reservation context.grid.reserve(.{
+                    .acquire_blocks = level_b + level_a,
+                    .release_blocks = level_b + if (context.table_info_a == .disk) level_a else 0,
+                }).?;
+            };
 
             // Levels may choose to drop tombstones if keys aren't included in the lower levels.
             // This invariant is always true for the last level as it doesn't have any lower ones.
@@ -418,7 +438,7 @@ pub fn CompactionType(
                 .checksums = index_schema_a.data_checksums_used(compaction.index_block_a),
                 .direction = .ascending,
             });
-            compaction.release_table_blocks(compaction.index_block_a);
+            compaction.release_table(compaction.index_block_a, .a, compaction.context.table_info_a.disk);
             compaction.state = .compacting;
             compaction.loop_start();
         }
@@ -546,12 +566,17 @@ pub fn CompactionType(
         fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
-            compaction.release_table_blocks(compaction.index_block_b);
+
+            const table_ref = compaction.context.range_b.tables.get(iterator_b.table_index);
+            compaction.release_table(compaction.index_block_b, .b, table_ref);
         }
 
-        // TODO: Support for LSM snapshots would require us to only remove blocks
-        // that are invisible.
-        fn release_table_blocks(compaction: *Compaction, index_block: BlockPtrConst) void {
+        fn release_table(
+            compaction: *Compaction,
+            index_block: BlockPtrConst,
+            level: InputLevel,
+            table: TableInfoReference,
+        ) void {
             // Release the table's block addresses in the Grid as it will be made invisible.
             // This is safe; compaction.index_block_b holds a copy of the index block for a
             // table in Level B. Additionally, compaction.index_block_a holds
@@ -559,8 +584,31 @@ pub fn CompactionType(
 
             const grid = compaction.context.grid;
             const index_schema = schema.TableIndex.from(index_block);
-            for (index_schema.data_addresses_used(index_block)) |address| grid.release(address);
-            grid.release(Table.block_address(index_block));
+
+            // TODO: Support for LSM snapshots would require us to only remove blocks
+            // that are invisible.
+            const invisible = true;
+            // +1 for the index block.
+            const blocks_to_release = index_schema.data_blocks_used(index_block) + 1;
+            if (invisible and blocks_to_release <= compaction.grid_reservation.?.remaining_staging) {
+                // Table is invisible, and we have enough negative space to free it immediately.
+                for (index_schema.data_addresses_used(index_block)) |address| {
+                    grid.release(&compaction.grid_reservation.?, address);
+                }
+                grid.release(&compaction.grid_reservation.?, Table.block_address(index_block));
+                compaction.manifest_entries.append_assume_capacity(.{
+                    .operation = if (level == .a) .remove_from_level_a else .remove_from_level_b,
+                    .table = table.table_info.*,
+                });
+            } else {
+                // Either the table is visible by some non-latest snapshot, or the free list is too
+                // full to free the table immediately. Just set `snapshot_max` and let manifest
+                // log compaction to free the table when that's possible
+                compaction.manifest_entries_updates.append_assume_capacity(.{
+                    .operation = if (level == .a) .update_level_a else .update_level_b,
+                    .table = table,
+                });
+            }
         }
 
         fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
@@ -789,7 +837,7 @@ pub fn CompactionType(
             {
                 table_builder.data_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .address = compaction.context.grid.acquire(&compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                     .tree_id = compaction.tree_config.id,
                 });
@@ -803,7 +851,7 @@ pub fn CompactionType(
             {
                 const table = table_builder.index_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
-                    .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
+                    .address = compaction.context.grid.acquire(&compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                     .tree_id = compaction.tree_config.id,
                 });
@@ -921,22 +969,30 @@ pub fn CompactionType(
 
             if (compaction.move_table) {
                 // If no compaction is required, don't update snapshot_max.
-            } else {
-                // These updates MUST precede insert_table() and move_table() since they use
-                // references to modify the ManifestLevel in-place.
-                switch (compaction.context.table_info_a) {
-                    .immutable => {},
-                    .disk => |table_info| {
-                        manifest.update_table(level_b - 1, snapshot_max, table_info);
+                assert(compaction.manifest_entries_updates.slice().len == 0);
+            }
+
+            // These updates MUST precede insert_table() and move_table() since they use
+            // references to modify the ManifestLevel in-place.
+            for (compaction.manifest_entries_updates.slice()) |*entry| {
+                switch (entry.operation) {
+                    .update_level_a => {
+                        assert(entry.table.table_info.checksum == compaction.context.table_info_a.disk.table_info.checksum);
+                        manifest.update_table(level_b - 1, snapshot_max, entry.table);
                     },
-                }
-                for (compaction.context.range_b.tables.const_slice()) |table| {
-                    manifest.update_table(level_b, snapshot_max, table);
+                    .update_level_b => {
+                        manifest.update_table(level_b, snapshot_max, entry.table);
+                    },
                 }
             }
 
             for (compaction.manifest_entries.slice()) |*entry| {
                 switch (entry.operation) {
+                    .remove_from_level_a => {
+                        assert(entry.table.checksum == compaction.context.table_info_a.disk.table_info.checksum);
+                        manifest.remove_table(level_b - 1, &entry.table);
+                    },
+                    .remove_from_level_b => manifest.remove_table(level_b, &entry.table),
                     .insert_to_level_b => manifest.insert_table(level_b, &entry.table),
                     .move_to_level_b => manifest.move_table(level_b - 1, level_b, &entry.table),
                 }

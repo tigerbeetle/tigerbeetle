@@ -901,12 +901,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .idle => assert(tree.table_immutable.mutability.immutable.flushed),
                     .tables_writing_done => {
                         tree.compaction_table_immutable.apply_to_manifest();
-                        tree.manifest.remove_invisible_tables(
-                            tree.compaction_table_immutable.context.level_b,
-                            &.{},
-                            tree.compaction_table_immutable.context.range_b.key_min,
-                            tree.compaction_table_immutable.context.range_b.key_max,
-                        );
+                        // tree.manifest.remove_invisible_tables(
+                        //     tree.compaction_table_immutable.context.level_b,
+                        //     &.{},
+                        //     tree.compaction_table_immutable.context.range_b.key_min,
+                        //     tree.compaction_table_immutable.context.range_b.key_max,
+                        // );
 
                         // Mark that the contents of our immutable table have been flushed,
                         // so it's safe to clear them.
@@ -931,19 +931,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     .idle => {}, // The compaction wasn't started for this half bar.
                     .tables_writing_done => {
                         context.compaction.apply_to_manifest();
-                        tree.manifest.remove_invisible_tables(
-                            context.compaction.context.level_b,
-                            &.{},
-                            context.compaction.context.range_b.key_min,
-                            context.compaction.context.range_b.key_max,
-                        );
+                        // tree.manifest.remove_invisible_tables(
+                        //     context.compaction.context.level_b,
+                        //     &.{},
+                        //     context.compaction.context.range_b.key_min,
+                        //     context.compaction.context.range_b.key_max,
+                        // );
                         if (context.compaction.context.level_b > 0) {
-                            tree.manifest.remove_invisible_tables(
-                                context.compaction.context.level_b - 1,
-                                &.{},
-                                context.compaction.context.range_b.key_min,
-                                context.compaction.context.range_b.key_max,
-                            );
+                            // tree.manifest.remove_invisible_tables(
+                            //     context.compaction.context.level_b - 1,
+                            //     &.{},
+                            //     context.compaction.context.range_b.key_min,
+                            //     context.compaction.context.range_b.key_max,
+                            // );
                         }
                         context.compaction.transition_to_idle();
                     },

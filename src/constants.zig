@@ -473,6 +473,8 @@ comptime {
 /// * the static memory allocation required for tracking LSM forest metadata in memory.
 pub const storage_size_max = config.cluster.storage_size_max;
 
+pub const free_list_capacity = 2048;
+
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///
 /// - A lower block size increases the memory overhead of table metadata, due to smaller/more tables.

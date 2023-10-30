@@ -257,6 +257,24 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest.manifest_log.?.update(log_level, &table.encode(manifest.config.id));
         }
 
+        pub fn remove_table(
+            manifest: *Manifest,
+            level: u8,
+            table: *const TreeTableInfo,
+        ) void {
+            assert(manifest.manifest_log.?.opened);
+            const manifest_level = &manifest.levels[level];
+
+            if (constants.verify) {
+                assert(manifest_level.contains(table));
+            }
+            manifest_level.remove_table(manifest.node_pool, table);
+
+            // Append update changes to the manifest log.
+            const log_level = @as(u6, @intCast(level));
+            manifest.manifest_log.?.remove(log_level, &table.encode(manifest.config.id));
+        }
+
         pub fn move_table(
             manifest: *Manifest,
             level_a: u8,

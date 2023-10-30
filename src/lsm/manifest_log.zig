@@ -653,7 +653,10 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             // +1: During manifest-log compaction, we will create at most one block.
             manifest_log.grid_reservation =
-                manifest_log.grid.reserve(1 + manifest_log.options.blocks_count_appends()).?;
+                manifest_log.grid.reserve(.{
+                    .acquire_blocks = 1 + @as(u32, @intCast(manifest_log.options.blocks_count_appends())),
+                    .release_blocks = 1,
+                }).?;
 
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_flush_callback);
@@ -764,7 +767,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             maybe(frees == 0);
             assert(manifest_log.blocks_closed <= 1);
 
-            manifest_log.grid.release(oldest_address);
+            manifest_log.grid.release(&manifest_log.grid_reservation.?, oldest_address);
             manifest_log.reading = false;
             manifest_log.compact_done_callback();
         }
@@ -790,7 +793,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
 
-            if (manifest_log.grid_reservation) |grid_reservation| {
+            if (manifest_log.grid_reservation) |*grid_reservation| {
                 manifest_log.grid.forfeit(grid_reservation);
                 manifest_log.grid_reservation = null;
             } else {
@@ -858,7 +861,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.blocks.advance_tail();
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
-            const block_address = manifest_log.grid.acquire(manifest_log.grid_reservation.?);
+            const block_address = manifest_log.grid.acquire(&manifest_log.grid_reservation.?);
 
             const newest_checksum = manifest_log.log_block_checksums.tail() orelse 0;
             const newest_address = manifest_log.log_block_addresses.tail() orelse 0;

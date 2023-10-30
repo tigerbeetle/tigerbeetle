@@ -232,54 +232,54 @@ pub const FreeSet = struct {
         }
     }
 
-    /// Marks a free block from the reservation as allocated, and returns the address.
-    /// The reservation must not have been forfeited yet.
-    /// The reservation must belong to the current cycle of reservations.
-    ///
-    /// Invariants:
-    ///
-    ///   - An acquired block cannot be acquired again until it has been released and the release
-    ///     has been checkpointed.
-    ///
-    /// Returns null if no free block is available in the reservation.
-    pub fn acquire(set: *FreeSet, reservation: Reservation) ?u64 {
-        assert(set.reservation_count > 0);
-        assert(reservation.block_count > 0);
-        assert(reservation.block_base < set.reservation_blocks);
-        assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
-        assert(reservation.session == set.reservation_session);
+    // /// Marks a free block from the reservation as allocated, and returns the address.
+    // /// The reservation must not have been forfeited yet.
+    // /// The reservation must belong to the current cycle of reservations.
+    // ///
+    // /// Invariants:
+    // ///
+    // ///   - An acquired block cannot be acquired again until it has been released and the release
+    // ///     has been checkpointed.
+    // ///
+    // /// Returns null if no free block is available in the reservation.
+    // pub fn acquire(set: *FreeSet, reservation: Reservation) ?u64 {
+    //     assert(set.reservation_count > 0);
+    //     assert(reservation.block_count > 0);
+    //     assert(reservation.block_base < set.reservation_blocks);
+    //     assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
+    //     assert(reservation.session == set.reservation_session);
 
-        const shard = find_bit(
-            set.index,
-            @divFloor(reservation.block_base, shard_bits),
-            div_ceil(reservation.block_base + reservation.block_count, shard_bits),
-            .unset,
-        ) orelse return null;
-        assert(!set.index.isSet(shard));
+    //     const shard = find_bit(
+    //         set.index,
+    //         @divFloor(reservation.block_base, shard_bits),
+    //         div_ceil(reservation.block_base + reservation.block_count, shard_bits),
+    //         .unset,
+    //     ) orelse return null;
+    //     assert(!set.index.isSet(shard));
 
-        const reservation_start = @max(
-            shard * shard_bits,
-            reservation.block_base,
-        );
-        const reservation_end = reservation.block_base + reservation.block_count;
-        const block = find_bit(
-            set.blocks,
-            reservation_start,
-            reservation_end,
-            .unset,
-        ) orelse return null;
-        assert(block >= reservation.block_base);
-        assert(block <= reservation.block_base + reservation.block_count);
-        assert(!set.blocks.isSet(block));
-        assert(!set.staging.isSet(block));
+    //     const reservation_start = @max(
+    //         shard * shard_bits,
+    //         reservation.block_base,
+    //     );
+    //     const reservation_end = reservation.block_base + reservation.block_count;
+    //     const block = find_bit(
+    //         set.blocks,
+    //         reservation_start,
+    //         reservation_end,
+    //         .unset,
+    //     ) orelse return null;
+    //     assert(block >= reservation.block_base);
+    //     assert(block <= reservation.block_base + reservation.block_count);
+    //     assert(!set.blocks.isSet(block));
+    //     assert(!set.staging.isSet(block));
 
-        set.blocks.set(block);
-        // Update the index when every block in the shard is allocated.
-        if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
+    //     set.blocks.set(block);
+    //     // Update the index when every block in the shard is allocated.
+    //     if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
 
-        const address = block + 1;
-        return address;
-    }
+    //     const address = block + 1;
+    //     return address;
+    // }
 
     fn find_free_block_in_shard(set: FreeSet, shard: usize) ?usize {
         const shard_start = shard * shard_bits;
