@@ -20,7 +20,7 @@
 - [#1218](https://github.com/tigerbeetle/tigerbeetle/pull/1218)
 
   Rewrite Node.js client implementation to use the common C client underneath. While clients for
-  other languages already use the underlying C library, the Node.js duplicated some code for
+  other languages already use the underlying C library, the Node.js client duplicated some code for
   historical reasons, but now we can leave that duplication in the past. [This Is A
   Photograph](https://www.youtube.com/watch?v=X0i7whWLW8M).
 
