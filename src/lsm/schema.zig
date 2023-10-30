@@ -39,9 +39,7 @@
 //! │                             │ parent=previous_manifest_block.checksum else 0
 //! │                             │ commit=previous_manifest_block.address else 0
 //! │ [entry_count]TableInfo      │
-//! │ [entry_count]Label          │ level index, insert|remove
 //! │ […]u8{0}                    │ padding (to end of block)
-//! Label and TableInfo entries correspond.
 const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -365,21 +363,15 @@ pub const TableData = struct {
     }
 };
 
-/// A Manifest block's body is a SoA of Labels and TableInfos.
-/// Each Label/TableInfo pair is an "entry".
+/// A Manifest block's body is an array of TableInfo entries.
 // TODO Store timestamp (snapshot) in header.
 pub const ManifestNode = struct {
-    const entry_size = @sizeOf(TableInfo) + @sizeOf(Label);
+    const entry_size = @sizeOf(TableInfo);
 
     pub const entry_count_max = @divFloor(block_body_size, entry_size);
 
-    const tables_size_max = entry_count_max * @sizeOf(TableInfo);
-    const labels_size_max = entry_count_max * @sizeOf(Label);
-
     comptime {
         assert(entry_count_max > 0);
-        assert(tables_size_max % @alignOf(Label) == 0);
-        assert(labels_size_max % @alignOf(Label) == 0);
 
         // Bit 7 is reserved to indicate whether the event is an insert or remove.
         assert(constants.lsm_levels <= std.math.maxInt(u6) + 1);
@@ -387,16 +379,12 @@ pub const ManifestNode = struct {
         assert(@sizeOf(Label) == @sizeOf(u8));
         assert(@alignOf(Label) == 1);
 
-        // All TableInfo's should already be 16-byte aligned because of the leading checksum.
+        // TableInfo should already be 16-byte aligned because of the leading padded key.
         const alignment = 16;
         assert(alignment <= @sizeOf(vsr.Header));
         assert(alignment == @alignOf(TableInfo));
 
         // For keys { 8, 16, 24, 32 } all TableInfo's should be a multiple of the alignment.
-        // However, we still store Label ahead of TableInfo to save space on the network.
-        // This means we store fewer entries per manifest block, to gain less padding,
-        // since we must store entry_count_max of whichever array is first in the layout.
-        // For a better understanding of this decision, see schema.ManifestNode.size().
         assert(@sizeOf(TableInfo) % alignment == 0);
     }
 
@@ -416,14 +404,15 @@ pub const ManifestNode = struct {
         /// All keys must fit within 32 bytes.
         pub const KeyPadded = [32]u8;
 
-        checksum: u128,
-        address: u64,
-        tree_id: u16,
-        reserved: [6]u8 = .{0} ** 6,
-        snapshot_min: u64,
-        snapshot_max: u64,
         key_min: KeyPadded,
         key_max: KeyPadded,
+        checksum: u128,
+        address: u64,
+        snapshot_min: u64,
+        snapshot_max: u64,
+        tree_id: u16,
+        label: Label,
+        reserved: [5]u8 = .{0} ** 5,
 
         comptime {
             assert(@alignOf(TableInfo) == 16);
@@ -490,9 +479,7 @@ pub const ManifestNode = struct {
         assert(schema.entry_count <= entry_count_max);
 
         const tables_size = schema.entry_count * @sizeOf(TableInfo);
-        const labels_size = schema.entry_count * @sizeOf(Label);
-
-        return @sizeOf(vsr.Header) + tables_size + labels_size;
+        return @sizeOf(vsr.Header) + tables_size;
     }
 
     pub fn tables(schema: *const ManifestNode, block: BlockPtr) []TableInfo {
@@ -506,24 +493,6 @@ pub const ManifestNode = struct {
         return mem.bytesAsSlice(
             TableInfo,
             block[@sizeOf(vsr.Header)..][0 .. schema.entry_count * @sizeOf(TableInfo)],
-        );
-    }
-
-    pub fn labels(schema: *const ManifestNode, block: BlockPtr) []Label {
-        const tables_size = schema.entry_count * @sizeOf(TableInfo);
-        const labels_size = schema.entry_count * @sizeOf(Label);
-        return mem.bytesAsSlice(
-            Label,
-            block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
-        );
-    }
-
-    pub fn labels_const(schema: *const ManifestNode, block: BlockPtrConst) []const Label {
-        const tables_size = schema.entry_count * @sizeOf(TableInfo);
-        const labels_size = schema.entry_count * @sizeOf(Label);
-        return mem.bytesAsSlice(
-            Label,
-            block[@sizeOf(vsr.Header) + tables_size ..][0..labels_size],
         );
     }
 };

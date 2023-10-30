@@ -269,18 +269,18 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
-            level: u6,
             table: *const schema.ManifestNode.TableInfo,
         ) void {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(forest.manifest_log_progress == .idle);
-            assert(level < constants.lsm_levels);
+            assert(table.label.level < constants.lsm_levels);
+            assert(table.label.event != .remove);
 
             switch (table.tree_id) {
                 inline tree_id_range.min...tree_id_range.max => |tree_id| {
                     var tree: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
-                    tree.open_table(level, table);
+                    tree.open_table(table);
                 },
                 else => {
                     log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
@@ -529,7 +529,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // The latest version of each table, keyed by table checksum.
             // Null when the table has been deleted.
             var tables_latest = std.AutoHashMap(u128, struct {
-                level: u6,
                 table: schema.ManifestNode.TableInfo,
                 manifest_block: u64,
                 manifest_entry: u32,
@@ -553,16 +552,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 assert(block_schema.entry_count > 0);
                 assert(block_schema.entry_count <= schema.ManifestNode.entry_count_max);
 
-                for (
-                    block_schema.labels_const(block),
-                    block_schema.tables_const(block),
-                    0..,
-                ) |label, *table, entry| {
-                    if (label.event == .remove) {
+                for (block_schema.tables_const(block), 0..) |*table, entry| {
+                    if (table.label.event == .remove) {
                         maybe(tables_latest.remove(table.checksum));
                     } else {
                         tables_latest.put(table.checksum, .{
-                            .level = label.level,
                             .table = table.*,
                             .manifest_block = block_address,
                             .manifest_entry = @intCast(entry),
@@ -595,11 +589,17 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // Verify the tables in `tables` are exactly the tables recovered by the Forest.
             var forest_tables_iterator = ForestTableIterator{};
             while (forest_tables_iterator.next(forest)) |forest_table_item| {
-                const table_latest = tables_latest.get(forest_table_item.table.checksum).?;
-                assert(table_latest.level == forest_table_item.level);
-                assert(std.meta.eql(table_latest.table, forest_table_item.table));
+                const table_latest = tables_latest.get(forest_table_item.checksum).?;
+                assert(table_latest.table.label.level == forest_table_item.label.level);
+                assert(std.meta.eql(table_latest.table.key_min, forest_table_item.key_min));
+                assert(std.meta.eql(table_latest.table.key_max, forest_table_item.key_max));
+                assert(table_latest.table.checksum == forest_table_item.checksum);
+                assert(table_latest.table.address == forest_table_item.address);
+                assert(table_latest.table.snapshot_min == forest_table_item.snapshot_min);
+                assert(table_latest.table.snapshot_max == forest_table_item.snapshot_max);
+                assert(table_latest.table.tree_id == forest_table_item.tree_id);
 
-                const table_removed = tables_latest.remove(forest_table_item.table.checksum);
+                const table_removed = tables_latest.remove(forest_table_item.checksum);
                 assert(table_removed);
             }
             assert(tables_latest.count() == 0);

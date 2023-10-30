@@ -66,10 +66,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             break :default iterators;
         },
 
-        pub fn next(iterator: *ForestTableIterator, forest: *const Forest) ?struct {
-            level: u6,
-            table: TableInfo,
-        } {
+        pub fn next(iterator: *ForestTableIterator, forest: *const Forest) ?TableInfo {
             while (iterator.level < constants.lsm_levels) : (iterator.level += 1) {
                 for (iterator.tree_id..Forest.tree_id_range.max + 1) |tree_id_runtime| {
                     iterator.tree_id = @intCast(tree_id_runtime);
@@ -84,10 +81,14 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                                 forest.tree_for_id_const(tree_id),
                                 iterator.level,
                             )) |table| {
-                                return .{
+                                return table.encode(.{
+                                    .tree_id = tree_id,
                                     .level = iterator.level,
-                                    .table = table.encode(tree_id),
-                                };
+                                    // Dummy event, doesn't really mean anything in this context.
+                                    // (We are reusing the schema's TableInfo type since it is
+                                    // shared by all Tree types.)
+                                    .event = .insert,
+                                });
                             }
                         },
                         else => unreachable,
