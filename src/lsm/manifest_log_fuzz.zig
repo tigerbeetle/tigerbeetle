@@ -17,25 +17,32 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
-const data_file_size_min = @import("../vsr/superblock.zig").data_file_size_min;
 const Storage = @import("../testing/storage.zig").Storage;
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
-const BlockType = schema.BlockType;
+const tree = @import("./tree.zig");
 const TableInfo = schema.ManifestNode.TableInfo;
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
 const manifest_log_options = ManifestLogOptions{
     .tree_id_min = 1,
-    .tree_id_max = 1,
+    // Use many trees so that we fill manifest blocks quickly.
+    // (This makes it easier to hit "worst case" scenarios in manifest compaction pacing.)
+    .tree_id_max = 20,
+    // Use a artificially low table-count-max so that we can easily fill the manifest log and verify
+    // that pacing is correct.
+    .forest_table_count_max = schema.ManifestNode.entry_count_max * 100,
 };
-const entries_max_block = schema.ManifestNode.entry_count_max;
-const entries_max_buffered = entries_max_block *
-    std.meta.fieldInfo(ManifestLog, .blocks).type.count_max;
+
+const pace = @import("manifest_log.zig").Pace.init(.{
+    .tree_count = manifest_log_options.forest_tree_count(),
+    .tables_max = manifest_log_options.forest_table_count_max,
+    .half_bar_compact_blocks_extra = constants.lsm_manifest_compact_blocks_extra,
+});
 
 pub fn main() !void {
     const allocator = fuzz.allocator;
@@ -44,8 +51,8 @@ pub fn main() !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
 
     const events_count = @min(
-        args.events_max orelse @as(usize, 2e5),
-        fuzz.random_int_exponential(prng.random(), usize, 1e4),
+        args.events_max orelse @as(usize, 1e7),
+        fuzz.random_int_exponential(prng.random(), usize, 1e6),
     );
 
     const events = try generate_events(allocator, prng.random(), events_count);
@@ -163,127 +170,118 @@ fn generate_events(
     random: std.rand.Random,
     events_count: usize,
 ) ![]const ManifestEvent {
-    const EventType = enum {
-        insert,
-        update_change_level,
-        update_change_snapshot,
-        remove,
-        compact,
-        checkpoint,
-    };
+    var events = std.ArrayList(ManifestEvent).init(allocator);
+    errdefer events.deinit();
 
-    const events = try allocator.alloc(ManifestEvent, events_count);
-    errdefer allocator.free(events);
-
-    var event_distribution = fuzz.random_enum_distribution(random, EventType);
-    // Don't remove too often, so that there are plenty of tables accumulating.
-    event_distribution.remove /= @floatFromInt(constants.lsm_levels);
-    // Don't compact or checkpoint too often, to approximate a real workload.
-    // Additionally, checkpoint is slow because of the verification, so run it less
-    // frequently.
-    event_distribution.compact /=
-        @floatFromInt(constants.lsm_levels * constants.lsm_batch_multiple);
-    event_distribution.checkpoint /=
-        @floatFromInt(constants.lsm_levels * constants.journal_slot_count);
-
-    log.info("event_distribution = {:.2}", .{event_distribution});
-    log.info("event_count = {d}", .{events.len});
-
-    var tables = std.ArrayList(struct {
-        level: u6,
-        table: TableInfo,
-    }).init(allocator);
+    var tables = std.ArrayList(struct { level: u6, table: TableInfo }).init(allocator);
     defer tables.deinit();
 
-    // The number of appends since the last flush (compact or checkpoint).
-    var append_count: usize = 0;
-    for (events, 0..) |*event, i| {
-        const event_type = blk: {
-            if (append_count == manifest_log_options.compaction_appends_max()) {
-                // We must compact or checkpoint periodically to avoid overfilling the ManifestLog.
-                break :blk if (random.boolean()) EventType.compact else EventType.checkpoint;
-            }
+    // The maximum number of (live) tables that the manifest has at any point in time.
+    var tables_max: usize = 0;
 
-            const event_type_random = fuzz.random_enum(random, EventType, event_distribution);
-            if (tables.items.len == 0) {
-                if (event_type_random == .update_change_level or
-                    event_type_random == .update_change_snapshot or
-                    event_type_random == .remove)
-                {
-                    break :blk .insert;
+    // Dummy table address for Table Infos.
+    var table_address: u64 = 1;
+
+    const compacts_per_checkpoint = fuzz.random_int_exponential(random, usize, 16);
+    log.info("compacts_per_checkpoint = {d}", .{compacts_per_checkpoint});
+
+    // When true, create as many entries as possible.
+    // This tries to test the manifest upper-bound calculation.
+    const fill_always = random.uintLessThan(usize, 4) == 0;
+
+    // The maximum number of snapshot-max updates per half-bar.
+    const updates_max = tree.compactions_max * tree.compaction_tables_input_max;
+
+    while (events.items.len < events_count) {
+        const fill = fill_always or random.boolean();
+        // All of the trees we are inserting/modifying have the same id (for simplicity), but we
+        // want to perform more updates if there are more trees, to better simulate a real state
+        // machine.
+        for (manifest_log_options.tree_id_min..manifest_log_options.tree_id_max + 1) |_| {
+            const operations: struct {
+                update_levels: usize,
+                update_snapshots: usize,
+                inserts: usize,
+            } = operations: {
+                const move = !fill and random.uintLessThan(usize, 10) == 0;
+                if (move) {
+                    break :operations .{
+                        .update_levels = 1,
+                        .update_snapshots = 0,
+                        .inserts = 0,
+                    };
+                } else {
+                    const updates =
+                        if (fill) updates_max else random.uintAtMost(usize, updates_max);
+                    break :operations .{
+                        .update_levels = 0,
+                        .update_snapshots = updates,
+                        .inserts = updates,
+                    };
                 }
-            }
+            };
 
-            break :blk event_type_random;
-        };
+            for (0..operations.inserts) |_| {
+                if (tables.items.len == manifest_log_options.forest_table_count_max) break;
 
-        event.* = switch (event_type) {
-            .insert => insert: {
                 const level = random.uintLessThan(u6, constants.lsm_levels);
                 const table = TableInfo{
                     .checksum = 0,
-                    .address = i + 1,
+                    .address = table_address,
                     .snapshot_min = 1,
-                    .snapshot_max = 2,
+                    .snapshot_max = std.math.maxInt(u64),
                     .key_min = .{0} ** 16,
                     .key_max = .{0} ** 16,
                     .tree_id = 1,
                 };
-                try tables.append(.{
-                    .level = level,
-                    .table = table,
-                });
-                const insert = ManifestEvent{ .insert = .{
-                    .level = level,
-                    .table = table,
-                } };
-                break :insert insert;
-            },
 
-            .update_change_level => update: {
+                table_address += 1;
+                try tables.append(.{ .level = level, .table = table });
+                try events.append(.{ .insert = .{ .level = level, .table = table } });
+            }
+            tables_max = @max(tables_max, tables.items.len);
+
+            for (0..operations.update_levels) |_| {
+                if (tables.items.len == 0) break;
+
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
-                if (table.level == constants.lsm_levels - 1) {
-                    break :update ManifestEvent{ .noop = {} };
-                }
+                if (table.level < constants.lsm_levels - 1) table.level += 1;
+                try events.append(.{ .update = .{ .level = table.level, .table = table.table } });
+            }
 
-                table.level += 1;
-                const update = ManifestEvent{ .update = .{
-                    .level = table.level,
-                    .table = table.table,
-                } };
-                break :update update;
-            },
+            for (0..operations.update_snapshots) |_| {
+                if (tables.items.len == 0) break;
 
-            .update_change_snapshot => update: {
                 const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
-                table.table.snapshot_max += 1;
-                const update = ManifestEvent{ .update = .{
-                    .level = table.level,
-                    .table = table.table,
-                } };
-                break :update update;
-            },
+                // Only update a table snapshot_max once (like real compaction).
+                if (table.table.snapshot_max == 2) continue;
+                table.table.snapshot_max = 2;
+                try events.append(.{ .update = .{ .level = table.level, .table = table.table } });
+            }
+        }
 
-            .remove => remove: {
-                const table = tables.swapRemove(random.uintLessThan(usize, tables.items.len));
-                const remove = ManifestEvent{ .remove = .{
-                    .level = table.level,
-                    .table = table.table,
-                } };
-                break :remove remove;
-            },
+        // We apply removes only after all inserts/updates (rather than mixing them together) to
+        // mimic how compaction is followed by remove_invisible_tables().
+        var i: usize = 0;
+        while (i < tables.items.len) {
+            if (tables.items[i].table.snapshot_max == 2) {
+                const table = tables.swapRemove(i);
+                try events.append(.{ .remove = .{ .level = table.level, .table = table.table } });
+            } else {
+                i += 1;
+            }
+        }
 
-            .compact => ManifestEvent{ .compact = {} },
-            .checkpoint => ManifestEvent{ .checkpoint = {} },
-        };
-
-        switch (event.*) {
-            .compact, .checkpoint => append_count = 0,
-            .noop => {},
-            else => append_count += 1,
+        if (random.uintAtMost(usize, compacts_per_checkpoint) == 0) {
+            try events.append(.compact);
+        } else {
+            try events.append(.checkpoint);
         }
     }
-    return events;
+    log.info("event_count = {d}", .{events.items.len});
+    log.info("tables_max = {d}/{d}", .{ tables_max, manifest_log_options.forest_table_count_max });
+
+    return events.toOwnedSlice();
 }
 
 const Environment = struct {
