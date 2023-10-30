@@ -430,8 +430,10 @@ pub const Header = extern struct {
     /// The version of the protocol implementation that originated this message.
     version: u8 = Version,
 
+    reserved: [128]u8 = [_]u8{0} ** 128,
+
     comptime {
-        assert(@sizeOf(Header) == 128);
+        assert(@sizeOf(Header) == 256);
         assert(stdx.no_padding(Header));
     }
 
@@ -475,6 +477,7 @@ pub const Header = extern struct {
         if (self.version != Version) return "version != Version";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
+        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
         return switch (self.command) {
             .reserved => self.invalid_reserved(),
             .ping => self.invalid_ping(),
