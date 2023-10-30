@@ -61,7 +61,11 @@ pub fn ManifestCheckerType(comptime Forest: type) type {
                     checksum_stream.add(std.mem.asBytes(&tree_id));
                     checksum_stream.add(std.mem.asBytes(&tree_level.table_count_visible));
                     while (tree_tables.next()) |tree_table| {
-                        checksum_stream.add(std.mem.asBytes(&tree_table.encode(tree_id)));
+                        checksum_stream.add(std.mem.asBytes(&tree_table.encode(.{
+                            .tree_id = tree_id,
+                            .event = .insert, // (Placeholder event).
+                            .level = @intCast(level),
+                        })));
                     }
                 }
             }

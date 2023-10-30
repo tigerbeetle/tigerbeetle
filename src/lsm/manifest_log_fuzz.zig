@@ -135,9 +135,7 @@ fn run_fuzz(
     for (events) |event| {
         log.debug("event={}", .{event});
         switch (event) {
-            .insert => |e| try env.insert(e.level, &e.table),
-            .update => |e| try env.update(e.level, &e.table),
-            .remove => |e| try env.remove(e.level, &e.table),
+            .append => |table_info| try env.append(&table_info),
             .compact => {
                 try env.half_bar_complete();
                 try env.half_bar_commence();
@@ -156,9 +154,7 @@ fn run_fuzz(
 }
 
 const ManifestEvent = union(enum) {
-    insert: struct { level: u6, table: TableInfo },
-    update: struct { level: u6, table: TableInfo },
-    remove: struct { level: u6, table: TableInfo },
+    append: TableInfo,
     compact,
     checkpoint,
     /// The random EventType could not be generated — this simplifies event generation.
@@ -173,7 +169,7 @@ fn generate_events(
     var events = std.ArrayList(ManifestEvent).init(allocator);
     errdefer events.deinit();
 
-    var tables = std.ArrayList(struct { level: u6, table: TableInfo }).init(allocator);
+    var tables = std.ArrayList(TableInfo).init(allocator);
     defer tables.deinit();
 
     // The maximum number of (live) tables that the manifest has at any point in time.
@@ -224,7 +220,6 @@ fn generate_events(
             for (0..operations.inserts) |_| {
                 if (tables.items.len == manifest_log_options.forest_table_count_max) break;
 
-                const level = random.uintLessThan(u6, constants.lsm_levels);
                 const table = TableInfo{
                     .checksum = 0,
                     .address = table_address,
@@ -233,30 +228,37 @@ fn generate_events(
                     .key_min = .{0} ** 16,
                     .key_max = .{0} ** 16,
                     .tree_id = 1,
+                    .label = .{
+                        .event = .insert,
+                        .level = random.uintLessThan(u6, constants.lsm_levels),
+                    },
                 };
 
                 table_address += 1;
-                try tables.append(.{ .level = level, .table = table });
-                try events.append(.{ .insert = .{ .level = level, .table = table } });
+                try tables.append(table);
+                try events.append(.{ .append = table });
             }
             tables_max = @max(tables_max, tables.items.len);
 
             for (0..operations.update_levels) |_| {
                 if (tables.items.len == 0) break;
 
-                const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
-                if (table.level < constants.lsm_levels - 1) table.level += 1;
-                try events.append(.{ .update = .{ .level = table.level, .table = table.table } });
+                var table = tables.items[random.uintLessThan(usize, tables.items.len)];
+                if (table.label.level == constants.lsm_levels - 1) continue;
+                table.label.event = .update;
+                table.label.level += 1;
+                try events.append(.{ .append = table });
             }
 
             for (0..operations.update_snapshots) |_| {
                 if (tables.items.len == 0) break;
 
-                const table = &tables.items[random.uintLessThan(usize, tables.items.len)];
+                var table = tables.items[random.uintLessThan(usize, tables.items.len)];
                 // Only update a table snapshot_max once (like real compaction).
-                if (table.table.snapshot_max == 2) continue;
-                table.table.snapshot_max = 2;
-                try events.append(.{ .update = .{ .level = table.level, .table = table.table } });
+                if (table.snapshot_max == 2) continue;
+                table.label.event = .update;
+                table.snapshot_max = 2;
+                try events.append(.{ .append = table });
             }
         }
 
@@ -264,9 +266,10 @@ fn generate_events(
         // mimic how compaction is followed by remove_invisible_tables().
         var i: usize = 0;
         while (i < tables.items.len) {
-            if (tables.items[i].table.snapshot_max == 2) {
-                const table = tables.swapRemove(i);
-                try events.append(.{ .remove = .{ .level = table.level, .table = table.table } });
+            if (tables.items[i].snapshot_max == 2) {
+                var table = tables.swapRemove(i);
+                table.label.event = .remove;
+                try events.append(.{ .append = table });
             } else {
                 i += 1;
             }
@@ -364,9 +367,8 @@ const Environment = struct {
         env.manifest_log.open(open_event, open_callback);
     }
 
-    fn open_event(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+    fn open_event(manifest_log: *ManifestLog, table: *const TableInfo) void {
         _ = manifest_log;
-        _ = level;
         _ = table;
 
         // This ManifestLog is only opened during setup, when it has no blocks.
@@ -378,19 +380,9 @@ const Environment = struct {
         env.pending -= 1;
     }
 
-    fn insert(env: *Environment, level: u6, table: *const TableInfo) !void {
-        try env.manifest_log_model.insert(level, table);
-        env.manifest_log.insert(level, table);
-    }
-
-    fn update(env: *Environment, level: u6, table: *const TableInfo) !void {
-        try env.manifest_log_model.update(level, table);
-        env.manifest_log.update(level, table);
-    }
-
-    fn remove(env: *Environment, level: u6, table: *const TableInfo) !void {
-        try env.manifest_log_model.remove(level, table);
-        env.manifest_log.remove(level, table);
+    fn append(env: *Environment, table: *const TableInfo) !void {
+        try env.manifest_log_model.append(table);
+        env.manifest_log.append(table);
     }
 
     fn half_bar_commence(env: *Environment) !void {
@@ -534,16 +526,13 @@ const Environment = struct {
 
     fn verify_manifest_open_event(
         manifest_log_verify: *ManifestLog,
-        level: u6,
         table: *const TableInfo,
     ) void {
         const env = @fieldParentPtr(Environment, "manifest_log_verify", manifest_log_verify);
         assert(env.pending > 0);
 
-        const expect = env.manifest_log_opening.?.get(table.address).?;
-        assert(expect.level == level);
-        assert(std.meta.eql(expect.table, table.*));
-        assert(env.manifest_log_opening.?.remove(table.address));
+        const expect = env.manifest_log_opening.?.fetchRemove(table.address).?;
+        assert(std.meta.eql(expect.value, table.*));
     }
 
     fn verify_manifest_open_callback(manifest_log_verify: *ManifestLog) void {
@@ -555,19 +544,10 @@ const Environment = struct {
 const ManifestLogModel = struct {
     /// Stores the latest checkpointed version of every table.
     /// Indexed by table address.
-    const TableMap = std.AutoHashMap(u64, TableEntry);
-
-    const TableEntry = struct {
-        level: u6,
-        table: TableInfo,
-    };
+    const TableMap = std.AutoHashMap(u64, TableInfo);
 
     /// Stores table updates that are not yet checkpointed.
-    const AppendList = std.ArrayList(struct {
-        event: enum { insert, update, remove },
-        level: u6,
-        table: TableInfo,
-    });
+    const AppendList = std.ArrayList(TableInfo);
 
     tables: TableMap,
     appends: AppendList,
@@ -590,52 +570,25 @@ const ManifestLogModel = struct {
         model.appends.deinit();
     }
 
-    fn current(model: ManifestLogModel, table_address: u64) ?TableEntry {
+    fn current(model: ManifestLogModel, table_address: u64) ?TableInfo {
         assert(model.appends.items.len == 0);
 
         return model.tables.get(table_address);
     }
 
-    fn insert(model: *ManifestLogModel, level: u6, table: *const TableInfo) !void {
-        try model.appends.append(.{
-            .event = .insert,
-            .level = level,
-            .table = table.*,
-        });
-    }
-
-    fn update(model: *ManifestLogModel, level: u6, table: *const TableInfo) !void {
-        try model.appends.append(.{
-            .event = .update,
-            .level = level,
-            .table = table.*,
-        });
-    }
-
-    fn remove(model: *ManifestLogModel, level: u6, table: *const TableInfo) !void {
-        try model.appends.append(.{
-            .event = .remove,
-            .level = level,
-            .table = table.*,
-        });
+    fn append(model: *ManifestLogModel, table: *const TableInfo) !void {
+        try model.appends.append(table.*);
     }
 
     fn checkpoint(model: *ManifestLogModel) !void {
-        for (model.appends.items) |append| {
-            switch (append.event) {
+        for (model.appends.items) |table_info| {
+            switch (table_info.label.event) {
                 .insert,
                 .update,
-                => {
-                    try model.tables.put(append.table.address, .{
-                        .level = append.level,
-                        .table = append.table,
-                    });
-                },
+                => try model.tables.put(table_info.address, table_info),
                 .remove => {
-                    const removed = model.tables.get(append.table.address).?;
-                    assert(removed.level == append.level);
-                    assert(std.meta.eql(removed.table, append.table));
-                    assert(model.tables.remove(append.table.address));
+                    const removed = model.tables.fetchRemove(table_info.address).?;
+                    assert(std.meta.eql(removed.value, table_info));
                 },
             }
         }
