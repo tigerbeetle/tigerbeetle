@@ -1,12 +1,30 @@
 # TigerBeetle Changelog
 
+## 2023-10-30
+
+### Safety And Performance
+
+- [#1251](https://github.com/tigerbeetle/tigerbeetle/pull/1251)
+
+  Prove a tighter upper bound for the size of manifest log. With this new bound, manifest log is
+  guaranteed to fit in allocated memory and is smaller. Additionally, manifest log compaction is
+  paced depending on the current length of the log, balancing throughput and time-to-recovery.
+
+- [#1198](https://github.com/tigerbeetle/tigerbeetle/pull/1198)
+
+  Recommend using [ULID](https://github.com/ulid/spec) for event IDs. ULIDs are approximately sorted,
+  which significantly improves common-case performance.
+
+### Internals
+
+- [#1218](https://github.com/tigerbeetle/tigerbeetle/pull/1218)
+
+  Rewrite Node.js client implementation to use the common C client underneath. While clients for
+  other languages already use the underlying C library, the Node.js client duplicated some code for
+  historical reasons, but now we can leave that duplication in the past. [This Is A
+  Photograph](https://www.youtube.com/watch?v=X0i7whWLW8M).
+
 ## 2023-10-25
-
-### Features
-
-- [#1245](https://github.com/tigerbeetle/tigerbeetle/pull/1245)
-
-  Include Docker images in the release.
 
 ### Safety And Performance
 
@@ -29,6 +47,12 @@
   Speed up secondary index maintenance by statically distinguishing between insertions and
   updates. [Faster than the speed of night!](https://open.spotify.com/track/30oZqbcUROFLSru3WcN3bx)
 
+### Features
+
+- [#1245](https://github.com/tigerbeetle/tigerbeetle/pull/1245)
+
+  Include Docker images in the release.
+
 ### Internals
 
 - [#1234](https://github.com/tigerbeetle/tigerbeetle/pull/1234)
@@ -43,19 +67,19 @@
 This is the start of the changelog. A lot happened before this point and is lost in the mist of git
 history, but any notable change from this point on shall be captured by this document.
 
-### Features
-
-- [#1228](https://github.com/tigerbeetle/tigerbeetle/pull/1228)
-
-  Increase alignment of data blocks to 128KiB (from 512 bytes). Larger alignment gives operators
-  better control over physical layout of data on disk.
-
 ### Safety And Performance
 
 - [#1225](https://github.com/tigerbeetle/tigerbeetle/pull/1225)
 
   Remove bloom filters. TigerBeetle implements more targeted optimizations for
   both positive and negative lookups, making bloom filters a net loss.
+
+### Features
+
+- [#1228](https://github.com/tigerbeetle/tigerbeetle/pull/1228)
+
+  Increase alignment of data blocks to 128KiB (from 512 bytes). Larger alignment gives operators
+  better control over physical layout of data on disk.
 
 ### Internals
 
