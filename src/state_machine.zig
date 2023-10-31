@@ -27,7 +27,7 @@ const CreateTransferResult = tb.CreateTransferResult;
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: @import("constants.zig").StateMachineConfig,
+    comptime config: global_constants.StateMachineConfig,
 ) type {
     assert(config.message_body_size_max > 0);
     assert(config.lsm_batch_multiple > 0);
@@ -41,6 +41,18 @@ pub fn StateMachineType(
 
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
+
+            /// The maximum amount of logical batches that may be queued on a client
+            /// (spread across all requests).
+            pub const batch_logical_max = blk: {
+                var max: usize = 0;
+                inline for (std.enums.values(Operation)) |operation| {
+                    if (@intFromEnum(operation) < config.vsr_operations_reserved) continue;
+                    if (!batch_logical_allowed(operation)) continue;
+                    max = @max(max, batch_max.operation_batch_max(operation));
+                }
+                break :blk max * global_constants.client_request_queue_max;
+            };
 
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
@@ -102,43 +114,47 @@ pub fn StateMachineType(
 
         /// Returns whether or not the operation can be batched at the VSR layer.
         /// If so, the StateMachine must support demuxing batched operations below.
-        pub fn batch_logical(operation: Operation) bool {
+        pub fn batch_logical_allowed(operation: Operation) bool {
             return switch (operation) {
                 .create_accounts, .create_transfers => true,
                 .lookup_accounts, .lookup_transfers => false, // Don't batch lookups for now.
             };
         }
 
-        /// Given results: []Result(operation), demux out the ones belonging to the Event offset
-        /// into the demuxed byte array, returning the amount of bytes written to it.
-        pub fn batch_demux(
-            operation: Operation,
-            results: []const u8,
-            demuxed: []u8,
-            event: struct { index: u32, count: u32 },
-        ) u32 {
-            switch (operation) {
-                inline .create_accounts, .create_transfers => |op| {
-                    const out_results = std.mem.bytesAsSlice(Result(op), demuxed);
-                    const in_results = std.mem.bytesAsSlice(Result(op), results);
+        pub fn DemuxerType(comptime operation: Operation) type {
+            comptime assert(batch_logical_allowed(operation));
+            return struct {
+                const Demuxer = @This();
+                const CreateResult = Result(operation);
 
-                    var out_count: u32 = 0;
-                    for (in_results) |*result| {
-                        if (result.index < event.index) continue;
-                        if (result.index >= event.index + event.count) continue;
+                results: []CreateResult,
 
-                        out_results[out_count] = .{
-                            .index = result.index - event.index, // Make it relative to the event.
-                            .result = result.result,
-                        };
-                        out_count += 1;
-                    }
+                /// Create a Demuxer which can extract Results out of the reply bytes in-place.
+                pub fn init(reply: []align(@alignOf(CreateResult)) u8) Demuxer {
+                    return Demuxer{ .results = std.mem.bytesAsSlice(CreateResult, reply) };
+                }
 
-                    const result_size = @sizeOf(Result(op));
-                    return out_count * result_size;
-                },
-                else => @panic("batch_demux on unsupported operation"),
-            }
+                /// Returns a slice into the the original reply bytes with Results matching the
+                /// Event range (offset and size). Each subsequent call to demux() must have ranges
+                /// that are disjoint and increase monotonically.
+                pub fn decode(
+                    self: *Demuxer,
+                    event_offset: u32,
+                    event_size: u32,
+                ) []align(@alignOf(CreateResult)) u8 {
+                    // Count all results from the start of our slice which match the Event range,
+                    // Updating the result.indexes to be relative to the Event range in the process.
+                    const demuxed = for (self.results, 0..) |*result, i| {
+                        if (result.index < event_offset) break i;
+                        if (result.index >= event_offset + event_size) break i;
+                        result.index -= event_offset;
+                    } else self.results.len;
+
+                    // Consume the demuxed Results out of our local slice and return them as bytes.
+                    defer self.results = self.results[demuxed..];
+                    return std.mem.sliceAsBytes(self.results[0..demuxed]);
+                }
+            };
         }
 
         const AccountsGroove = GrooveType(
