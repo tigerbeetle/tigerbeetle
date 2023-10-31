@@ -142,6 +142,7 @@ pub fn CompactionType(
             // Worst-case manifest updates:
             // See docs/internals/lsm.md "Compaction Table Overlap" for more detail.
             var count = 0;
+            count += constants.lsm_growth_factor + 1;
             count += constants.lsm_growth_factor + 1; // Insert the output tables to level B.
             // (In the move-table case, only a single TableInfo is inserted, and none are updated.)
             break :manifest_entries_max count;

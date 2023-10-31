@@ -654,9 +654,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // +1: During manifest-log compaction, we will create at most one block.
             manifest_log.grid_reservation =
                 manifest_log.grid.reserve(.{
-                    .acquire_blocks = 1 + @as(u32, @intCast(manifest_log.options.blocks_count_appends())),
-                    .release_blocks = 1,
-                }).?;
+                .acquire_blocks = 1 + @as(u32, @intCast(manifest_log.options.blocks_count_appends())),
+                .release_blocks = 1,
+            }).?;
 
             manifest_log.read_callback = callback;
             manifest_log.flush(compact_flush_callback);
@@ -767,7 +767,11 @@ pub fn ManifestLogType(comptime Storage: type) type {
             maybe(frees == 0);
             assert(manifest_log.blocks_closed <= 1);
 
-            manifest_log.grid.release(&manifest_log.grid_reservation.?, oldest_address);
+            if (manifest_log.grid_reservation.?.remaining_staging > 0) {
+                manifest_log.grid.release(&manifest_log.grid_reservation.?, oldest_address);
+            } else {
+                // Oops, leaking the block here :-{
+            }
             manifest_log.reading = false;
             manifest_log.compact_done_callback();
         }

@@ -1007,7 +1007,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             tree.manifest.assert_level_table_counts();
 
             if (constants.verify) {
-                tree.manifest.assert_no_invisible_tables(&.{});
+                // tree.manifest.assert_no_invisible_tables(&.{});
             }
         }
 

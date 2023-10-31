@@ -217,7 +217,7 @@ pub const FreeList = struct {
             .index = free_list.round_reserved - options.acquire_blocks,
             .remaining = options.acquire_blocks,
 
-            .remaining_staging = options.release_blocks,
+            .remaining_staging = staging_reservation,
         };
     }
 
