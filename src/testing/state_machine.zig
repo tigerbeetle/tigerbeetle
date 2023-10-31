@@ -3,14 +3,13 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.state_machine);
 
 const stdx = @import("../stdx.zig");
-const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
 const ForestType = @import("../lsm/forest.zig").ForestType;
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: constants.StateMachineConfig,
+    comptime config: @import("../constants.zig").StateMachineConfig,
 ) type {
     return struct {
         const StateMachine = @This();
@@ -22,21 +21,18 @@ pub fn StateMachineType(
             echo = config.vsr_operations_reserved + 0,
         };
 
-        /// TODO: Support batching in test StateMachine (?)
-        pub fn batch_logical(operation: Operation) bool {
-            _ = operation;
+        pub const constants = struct {
+            pub const message_body_size_max = config.message_body_size_max;
+            pub const batch_logical_max = 0; // Batching not supported by test StateMachine.
+        };
+
+        pub fn batch_logical_allowed(_: Operation) bool {
+            // Batching not supported by test StateMachine.
             return false;
         }
 
-        /// TODO: Support batching in test StateMachine (?)
-        pub fn batch_demux(
-            operation: Operation,
-            results: []const u8,
-            demuxed: []u8,
-            event: struct { index: u32, count: u32 },
-        ) u32 {
-            _ = .{ operation, results, demuxed, event };
-            unreachable;
+        pub fn DemuxerType(comptime _: Operation) type {
+            @compileError("Batching not supported by test StateMachine");
         }
 
         pub const Options = struct {
@@ -239,6 +235,7 @@ pub fn StateMachineType(
 fn WorkloadType(comptime StateMachine: type) type {
     return struct {
         const Workload = @This();
+        const constants = StateMachine.constants;
 
         random: std.rand.Random,
         requests_sent: usize = 0,
