@@ -1,7 +1,7 @@
 # docs.tigerbeetle.com
 
 Documentation generator for <docs.tigerbeetle.com>. Static website is generated via `npm run build`
-and is pushed to <https://github.com/tigerbeetledb/docs>, which is then hosted on GitHub pages.
+and is pushed to <https://github.com/tigerbeetle/docs>, which is then hosted on GitHub pages.
 
 Overview of the build process:
 
@@ -12,4 +12,4 @@ Overview of the build process:
 * Run `docusaurus build` to produce the static HTML files in the `./build` directory.
 
 This process is triggered by `ci.zig` in our merge queue (mostly to detect broken links) and by
-`release.zig` to push the rendered docs to <https://github.com/tigerbeetledb/docs>.
+`release.zig` to push the rendered docs to <https://github.com/tigerbeetle/docs>.

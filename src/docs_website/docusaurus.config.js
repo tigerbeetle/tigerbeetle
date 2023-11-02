@@ -16,7 +16,7 @@ const config = {
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'tigerbeetledb', // Usually your GitHub org/user name.
+  organizationName: 'tigerbeetle', // Usually your GitHub org/user name.
   projectName: 'docs', // Usually your repo name.
 
   // Even if you don't use internalization, you can use this field to set useful
@@ -39,7 +39,7 @@ const config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl: ({ docPath }) =>
-            'https://github.com/tigerbeetledb/tigerbeetle/blob/main/docs/' + docPath.replace('/pages/', ''),
+            'https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/' + docPath.replace('/pages/', ''),
         },
         theme: {
           customCss: require.resolve('./src/css/custom.css'),
@@ -67,7 +67,7 @@ const config = {
         },
         items: [
           {
-            href: 'https://github.com/tigerbeetledb/tigerbeetle',
+            href: 'https://github.com/tigerbeetle/tigerbeetle',
             label: 'GitHub',
             position: 'right',
           },
@@ -85,7 +85,7 @@ const config = {
               },
               {
                 label: 'GitHub',
-                href: 'https://github.com/tigerbeetledb/tigerbeetle',
+                href: 'https://github.com/tigerbeetle/tigerbeetle',
               },
               {
                 label: 'LinkedIn',
