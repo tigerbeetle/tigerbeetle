@@ -299,6 +299,8 @@ pub fn main() !void {
             output.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
             output.warn("no liveness, {} blocks are not available in core", .{blocks});
+        } else if (simulator.core_missing_checkpoint()) {
+            output.warn("no liveness, core can't find canonical checkpoint", .{});
         } else {
             output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
@@ -454,6 +456,9 @@ pub const Simulator = struct {
     // the core might fail to converge, as parts of the repair protocol rely on primary-sent
     // `.start_view_change` messages. Until we fix this issue, we special-case this scenario in
     // VOPR and don't treat it as a liveness failure.
+    //
+    // TODO: make sure that .recovering_head replicas can transition to normal even without direct
+    // connection to the primary
     pub fn core_missing_primary(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 
@@ -625,6 +630,37 @@ pub const Simulator = struct {
         } else {
             return blocks_missing.items.len;
         }
+    }
+
+    // Check if the core is stuck in a view change because replicas can't converge to a canonical
+    // checkpoint. This can happen in two scenarios:
+    //
+    // - There is a canonical checkpoint, but replicas can't learn about because commit messages
+    //   don't flow during view change.
+    // - There is no canonical checkpoint at all --- one replica is ahead of others by a checkpoint,
+    //   but there are no commits on top of that checkpoint.
+    //
+    // TODO: both of the above genuine liveness issues to be fixed with async checkpoints, which
+    // would allow to sync to the _previous_ checkpoint, guaranteed to be canonical.
+    fn core_missing_checkpoint(simulator: *const Simulator) bool {
+        var core_checkpoints = stdx.BoundedArray(u128, constants.replicas_max){};
+        for (simulator.cluster.replicas) |replica| {
+            if (!simulator.core.isSet(replica.replica)) continue;
+            if (replica.standby()) continue;
+
+            if (replica.status == .normal) return false;
+            core_checkpoints.append_assume_capacity(replica.superblock.working.checkpoint_id());
+        }
+
+        for (0..core_checkpoints.count()) |i| {
+            for (0..i) |j| {
+                if (core_checkpoints.get(i) != core_checkpoints.get(j)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     fn on_cluster_reply(
