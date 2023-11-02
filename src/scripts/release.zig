@@ -651,10 +651,16 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         }
         try shell.exec(
             \\docker buildx build --file tools/docker/Dockerfile . --platform linux/amd64,linux/arm64
-            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{version}{debug} --push
+            \\   --tag ghcr.io/tigerbeetle/tigerbeetle:{version}{debug}
+            \\   {tag_latest}
+            \\   --push
         , .{
             .version = info.version,
             .debug = if (debug) "-debug" else "",
+            .tag_latest = @as(
+                []const []const u8,
+                if (debug) &.{} else &.{ "--tag", "ghcr.io/tigerbeetle/tigerbeetle:latest" },
+            ),
         });
 
         // Sadly, there isn't an easy way to locally build & test a multiplatform image without
