@@ -53,9 +53,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             pub fn slice(batch: Batch) []u8 {
                 const body_offset = if (batch.demux) |demux| blk: {
                     const operation = batch.request.message.header.operation.cast(StateMachine);
-                    break :blk switch (operation) {
-                        inline else => |op| @sizeOf(StateMachine.Event(op)) * demux.event_offset,
-                    };
+                    switch (operation) {
+                        inline else => |op| {
+                            const event_size: u32 = @sizeOf(StateMachine.Event(op));
+                            break :blk event_size * demux.event_offset;
+                        },
+                    }
                 } else blk: {
                     assert(batch.request.demux_queue.empty());
                     break :blk 0;
@@ -323,7 +326,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     demux.* = .{
                         .info = undefined, // Set during batch_submit().
                         .event_count = @intCast(event_count),
-                        .event_offset = @intCast(request.message.body().len),
+                        .event_offset = @intCast(@divExact(request.message.body().len, event_size)),
                     };
 
                     // Extend the message size to contain the Batch data as if already written.
@@ -458,7 +461,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Acquires a message from the message bus.
         /// The caller must ensure that a message is available.
         ///
-        /// Either use it in `client.request()` or discard via `client.release()`,
+        /// Either use it in `client.raw_request()` or discard via `client.release()`,
         /// the reference is not guaranteed to be valid after both actions.
         /// Do NOT use the reference counter function `message.ref()` for storing the message.
         pub fn get_message(self: *Self) *Message {
@@ -643,6 +646,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // Make sure to add the inflight_demux at the front of its queue.
             inflight_demux.next = inflight.demux_queue.out;
             inflight.demux_queue.out = &inflight_demux;
+            inflight.demux_queue.count += 1;
 
             switch (operation) {
                 inline else => |op| {
@@ -658,7 +662,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         const info = demux.info;
                         const results = demuxer.decode(demux.event_offset, demux.event_count);
 
-                        // Free the Demux node before invoking the callback in case it calls 
+                        // Free the Demux node before invoking the callback in case it calls
                         // batch_get() and wants a Demux node as well.
                         if (demux != &inflight_demux) self.demux_pool.release(demux);
                         (info.callback.?)(
@@ -667,7 +671,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                             results,
                         );
                     }
-                }
+                },
             }
         }
 
@@ -840,4 +844,288 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             );
         }
     };
+}
+
+test "Client Batching" {
+    const global_constants = constants;
+
+    // Stub StateMachine which supports one batchable and non-batchable Operation for testing.
+    const StateMachine = struct {
+        const config = global_constants.state_machine_config;
+
+        pub const constants = struct {
+            pub const batch_logical_max = blk: {
+                const max = @max(@sizeOf(Event(.batched)), @sizeOf(Result(.batched)));
+                break :blk max * global_constants.client_request_queue_max;
+            };
+        };
+
+        pub const Operation = enum(u8) {
+            batched = config.vsr_operations_reserved + 0,
+            serial = config.vsr_operations_reserved + 1,
+        };
+
+        pub fn Event(comptime operation: Operation) type {
+            return switch (operation) {
+                .batched => [128]u8,
+                .serial => u128,
+            };
+        }
+
+        pub fn Result(comptime operation: Operation) type {
+            return switch (operation) {
+                .batched => u128,
+                .serial => u128,
+            };
+        }
+
+        pub fn batch_logical_allowed(operation: Operation) bool {
+            return switch (operation) {
+                .batched => true,
+                .serial => false,
+            };
+        }
+
+        // Demuxer which gives each Event a Result 1:1
+        pub fn DemuxerType(comptime operation: Operation) type {
+            comptime assert(batch_logical_allowed(operation));
+            return struct {
+                const Demuxer = @This();
+                const alignment = @alignOf(Result(operation));
+
+                results: []Result(operation),
+                offset: u32 = 0,
+
+                pub fn init(reply: []align(alignment) u8) Demuxer {
+                    return .{ .results = std.mem.bytesAsSlice(Result(operation), reply) };
+                }
+
+                pub fn decode(self: *Demuxer, offset: u32, size: u32) []align(alignment) u8 {
+                    assert(self.offset == offset);
+                    defer self.offset += size;
+                    return std.mem.sliceAsBytes(self.results[offset..][0..size]);
+                }
+            };
+        }
+    };
+
+    // Stub MessageBus which simulates replica that provides matching Results for StateMachine.
+    // This avoids pulling in ReplicaType and having to implement StateMachine.prefetch/commit/etc.
+    const MessageBus = struct {
+        const Self = @This();
+
+        pub const Options = struct {};
+        const MessageQueue = RingBuffer(*Message, .{ .array = constants.client_request_queue_max });
+
+        pool: *MessagePool,
+        commit: u64 = 1,
+        timestamp: u64 = 1,
+        on_message: *const fn (message_bus: *Self, message: *Message) void,
+        message_queue: MessageQueue = MessageQueue.init(),
+
+        pub fn init(
+            allocator: mem.Allocator,
+            cluster: u32,
+            process: struct { client: u128 },
+            message_pool: *MessagePool,
+            on_message: *const fn (message_bus: *Self, message: *Message) void,
+            options: Options,
+        ) !Self {
+            _ = .{ allocator, cluster, process, options };
+            return Self{
+                .pool = message_pool,
+                .on_message = on_message,
+            };
+        }
+
+        pub fn deinit(bus: *Self, allocator: mem.Allocator) void {
+            _ = allocator;
+            while (bus.message_queue.pop()) |message| {
+                bus.unref(message);
+            }
+        }
+
+        pub fn get_message(bus: *Self) *Message {
+            return bus.pool.get_message();
+        }
+
+        pub fn unref(bus: *Self, message: *Message) void {
+            bus.pool.unref(message);
+        }
+
+        pub fn tick(bus: *Self) void {
+            const message = bus.message_queue.pop() orelse @panic("done");
+            defer bus.unref(message);
+
+            const reply = bus.get_message();
+            defer bus.unref(reply);
+
+            // Figure out how many zeroes to write to reply.
+            // StateMachine requests get an equal amount of empty Results per Event.
+            const body_size = if (message.header.operation.vsr_reserved()) blk: {
+                assert(message.body().len == 0);
+                break :blk 0;
+            } else switch (message.header.operation.cast(StateMachine)) {
+                inline else => |op| result_size: {
+                    const event_count = @divExact(
+                        message.body().len,
+                        @sizeOf(StateMachine.Event(op)),
+                    );
+                    break :result_size event_count * @sizeOf(StateMachine.Result(op));
+                },
+            };
+
+            bus.timestamp += 1;
+            assert(bus.timestamp != 0);
+
+            bus.commit += @intFromBool(bus.timestamp % global_constants.lsm_batch_multiple == 0);
+            assert(bus.commit != 0);
+
+            reply.header.* = message.header.*;
+            reply.header.command = .reply;
+            reply.header.op = bus.commit;
+            reply.header.commit = bus.commit;
+            reply.header.timestamp = bus.timestamp;
+            reply.header.parent = message.header.checksum;
+            reply.header.size = @intCast(@sizeOf(Header) + body_size);
+
+            @memset(reply.body(), 0);
+            reply.header.set_checksum_body(reply.body());
+            reply.header.set_checksum();
+
+            if (reply.header.invalid()) |header_err| @panic(header_err);
+            bus.on_message(bus, reply);
+        }
+
+        pub fn send_message_to_replica(bus: *Self, replica: u32, message: *Message) void {
+            _ = replica;
+            bus.message_queue.push_assume_capacity(message.ref());
+        }
+    };
+
+    const VSRClient = Client(StateMachine, MessageBus);
+    const allocator = std.testing.allocator;
+
+    const Event = StateMachine.Event;
+    const events_serial_max = @divExact(constants.message_body_size_max, @sizeOf(Event(.serial)));
+    const events_batched_max = @divExact(constants.message_body_size_max, @sizeOf(Event(.batched)));
+
+    // Submits batches to the VSRClient and checks messages_available based on Submissions.
+    const Context = struct {
+        client: VSRClient,
+        messages_reserved: u32 = 0,
+
+        /// Tracks highest Submission.user_id which completed in its callback.
+        var highest_user_id: u128 = 0;
+
+        const Submission = struct {
+            operation: StateMachine.Operation,
+            event_count: usize,
+            user_id: u128,
+            messages_reserved: u32,
+        };
+
+        fn submit(self: *@This(), comptime submission: Submission) !void {
+            const batch = try self.client.batch_get(
+                submission.operation,
+                @intCast(submission.event_count),
+            );
+            const events = switch (submission.operation) {
+                inline else => |op| std.mem.zeroes(
+                    [@divExact(constants.message_body_size_max, @sizeOf(Event(op)))]Event(op),
+                ),
+            };
+            @memcpy(batch.slice(), std.mem.sliceAsBytes(events[0..submission.event_count]));
+
+            const callback = struct {
+                pub fn callback(user_id: u128, op: StateMachine.Operation, reply: []const u8) void {
+                    assert(op == submission.operation);
+                    assert(user_id == submission.user_id);
+                    highest_user_id = @max(highest_user_id, user_id);
+
+                    const result_size = @sizeOf(StateMachine.Result(submission.operation));
+                    assert(reply.len == result_size * submission.event_count);
+                }
+            }.callback;
+            self.client.batch_submit(submission.user_id, callback, batch);
+
+            self.messages_reserved += submission.messages_reserved;
+            const messages_available = constants.client_request_queue_max - self.messages_reserved;
+            assert(self.client.messages_available == messages_available);
+        }
+    };
+
+    var message_pool = try MessagePool.init(allocator, .client);
+    defer message_pool.deinit(allocator);
+
+    var ctx = Context{ .client = try VSRClient.init(allocator, 1, 0, 1, &message_pool, .{}) };
+    defer ctx.client.deinit(allocator);
+
+    // Make sure all messages are available at the start.
+    comptime var last_user_id: u128 = 0;
+    assert(ctx.client.messages_available == constants.client_request_queue_max);
+
+    // New request with op that is batchable, with one more slot until it fills up.
+    // Ensure this reserves TWO messages (one for register(), one for .batched).
+    last_user_id += 1;
+    try ctx.submit(.{
+        .operation = .batched,
+        .event_count = events_batched_max - 1,
+        .user_id = last_user_id,
+        .messages_reserved = 2,
+    });
+
+    // New request with op that is NOT batchable.
+    // Ensure it reserves a new message, unrelated to the previous .batched.
+    last_user_id += 1;
+    try ctx.submit(.{
+        .operation = .serial,
+        .event_count = events_serial_max - 1,
+        .user_id = last_user_id,
+        .messages_reserved = 1,
+    });
+
+    // New request with a single batchable op.
+    // Ensure no new messages as it should get merged with the previous batchable op to fill it.
+    last_user_id += 1;
+    try ctx.submit(.{
+        .operation = .batched,
+        .event_count = 1,
+        .user_id = last_user_id,
+        .messages_reserved = 0,
+    });
+
+    // Another new request with a batchable op.
+    // Ensure this creates a NEW message as the previous batch should've been filled up.
+    last_user_id += 1;
+    try ctx.submit(.{
+        .operation = .batched,
+        .event_count = 1,
+        .user_id = last_user_id,
+        .messages_reserved = 1,
+    });
+
+    // Another new request with an op that's NOT batchable.
+    // Ensure this creates a NEW message, not batched with previous .sreial that had extra room.
+    last_user_id += 1;
+    try ctx.submit(.{
+        .operation = .serial,
+        .event_count = 1,
+        .user_id = last_user_id,
+        .messages_reserved = 1,
+    });
+
+    // Final new request with a batchable op.
+    // Ensure this gets merged with the other .batched instead of creating a new message.
+    last_user_id += 1;
+    try ctx.submit(.{
+        .operation = .batched,
+        .event_count = 1,
+        .user_id = last_user_id,
+        .messages_reserved = 0,
+    });
+
+    while (Context.highest_user_id != last_user_id) {
+        ctx.client.tick();
+    }
 }
