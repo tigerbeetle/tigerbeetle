@@ -2,7 +2,7 @@
 
 set -eu
 
-repo="https://github.com/tigerbeetledb/tigerbeetle"
+repo="https://github.com/tigerbeetle/tigerbeetle"
 root="$(pwd)"
 rm -rf pages
 cp -r ../../docs pages
