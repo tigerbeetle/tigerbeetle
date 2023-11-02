@@ -246,7 +246,7 @@ pub const DotnetDocs = Docs{
     \\to convert 128-bit little-endian unsigned integers between
     \\`BigInteger`, `byte[]`, and `Guid`.
     \\
-    \\See the class [UInt128Extensions](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/clients/dotnet/TigerBeetle/UInt128.cs) for more details.
+    \\See the class [UInt128Extensions](/src/clients/dotnet/TigerBeetle/UInt128.cs) for more details.
     ,
 
     .account_flags_documentation =
