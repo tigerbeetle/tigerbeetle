@@ -1,28 +1,15 @@
 # docs.tigerbeetle.com
 
-This site is built with a pretty vanilla docusaurus configuration and
-hosted on Github Pages.
+Documentation generator for <docs.tigerbeetle.com>. Static website is generated via `npm run build`
+and is pushed to <https://github.com/tigerbeetledb/docs>, which is then hosted on GitHub pages.
 
-## Actual docs
+Overview of the build process:
 
-The actual docs themselves are in the [TigerBeetle
-docs/](https://github.com/tigerbeetledb/tigerbeetle/tree/main/docs)
-directory.
+* Copy over markdown files from `/docs` and `/src/clients/$lang/README.md`
+* Massage markdown links in place to use relative links for things hosted on the docs website, and
+  `https://github.com/tigerbeetle/tigerbeetle` links for everything else.
+* Run link checker on the resulting markdown files
+* Run `docusaurus build` to produce the static HTML files in the `./build` directory.
 
-They are copied here during the build step.
-
-## Building for deployment
-
-The built assets are *committed* by a developer (no CI does this at the
-moment).
-
-The built assets are in the [docs/](./docs/) directory since this is
-where Github Pages wants them to be.
-
-To build:
-
-```bash
-$ ./scripts/build.sh
-```
-
-Then commit all the changes (in the `docs/` directory).
+This process is triggered by `ci.zig` in our merge queue (mostly to detect broken links) and by
+`release.zig` to push the rendered docs to <https://github.com/tigerbeetledb/docs>.
