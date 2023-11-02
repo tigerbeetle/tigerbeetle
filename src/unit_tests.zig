@@ -42,6 +42,7 @@ test {
     _ = @import("testing/tmp_tigerbeetle.zig");
 
     _ = @import("vsr.zig");
+    _ = @import("vsr/client.zig");
     _ = @import("vsr/clock.zig");
     _ = @import("vsr/checksum.zig");
     _ = @import("vsr/grid_blocks_missing.zig");
