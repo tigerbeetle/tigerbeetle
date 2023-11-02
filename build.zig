@@ -367,15 +367,15 @@ pub fn build(b: *std.Build) !void {
         );
 
         const ci_exe = b.addExecutable(.{
-            .name = "client-ci",
-            .root_source_file = .{ .path = "src/clients/ci.zig" },
+            .name = "ci",
+            .root_source_file = .{ .path = "src/scripts/ci.zig" },
             .target = target,
             .main_pkg_path = .{ .path = "src" },
         });
-        const client_ci_run = b.addRunArtifact(ci_exe);
-        if (b.args) |args| client_ci_run.addArgs(args);
-        const client_ci_step = b.step("client_ci", "Run CI checks for clients");
-        client_ci_step.dependOn(&client_ci_run.step);
+        const ci_run = b.addRunArtifact(ci_exe);
+        if (b.args) |args| ci_run.addArgs(args);
+        const ci_step = b.step("ci", "Run CI checks");
+        ci_step.dependOn(&ci_run.step);
     }
 
     {
