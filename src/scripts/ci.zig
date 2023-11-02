@@ -1,4 +1,10 @@
+//! Various CI checks that go beyond `zig build test`. Notably, at the moment this script includes:
+//!
+//! - Testing all language clients.
+//! - Building and link-checking docs.
+
 const std = @import("std");
+const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
@@ -9,10 +15,10 @@ const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
 
 const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
 const LanguageCI = .{
-    .dotnet = @import("./dotnet/ci.zig"),
-    .go = @import("./go/ci.zig"),
-    .java = @import("./java/ci.zig"),
-    .node = @import("./node/ci.zig"),
+    .dotnet = @import("../clients/dotnet/ci.zig"),
+    .go = @import("../clients/go/ci.zig"),
+    .java = @import("../clients/java/ci.zig"),
+    .node = @import("../clients/node/ci.zig"),
 };
 
 const CliArgs = struct {
@@ -63,7 +69,26 @@ pub fn main() !void {
                 try client_src_dir.setAsCwd();
 
                 try ci.tests(shell, gpa);
+
+                // Piggy back on node client testing to verify our docs, as we use node to generate
+                // them anyway.
+                if (language == .node and builtin.os.tag == .linux) {
+                    try build_docs(shell);
+                }
             }
         }
     }
+}
+
+fn build_docs(shell: *Shell) !void {
+    var docs_dir = try shell.project_root.openDir(
+        "src/docs_website",
+        .{},
+    );
+    defer docs_dir.close();
+
+    try docs_dir.setAsCwd();
+
+    try shell.exec("npm install", .{});
+    try shell.exec("npm run build", .{});
 }
