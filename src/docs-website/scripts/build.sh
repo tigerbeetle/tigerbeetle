@@ -36,9 +36,8 @@ done
 npx remark --use remark-validate-links --frail pages
 
 # Build the site
-rm -rf docs build
+rm -rf build
 npx docusaurus build
-cp -r build docs
 
 # CNAME file for Github Pages DNS matching
 echo 'docs.tigerbeetle.com' >> docs/CNAME
