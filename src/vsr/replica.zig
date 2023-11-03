@@ -7928,7 +7928,7 @@ pub fn ReplicaType(
             const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
             while (self.sync_tables.?.next(&self.state_machine.forest)) |table_info| {
                 assert(self.grid_repair_tables.available() > 0);
-                assert(table_info.label.event == .insert); // Dummy event.
+                assert(table_info.label.event == .reserved);
 
                 if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
                     table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
