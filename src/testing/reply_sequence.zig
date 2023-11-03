@@ -17,8 +17,8 @@ const PriorityQueue = std.PriorityQueue;
 /// Both messages belong to the ReplySequence's `MessagePool`.
 const PendingReply = struct {
     client_index: usize,
-    request: *Message,
-    reply: *Message,
+    request: Message.Type(.request),
+    reply: Message.Type(.reply),
 
     /// `PendingReply`s are ordered by ascending reply op.
     fn compare(context: void, a: PendingReply, b: PendingReply) std.math.Order {
@@ -66,8 +66,8 @@ pub const ReplySequence = struct {
 
     pub fn deinit(sequence: *ReplySequence, allocator: std.mem.Allocator) void {
         while (sequence.stalled_queue.removeOrNull()) |pending| {
-            sequence.message_pool.unref(pending.request);
-            sequence.message_pool.unref(pending.reply);
+            sequence.message_pool.unref(pending.request.base);
+            sequence.message_pool.unref(pending.reply.base);
         }
         sequence.stalled_queue.deinit();
         sequence.message_pool.deinit(allocator);
@@ -84,13 +84,13 @@ pub const ReplySequence = struct {
     pub fn insert(
         sequence: *ReplySequence,
         client_index: usize,
-        request_message: *Message,
-        reply_message: *Message,
+        request_message: Message.Type(.request),
+        reply_message: Message.Type(.reply),
     ) void {
-        assert(request_message.header.invalid() == null);
+        assert(request_message.header.frame_const().invalid() == null);
         assert(request_message.header.command == .request);
 
-        assert(reply_message.header.invalid() == null);
+        assert(reply_message.header.frame_const().invalid() == null);
         assert(reply_message.header.request == request_message.header.request);
         assert(reply_message.header.op >= sequence.stalled_op);
         assert(reply_message.header.command == .reply);
@@ -98,8 +98,8 @@ pub const ReplySequence = struct {
 
         sequence.stalled_queue.add(.{
             .client_index = client_index,
-            .request = sequence.clone_message(request_message),
-            .reply = sequence.clone_message(reply_message),
+            .request = sequence.clone_message(request_message.base).into(.request).?,
+            .reply = sequence.clone_message(reply_message.base).into(.reply).?,
         }) catch unreachable;
     }
 
@@ -120,8 +120,8 @@ pub const ReplySequence = struct {
         assert(commit.reply.header.op == sequence.stalled_op);
 
         sequence.stalled_op += 1;
-        sequence.message_pool.unref(commit.reply);
-        sequence.message_pool.unref(commit.request);
+        sequence.message_pool.unref(commit.reply.base);
+        sequence.message_pool.unref(commit.request.base);
     }
 
     /// Copy the message from a Client's MessagePool to the ReplySequence's MessagePool.

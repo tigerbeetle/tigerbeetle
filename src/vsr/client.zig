@@ -29,7 +29,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             user_data: u128,
             // Null iff operation=register.
             callback: ?Callback,
-            message: *Message,
+            message: Message.Type(.request),
         };
 
         const RequestQueue = RingBuffer(Request, .{ .array = constants.client_request_queue_max });
@@ -98,8 +98,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Used for testing. Called for replies to all operations (including `register`).
         on_reply_callback: ?*const fn (
             client: *Self,
-            request: *Message,
-            reply: *Message,
+            request: Message.Type(.request),
+            reply: Message.Type(.reply),
         ) void = null,
 
         pub fn init(
@@ -149,7 +149,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             while (self.request_queue.pop()) |inflight| {
-                self.release(inflight.message);
+                self.release(inflight.message.base);
             }
             assert(self.messages_available == constants.client_request_queue_max);
             self.message_bus.deinit(allocator);
@@ -170,10 +170,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 });
                 return;
             }
-            switch (message.header.command) {
-                .pong_client => self.on_pong_client(message),
-                .reply => self.on_reply(message),
-                .eviction => self.on_eviction(message),
+            switch (message.into_any()) {
+                .pong_client => |m| self.on_pong_client(m),
+                .reply => |m| self.on_reply(m),
+                .eviction => |m| self.on_eviction(m),
                 else => {
                     log.warn("{}: on_message: ignoring misdirected {s} message", .{
                         self.id,
@@ -209,8 +209,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.register();
             assert(self.request_number > 0);
 
-            // We will set parent, context, view and checksums only when sending for the first time:
-            message.header.* = .{
+            const message_request = message.build(.request);
+
+            // We will set parent, session, view and checksums only when sending for the first time:
+            message_request.header.* = .{
                 .client = self.id,
                 .request = self.request_number,
                 .cluster = self.cluster,
@@ -222,8 +224,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             log.debug("{}: request: user_data={} request={} size={} {s}", .{
                 self.id,
                 user_data,
-                message.header.request,
-                message.header.size,
+                message_request.header.request,
+                message_request.header.size,
                 @tagName(operation),
             });
 
@@ -234,12 +236,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
-                .message = message,
+                .message = message_request,
             });
             if (self.request_queue.full()) assert(self.messages_available == 0);
 
             // If the queue was empty, then there is no request inflight and we must send this one:
-            if (was_empty) self.send_request_for_the_first_time(message);
+            if (was_empty) self.send_request_for_the_first_time(message_request);
         }
 
         /// Sends a request, only setting request_number in the header. Currently only used by
@@ -248,7 +250,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self: *Self,
             user_data: u128,
             callback: Request.Callback,
-            message: *Message,
+            message: Message.Type(.request),
         ) void {
             assert(!message.header.operation.vsr_reserved());
             const operation = message.header.operation.cast(StateMachine);
@@ -302,7 +304,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.unref(message);
         }
 
-        fn on_eviction(self: *Self, eviction: *const Message) void {
+        fn on_eviction(self: *Self, eviction: Message.Type(.eviction)) void {
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);
 
@@ -329,14 +331,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             @panic("session evicted: too many concurrent client sessions");
         }
 
-        fn on_pong_client(self: *Self, pong: *const Message) void {
+        fn on_pong_client(self: *Self, pong: Message.Type(.pong_client)) void {
             assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
-
-            if (pong.header.client != 0) {
-                log.debug("{}: on_pong: ignoring (client != 0)", .{self.id});
-                return;
-            }
 
             if (pong.header.view > self.view) {
                 log.debug("{}: on_pong: newer view={}..{}", .{
@@ -351,11 +348,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.register();
         }
 
-        fn on_reply(self: *Self, reply: *Message) void {
+        fn on_reply(self: *Self, reply: Message.Type(.reply)) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
-            assert(reply.header.valid_checksum());
-            assert(reply.header.valid_checksum_body(reply.body()));
+            assert(reply.header.frame_const().valid_checksum());
+            assert(reply.header.frame_const().valid_checksum_body(reply.body()));
             assert(reply.header.command == .reply);
 
             if (reply.header.client != self.id) {
@@ -390,12 +387,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Eagerly release request message, to ensure that user's callback can submit a new
             // request.
-            self.release(inflight.message);
+            self.release(inflight.message.base);
             assert(self.messages_available > 0);
 
             // Even though we release our reference to the message, we might have another one
             // retained by the send queue in case of timeout.
-            maybe(inflight.message.references > 0);
+            maybe(inflight.message.base.references > 0);
             inflight.message = undefined;
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
@@ -455,14 +452,14 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn on_ping_timeout(self: *Self) void {
             self.ping_timeout.reset();
 
-            const ping = Header{
+            const ping = Header.Type(.ping_client){
                 .command = .ping_client,
                 .cluster = self.cluster,
                 .client = self.id,
             };
 
             // TODO If we haven't received a pong from a replica since our last ping, then back off.
-            self.send_header_to_replicas(ping);
+            self.send_header_to_replicas(ping.frame_const().*);
         }
 
         fn on_request_timeout(self: *Self) void {
@@ -472,7 +469,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.command == .request);
             assert(message.header.request < self.request_number);
             assert(message.header.checksum == self.parent);
-            assert(message.header.context == self.session);
+            assert(message.header.session == self.session);
 
             log.debug("{}: on_request_timeout: resending request={} checksum={}", .{
                 self.id,
@@ -483,13 +480,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // We assume the primary is down and round-robin through the cluster:
             self.send_message_to_replica(
                 @as(u8, @intCast((self.view + self.request_timeout.attempts) % self.replica_count)),
-                message,
+                message.base,
             );
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Self, header: Header) *Message {
-            assert(header.client == self.id);
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
@@ -507,10 +503,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
 
-            const message = self.get_message();
-            errdefer self.release(message);
+            const message = self.get_message().build(.request);
+            errdefer self.release(message.base);
 
-            // We will set parent, context, view and checksums only when sending for the first time:
+            // We will set parent, session, view and checksums only when sending for the first time:
             message.header.* = .{
                 .client = self.id,
                 .request = self.request_number,
@@ -562,18 +558,24 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             assert(replica < self.replica_count);
             assert(message.header.valid_checksum());
-            assert(message.header.client == self.id);
             assert(message.header.cluster == self.cluster);
+
+            switch (message.into_any()) {
+                inline .request,
+                .ping_client,
+                => |m| assert(m.header.client == self.id),
+                else => unreachable,
+            }
 
             self.message_bus.send_message_to_replica(replica, message);
         }
 
-        fn send_request_for_the_first_time(self: *Self, message: *Message) void {
-            assert(self.request_queue.head_ptr().?.message == message);
+        fn send_request_for_the_first_time(self: *Self, message: Message.Type(.request)) void {
+            assert(self.request_queue.head_ptr().?.message.base == message.base);
 
             assert(message.header.command == .request);
             assert(message.header.parent == 0);
-            assert(message.header.context == 0);
+            assert(message.header.session == 0);
             assert(message.header.request < self.request_number);
             assert(message.header.view == 0);
             assert(message.header.size <= constants.message_size_max);
@@ -583,13 +585,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // which is when we have the checksum of the latest reply available to set as `parent`,
             // and similarly also the session number if requests were queued while registering:
             message.header.parent = self.parent;
-            message.header.context = self.session;
+            message.header.session = self.session;
             // We also try to include our highest view number, so we wait until the request is ready
             // to be sent for the first time. However, beyond that, it is not necessary to update
             // the view number again, for example if it should change between now and resending.
             message.header.view = self.view;
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
+            message.header.frame().set_checksum_body(message.body());
+            message.header.frame().set_checksum();
 
             // The checksum of this request becomes the parent of our next reply:
             self.parent = message.header.checksum;
@@ -605,7 +607,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // If our view number is out of date, then the old primary will forward our request.
             // If the primary is offline, then our request timeout will fire and we will round-robin.
-            self.send_message_to_replica(@as(u8, @intCast(self.view % self.replica_count)), message);
+            self.send_message_to_replica(
+                @as(u8, @intCast(self.view % self.replica_count)),
+                message.base,
+            );
         }
     };
 }

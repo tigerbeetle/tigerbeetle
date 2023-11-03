@@ -70,7 +70,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             message: *Message,
             message_body_size: usize,
         ) void {
-            message.header.* = .{
+            const message_request = message.build(.request);
+
+            message_request.header.* = .{
                 .client = 0,
                 .request = 0,
                 .cluster = 0,
@@ -84,7 +86,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             self.request_queue.push_assume_capacity(.{
                 .user_data = user_data,
                 .callback = callback,
-                .message = message,
+                .message = message_request,
             });
         }
 
@@ -102,13 +104,19 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
         fn reply(self: *Self) void {
             while (self.request_queue.pop()) |inflight| {
-                const reply_message = self.message_pool.get_message();
-                defer self.message_pool.unref(reply_message);
+                const reply_message = self.message_pool.get_message().build(.request);
+                defer self.message_pool.unref(reply_message.base);
 
-                stdx.copy_disjoint(.exact, u8, reply_message.buffer, inflight.message.buffer);
+                stdx.copy_disjoint(
+                    .exact,
+                    u8,
+                    reply_message.base.buffer,
+                    inflight.message.base.buffer,
+                );
+
                 // Similarly to the real client, release the request message before invoking the
                 // callback. This necessitates a `copy_disjoint` above.
-                self.release(inflight.message);
+                self.release(inflight.message.base);
 
                 inflight.callback.?(
                     inflight.user_data,

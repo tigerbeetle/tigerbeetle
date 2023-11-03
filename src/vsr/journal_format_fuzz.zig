@@ -42,7 +42,7 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
         const write_size = journal.format_wal_headers(cluster, offset, write);
         defer offset += write_size;
 
-        const write_headers = std.mem.bytesAsSlice(vsr.Header, write[0..write_size]);
+        const write_headers = std.mem.bytesAsSlice(vsr.Header.Type(.prepare), write[0..write_size]);
         for (write_headers, 0..) |header, i| {
             const slot = @divExact(offset, @sizeOf(vsr.Header)) + i;
             try verify_slot_header(slot, header);
@@ -76,7 +76,7 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
                 // Message header.
                 const slot = @divExact(offset + offset_checked, constants.message_size_max);
                 const header_bytes = write[offset_checked..][0..@sizeOf(vsr.Header)];
-                const header = std.mem.bytesToValue(vsr.Header, header_bytes);
+                const header = std.mem.bytesToValue(vsr.Header.Type(.prepare), header_bytes);
 
                 try verify_slot_header(slot, header);
                 offset_checked += @sizeOf(vsr.Header);
@@ -96,17 +96,17 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
     assert(offset == constants.journal_size_prepares);
 }
 
-fn verify_slot_header(slot: usize, header: vsr.Header) !void {
-    try std.testing.expect(header.valid_checksum());
-    try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
-    try std.testing.expectEqual(header.invalid(), null);
+fn verify_slot_header(slot: usize, header: vsr.Header.Type(.prepare)) !void {
+    try std.testing.expect(header.frame_const().valid_checksum());
+    try std.testing.expect(header.frame_const().valid_checksum_body(&[0]u8{}));
+    try std.testing.expectEqual(header.frame_const().invalid(), null);
     try std.testing.expectEqual(header.cluster, cluster);
     try std.testing.expectEqual(header.op, slot);
     try std.testing.expectEqual(header.size, @sizeOf(vsr.Header));
+    try std.testing.expectEqual(header.command, .prepare);
     if (slot == 0) {
-        try std.testing.expectEqual(header.command, .prepare);
         try std.testing.expectEqual(header.operation, .root);
     } else {
-        try std.testing.expectEqual(header.command, .reserved);
+        try std.testing.expectEqual(header.operation, .reserved);
     }
 }

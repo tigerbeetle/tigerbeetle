@@ -820,8 +820,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 const header_peer: Connection.Peer = switch (header.peer_type()) {
                     .unknown => return true,
-                    .replica => .{ .replica = header.replica },
-                    .client => .{ .client = header.client },
+                    .replica => |replica| .{ .replica = replica },
+                    .client => |client| .{ .client = client },
                 };
 
                 if (connection.peer != .unknown) {

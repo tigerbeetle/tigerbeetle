@@ -54,14 +54,14 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             completion: Storage.Read,
             callback: *const fn (
                 client_replies: *ClientReplies,
-                reply_header: *const vsr.Header,
-                reply: ?*Message,
+                reply_header: *const vsr.Header.Type(.reply),
+                reply: ?Message.Type(.reply),
                 destination_replica: ?u8,
             ) void,
             slot: Slot,
-            message: *Message,
+            message: Message.Type(.reply),
             /// The header of the expected reply.
-            header: vsr.Header,
+            header: vsr.Header.Type(.reply),
             destination_replica: ?u8,
         };
 
@@ -69,7 +69,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             completion: Storage.Write,
             slot: Slot,
-            message: *Message,
+            message: Message.Type(.reply),
         };
 
         const WriteQueue = RingBuffer(*Write, .{
@@ -120,11 +120,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         pub fn deinit(client_replies: *ClientReplies) void {
             {
                 var it = client_replies.reads.iterate();
-                while (it.next()) |read| client_replies.message_pool.unref(read.message);
+                while (it.next()) |read| client_replies.message_pool.unref(read.message.base);
             }
             {
                 var it = client_replies.writes.iterate();
-                while (it.next()) |write| client_replies.message_pool.unref(write.message);
+                while (it.next()) |write| client_replies.message_pool.unref(write.message.base);
             }
             // Don't unref `write_queue`'s Writes — they are a subset of `writes`.
         }
@@ -133,7 +133,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-        ) ?*Message {
+        ) ?Message.Type(.reply) {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
@@ -164,7 +164,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-            callback: *const fn (*ClientReplies, *const vsr.Header, ?*Message, ?u8) void,
+            callback: *const fn (
+                *ClientReplies,
+                *const vsr.Header.Type(.reply),
+                ?Message.Type(.reply),
+                ?u8,
+            ) void,
             destination_replica: ?u8,
         ) error{Busy}!void {
             assert(client_replies.read_reply_sync(slot, session) == null);
@@ -192,7 +197,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 .client_replies = client_replies,
                 .completion = undefined,
                 .slot = slot,
-                .message = message.ref(),
+                .message = message.ref().build(.reply),
                 .callback = callback,
                 .header = session.header,
                 .destination_replica = destination_replica,
@@ -218,12 +223,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.reads.release(read);
 
             defer {
-                client_replies.message_pool.unref(message);
+                client_replies.message_pool.unref(message.base);
                 client_replies.write_reply_next();
             }
 
-            if (!message.header.valid_checksum() or
-                !message.header.valid_checksum_body(message.body()))
+            if (!message.header.frame_const().valid_checksum() or
+                !message.header.frame_const().valid_checksum_body(message.body()))
             {
                 log.warn("{}: read_reply: corrupt reply (client={} reply={})", .{
                     client_replies.replica,
@@ -294,7 +299,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         pub fn write_reply(
             client_replies: *ClientReplies,
             slot: Slot,
-            message: *Message,
+            message: Message.Type(.reply),
             trigger: enum { commit, repair },
         ) void {
             assert(client_replies.ready_sync());
@@ -334,7 +339,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             var write_queue = client_replies.write_queue.iterator_mutable();
             while (write_queue.next_ptr()) |queued| {
                 if (queued.*.slot.index == slot.index) {
-                    client_replies.message_pool.unref(queued.*.message);
+                    client_replies.message_pool.unref(queued.*.message.base);
                     client_replies.writes.release(queued.*);
 
                     queued.* = write;
@@ -361,13 +366,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 // Zero sector padding to ensure deterministic storage.
                 const size = message.header.size;
                 const size_ceil = vsr.sector_ceil(size);
-                @memset(message.buffer[size..size_ceil], 0);
+                @memset(message.base.buffer[size..size_ceil], 0);
 
                 client_replies.writing.set(write.slot.index);
                 client_replies.storage.write_sectors(
                     write_reply_callback,
                     &write.completion,
-                    message.buffer[0..size_ceil],
+                    message.base.buffer[0..size_ceil],
                     .client_replies,
                     slot_offset(write.slot),
                 );
@@ -392,7 +397,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.writing.unset(write.slot.index);
             client_replies.writes.release(write);
 
-            client_replies.message_pool.unref(message);
+            client_replies.message_pool.unref(message.base);
             client_replies.write_reply_next();
 
             if (client_replies.ready_callback) |ready_callback| {

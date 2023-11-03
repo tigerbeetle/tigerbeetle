@@ -270,14 +270,14 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 // VSRState.monotonic() asserts that the previous_checkpoint id changes.
                 // In a normal replica this is guaranteed – even if the LSM is idle and no blocks
                 // are acquired or released, the client sessions are necessarily mutated.
-                var reply = std.mem.zeroInit(vsr.Header, .{
+                var reply = std.mem.zeroInit(vsr.Header.Type(.reply), .{
                     .cluster = cluster,
                     .command = .reply,
                     .op = op,
                     .commit = op,
                 });
-                reply.set_checksum_body(&.{});
-                reply.set_checksum();
+                reply.frame().set_checksum_body(&.{});
+                reply.frame().set_checksum();
 
                 _ = env.superblock.client_sessions.put(1, &reply);
             }

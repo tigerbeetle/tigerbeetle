@@ -307,20 +307,20 @@ pub fn TableType(
 
                 const block = builder.data_block;
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                header.* = .{
+                header.* = @bitCast(vsr.Header.Type(.block){
                     .cluster = options.cluster,
-                    .parent = @bitCast(schema.TableData.Parent{ .tree_id = options.tree_id }),
-                    .context = @bitCast(schema.TableData.Context{
+                    .metadata_bytes = @bitCast(schema.TableData.Metadata{
                         .value_count_max = data.value_count_max,
+                        .value_count = builder.value_count,
                         .value_size = value_size,
+                        .tree_id = options.tree_id,
                     }),
-                    .op = options.address,
-                    .timestamp = options.snapshot_min,
-                    .request = builder.value_count,
+                    .address = options.address,
+                    .snapshot = options.snapshot_min,
                     .size = @sizeOf(vsr.Header) + builder.value_count * @sizeOf(Value),
                     .command = .block,
-                    .operation = schema.BlockType.data.operation(),
-                };
+                    .block_type = .data,
+                });
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
@@ -406,22 +406,20 @@ pub fn TableType(
 
                 const index_block = builder.index_block;
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                header.* = .{
+                header.* = @bitCast(vsr.Header.Type(.block){
                     .cluster = options.cluster,
-                    .parent = @bitCast(schema.TableIndex.Parent{
-                        .tree_id = options.tree_id,
-                    }),
-                    .context = @bitCast(schema.TableIndex.Context{
+                    .metadata_bytes = @bitCast(schema.TableIndex.Metadata{
                         .data_block_count = builder.data_block_count,
                         .data_block_count_max = index.data_block_count_max,
+                        .tree_id = options.tree_id,
+                        .key_size = index.key_size,
                     }),
-                    .request = index.key_size,
-                    .op = options.address,
-                    .timestamp = options.snapshot_min,
+                    .address = options.address,
+                    .snapshot = options.snapshot_min,
                     .size = index.size,
                     .command = .block,
-                    .operation = schema.BlockType.index.operation(),
-                };
+                    .block_type = .index,
+                });
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
@@ -516,9 +514,8 @@ pub fn TableType(
 
         pub inline fn block_address(block: BlockPtrConst) u64 {
             const header = schema.header_from_block(block);
-            const address = header.op;
-            assert(address > 0);
-            return address;
+            assert(header.address > 0);
+            return header.address;
         }
 
         pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
@@ -571,7 +568,7 @@ pub fn TableType(
             ) |data_block_address, data_block_checksum, data_block_index| {
                 const data_block = storage.grid_block(data_block_address).?;
                 const data_block_header = schema.header_from_block(data_block);
-                assert(data_block_header.op == data_block_address);
+                assert(data_block_header.address == data_block_address);
                 assert(data_block_header.checksum == data_block_checksum);
 
                 const values = data_block_values_used(data_block);

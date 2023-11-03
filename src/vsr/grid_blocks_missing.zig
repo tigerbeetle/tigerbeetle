@@ -329,10 +329,10 @@ pub const GridBlocksMissing = struct {
 
     pub fn repair_complete(queue: *GridBlocksMissing, block: BlockPtrConst) void {
         const block_header = schema.header_from_block(block);
-        const fault_index = queue.faulty_blocks.getIndex(block_header.op).?;
+        const fault_index = queue.faulty_blocks.getIndex(block_header.address).?;
         const fault_address = queue.faulty_blocks.entries.items(.key)[fault_index];
         const fault: FaultyBlock = queue.faulty_blocks.entries.items(.value)[fault_index];
-        assert(fault_address == block_header.op);
+        assert(fault_address == block_header.address);
         assert(fault.checksum == block_header.checksum);
         assert(fault.state == .aborting or fault.state == .writing);
 
@@ -388,9 +388,9 @@ pub const GridBlocksMissing = struct {
 
         const index_schema = schema.TableIndex.from(index_block_data);
         const index_block_header = schema.header_from_block(index_block_data);
-        assert(index_block_header.op == table.index_address);
+        assert(index_block_header.address == table.index_address);
         assert(index_block_header.checksum == table.index_checksum);
-        assert(schema.BlockType.from(index_block_header.operation) == .index);
+        assert(index_block_header.block_type == .index);
 
         table.table_blocks_total = index_schema.data_blocks_used(index_block_data) + 1;
 
