@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Disable shellcheck for this script: it is rather complex, and the proper here would be to
+# get rit of it altogether, but it is not completely obvious what the end state we want here yet.
+# shellcheck disable=all
+
 set -eu
 
 repo="https://github.com/tigerbeetle/tigerbeetle"
