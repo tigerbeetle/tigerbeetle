@@ -146,7 +146,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     // Linting targets
-    // We currently have: lint_zig_fmt, lint_tigerstyle, lint_shellcheck, lint_validate_docs.
+    // We currently have: lint_zig_fmt, lint_tigerstyle, lint_shellcheck.
     // The meta-target lint runs them all
     {
         // lint_zig_fmt
@@ -177,18 +177,12 @@ pub fn build(b: *std.Build) !void {
         const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
         lint_shellcheck_step.dependOn(&lint_shellcheck.step);
 
-        // lint_validate_docs
-        const lint_validate_docs = b.addSystemCommand(&.{"scripts/validate_docs.sh"});
-        const lint_validate_docs_step = b.step("lint_validate_docs", "Validate docs");
-        lint_validate_docs_step.dependOn(&lint_validate_docs.step);
-
         // TODO: Iterate above? Make it impossible to neglect to add somehow?
         // lint
         const lint_step = b.step("lint", "Run all defined linters");
         lint_step.dependOn(lint_tigerstyle_step);
         lint_step.dependOn(lint_zig_fmt_step);
         lint_step.dependOn(lint_shellcheck_step);
-        lint_step.dependOn(lint_validate_docs_step);
     }
 
     // Executable which generates src/clients/c/tb_client.h
@@ -367,15 +361,15 @@ pub fn build(b: *std.Build) !void {
         );
 
         const ci_exe = b.addExecutable(.{
-            .name = "client-ci",
-            .root_source_file = .{ .path = "src/clients/ci.zig" },
+            .name = "ci",
+            .root_source_file = .{ .path = "src/scripts/ci.zig" },
             .target = target,
             .main_pkg_path = .{ .path = "src" },
         });
-        const client_ci_run = b.addRunArtifact(ci_exe);
-        if (b.args) |args| client_ci_run.addArgs(args);
-        const client_ci_step = b.step("client_ci", "Run CI checks for clients");
-        client_ci_step.dependOn(&client_ci_run.step);
+        const ci_run = b.addRunArtifact(ci_exe);
+        if (b.args) |args| ci_run.addArgs(args);
+        const ci_step = b.step("ci", "Run CI checks");
+        ci_step.dependOn(&ci_run.step);
     }
 
     {
