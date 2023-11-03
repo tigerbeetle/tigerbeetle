@@ -73,7 +73,12 @@ pub fn main() !void {
                 // Piggy back on node client testing to verify our docs, as we use node to generate
                 // them anyway.
                 if (language == .node and builtin.os.tag == .linux) {
-                    try build_docs(shell);
+                    const node_version = try shell.exec_stdout("node --version", .{});
+                    if (std.mem.startsWith(u8, node_version, "v14")) {
+                        log.warn("skip building documentation on old Node.js", .{});
+                    } else {
+                        try build_docs(shell);
+                    }
                 }
             }
         }
