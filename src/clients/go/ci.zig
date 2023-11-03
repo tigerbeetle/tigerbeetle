@@ -47,17 +47,26 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
-pub fn verify_release(shell: *Shell, gpa: std.mem.Allocator, tmp_dir: std.fs.Dir) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    version: []const u8,
+    tigerbeetle: []const u8,
+}) !void {
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        .prebuilt = options.tigerbeetle,
+    });
     defer tmp_beetle.deinit(gpa);
 
+    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+
     try shell.exec("go mod init tbtest", .{});
-    try shell.exec("go get github.com/tigerbeetle/tigerbeetle-go", .{});
+    try shell.exec("go get github.com/tigerbeetle/tigerbeetle-go@v{version}", .{
+        .version = options.version,
+    });
 
     try Shell.copy_path(
         shell.project_root,
         "src/clients/go/samples/basic/main.go",
-        tmp_dir,
+        shell.cwd,
         "main.go",
     );
     const zig_exe = try shell.project_root.realpathAlloc(
