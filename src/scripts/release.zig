@@ -543,6 +543,10 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     try tigerbeetle_go_dir.setAsCwd();
 
     try shell.exec("git add .", .{});
+    // Native libraries are ignored in this repository, but we want to push them to the
+    // tigerbeetle-go one!
+    try shell.exec("git add --force pkg/native", .{});
+
     try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
     try shell.env.put("GIT_AUTHOR_EMAIL", "bot@tigerbeetle.com");
     try shell.env.put("GIT_COMMITTER_NAME", "TigerBeetle Bot");
@@ -688,7 +692,7 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
     defer section.close();
 
     {
-        var docs_dir = try shell.project_root.openDir("src/docs_website");
+        var docs_dir = try shell.project_root.openDir("src/docs_website", .{});
         defer docs_dir.close();
 
         try docs_dir.setAsCwd();
