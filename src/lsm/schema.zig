@@ -421,9 +421,10 @@ pub const ManifestNode = struct {
     };
 
     pub const Event = enum(u2) {
-        insert = 0,
-        update = 1,
-        remove = 2,
+        reserved = 0,
+        insert = 1,
+        update = 2,
+        remove = 3,
     };
 
     pub const Label = packed struct(u8) {

@@ -87,7 +87,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                                     // Dummy event, doesn't really mean anything in this context.
                                     // (We are reusing the schema's TableInfo type since it is
                                     // shared by all Tree types.)
-                                    .event = .insert,
+                                    .event = .reserved,
                                 });
                             }
                         },

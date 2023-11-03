@@ -369,6 +369,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 entry -= 1;
 
                 const table = &tables_used[entry];
+                assert(table.label.event != .reserved);
                 assert(table.tree_id >= manifest_log.options.tree_id_min);
                 assert(table.tree_id <= manifest_log.options.tree_id_max);
                 assert(table.address > 0);
@@ -458,6 +459,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(!manifest_log.writing);
 
             switch (table.label.event) {
+                .reserved => unreachable,
                 .insert => assert(manifest_log.table_extents.get(table.address) == null),
                 // For updates + removes, the table must have previously been inserted into the log:
                 .update => assert(manifest_log.table_extents.get(table.address) != null),
@@ -515,6 +517,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block_address = block_header.op;
 
             switch (table.label.event) {
+                .reserved => unreachable,
                 .insert,
                 .update,
                 => {
@@ -749,6 +752,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             ) |*table, entry_index| {
                 const entry: u32 = @intCast(entry_index);
                 switch (table.label.event) {
+                    .reserved => unreachable,
                     // Append the table, updating the table extent:
                     .insert,
                     .update,
