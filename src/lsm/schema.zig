@@ -4,40 +4,18 @@
 //! relevant parameters directly into the block's header. This allows the decoders to not be
 //! generic. This is convenient for compaction, but critical for the scrubber and repair queue.
 //!
-//! Every block begins with a `vsr.Header` that includes:
-//!
-//! * `checksum`, `checksum_body` verify the data integrity.
-//! * `cluster` is the cluster id.
-//! * `command` is `.block`.
-//! * `op` is the block address.
-//! * `size` is the block size excluding padding.
-//!
-//! Index block schema:
-//! │ vsr.Header                   │ operation=BlockType.index,
-//! │                              │ context: schema.TableIndex.Context,
-//! │                              │ parent: schema.TableIndex.Parent,
-//! │                              │ request=@sizeOf(Key)
-//! │                              │ timestamp=snapshot_min
+//! Index block body schema:
 //! │ [data_block_count_max]u128   │ checksums of data blocks
 //! │ [data_block_count_max]Key    │ the minimum/first key in the respective data block
 //! │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
 //! │ [data_block_count_max]u64    │ addresses of data blocks
 //! │ […]u8{0}                     │ padding (to end of block)
 //!
-//! Data block schema:
-//! │ vsr.Header               │ operation=BlockType.data,
-//! │                          │ context: schema.TableData.Context,
-//! │                          │ parent: schema.TableData.Parent,
-//! │                          │ request=values_count
-//! │                          │ timestamp=snapshot_min
+//! Data block body schema:
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
-//! ManifestNode block schema:
-//! │ vsr.Header                  │ operation=BlockType.manifest
-//! │                             │ context: schema.ManifestNode.Context
-//! │                             │ parent=previous_manifest_block.checksum else 0
-//! │                             │ commit=previous_manifest_block.address else 0
+//! ManifestNode block body schema:
 //! │ [entry_count]TableInfo      │
 //! │ […]u8{0}                    │ padding (to end of block)
 const std = @import("std");
@@ -58,70 +36,53 @@ const block_body_size = block_size - @sizeOf(vsr.Header);
 const BlockPtr = *align(constants.sector_size) [block_size]u8;
 const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 
-pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header {
-    const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header.Type(.block) {
+    const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
-    assert(header.op > 0);
+    assert(header.address > 0);
     assert(header.size >= @sizeOf(vsr.Header)); // Every block has a header.
     assert(header.size > @sizeOf(vsr.Header)); // Every block has a non-empty body.
     assert(header.size <= block.len);
-    assert(BlockType.valid(header.operation));
-    assert(BlockType.from(header.operation) != .reserved);
+    assert(header.block_type.valid());
+    assert(header.block_type != .reserved);
     return header;
 }
 
 /// A block's type is implicitly determined by how its address is stored (e.g. in the index block).
 /// BlockType is an additional check that a block has the expected type on read.
 ///
-/// The BlockType is stored in the block's `header.operation`.
+/// The BlockType is stored in the block's `header.block_type`.
 pub const BlockType = enum(u8) {
-    /// Unused; verifies that no block is written with a default 0 operation.
+    /// Unused; verifies that no block is written with a default 0 block type.
     reserved = 0,
 
     manifest = 1,
     index = 2,
     data = 3,
 
-    pub fn valid(vsr_operation: vsr.Operation) bool {
-        _ = std.meta.intToEnum(BlockType, @intFromEnum(vsr_operation)) catch return false;
+    pub fn valid(block_type: BlockType) bool {
+        _ = std.meta.intToEnum(BlockType, @intFromEnum(block_type)) catch return false;
 
         return true;
-    }
-
-    pub inline fn from(vsr_operation: vsr.Operation) BlockType {
-        return @as(BlockType, @enumFromInt(@intFromEnum(vsr_operation)));
-    }
-
-    pub inline fn operation(block_type: BlockType) vsr.Operation {
-        return @as(vsr.Operation, @enumFromInt(@intFromEnum(block_type)));
     }
 };
 
 pub const TableIndex = struct {
-    /// Stored in every index block's header's `context` field.
+    /// Stored in every index block's header's `metadata_bytes` field.
     ///
     /// The max-counts are stored in the header despite being available (per-tree) at comptime:
     /// - Encoding schema parameters enables schema evolution.
     /// - Tables can be decoded without per-tree specialized decoders.
     ///   (In particular, this is useful for the scrubber and the grid repair queue).
-    pub const Context = extern struct {
+    pub const Metadata = extern struct {
         data_block_count: u32,
         data_block_count_max: u32,
-        padding: [8]u8 = [_]u8{0} ** 8,
-
-        comptime {
-            assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(stdx.no_padding(Context));
-        }
-    };
-
-    pub const Parent = extern struct {
+        key_size: u32,
         tree_id: u16,
-        reserved: [14]u8 = [_]u8{0} ** 14,
+        reserved: [130]u8 = [_]u8{0} ** 130,
 
         comptime {
-            assert(@sizeOf(Parent) == @sizeOf(u128));
-            assert(stdx.no_padding(Parent));
+            assert(stdx.no_padding(Metadata));
         }
     };
 
@@ -187,26 +148,27 @@ pub const TableIndex = struct {
     pub fn from(index_block: BlockPtrConst) TableIndex {
         const header = header_from_block(index_block);
         assert(header.command == .block);
-        assert(BlockType.from(header.operation) == .index);
-        assert(header.op > 0);
-        assert(header.timestamp > 0);
+        assert(header.block_type == .index);
+        assert(header.address > 0);
+        assert(header.snapshot > 0);
 
-        const context = @as(Context, @bitCast(header.context));
-        assert(context.data_block_count <= context.data_block_count_max);
+        const header_metadata = metadata(index_block);
 
         return TableIndex.init(.{
-            .key_size = header.request,
-            .data_block_count_max = context.data_block_count_max,
+            .key_size = header_metadata.key_size,
+            .data_block_count_max = header_metadata.data_block_count_max,
         });
     }
 
-    pub fn tree_id(index_block: BlockPtrConst) u16 {
+    pub fn metadata(index_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(index_block);
-        assert(BlockType.from(header.operation) == .index);
+        assert(header.command == .block);
+        assert(header.block_type == .index);
 
-        const parent = @as(Parent, @bitCast(header.parent));
-        assert(stdx.zeroed(&parent.reserved));
-        return parent.tree_id;
+        const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
+        assert(header_metadata.data_block_count <= header_metadata.data_block_count_max);
+        assert(stdx.zeroed(&header_metadata.reserved));
+        return header_metadata;
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
@@ -246,35 +208,24 @@ pub const TableIndex = struct {
     }
 
     pub inline fn data_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        const header = header_from_block(index_block);
-        const context = @as(Context, @bitCast(header.context));
-        const value = @as(u32, @intCast(context.data_block_count));
-        assert(value > 0);
-        assert(value <= index.data_block_count_max);
-        return value;
+        const header_metadata = metadata(index_block);
+        assert(header_metadata.data_block_count > 0);
+        assert(header_metadata.data_block_count <= index.data_block_count_max);
+        return header_metadata.data_block_count;
     }
 };
 
 pub const TableData = struct {
-    /// Stored in every data block's header's `context` field.
-    pub const Context = extern struct {
+    /// Stored in every data block's header's `metadata_bytes` field.
+    pub const Metadata = extern struct {
         value_count_max: u32,
+        value_count: u32,
         value_size: u32,
-        padding: [8]u8 = [_]u8{0} ** 8,
-
-        comptime {
-            assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(stdx.no_padding(Context));
-        }
-    };
-
-    pub const Parent = extern struct {
         tree_id: u16,
-        reserved: [14]u8 = .{0} ** 14,
+        reserved: [130]u8 = [_]u8{0} ** 130,
 
         comptime {
-            assert(@sizeOf(Parent) == @sizeOf(u128));
-            assert(stdx.no_padding(Parent));
+            assert(stdx.no_padding(Metadata));
         }
     };
 
@@ -289,7 +240,12 @@ pub const TableData = struct {
     padding_offset: u32,
     padding_size: u32,
 
-    pub fn init(parameters: Context) TableData {
+    pub const Parameters = struct {
+        value_count_max: u32,
+        value_size: u32,
+    };
+
+    pub fn init(parameters: Parameters) TableData {
         assert(parameters.value_count_max > 0);
         assert(parameters.value_size > 0);
         assert(std.math.isPowerOfTwo(parameters.value_size));
@@ -315,20 +271,30 @@ pub const TableData = struct {
     pub fn from(data_block: BlockPtrConst) TableData {
         const header = header_from_block(data_block);
         assert(header.command == .block);
-        assert(BlockType.from(header.operation) == .data);
-        assert(header.op > 0);
-        assert(header.timestamp > 0);
+        assert(header.block_type == .data);
+        assert(header.address > 0);
+        assert(header.snapshot > 0);
 
-        return TableData.init(@as(Context, @bitCast(header.context)));
+        const header_metadata = metadata(data_block);
+
+        return TableData.init(.{
+            .value_count_max = header_metadata.value_count_max,
+            .value_size = header_metadata.value_size,
+        });
     }
 
-    pub fn tree_id(data_block: BlockPtrConst) u16 {
+    pub fn metadata(data_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(data_block);
-        assert(BlockType.from(header.operation) == .data);
+        assert(header.command == .block);
+        assert(header.block_type == .data);
 
-        const parent = @as(Parent, @bitCast(header.parent));
-        assert(stdx.zeroed(&parent.reserved));
-        return parent.tree_id;
+        const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
+        assert(header_metadata.value_size > 0);
+        assert(header_metadata.value_count > 0);
+        assert(header_metadata.value_count <= header_metadata.value_count_max);
+        assert(header_metadata.tree_id > 0);
+        assert(stdx.zeroed(&header_metadata.reserved));
+        return header_metadata;
     }
 
     pub inline fn block_values_bytes(
@@ -350,9 +316,9 @@ pub const TableData = struct {
         data_block: BlockPtrConst,
     ) []align(16) const u8 {
         const header = header_from_block(data_block);
-        assert(BlockType.from(header.operation) == .data);
+        assert(header.block_type == .data);
 
-        const used_values: u32 = header.request;
+        const used_values: u32 = metadata(data_block).value_count;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
 
@@ -364,7 +330,7 @@ pub const TableData = struct {
 };
 
 /// A Manifest block's body is an array of TableInfo entries.
-// TODO Store timestamp (snapshot) in header.
+// TODO Store snapshot in header.
 pub const ManifestNode = struct {
     const entry_size = @sizeOf(TableInfo);
 
@@ -388,14 +354,15 @@ pub const ManifestNode = struct {
         assert(@sizeOf(TableInfo) % alignment == 0);
     }
 
-    /// Stored in every manifest block's header's `context` field.
-    pub const Context = extern struct {
+    /// Stored in every manifest block's header's `metadata_bytes` field.
+    pub const Metadata = extern struct {
+        previous_manifest_block_checksum: u128,
+        previous_manifest_block_address: u64,
         entry_count: u32,
-        reserved: [12]u8 = .{0} ** 12,
+        reserved: [116]u8 = .{0} ** 116,
 
         comptime {
-            assert(@sizeOf(Context) == @sizeOf(u128));
-            assert(stdx.no_padding(Context));
+            assert(stdx.no_padding(Metadata));
         }
     };
 
@@ -439,22 +406,28 @@ pub const ManifestNode = struct {
     entry_count: u32,
 
     pub fn from(manifest_block: BlockPtrConst) ManifestNode {
+        const header_metadata = metadata(manifest_block);
+        return .{ .entry_count = header_metadata.entry_count };
+    }
+
+    pub fn metadata(manifest_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(manifest_block);
         assert(header.command == .block);
-        assert(BlockType.from(header.operation) == .manifest);
-        assert(header.op > 0);
+        assert(header.block_type == .manifest);
+        assert(header.address > 0);
 
-        const context = @as(Context, @bitCast(header.context));
-        assert(context.entry_count > 0);
-        assert(context.entry_count <= entry_count_max);
-        assert(context.entry_count == @divExact(header.size - @sizeOf(vsr.Header), entry_size));
-        assert(stdx.zeroed(&context.reserved));
+        const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
+        assert(header_metadata.entry_count > 0);
+        assert(header_metadata.entry_count <= entry_count_max);
+        assert(header_metadata.entry_count ==
+            @divExact(header.size - @sizeOf(vsr.Header), entry_size));
+        assert(stdx.zeroed(&header_metadata.reserved));
 
-        if (header.commit == 0) {
-            assert(header.parent == 0);
+        if (header_metadata.previous_manifest_block_address == 0) {
+            assert(header_metadata.previous_manifest_block_checksum == 0);
         }
 
-        return .{ .entry_count = context.entry_count };
+        return header_metadata;
     }
 
     /// Note that the returned block reference is no longer be part of the manifest if
@@ -462,15 +435,15 @@ pub const ManifestNode = struct {
     pub fn previous(manifest_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
         _ = from(manifest_block); // Validation only.
 
-        const header = header_from_block(manifest_block);
-        if (header.commit == 0) {
-            assert(header.parent == 0);
+        const header_metadata = metadata(manifest_block);
+        if (header_metadata.previous_manifest_block_address == 0) {
+            assert(header_metadata.previous_manifest_block_checksum == 0);
 
             return null;
         } else {
             return .{
-                .checksum = header.parent,
-                .address = header.commit,
+                .checksum = header_metadata.previous_manifest_block_checksum,
+                .address = header_metadata.previous_manifest_block_address,
             };
         }
     }

@@ -513,8 +513,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const entry = manifest_log.entry_count;
             block_builder_schema.tables(block)[entry] = table.*;
 
-            const block_header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const block_address = block_header.op;
+            const block_header =
+                mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
+            const block_address = block_header.address;
 
             switch (table.label.event) {
                 .reserved => unreachable,
@@ -594,8 +595,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(block_schema.entry_count > 0);
 
             const header = schema.header_from_block(block.*);
-            const address = header.op;
-            assert(address > 0);
+            assert(header.address > 0);
 
             if (block_index == manifest_log.blocks_closed - 1) {
                 // This might be the last block of a checkpoint, which can be a partial block.
@@ -607,7 +607,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             log.debug("{}: write_block: checksum={} address={} entries={}", .{
                 manifest_log.superblock.replica_index.?,
                 header.checksum,
-                address,
+                header.address,
                 block_schema.entry_count,
             });
 
@@ -893,19 +893,15 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const block_address = manifest_log.grid.acquire(manifest_log.grid_reservation.?);
 
-            const newest_checksum = manifest_log.log_block_checksums.tail() orelse 0;
-            const newest_address = manifest_log.log_block_addresses.tail() orelse 0;
-
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+            const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
             header.* = .{
-                .context = undefined,
                 .cluster = manifest_log.superblock.working.cluster,
-                .parent = newest_checksum,
-                .commit = newest_address,
-                .op = block_address,
+                .address = block_address,
+                .snapshot = 0, // TODO(snapshots): Set this properly; it is useful for debugging.
                 .size = undefined,
                 .command = .block,
-                .operation = BlockType.manifest.operation(),
+                .metadata_bytes = undefined, // Set by close_block().
+                .block_type = .manifest,
             };
         }
 
@@ -923,28 +919,34 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(entry_count <= schema.ManifestNode.entry_count_max);
 
             const block_schema = schema.ManifestNode{ .entry_count = entry_count };
-            const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-            const address = header.op;
+            const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
             assert(header.cluster == manifest_log.superblock.working.cluster);
             assert(header.command == .block);
-            assert(address > 0);
+            assert(header.address > 0);
             header.size = block_schema.size();
-            header.context = @bitCast(schema.ManifestNode.Context{ .entry_count = entry_count });
+
+            const newest_checksum = manifest_log.log_block_checksums.tail() orelse 0;
+            const newest_address = manifest_log.log_block_addresses.tail() orelse 0;
+            header.metadata_bytes = @bitCast(schema.ManifestNode.Metadata{
+                .previous_manifest_block_checksum = newest_checksum,
+                .previous_manifest_block_address = newest_address,
+                .entry_count = entry_count,
+            });
 
             // Zero padding:
             @memset(block[header.size..], 0);
 
-            header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
-            header.set_checksum();
+            header.frame().set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
+            header.frame().set_checksum();
             verify_block(block, null, null);
 
             manifest_log.log_block_checksums.push_assume_capacity(header.checksum);
-            manifest_log.log_block_addresses.push_assume_capacity(address);
+            manifest_log.log_block_addresses.push_assume_capacity(header.address);
 
             log.debug("{}: close_block: checksum={} address={} entries={}/{}", .{
                 manifest_log.superblock.replica_index.?,
                 header.checksum,
-                address,
+                header.address,
                 entry_count,
                 schema.ManifestNode.entry_count_max,
             });
@@ -955,15 +957,16 @@ pub fn ManifestLogType(comptime Storage: type) type {
         }
 
         fn verify_block(block: BlockPtrConst, checksum: ?u128, address: ?u64) void {
-            const header = schema.header_from_block(block);
-            assert(BlockType.from(header.operation) == .manifest);
-
             if (constants.verify) {
-                assert(header.valid_checksum());
-                assert(header.valid_checksum_body(block[@sizeOf(vsr.Header)..header.size]));
+                const frame = std.mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
+                assert(frame.valid_checksum());
+                assert(frame.valid_checksum_body(block[@sizeOf(vsr.Header)..frame.size]));
             }
 
-            assert(address == null or header.op == address.?);
+            const header = schema.header_from_block(block);
+            assert(header.block_type == .manifest);
+
+            assert(address == null or header.address == address.?);
             assert(checksum == null or header.checksum == checksum.?);
 
             const block_schema = schema.ManifestNode.from(block);

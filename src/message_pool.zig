@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
 
+const stdx = @import("stdx.zig");
 const constants = @import("constants.zig");
 
 const vsr = @import("vsr.zig");
@@ -65,6 +66,8 @@ comptime {
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = struct {
+        pub const Type = MessageType;
+
         // TODO: replace this with a header() function to save memory
         header: *Header,
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
@@ -82,6 +85,36 @@ pub const MessagePool = struct {
 
         pub fn body(message: *const Message) []align(@sizeOf(Header)) u8 {
             return message.buffer[@sizeOf(Header)..message.header.size];
+        }
+
+        /// NOTE:
+        /// - Does *not* alter the reference count.
+        /// - Does *not* verify the command. (Use this function for constructing the message.)
+        pub fn build(message: *Message, comptime command: vsr.Command) MessageType(command) {
+            return .{
+                .header = std.mem.bytesAsValue(
+                    Header.Type(command),
+                    std.mem.asBytes(message.header),
+                ),
+                .base = message,
+            };
+        }
+
+        /// NOTE: Does *not* alter the reference count.
+        pub fn into(message: *Message, comptime command: vsr.Command) ?MessageType(command) {
+            const header = message.header.into(command) orelse return null;
+            return .{ .header = header, .base = message };
+        }
+
+        pub const AnyMessage = stdx.EnumUnionType(vsr.Command, MessageType);
+
+        /// NOTE: Does *not* alter the reference count.
+        pub fn into_any(message: *Message) AnyMessage {
+            switch (message.header.command) {
+                inline else => |command| {
+                    return @unionInit(AnyMessage, @tagName(command), message.into(command).?);
+                },
+            }
         }
     };
 
@@ -170,3 +203,25 @@ pub const MessagePool = struct {
         }
     }
 };
+
+fn MessageType(comptime command: vsr.Command) type {
+    return struct {
+        const CommandMessage = @This();
+        const CommandHeader = Header.Type(command);
+
+        /// Points into `base.buffer`.
+        header: *CommandHeader,
+        base: *MessagePool.Message,
+
+        pub fn ref(message: CommandMessage) CommandMessage {
+            return .{
+                .header = message.header,
+                .base = message.base.ref(),
+            };
+        }
+
+        pub fn body(message: CommandMessage) []align(@sizeOf(Header)) u8 {
+            return message.base.body();
+        }
+    };
+}

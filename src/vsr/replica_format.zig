@@ -78,17 +78,16 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
-                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
+                for (std.mem.bytesAsSlice(Header.Type(.prepare), wal_buffer[0..size])) |*header| {
                     if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
                         // This is the (empty) body of a reserved or root Prepare.
                     } else {
                         // This is a Prepare's header.
-                        assert(header.valid_checksum());
-                        if (header.op == 0) {
-                            assert(header.command == .prepare);
-                            assert(header.operation == .root);
+                        assert(header.frame_const().valid_checksum());
+
+                        if (header.operation == .root) {
+                            assert(header.op == 0);
                         } else {
-                            assert(header.command == .reserved);
                             assert(header.operation == .reserved);
                         }
                     }
@@ -113,13 +112,12 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 const size = format_wal_headers(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
-                for (std.mem.bytesAsSlice(Header, wal_buffer[0..size])) |*header| {
-                    assert(header.valid_checksum());
-                    if (header.op == 0) {
-                        assert(header.command == .prepare);
-                        assert(header.operation == .root);
+                for (std.mem.bytesAsSlice(Header.Type(.prepare), wal_buffer[0..size])) |*header| {
+                    assert(header.frame_const().valid_checksum());
+
+                    if (header.operation == .root) {
+                        assert(header.op == 0);
                     } else {
-                        assert(header.command == .reserved);
                         assert(header.operation == .reserved);
                     }
                 }
@@ -268,17 +266,17 @@ test "format" {
     for (storage.wal_headers(), storage.wal_prepares(), 0..) |header, *message, slot| {
         try std.testing.expect(std.meta.eql(header, message.header));
 
-        try std.testing.expect(header.valid_checksum());
-        try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
-        try std.testing.expectEqual(header.invalid(), null);
+        try std.testing.expect(header.frame_const().valid_checksum());
+        try std.testing.expect(header.frame_const().valid_checksum_body(&[0]u8{}));
+        try std.testing.expectEqual(header.frame_const().invalid(), null);
         try std.testing.expectEqual(header.cluster, cluster);
         try std.testing.expectEqual(header.op, slot);
         try std.testing.expectEqual(header.size, @sizeOf(vsr.Header));
+        try std.testing.expectEqual(header.command, .prepare);
         if (slot == 0) {
-            try std.testing.expectEqual(header.command, .prepare);
             try std.testing.expectEqual(header.operation, .root);
         } else {
-            try std.testing.expectEqual(header.command, .reserved);
+            try std.testing.expectEqual(header.operation, .reserved);
         }
     }
 

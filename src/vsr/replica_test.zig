@@ -1160,7 +1160,12 @@ const TestContext = struct {
         return commits_before != t.cluster.state_checker.commits.items.len;
     }
 
-    fn on_client_reply(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void {
+    fn on_client_reply(
+        cluster: *Cluster,
+        client: usize,
+        request: Message.Type(.request),
+        reply: Message.Type(.reply),
+    ) void {
         _ = request;
         _ = reply;
         const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));

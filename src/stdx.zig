@@ -670,3 +670,36 @@ test "has_unique_representation" {
 
     try std.testing.expect(has_unique_representation(@Vector(4, u16)));
 }
+
+/// Construct a `union(Enum)` type, where each union "value" type is defined in terms of the
+/// variant.
+///
+/// That is, `EnumUnionType(Enum, TypeForVariant)` is equivalent to:
+///
+///   union(Enum) {
+///     // For every `e` in `Enum`:
+///     e: TypeForVariant(e),
+///   }
+///
+pub fn EnumUnionType(
+    comptime Enum: type,
+    comptime TypeForVariant: fn (comptime variant: Enum) type,
+) type {
+    const UnionField = std.builtin.Type.UnionField;
+
+    var fields: []const UnionField = &[_]UnionField{};
+    for (std.enums.values(Enum)) |enum_variant| {
+        fields = fields ++ &[_]UnionField{.{
+            .name = @tagName(enum_variant),
+            .type = TypeForVariant(enum_variant),
+            .alignment = @alignOf(TypeForVariant(enum_variant)),
+        }};
+    }
+
+    return @Type(.{ .Union = .{
+        .layout = .Auto,
+        .fields = fields,
+        .decls = &.{},
+        .tag_type = Enum,
+    } });
+}

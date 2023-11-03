@@ -76,8 +76,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         on_client_reply: *const fn (
             cluster: *Self,
             client: usize,
-            request: *Message,
-            reply: *Message,
+            request: Message.Type(.request),
+            reply: Message.Type(.reply),
         ) void,
 
         network: *Network,
@@ -111,8 +111,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             on_client_reply: *const fn (
                 cluster: *Self,
                 client: usize,
-                request: *Message,
-                reply: *Message,
+                request: Message.Type(.request),
+                reply: Message.Type(.reply),
             ) void,
             options: Options,
         ) !*Self {
@@ -485,10 +485,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             _ = result;
         }
 
-        fn client_on_reply(client: *Client, request_message: *Message, reply_message: *Message) void {
+        fn client_on_reply(
+            client: *Client,
+            request_message: Message.Type(.request),
+            reply_message: Message.Type(.reply),
+        ) void {
             const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
+            assert(reply_message.header.frame_const().invalid() == null);
             assert(reply_message.header.cluster == cluster.options.cluster_id);
-            assert(reply_message.header.invalid() == null);
             assert(reply_message.header.client == client.id);
             assert(reply_message.header.request == request_message.header.request);
             assert(reply_message.header.command == .reply);
@@ -619,7 +623,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var journal_op_min: u64 = std.math.maxInt(u64);
                 var journal_op_max: u64 = 0;
                 for (replica.journal.headers) |*header| {
-                    if (header.command == .prepare) {
+                    if (header.operation != .reserved) {
                         if (journal_op_min > header.op) journal_op_min = header.op;
                         if (journal_op_max < header.op) journal_op_max = header.op;
                     }
@@ -628,7 +632,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var wal_op_min: u64 = std.math.maxInt(u64);
                 var wal_op_max: u64 = 0;
                 for (cluster.storages[replica_index].wal_prepares()) |*prepare| {
-                    if (prepare.header.valid_checksum() and prepare.header.command == .prepare) {
+                    if (prepare.header.frame_const().valid_checksum() and
+                        prepare.header.command == .prepare)
+                    {
                         if (wal_op_min > prepare.header.op) wal_op_min = prepare.header.op;
                         if (wal_op_max < prepare.header.op) wal_op_max = prepare.header.op;
                     }

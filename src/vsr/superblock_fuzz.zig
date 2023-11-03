@@ -288,7 +288,7 @@ const Environment = struct {
         });
 
         var vsr_headers = vsr.Headers.Array{};
-        vsr_headers.append_assume_capacity(vsr.Header.root_prepare(cluster));
+        vsr_headers.append_assume_capacity(vsr.Header.Type(.prepare).root(cluster));
 
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
@@ -345,7 +345,7 @@ const Environment = struct {
         };
 
         var vsr_headers = vsr.Headers.Array{};
-        var vsr_head = std.mem.zeroInit(vsr.Header, .{
+        var vsr_head = std.mem.zeroInit(vsr.Header.Type(.prepare), .{
             .client = 1,
             .request = 1,
             .command = .prepare,
@@ -353,8 +353,8 @@ const Environment = struct {
             .op = env.superblock.staging.vsr_state.checkpoint.commit_min + 1,
             .timestamp = 1,
         });
-        vsr_head.set_checksum_body(&.{});
-        vsr_head.set_checksum();
+        vsr_head.frame().set_checksum_body(&.{});
+        vsr_head.frame().set_checksum();
         vsr_headers.append_assume_capacity(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
@@ -414,14 +414,14 @@ const Environment = struct {
         // To mimic the replica, ClientSessions mutates between every checkpoint.
         // This ensures that sequential checkpoint ids are never identical.
         const session: u64 = 1;
-        var reply = vsr.Header{
+        var reply = std.mem.zeroInit(vsr.Header.Type(.reply), .{
             .cluster = cluster,
             .command = .reply,
             .client = 456,
             .commit = vsr_state.checkpoint.commit_min,
-        };
-        reply.set_checksum_body(&.{});
-        reply.set_checksum();
+        });
+        reply.frame().set_checksum_body(&.{});
+        reply.frame().set_checksum();
 
         _ = env.superblock.client_sessions.put(session, &reply);
 
