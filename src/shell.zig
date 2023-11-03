@@ -201,6 +201,17 @@ pub fn pushd(shell: *Shell, path: []const u8) !void {
     shell.cwd = cwd_new;
 }
 
+pub fn pushd_dir(shell: *Shell, dir: std.fs.Dir) !void {
+    assert(shell.cwd_stack_count < cwd_stack_max);
+
+    // Re-open the directory such that `popd` can close it.
+    const cwd_new = try dir.openDir(".", .{});
+
+    shell.cwd_stack[shell.cwd_stack_count] = shell.cwd;
+    shell.cwd_stack_count += 1;
+    shell.cwd = cwd_new;
+}
+
 pub fn popd(shell: *Shell) void {
     shell.cwd.close();
     shell.cwd_stack_count -= 1;
