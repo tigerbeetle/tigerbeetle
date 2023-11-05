@@ -56,11 +56,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         pub const Callback = *const fn (manifest_log: *ManifestLog) void;
 
-        pub const OpenEvent = *const fn (
-            manifest_log: *ManifestLog,
-            level: u6,
-            table: *const TableInfo,
-        ) void;
+        pub const OpenEvent = *const fn (manifest_log: *ManifestLog, table: *const TableInfo) void;
 
         const Write = struct {
             manifest_log: *ManifestLog,
@@ -364,7 +360,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             verify_block(block, block_checksum, block_address);
 
             const block_schema = schema.ManifestNode.from(block);
-            const labels_used = block_schema.labels_const(block);
             const tables_used = block_schema.tables_const(block);
             assert(block_schema.entry_count > 0);
             assert(block_schema.entry_count <= schema.ManifestNode.entry_count_max);
@@ -373,19 +368,19 @@ pub fn ManifestLogType(comptime Storage: type) type {
             while (entry > 0) {
                 entry -= 1;
 
-                const label = labels_used[entry];
                 const table = &tables_used[entry];
+                assert(table.label.event != .reserved);
                 assert(table.tree_id >= manifest_log.options.tree_id_min);
                 assert(table.tree_id <= manifest_log.options.tree_id_max);
                 assert(table.address > 0);
 
-                if (label.event == .remove) {
+                if (table.label.event == .remove) {
                     const table_removed =
                         manifest_log.tables_removed.fetchPutAssumeCapacity(table.address, {});
                     assert(table_removed == null);
                 } else {
                     if (manifest_log.tables_removed.get(table.address)) |_| {
-                        if (label.event == .insert) {
+                        if (table.label.event == .insert) {
                             assert(manifest_log.tables_removed.remove(table.address));
                         }
                     } else {
@@ -393,7 +388,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                             manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                         if (!extent.found_existing) {
                             extent.value_ptr.* = .{ .block = block_address, .entry = entry };
-                            manifest_log.open_event(manifest_log, label.level, table);
+                            manifest_log.open_event(manifest_log, table);
                         }
                     }
                 }
@@ -454,47 +449,38 @@ pub fn ManifestLogType(comptime Storage: type) type {
             callback(manifest_log);
         }
 
-        /// Appends an insert of a table to a level.
-        pub fn insert(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
-            maybe(manifest_log.opened);
-            maybe(manifest_log.reading);
-            assert(!manifest_log.writing);
-            assert(manifest_log.table_extents.get(table.address) == null);
-
-            manifest_log.append(.{ .level = level, .event = .insert }, table);
-        }
-
-        /// Appends an update or a direct move of a table to a level.
+        /// Appends an insert/update/remove of a table to a level.
+        ///
         /// A move is only recorded as an update, there is no remove from the previous level, since
         /// this is safer (no potential to get the event order wrong) and reduces fragmentation.
-        pub fn update(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
+        pub fn append(manifest_log: *ManifestLog, table: *const TableInfo) void {
             maybe(manifest_log.opened);
             maybe(manifest_log.reading);
             assert(!manifest_log.writing);
-            assert(manifest_log.table_extents.get(table.address) != null);
 
-            manifest_log.append(.{ .level = level, .event = .update }, table);
-        }
+            switch (table.label.event) {
+                .reserved => unreachable,
+                .insert => assert(manifest_log.table_extents.get(table.address) == null),
+                // For updates + removes, the table must have previously been inserted into the log:
+                .update => assert(manifest_log.table_extents.get(table.address) != null),
+                .remove => assert(manifest_log.table_extents.get(table.address) != null),
+            }
 
-        /// Appends the removal of a table from a level.
-        /// The table must have previously been inserted to the manifest log.
-        pub fn remove(manifest_log: *ManifestLog, level: u6, table: *const TableInfo) void {
-            assert(manifest_log.opened);
-            assert(!manifest_log.reading);
-            assert(!manifest_log.writing);
-            assert(manifest_log.table_extents.get(table.address) != null);
-
-            manifest_log.append(.{ .level = level, .event = .remove }, table);
+            manifest_log.append_internal(table);
         }
 
         /// The table extent must be updated immediately when appending, without delay.
         /// Otherwise, ManifestLog.compact() may append a stale version over the latest.
-        fn append(manifest_log: *ManifestLog, label: Label, table: *const TableInfo) void {
+        ///
+        /// append_internal() is used for both:
+        /// - External appends, e.g. events created due to table compaction.
+        /// - Internal appends, e.g. events recycled by manifest compaction.
+        fn append_internal(manifest_log: *ManifestLog, table: *const TableInfo) void {
             assert(manifest_log.opened);
             assert(!manifest_log.writing);
             maybe(manifest_log.reading);
             assert(manifest_log.grid_reservation != null);
-            assert(label.level < constants.lsm_levels);
+            assert(table.label.level < constants.lsm_levels);
             assert(table.address > 0);
             assert(table.snapshot_min > 0);
             assert(table.snapshot_max > table.snapshot_min);
@@ -513,8 +499,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 "{}: {s}: level={} tree={} checksum={} address={} snapshot={}..{}",
                 .{
                     manifest_log.superblock.replica_index.?,
-                    @tagName(label.event),
-                    label.level,
+                    @tagName(table.label.event),
+                    table.label.level,
                     table.tree_id,
                     table.checksum,
                     table.address,
@@ -525,21 +511,21 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const entry = manifest_log.entry_count;
-            block_builder_schema.labels(block)[entry] = label;
             block_builder_schema.tables(block)[entry] = table.*;
 
             const block_header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
             const block_address = block_header.op;
 
-            switch (label.event) {
+            switch (table.label.event) {
+                .reserved => unreachable,
                 .insert,
                 .update,
                 => {
                     var extent = manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                     if (extent.found_existing) {
-                        maybe(label.event == .insert); // (Compaction.)
+                        maybe(table.label.event == .insert); // (Compaction.)
                     } else {
-                        assert(label.event == .insert);
+                        assert(table.label.event == .insert);
                     }
                     extent.value_ptr.* = .{ .block = block_address, .entry = entry };
                 },
@@ -761,12 +747,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
             var frees: u32 = 0;
             for (
-                block_schema.labels_const(block),
                 block_schema.tables_const(block),
                 0..block_schema.entry_count,
-            ) |label, *table, entry_index| {
+            ) |*table, entry_index| {
                 const entry: u32 = @intCast(entry_index);
-                switch (label.event) {
+                switch (table.label.event) {
+                    .reserved => unreachable,
                     // Append the table, updating the table extent:
                     .insert,
                     .update,
@@ -779,7 +765,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                             .{ .block = oldest_address, .entry = entry },
                         )) {
                             // Append the table, updating the table extent:
-                            manifest_log.append(label, table);
+                            manifest_log.append_internal(table);
                         } else {
                             // Either:
                             // - This is not the latest insert for this table, so it can be dropped.
@@ -944,17 +930,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(address > 0);
             header.size = block_schema.size();
             header.context = @bitCast(schema.ManifestNode.Context{ .entry_count = entry_count });
-
-            if (entry_count < schema.ManifestNode.entry_count_max) {
-                // Copy the labels backwards, since the block-builder schema assumed that the block
-                // would be full, and it is not.
-                stdx.copy_left(
-                    .exact,
-                    Label,
-                    block_schema.labels(block),
-                    block_builder_schema.labels(block)[0..entry_count],
-                );
-            }
 
             // Zero padding:
             @memset(block[header.size..], 0);
