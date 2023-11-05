@@ -531,14 +531,16 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         pub fn open_table(
             tree: *Tree,
-            level: u8,
             table: *const schema.ManifestNode.TableInfo,
         ) void {
             assert(tree.compaction_op == null);
             assert(tree.key_range == null);
 
             const tree_table = Manifest.TreeTableInfo.decode(table);
-            tree.manifest.levels[level].insert_table(tree.manifest.node_pool, &tree_table);
+            tree.manifest.levels[table.label.level].insert_table(
+                tree.manifest.node_pool,
+                &tree_table,
+            );
         }
 
         pub fn open_complete(tree: *Tree) void {

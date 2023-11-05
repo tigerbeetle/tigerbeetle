@@ -111,8 +111,12 @@ pub fn TreeTableInfoType(comptime Table: type) type {
             };
         }
 
-        pub fn encode(table: *const TreeTableInfo, tree_id: u16) TableInfo {
-            assert(tree_id > 0);
+        pub fn encode(table: *const TreeTableInfo, options: struct {
+            tree_id: u16,
+            level: u6,
+            event: schema.ManifestNode.Event,
+        }) TableInfo {
+            assert(options.tree_id > 0);
 
             var key_min = std.mem.zeroes(TableInfo.KeyPadded);
             var key_max = std.mem.zeroes(TableInfo.KeyPadded);
@@ -125,9 +129,13 @@ pub fn TreeTableInfoType(comptime Table: type) type {
                 .address = table.address,
                 .snapshot_min = table.snapshot_min,
                 .snapshot_max = table.snapshot_max,
-                .tree_id = tree_id,
+                .tree_id = options.tree_id,
                 .key_min = key_min,
                 .key_max = key_max,
+                .label = .{
+                    .level = options.level,
+                    .event = options.event,
+                },
             };
         }
     };
@@ -226,8 +234,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             manifest_level.insert_table(manifest.node_pool, table);
 
             // Append insert changes to the manifest log.
-            const log_level = @as(u6, @intCast(level));
-            manifest.manifest_log.?.insert(log_level, &table.encode(manifest.config.id));
+            manifest.manifest_log.?.append(&table.encode(.{
+                .tree_id = manifest.config.id,
+                .event = .insert,
+                .level = @intCast(level),
+            }));
 
             if (constants.verify) {
                 assert(manifest_level.contains(table));
@@ -253,8 +264,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             assert(table.snapshot_max == snapshot);
 
             // Append update changes to the manifest log.
-            const log_level = @as(u6, @intCast(level));
-            manifest.manifest_log.?.update(log_level, &table.encode(manifest.config.id));
+            manifest.manifest_log.?.append(&table.encode(.{
+                .tree_id = manifest.config.id,
+                .event = .update,
+                .level = @intCast(level),
+            }));
         }
 
         pub fn move_table(
@@ -285,10 +299,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             // LIFO order and duplicates are ignored. This means the table will only be replayed in
             // level B instead of the old one in level A.
             manifest_level_b.insert_table(manifest.node_pool, table);
-            manifest.manifest_log.?.update(
-                @as(u6, @intCast(level_b)),
-                &table.encode(manifest.config.id),
-            );
+            manifest.manifest_log.?.append(&table.encode(.{
+                .tree_id = manifest.config.id,
+                .event = .update,
+                .level = @intCast(level_b),
+            }));
 
             if (constants.verify) {
                 assert(!manifest_level_a.contains(table));
@@ -351,10 +366,11 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(table.key_min <= key_max);
 
                 // Append remove changes to the manifest log and purge from memory (ManifestLevel):
-                manifest.manifest_log.?.remove(
-                    @as(u6, @intCast(level)),
-                    &table.encode(manifest.config.id),
-                );
+                manifest.manifest_log.?.append(&table.encode(.{
+                    .tree_id = manifest.config.id,
+                    .event = .remove,
+                    .level = @intCast(level),
+                }));
                 manifest_level.remove_table(manifest.node_pool, &table);
             }
 
