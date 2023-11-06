@@ -9,26 +9,27 @@
     <AssemblyName>TigerBeetle</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RollForward>LatestMajor</RollForward>
-  </PropertyGroup> 
+  </PropertyGroup>
   <PropertyGroup>
     <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
   </PropertyGroup>
   <Target Name="BuildZig" BeforeTargets="DispatchToInnerBuilds">
     <Exec Command=".\zig\zig build dotnet_client -Doptimize=ReleaseSafe -Dconfig=production" WorkingDirectory="$(MSBuildProjectDirectory)\..\..\..\.." Condition="'$(OS)'=='Windows'" />
     <Exec Command="./zig/zig build dotnet_client -Doptimize=ReleaseSafe -Dconfig=production" WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Condition="'$(OS)'!='Windows'" />
+
+    <ItemGroup>
+      <Content Include="runtimes\**\*.so">
+        <PackagePath>runtimes</PackagePath>
+        <Pack>true</Pack>
+      </Content>
+      <Content Include="runtimes\**\*.dylib">
+        <PackagePath>runtimes</PackagePath>
+        <Pack>true</Pack>
+      </Content>
+      <Content Include="runtimes\**\*.dll">
+        <PackagePath>runtimes</PackagePath>
+        <Pack>true</Pack>
+      </Content>
+    </ItemGroup>
   </Target>
-  <ItemGroup>
-    <Content Include="runtimes\**\*.so">
-      <PackagePath>%(Identity)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
-    <Content Include="runtimes\**\*.dylib">
-      <PackagePath>%(Identity)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
-    <Content Include="runtimes\**\*.dll">
-      <PackagePath>%(Identity)</PackagePath>
-      <Pack>true</Pack>
-    </Content>
-  </ItemGroup>
 </Project>
