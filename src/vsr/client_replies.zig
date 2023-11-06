@@ -100,11 +100,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// Pointers are into `writes`.
         write_queue: WriteQueue = WriteQueue.init(),
 
-        ready_next_tick: Storage.NextTick = undefined,
-        ready_callback: ?union(enum) {
-            next_tick: *const fn (*ClientReplies) void,
-            write: *const fn (*ClientReplies) void,
-        } = null,
+        ready_callback: ?*const fn (*ClientReplies) void = null,
 
         checkpoint_next_tick: Storage.NextTick = undefined,
         checkpoint_callback: ?*const fn (*ClientReplies) void = null,
@@ -267,33 +263,24 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             callback(client_replies, &header, message, destination_replica);
         }
 
+        pub fn ready_sync(client_replies: *ClientReplies) bool {
+            maybe(client_replies.ready_callback == null);
+
+            return client_replies.writes.available() > 0;
+        }
+
+        /// Caller must check ready_sync() first.
         /// Call `callback` when ClientReplies is able to start another write_reply().
         pub fn ready(
             client_replies: *ClientReplies,
             callback: *const fn (client_replies: *ClientReplies) void,
         ) void {
             assert(client_replies.ready_callback == null);
+            assert(!client_replies.ready_sync());
+            assert(client_replies.writes.available() == 0);
 
-            if (client_replies.writes.available() > 0) {
-                client_replies.ready_callback = .{ .next_tick = callback };
-                client_replies.storage.on_next_tick(
-                    .vsr,
-                    ready_next_tick_callback,
-                    &client_replies.ready_next_tick,
-                );
-            } else {
-                // ready_callback will be called the next time a write completes.
-                client_replies.ready_callback = .{ .write = callback };
-            }
-        }
-
-        fn ready_next_tick_callback(next_tick: *Storage.NextTick) void {
-            const client_replies = @fieldParentPtr(ClientReplies, "ready_next_tick", next_tick);
-            assert(client_replies.writes.available() > 0);
-
-            const callback = client_replies.ready_callback.?.next_tick;
-            client_replies.ready_callback = null;
-            callback(client_replies);
+            // ready_callback will be called the next time a write completes.
+            client_replies.ready_callback = callback;
         }
 
         pub fn remove_reply(client_replies: *ClientReplies, slot: Slot) void {
@@ -308,8 +295,10 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             message: *Message,
-            trigger: enum { create, repair },
+            trigger: enum { commit, repair },
         ) void {
+            assert(client_replies.ready_sync());
+            assert(client_replies.ready_callback == null);
             assert(client_replies.writes.available() > 0);
             maybe(client_replies.writing.isSet(slot.index));
             assert(message.header.command == .reply);
@@ -318,13 +307,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             assert(message.header.size != @sizeOf(vsr.Header));
 
             switch (trigger) {
-                .create => {
-                    assert(client_replies.ready_callback == null);
+                .commit => {
                     assert(client_replies.checkpoint_callback == null);
                     maybe(client_replies.faulty.isSet(slot.index));
                 },
                 .repair => {
-                    maybe(client_replies.ready_callback == null);
                     maybe(client_replies.checkpoint_callback == null);
                     assert(client_replies.faulty.isSet(slot.index));
                 },
@@ -409,13 +396,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.write_reply_next();
 
             if (client_replies.ready_callback) |ready_callback| {
-                switch (ready_callback) {
-                    .write => |callback| {
-                        client_replies.ready_callback = null;
-                        callback(client_replies);
-                    },
-                    .next_tick => {},
-                }
+                client_replies.ready_callback = null;
+                ready_callback(client_replies);
             }
 
             if (client_replies.checkpoint_callback != null and
