@@ -447,6 +447,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 
     if (languages.contains(.zig)) {
+        try shell.project_root.setAsCwd();
         try shell.exec(
             \\gh release edit --draft=false
             \\  {tag}
