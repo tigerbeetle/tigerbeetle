@@ -1460,7 +1460,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.client_replies.writes.available() == 0) {
+            if (!self.client_replies.ready_sync()) {
                 log.debug("{}: on_reply: ignoring, busy (client={} request={})", .{
                     self.replica,
                     message.header.client,
@@ -3100,7 +3100,11 @@ pub fn ReplicaType(
                 .next_pipeline => self.commit_pipeline_next(),
                 .prefetch_state_machine => self.commit_op_prefetch(),
                 .setup_client_replies => {
-                    self.client_replies.ready(commit_op_client_replies_ready_callback);
+                    if (self.client_replies.ready_sync()) {
+                        commit_op_client_replies_ready_callback(&self.client_replies);
+                    } else {
+                        self.client_replies.ready(commit_op_client_replies_ready_callback);
+                    }
                 },
                 .compact_state_machine => self.state_machine.compact(
                     commit_op_compact_callback,
@@ -3828,7 +3832,7 @@ pub fn ReplicaType(
             if (reply.header.size == @sizeOf(Header)) {
                 self.client_replies.remove_reply(reply_slot);
             } else {
-                self.client_replies.write_reply(reply_slot, reply, .create);
+                self.client_replies.write_reply(reply_slot, reply, .commit);
             }
         }
 
@@ -3866,7 +3870,7 @@ pub fn ReplicaType(
                 if (entry.header.size == @sizeOf(Header)) {
                     self.client_replies.remove_reply(reply_slot);
                 } else {
-                    self.client_replies.write_reply(reply_slot, reply, .create);
+                    self.client_replies.write_reply(reply_slot, reply, .commit);
                 }
             } else {
                 // If no entry exists, then the session must have been evicted while being prepared.
