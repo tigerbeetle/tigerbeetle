@@ -1,5 +1,33 @@
 # TigerBeetle Changelog
 
+## 2023-11-6
+
+### Safety And Performance
+
+- [#1263](https://github.com/tigerbeetle/tigerbeetle/pull/1263)
+
+  Revive the TigerBeetle [VOPRHub](https://github.com/tigerbeetle-vopr)! Some previous changes left
+  it on it's [Last Stand](https://open.spotify.com/track/1ibHApXtb0pgplmNDRLHrJ), but the bot is 
+  back in business finding liveness bugs: [#1266](https://github.com/tigerbeetle/tigerbeetle/issues/1266)
+
+### Features
+
+- [#1260](https://github.com/tigerbeetle/tigerbeetle/pull/1260)
+
+  Set the latest Docker image to track the latest release. Avoids language clients going out of sync
+  with your default docker replica installations.
+  
+### Internals
+
+- [#1261](https://github.com/tigerbeetle/tigerbeetle/pull/1261)
+
+  Move website doc generation for https://docs.tigerbeetle.com/ into the main repo.
+
+- [#1265](https://github.com/tigerbeetle/tigerbeetle/pull/1265),
+  [#1243](https://github.com/tigerbeetle/tigerbeetle/pull/1243)
+  
+  Addressed some release quirks with the .NET and Go client builds. 
+
 ## 2023-10-30
 
 ### Safety And Performance
