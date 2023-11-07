@@ -216,7 +216,7 @@ pub const GridBlocksMissing = struct {
         table: *RepairTable,
         address: u64,
         checksum: u128,
-    ) void {
+    ) enum { insert, duplicate } {
         assert(queue.faulty_tables.count < queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
@@ -224,7 +224,14 @@ pub const GridBlocksMissing = struct {
         var tables = queue.faulty_tables.peek();
         while (tables) |queue_table| : (tables = queue_table.next) {
             assert(queue_table != table);
-            assert(queue_table.index_address != address);
+
+            if (queue_table.index_address == address) {
+                // The ForestTableIterator does not repeat tables *except* when the table was first
+                // encountered at level L, and then it was re-encountered having moved to a deeper
+                // level (L+1, etc).
+                assert(queue_table.index_checksum == checksum);
+                return .duplicate;
+            }
         }
 
         table.* = .{
@@ -236,6 +243,8 @@ pub const GridBlocksMissing = struct {
         const enqueue =
             queue.enqueue_faulty_block(address, checksum, .{ .table_index = .{ .table = table } });
         assert(enqueue == .insert or enqueue == .replace);
+
+        return .insert;
     }
 
     fn enqueue_faulty_block(
@@ -268,7 +277,7 @@ pub const GridBlocksMissing = struct {
                 .table_index,
                 .table_data,
                 => {
-                    // The content block may already have been queued by either the scrubber or a
+                    // The data block may already have been queued by either the scrubber or a
                     // commit/compaction grid read.
                     assert(fault.progress == .block);
 
