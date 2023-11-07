@@ -2,17 +2,12 @@ name: Linux
 
 on:
   workflow_call:
-    inputs:
-      version:
-        required: false
-        type: string
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   lint:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -22,21 +17,18 @@ jobs:
       SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
 
   docs_link_spellcheck:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: ./.github/ci/docs_check.sh
 
   test_on_alpine:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: ./.github/ci/tests_on_alpine.sh
 
   test_on_ubuntu:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -53,7 +45,6 @@ jobs:
   # Used to generate coverage information for the target of this PR.
   # Disabled while `zig build test`'s setExecCmd isn't working.
   # test_on_ubuntu_main:
-  #   if: inputs.version == ''
   #   runs-on: ubuntu-latest
   #   continue-on-error: true
   #   steps:
@@ -91,7 +82,6 @@ jobs:
 
   # Disabled while `zig build test`'s setExecCmd isn't working.
   # coverage:
-  #   if: inputs.version == ''
   #   runs-on: ubuntu-latest
   #   needs: [test_on_ubuntu, test_on_ubuntu_main]
   #   continue-on-error: true
@@ -142,7 +132,6 @@ jobs:
   #         path: coverage-diff.html
 
   repl_integration:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -152,7 +141,6 @@ jobs:
       - run: ./zig-out/bin/repl_integration
 
   benchmark:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -160,7 +148,6 @@ jobs:
       - run: ./scripts/benchmark.sh --transfer-count=4000
 
   aof:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -168,7 +155,6 @@ jobs:
       - run: ./.github/ci/test_aof.sh
 
   c_sample:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -178,7 +164,6 @@ jobs:
   # I don't like this - having everything manually listed out here, but need to think of a better
   # way to parallelize it.
   fuzz:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -201,7 +186,6 @@ jobs:
   # Things like "go_client", "java_client", "dotnet_client" are excluded here
   # because they get run in their own CI
   verify:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -218,7 +202,6 @@ jobs:
   # but that currently has some false failures :-)
   # TODO: Make so we have a single zig build simulator that does both
   simulate:
-    if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
