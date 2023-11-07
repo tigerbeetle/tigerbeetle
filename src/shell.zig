@@ -21,6 +21,8 @@ const assert = std.debug.assert;
 
 const Shell = @This();
 
+const cwd_stack_max = 16;
+
 /// For internal use by the `Shell` itself.
 gpa: std.mem.Allocator,
 
@@ -31,12 +33,18 @@ arena: std.heap.ArenaAllocator,
 
 /// Root directory of this repository.
 ///
-/// Prefer this to `std.fs.cwd()` if possible.
-///
 /// This is initialized when a shell is created. It would be more flexible to lazily initialize this
 /// on the first access, but, given that we always use `Shell` in the context of our repository,
 /// eager initialization is more ergonomic.
 project_root: std.fs.Dir,
+
+/// Shell's logical cwd which is used for all functions in this file. It might be different from
+/// `std.fs.cwd()` and is set to `project_root` on init.
+cwd: std.fs.Dir,
+
+// Stack of working directories backing pushd/popd.
+cwd_stack: [cwd_stack_max]std.fs.Dir,
+cwd_stack_count: usize,
 
 env: std.process.EnvMap,
 
@@ -50,6 +58,9 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
     var project_root = try discover_project_root();
     errdefer project_root.close();
 
+    var cwd = try project_root.openDir(".", .{});
+    errdefer cwd.close();
+
     var env = try std.process.getEnvMap(gpa);
     errdefer env.deinit();
 
@@ -62,6 +73,9 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
         .gpa = gpa,
         .arena = arena,
         .project_root = project_root,
+        .cwd = cwd,
+        .cwd_stack = undefined,
+        .cwd_stack_count = 0,
         .env = env,
         .ci = ci,
     };
@@ -72,7 +86,11 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
 pub fn destroy(shell: *Shell) void {
     const gpa = shell.gpa;
 
+    assert(shell.cwd_stack_count == 0); // pushd not paired by popd
+
     shell.env.deinit();
+    shell.cwd.close();
+    shell.project_root.close();
     shell.arena.deinit();
     gpa.destroy(shell);
 }
@@ -153,6 +171,8 @@ const Section = struct {
     }
 };
 
+/// Convenience string formatting function which uses shell's arena and doesn't require
+/// freeing the resulting string.
 pub fn print(shell: *Shell, comptime fmt: []const u8, fmt_args: anytype) ![]const u8 {
     return std.fmt.allocPrint(shell.arena.allocator(), fmt, fmt_args);
 }
@@ -165,11 +185,41 @@ pub fn env_get(shell: *Shell, var_name: []const u8) ![]const u8 {
     return try std.process.getEnvVarOwned(shell.arena.allocator(), var_name);
 }
 
-/// Checks if the path exists and is a directory.
-pub fn dir_exists(shell: *Shell, path: []const u8) !bool {
-    _ = shell;
+/// Change `shell`'s working directory. It *must* be followed by
+///
+///     defer shell.popd();
+///
+/// to restore the previous directory back.
+pub fn pushd(shell: *Shell, path: []const u8) !void {
+    assert(shell.cwd_stack_count < cwd_stack_max);
+    assert(path[0] == '.'); // allow only explicitly relative paths
 
-    return subdir_exists(std.fs.cwd(), path);
+    const cwd_new = try shell.cwd.openDir(path, .{});
+
+    shell.cwd_stack[shell.cwd_stack_count] = shell.cwd;
+    shell.cwd_stack_count += 1;
+    shell.cwd = cwd_new;
+}
+
+pub fn popd(shell: *Shell) void {
+    shell.cwd.close();
+    shell.cwd_stack_count -= 1;
+    shell.cwd = shell.cwd_stack[shell.cwd_stack_count];
+}
+
+/// Checks if the path exists and is a directory.
+///
+/// Note: this api is prone to TOCTOU and exists primarily for assertions.
+pub fn dir_exists(shell: *Shell, path: []const u8) !bool {
+    return subdir_exists(shell.cwd, path);
+}
+
+/// Checks if the path exists and is a file.
+///
+/// Note: this api is prone to TOCTOU and exists primarily for assertions.
+pub fn file_exists(shell: *Shell, path: []const u8) bool {
+    const stat = shell.cwd.statFile(path) catch return false;
+    return stat.kind == .file;
 }
 
 fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
@@ -206,9 +256,8 @@ pub fn find(shell: *Shell, options: FindOptions) ![]const []const u8 {
 
     var result = std.ArrayList([]const u8).init(shell.arena.allocator());
 
-    const cwd = std.fs.cwd();
     for (options.where) |base_path| {
-        var base_dir = try cwd.openIterableDir(base_path, .{});
+        var base_dir = try shell.cwd.openIterableDir(base_path, .{});
         defer base_dir.close();
 
         var walker = try base_dir.walk(shell.gpa);
@@ -277,7 +326,12 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     try expand_argv(&argv, cmd, cmd_args);
 
+    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const cwd_path = try shell.cwd.realpath(".", &buffer);
+
     var child = std.ChildProcess.init(argv.slice(), shell.gpa);
+    child.cwd = cwd_path;
     child.env_map = &shell.env;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
@@ -302,9 +356,14 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
 
     try expand_argv(&argv, cmd, cmd_args);
 
+    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const cwd_path = try shell.cwd.realpath(".", &buffer);
+
     const res = std.ChildProcess.exec(.{
         .allocator = shell.gpa,
         .argv = argv.slice(),
+        .cwd = cwd_path,
     }) catch return false;
     defer shell.gpa.free(res.stderr);
     defer shell.gpa.free(res.stdout);
@@ -326,9 +385,14 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
 
     try expand_argv(&argv, cmd, cmd_args);
 
+    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const cwd_path = try shell.cwd.realpath(".", &buffer);
+
     const child = try std.ChildProcess.exec(.{
         .allocator = shell.arena.allocator(),
         .argv = argv.slice(),
+        .cwd = cwd_path,
     });
     defer shell.arena.allocator().free(child.stderr);
     errdefer {
@@ -360,7 +424,12 @@ pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.Chi
 
     try expand_argv(&argv, cmd, cmd_args);
 
+    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const cwd_path = try shell.cwd.realpath(".", &buffer);
+
     var child = std.ChildProcess.init(argv.slice(), shell.gpa);
+    child.cwd = cwd_path;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
@@ -386,7 +455,12 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     try argv.append_new_arg(zig_exe);
     try expand_argv(&argv, cmd, cmd_args);
 
+    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const cwd_path = try shell.cwd.realpath(".", &buffer);
+
     var child = std.ChildProcess.init(argv.slice(), shell.gpa);
+    child.cwd = cwd_path;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
