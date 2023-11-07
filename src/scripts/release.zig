@@ -723,7 +723,7 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
                 shell.arena.allocator(),
                 file,
                 "src/docs_website/build",
-                "tigerbeetle-docs/docs",
+                "tigerbeetle-docs/",
             ),
         );
     }
