@@ -213,15 +213,13 @@ jobs:
       - run: zig/zig build build_benchmark_segmented_array
       - run: zig/zig build -Dtracer-backend=tracy
 
-  # This is just a canary to make sure that the simulator compiles
-  # It would be a good idea to also _run_ a single iteration,
-  # but that currently has some false failures :-)
-  # TODO: Make so we have a single zig build simulator that does both
+  # Run simulator once for each state machine, using commit hash as a random, but also deterministic
+  # seed.
   simulate:
     if: inputs.version == ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build simulator -Dsimulator-state-machine=accounting
-      - run: zig/zig build simulator -Dsimulator-state-machine=testing
+      - run: zig/zig build simulator_run -Dsimulator-state-machine=accounting -Doptimize=ReleaseSafe -- ${{ github.sha }}
+      - run: zig/zig build simulator_run -Dsimulator-state-machine=testing    -Doptimize=ReleaseSafe -- ${{ github.sha }}
