@@ -130,4 +130,10 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
             });
         }
     }
+
+    const docker_version = try shell.exec_stdout(
+        \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version} version --verbose
+    , .{ .version = tag });
+    assert(std.mem.indexOf(u8, docker_version, tag) != null);
+    assert(std.mem.indexOf(u8, docker_version, "ReleaseSafe") != null);
 }
