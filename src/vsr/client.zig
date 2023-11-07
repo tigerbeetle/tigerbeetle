@@ -51,8 +51,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             demux: ?*Request.Demux, // Null iff batch_get() newly created `request`
 
             pub fn slice(batch: Batch) []u8 {
+                const message = batch.request.message;
+                assert(message.header.command == .request);
+
                 const body_offset = if (batch.demux) |demux| blk: {
-                    const operation = batch.request.message.header.operation.cast(StateMachine);
+                    const operation = message.header.operation.cast(StateMachine);
                     switch (operation) {
                         inline else => |op| {
                             const event_size: u32 = @sizeOf(StateMachine.Event(op));
@@ -64,22 +67,33 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     break :blk 0;
                 };
 
-                const body = batch.request.message.body();
-                return body[body_offset..];
+                return message.body()[body_offset..];
             }
         };
 
+        /// A pool of Request.Demux nodes used for batching client events.
+        /// This uses the lazy FIFO pattern over IOPS due to the max Demux node count being large.
         const DemuxPool = struct {
             free: ?*Request.Demux = null,
-            used: usize = 0,
+            memory_allocated: usize = 0,
             memory: []Request.Demux,
+
+            /// The maximum amount of logical batches that may be queued on a client
+            /// (spread across all requests).
+            const batch_logical_max = blk: {
+                var max: usize = 0;
+                inline for (std.enums.values(StateMachine.Operation)) |operation| {
+                    if (@intFromEnum(operation) < constants.vsr_operations_reserved) continue;
+                    if (!StateMachine.batch_logical_allowed.get(operation)) continue;
+                    max = @max(max, @sizeOf(StateMachine.Result(operation)));
+                    max = @max(max, @sizeOf(StateMachine.Event(operation)));
+                }
+                break :blk max * constants.client_request_queue_max;
+            };
 
             fn init(allocator: mem.Allocator) !DemuxPool {
                 return DemuxPool{
-                    .memory = try allocator.alloc(
-                        Request.Demux,
-                        StateMachine.constants.batch_logical_max,
-                    ),
+                    .memory = try allocator.alloc(Request.Demux, batch_logical_max),
                 };
             }
 
@@ -92,15 +106,15 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     pool.free = demux.next;
                     return demux;
                 }
-                if (pool.used < pool.memory.len) {
-                    defer pool.used += 1;
-                    return &pool.memory[pool.used];
+                if (pool.memory_allocated < pool.memory.len) {
+                    defer pool.memory_allocated += 1;
+                    return &pool.memory[pool.memory_allocated];
                 }
                 return null;
             }
 
             fn release(pool: *DemuxPool, demux: *Request.Demux) void {
-                assert(@intFromPtr(demux) < @intFromPtr(pool.memory.ptr + pool.memory.len));
+                assert(@intFromPtr(demux) < @intFromPtr(pool.memory.ptr + pool.memory_allocated));
                 assert(@intFromPtr(demux) >= @intFromPtr(&pool.memory[0]));
                 demux.next = pool.free;
                 pool.free = demux;
@@ -292,7 +306,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Unlike `raw_request`, a Batch will attempt to piggy-back onto an existing Message.
         /// The returned Batch provides a slice of memory to write the events to. Once populated,
         /// use `batch_submit` to commit the writes to the Message and send it through the Client.
-        /// NOTE: A Batch cannot be stored and must be passed to batch_submit() before any calling
+        /// NOTE: A Batch cannot be stored and must be passed to batch_submit() before calling
         /// any other methods on the Client.
         pub fn batch_get(
             self: *Self,
@@ -310,11 +324,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // Check-in with the StateMachine to see if this operation can even be batched.
             // If so, find an existing Request with the same Op that has room in its Message.
             // The request must not be the one currently inflight in VSR as its Message is sealed.
-            if (StateMachine.batch_logical_allowed(operation)) {
+            if (StateMachine.batch_logical_allowed.get(operation)) {
                 var it = self.request_queue.iterator_mutable();
                 while (it.next_ptr()) |request| {
                     if (request == self.request_inflight) continue;
-                    if (request.message.header.command != .request) continue;
                     if (request.message.header.operation.cast(StateMachine) != operation) continue;
                     if (request.message.header.size + body_size > constants.message_size_max) continue;
 
@@ -377,7 +390,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             };
         }
 
-        /// After writing Event to batch.slice(), commit the batched
+        /// After writing Events to batch.slice(), mark the batched data as sendable with a callback
+        /// and user_data for when it completes. This may also start sending the Batch's message
+        /// through VSR.
         pub fn batch_submit(
             self: *Self,
             user_data: u128,
@@ -390,7 +405,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .callback = callback,
             };
 
-            // Newly made Requests are populated and potentially pushed through VSR if no inflight.
+            // Newly made Requests are populated and potentially pushed through VSR if there exists
+            // no currently inflight request.
             // NOTE: This sets the request.message.request number.
             if (batch.demux == null) {
                 self.request_submit(batch.request);
@@ -650,7 +666,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             switch (operation) {
                 inline else => |op| {
-                    if (comptime !StateMachine.batch_logical_allowed(op)) {
+                    if (comptime !StateMachine.batch_logical_allowed.get(op)) {
                         std.debug.panic("invalid batched op: {s}", .{
                             inflight_operation.tag_name(StateMachine),
                         });
@@ -853,13 +869,6 @@ test "Client Batching" {
     const StateMachine = struct {
         const config = global_constants.state_machine_config;
 
-        pub const constants = struct {
-            pub const batch_logical_max = blk: {
-                const max = @max(@sizeOf(Event(.batched)), @sizeOf(Result(.batched)));
-                break :blk max * global_constants.client_request_queue_max;
-            };
-        };
-
         pub const Operation = enum(u8) {
             batched = config.vsr_operations_reserved + 0,
             serial = config.vsr_operations_reserved + 1,
@@ -879,16 +888,14 @@ test "Client Batching" {
             };
         }
 
-        pub fn batch_logical_allowed(operation: Operation) bool {
-            return switch (operation) {
-                .batched => true,
-                .serial => false,
-            };
-        }
+        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
+            .batched = true,
+            .serial = false,
+        });
 
         // Demuxer which gives each Event a Result 1:1
         pub fn DemuxerType(comptime operation: Operation) type {
-            comptime assert(batch_logical_allowed(operation));
+            comptime assert(batch_logical_allowed.get(operation));
             return struct {
                 const Demuxer = @This();
                 const alignment = @alignOf(Result(operation));

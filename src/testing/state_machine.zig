@@ -23,13 +23,12 @@ pub fn StateMachineType(
 
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
-            pub const batch_logical_max = 0; // Batching not supported by test StateMachine.
         };
 
-        pub fn batch_logical_allowed(_: Operation) bool {
+        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
             // Batching not supported by test StateMachine.
-            return false;
-        }
+            .echo = false,
+        });
 
         pub fn DemuxerType(comptime _: Operation) type {
             @compileError("Batching not supported by test StateMachine");

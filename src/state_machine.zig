@@ -42,18 +42,6 @@ pub fn StateMachineType(
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
 
-            /// The maximum amount of logical batches that may be queued on a client
-            /// (spread across all requests).
-            pub const batch_logical_max = blk: {
-                var max: usize = 0;
-                inline for (std.enums.values(Operation)) |operation| {
-                    if (@intFromEnum(operation) < config.vsr_operations_reserved) continue;
-                    if (!batch_logical_allowed(operation)) continue;
-                    max = @max(max, batch_max.operation_batch_max(operation));
-                }
-                break :blk max * global_constants.client_request_queue_max;
-            };
-
             /// The maximum number of objects within a batch, by operation.
             pub const batch_max = struct {
                 pub const create_accounts = operation_batch_max(.create_accounts);
@@ -112,17 +100,18 @@ pub fn StateMachineType(
             };
         };
 
-        /// Returns whether or not the operation can be batched at the VSR layer.
+        /// Used to determine if an operation can be batched at the VSR layer.
         /// If so, the StateMachine must support demuxing batched operations below.
-        pub fn batch_logical_allowed(operation: Operation) bool {
-            return switch (operation) {
-                .create_accounts, .create_transfers => true,
-                .lookup_accounts, .lookup_transfers => false, // Don't batch lookups for now.
-            };
-        }
+        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
+            .create_accounts = true,
+            .create_transfers = true,
+            // Don't batch lookups for now.
+            .lookup_accounts = false,
+            .lookup_transfers = false,
+        });
 
         pub fn DemuxerType(comptime operation: Operation) type {
-            comptime assert(batch_logical_allowed(operation));
+            comptime assert(batch_logical_allowed.get(operation));
             return struct {
                 const Demuxer = @This();
                 const CreateResult = Result(operation);
