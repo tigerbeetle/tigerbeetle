@@ -60,15 +60,12 @@ pub fn main() !void {
                 var section = try shell.open_section(@tagName(language) ++ " ci");
                 defer section.close();
 
-                var client_src_dir = try shell.project_root.openDir(
-                    "src/clients/" ++ @tagName(language),
-                    .{},
-                );
-                defer client_src_dir.close();
+                {
+                    try shell.pushd("./src/clients/" ++ @tagName(language));
+                    defer shell.popd();
 
-                try client_src_dir.setAsCwd();
-
-                try ci.tests(shell, gpa);
+                    try ci.tests(shell, gpa);
+                }
 
                 // Piggy back on node client testing to verify our docs, as we use node to generate
                 // them anyway.
@@ -86,13 +83,8 @@ pub fn main() !void {
 }
 
 fn build_docs(shell: *Shell) !void {
-    var docs_dir = try shell.project_root.openDir(
-        "src/docs_website",
-        .{},
-    );
-    defer docs_dir.close();
-
-    try docs_dir.setAsCwd();
+    try shell.pushd("./src/docs_website");
+    defer shell.popd();
 
     try shell.exec("npm install", .{});
     try shell.exec("npm run build", .{});

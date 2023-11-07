@@ -9,6 +9,8 @@ const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+    assert(shell.file_exists("package.json"));
+
     // We have some unit-tests for node, but they are likely bitrotted, as they are not run on CI.
 
     // Integration tests.
@@ -18,10 +20,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec("npm pack --quiet", .{});
 
     inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
-        var sample_dir = try shell.project_root.openDir("src/clients/node/samples/" ++ sample, .{});
-        defer sample_dir.close();
-
-        try sample_dir.setAsCwd();
+        try shell.pushd("./samples/" ++ sample);
+        defer shell.popd();
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
@@ -33,10 +33,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     // Container smoke tests.
     if (builtin.target.os.tag == .linux) {
-        var client_dir = try shell.project_root.openDir("src/clients/node/", .{});
-        defer client_dir.close();
-
-        try client_dir.setAsCwd();
 
         // Installing node through <https://github.com/nodesource/distributions>.
 
