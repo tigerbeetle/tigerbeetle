@@ -18,7 +18,8 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/node/samples/basic
 Then, install the TigerBeetle client:
 
 ```console
-npm install tigerbeetle-node
+npm install --prefix ../../
+npm install
 ```
 
 ## Start the TigerBeetle server
