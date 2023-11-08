@@ -26,10 +26,7 @@
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
     "test": "node dist/test",
-    "build": "node ./scripts/build.js",
-    "build_tsc": "node ./node_modules/typescript/bin/tsc",
-    "build_lib": "node ./scripts/build_lib.js",
-    "prepack": "node ./scripts/prepack.js",
+    "prepare": "node ./scripts/prepare.js",
     "clean": "node ./scripts/clean.js"
   },
   "author": "TigerBeetle, Inc",
