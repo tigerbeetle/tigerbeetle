@@ -401,10 +401,13 @@ pub fn build(b: *std.Build) !void {
                 // On Linux, detects the abi by calling `ldd` to check if
                 // the libjvm.so is linked against libc or musl.
                 // It's reasonable to assume that ldd will be present.
-                const ldd_result = b.exec(&.{
-                    "ldd",
-                    b.pathJoin(&.{ libjvm_path, "libjvm.so" }),
-                });
+                var exit_code: u8 = undefined;
+                const stderr_behavior = .Ignore;
+                const ldd_result = try b.execAllowFail(
+                    &.{ "ldd", b.pathJoin(&.{ libjvm_path, "libjvm.so" }) },
+                    &exit_code,
+                    stderr_behavior,
+                );
                 tests.target.abi = if (std.mem.indexOf(u8, ldd_result, "musl") != null)
                     .musl
                 else if (std.mem.indexOf(u8, ldd_result, "libc") != null)
