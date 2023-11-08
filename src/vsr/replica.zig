@@ -7951,11 +7951,21 @@ pub fn ReplicaType(
                     const table = self.grid_repair_tables.acquire().?;
                     table.* = .{ .replica = self, .table = undefined };
 
-                    self.grid.blocks_missing.enqueue_table(
+                    const enqueue_result = self.grid.blocks_missing.enqueue_table(
                         &table.table,
                         table_info.address,
                         table_info.checksum,
                     );
+
+                    switch (enqueue_result) {
+                        .insert => {},
+                        .duplicate => {
+                            // Duplicates are only possible due to move-table.
+                            assert(table_info.label.level > 0);
+
+                            self.grid_repair_tables.release(table);
+                        },
+                    }
 
                     if (self.grid_repair_tables.available() == 0) break;
                 } else {
