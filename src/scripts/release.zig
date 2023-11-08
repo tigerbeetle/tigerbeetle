@@ -132,8 +132,6 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     var section = try shell.open_section("build tigerbeetle");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
-
     const llvm_lipo = for (@as([2][]const u8, .{ "llvm-lipo-16", "llvm-lipo" })) |llvm_lipo| {
         if (shell.exec_stdout("{llvm_lipo} -version", .{
             .llvm_lipo = llvm_lipo,
@@ -220,10 +218,8 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var section = try shell.open_section("build dotnet");
     defer section.close();
 
-    var client_src_dir = try shell.project_root.openDir("src/clients/dotnet", .{});
-    defer client_src_dir.close();
-
-    try client_src_dir.setAsCwd();
+    try shell.pushd("./src/clients/dotnet");
+    defer shell.popd();
 
     const dotnet_version = shell.exec_stdout("dotnet --version", .{}) catch {
         fatal("can't find dotnet", .{});
@@ -236,7 +232,7 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     , .{ .version = info.version });
 
     try Shell.copy_path(
-        client_src_dir,
+        shell.cwd,
         try shell.print("TigerBeetle/bin/Release/tigerbeetle.{s}.nupkg", .{info.version}),
         dist_dir,
         try shell.print("tigerbeetle.{s}.nupkg", .{info.version}),
@@ -247,10 +243,8 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var section = try shell.open_section("build go");
     defer section.close();
 
-    var client_src_dir = try shell.project_root.openDir("src/clients/go", .{});
-    defer client_src_dir.close();
-
-    try client_src_dir.setAsCwd();
+    try shell.pushd("./src/clients/go");
+    defer shell.popd();
 
     try shell.zig("build go_client -Doptimize=ReleaseSafe -Dconfig=production", .{});
 
@@ -259,7 +253,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var copied_count: u32 = 0;
     while (files_lines.next()) |file| {
         assert(file.len > 3);
-        try Shell.copy_path(client_src_dir, file, dist_dir, file);
+        try Shell.copy_path(shell.cwd, file, dist_dir, file);
         copied_count += 1;
     }
     assert(copied_count >= 10);
@@ -267,7 +261,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     const native_files = try shell.find(.{ .where = &.{"."}, .extensions = &.{ ".a", ".lib" } });
     copied_count = 0;
     for (native_files) |native_file| {
-        try Shell.copy_path(client_src_dir, native_file, dist_dir, native_file);
+        try Shell.copy_path(shell.cwd, native_file, dist_dir, native_file);
         copied_count += 1;
     }
     // 5 = 3 + 2
@@ -291,18 +285,16 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var section = try shell.open_section("build java");
     defer section.close();
 
-    var client_src_dir = try shell.project_root.openDir("src/clients/java", .{});
-    defer client_src_dir.close();
-
-    try client_src_dir.setAsCwd();
+    try shell.pushd("./src/clients/java");
+    defer shell.popd();
 
     const java_version = shell.exec_stdout("java --version", .{}) catch {
         fatal("can't find java", .{});
     };
     log.info("java version {s}", .{java_version});
 
-    try backup_create(client_src_dir, "pom.xml");
-    defer backup_restore(client_src_dir, "pom.xml");
+    try backup_create(shell.cwd, "pom.xml");
+    defer backup_restore(shell.cwd, "pom.xml");
 
     try shell.exec(
         \\mvn --batch-mode --quiet --file pom.xml
@@ -316,7 +308,7 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     , .{});
 
     try Shell.copy_path(
-        client_src_dir,
+        shell.cwd,
         try shell.print("target/tigerbeetle-java-{s}.jar", .{info.version}),
         dist_dir,
         try shell.print("tigerbeetle-java-{s}.jar", .{info.version}),
@@ -327,28 +319,26 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var section = try shell.open_section("build node");
     defer section.close();
 
-    var client_src_dir = try shell.project_root.openDir("src/clients/node", .{});
-    defer client_src_dir.close();
-
-    try client_src_dir.setAsCwd();
+    try shell.pushd("./src/clients/node");
+    defer shell.popd();
 
     const node_version = shell.exec_stdout("node --version", .{}) catch {
         fatal("can't find nodejs", .{});
     };
     log.info("node version {s}", .{node_version});
 
-    try backup_create(client_src_dir, "package.json");
-    defer backup_restore(client_src_dir, "package.json");
+    try backup_create(shell.cwd, "package.json");
+    defer backup_restore(shell.cwd, "package.json");
 
-    try backup_create(client_src_dir, "package-lock.json");
-    defer backup_restore(client_src_dir, "package-lock.json");
+    try backup_create(shell.cwd, "package-lock.json");
+    defer backup_restore(shell.cwd, "package-lock.json");
 
     try shell.exec("npm version --no-git-tag-version {version}", .{ .version = info.version });
     try shell.exec("npm install", .{});
     try shell.exec("npm pack --quiet", .{});
 
     try Shell.copy_path(
-        client_src_dir,
+        shell.cwd,
         try shell.print("tigerbeetle-node-{s}.tgz", .{info.version}),
         dist_dir,
         try shell.print("tigerbeetle-node-{s}.tgz", .{info.version}),
@@ -359,7 +349,6 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     var section = try shell.open_section("publish all");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist"));
 
     if (languages.contains(.zig)) {
@@ -447,7 +436,6 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 
     if (languages.contains(.zig)) {
-        try shell.project_root.setAsCwd();
         try shell.exec(
             \\gh release edit --draft=false
             \\  {tag}
@@ -490,7 +478,6 @@ fn publish_dotnet(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish dotnet");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/dotnet"));
 
     const nuget_key = try shell.env_get("NUGET_KEY");
@@ -509,7 +496,6 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish go");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/go"));
 
     const token = try shell.env_get("TIGERBEETLE_GO_PAT");
@@ -538,10 +524,8 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
         );
     }
 
-    var tigerbeetle_go_dir = try shell.project_root.openDir("tigerbeetle-go", .{});
-    defer tigerbeetle_go_dir.close();
-
-    try tigerbeetle_go_dir.setAsCwd();
+    try shell.pushd("tigerbeetle-go");
+    defer shell.popd();
 
     try shell.exec("git add .", .{});
     // Native libraries are ignored in this repository, but we want to push them to the
@@ -571,7 +555,6 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish java");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/java"));
 
     // These variables don't have a special meaning in maven, and instead are a part of
@@ -611,7 +594,6 @@ fn publish_node(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish node");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/node"));
 
     // `NODE_AUTH_TOKEN` env var doesn't have a special meaning in npm. It does have special meaning
@@ -630,7 +612,6 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
     var section = try shell.open_section("publish docker");
     defer section.close();
 
-    try shell.project_root.setAsCwd();
     assert(try shell.dir_exists("dist/tigerbeetle"));
 
     try shell.exec(
@@ -693,15 +674,12 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
     defer section.close();
 
     {
-        var docs_dir = try shell.project_root.openDir("src/docs_website", .{});
-        defer docs_dir.close();
-
-        try docs_dir.setAsCwd();
+        try shell.pushd("src/docs_website");
+        defer shell.popd();
 
         try shell.exec("npm install", .{});
         try shell.exec("npm run build", .{});
     }
-    try shell.project_root.setAsCwd();
 
     const token = try shell.env_get("TIGERBEETLE_DOCS_PAT");
     try shell.exec(
@@ -729,10 +707,8 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
         );
     }
 
-    var tigerbeetle_docs_dir = try shell.project_root.openDir("tigerbeetle-docs", .{});
-    defer tigerbeetle_docs_dir.close();
-
-    try tigerbeetle_docs_dir.setAsCwd();
+    try shell.pushd("tigerebeetle-docs");
+    defer shell.popd();
 
     try shell.exec("git add .", .{});
     try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
