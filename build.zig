@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const builtin = @import("builtin");
 const CrossTarget = std.zig.CrossTarget;
 const Mode = std.builtin.Mode;
@@ -680,14 +681,22 @@ fn link_tracer_backend(
 
 // Zig cross-targets plus Dotnet RID (Runtime Identifier):
 const platforms = .{
-    .{ "x86_64-linux-gnu", "linux-x64" },
+    .{ "x86_64-linux-gnu.2.27", "linux-x64" },
     .{ "x86_64-linux-musl", "linux-musl-x64" },
     .{ "x86_64-macos", "osx-x64" },
-    .{ "aarch64-linux-gnu", "linux-arm64" },
+    .{ "aarch64-linux-gnu.2.27", "linux-arm64" },
     .{ "aarch64-linux-musl", "linux-musl-arm64" },
     .{ "aarch64-macos", "osx-arm64" },
     .{ "x86_64-windows", "win-x64" },
 };
+
+fn strip_glibc_version(triple: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, triple, "gnu.2.27")) {
+        return triple[0 .. triple.len - ".2.27".len];
+    }
+    assert(std.mem.indexOf(u8, triple, "gnu") == null);
+    return triple;
+}
 
 fn go_client(
     b: *std.Build,
@@ -720,6 +729,9 @@ fn go_client(
     const bindings_step = b.addRunArtifact(bindings);
 
     inline for (platforms) |platform| {
+        // We don't need the linux-gnu builds.
+        if (comptime std.mem.indexOf(u8, platform[0], "linux-gnu") != null) continue;
+
         const name = if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-musl"))
             "x86_64-linux"
         else if (comptime std.mem.eql(u8, platform[0], "aarch64-linux-musl"))
@@ -727,34 +739,31 @@ fn go_client(
         else
             platform[0];
 
-        // We don't need the linux-gnu builds.
-        if (comptime !std.mem.endsWith(u8, platform[0], "linux-gnu")) {
-            const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
-            var b_isolated = builder_with_isolated_cache(b, cross_target);
+        const cross_target = CrossTarget.parse(.{ .arch_os_abi = name, .cpu_features = "baseline" }) catch unreachable;
+        var b_isolated = builder_with_isolated_cache(b, cross_target);
 
-            const lib = b_isolated.addStaticLibrary(.{
-                .name = "tb_client",
-                .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
-                .target = cross_target,
-                .optimize = mode,
-                .main_pkg_path = .{ .path = "src" },
-            });
-            lib.linkLibC();
-            lib.pie = true;
-            lib.bundle_compiler_rt = true;
-            lib.stack_protector = false;
+        const lib = b_isolated.addStaticLibrary(.{
+            .name = "tb_client",
+            .root_source_file = .{ .path = "src/clients/c/tb_client_exports.zig" },
+            .target = cross_target,
+            .optimize = mode,
+            .main_pkg_path = .{ .path = "src" },
+        });
+        lib.linkLibC();
+        lib.pie = true;
+        lib.bundle_compiler_rt = true;
+        lib.stack_protector = false;
 
-            lib.addOptions("vsr_options", options);
-            link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
+        lib.addOptions("vsr_options", options);
+        link_tracer_backend(lib, git_clone_tracy, tracer_backend, cross_target);
 
-            lib.step.dependOn(&install_header.step);
-            lib.step.dependOn(&bindings_step.step);
+        lib.step.dependOn(&install_header.step);
+        lib.step.dependOn(&bindings_step.step);
 
-            // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
-            const lib_install = b.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{ .custom = "../src/clients/go/pkg/native/" ++ name };
-            build_step.dependOn(&lib_install.step);
-        }
+        // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
+        const lib_install = b.addInstallArtifact(lib, .{});
+        lib_install.dest_dir = .{ .custom = "../src/clients/go/pkg/native/" ++ name };
+        build_step.dependOn(&lib_install.step);
     }
 }
 
@@ -807,7 +816,10 @@ fn java_client(
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         const lib_install = b.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "../src/clients/java/src/main/resources/lib/" ++ platform[0] };
+        lib_install.dest_dir = .{
+            .custom = "../src/clients/java/src/main/resources/lib/" ++
+                comptime strip_glibc_version(platform[0]),
+        };
         build_step.dependOn(&lib_install.step);
     }
 }
@@ -861,7 +873,9 @@ fn dotnet_client(
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
         const lib_install = b.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "../src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native" };
+        lib_install.dest_dir = .{
+            .custom = "../src/clients/dotnet/TigerBeetle/runtimes/" ++ platform[1] ++ "/native",
+        };
         build_step.dependOn(&lib_install.step);
     }
 }
@@ -922,7 +936,9 @@ fn node_client(
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
         const lib_install = b.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{ .custom = "../src/clients/node/dist/bin/" ++ platform[0] };
+        lib_install.dest_dir = .{
+            .custom = "../src/clients/node/dist/bin/" ++ comptime strip_glibc_version(platform[0]),
+        };
         build_step.dependOn(&lib_install.step);
     }
 }
@@ -984,7 +1000,9 @@ fn c_client(
 
             // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
             const lib_install = b.addInstallArtifact(lib, .{});
-            lib_install.dest_dir = .{ .custom = "../src/clients/c/lib/" ++ platform[0] };
+            lib_install.dest_dir = .{
+                .custom = "../src/clients/c/lib/" ++ comptime strip_glibc_version(platform[0]),
+            };
             build_step.dependOn(&lib_install.step);
         }
     }
