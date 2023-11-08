@@ -31,7 +31,8 @@ pub const messages_max_replica = messages_max: {
     // All other quorums are bitsets.
     sum += constants.replicas_max;
     sum += constants.connections_max; // Connection.recv_message
-    sum += constants.connections_max * constants.connection_send_queue_max_replica; // Connection.send_queue
+    // Connection.send_queue:
+    sum += constants.connections_max * constants.connection_send_queue_max_replica;
     sum += 1; // Handle bursts (e.g. Connection.parse_message)
     // Handle Replica.commit_op's reply:
     // (This is separate from the burst +1 because they may occur concurrently).
@@ -45,7 +46,8 @@ pub const messages_max_client = messages_max: {
     var sum: usize = 0;
 
     sum += constants.replicas_max; // Connection.recv_message
-    sum += constants.replicas_max * constants.connection_send_queue_max_client; // Connection.send_queue
+    // Connection.send_queue:
+    sum += constants.replicas_max * constants.connection_send_queue_max_client;
     sum += constants.client_request_queue_max; // Client.request_queue
     // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
     sum += 1;
@@ -88,21 +90,26 @@ pub const MessagePool = struct {
 
     messages_max: usize,
 
-    pub fn init(allocator: mem.Allocator, process_type: vsr.ProcessType) error{OutOfMemory}!MessagePool {
+    pub fn init(
+        allocator: mem.Allocator,
+        process_type: vsr.ProcessType,
+    ) error{OutOfMemory}!MessagePool {
         return MessagePool.init_capacity(allocator, switch (process_type) {
             .replica => messages_max_replica,
             .client => messages_max_client,
         });
     }
 
-    pub fn init_capacity(allocator: mem.Allocator, messages_max: usize) error{OutOfMemory}!MessagePool {
+    pub fn init_capacity(
+        allocator: mem.Allocator,
+        messages_max: usize,
+    ) error{OutOfMemory}!MessagePool {
         var pool: MessagePool = .{
             .free_list = null,
             .messages_max = messages_max,
         };
         {
-            var i: usize = 0;
-            while (i < messages_max) : (i += 1) {
+            for (0..messages_max) |_| {
                 const buffer = try allocator.alignedAlloc(
                     u8,
                     constants.sector_size,
