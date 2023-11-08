@@ -8,6 +8,8 @@ const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
+    assert(shell.file_exists("pom.xml"));
+
     // Java's maven doesn't support a separate test command, or a way to add dependency on a
     // project (as opposed to a compiled jar file).
     //
@@ -17,10 +19,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec("mvn --batch-mode --file pom.xml --quiet install", .{});
 
     inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
-        var sample_dir = try shell.project_root.openDir("src/clients/java/samples/" ++ sample, .{});
-        defer sample_dir.close();
-
-        try sample_dir.setAsCwd();
+        try shell.pushd("./samples/" ++ sample);
+        defer shell.popd();
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
