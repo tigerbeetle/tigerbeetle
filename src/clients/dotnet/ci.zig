@@ -85,17 +85,26 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     }
 }
 
-pub fn verify_release(shell: *Shell, gpa: std.mem.Allocator, tmp_dir: std.fs.Dir) !void {
-    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
+    version: []const u8,
+    tigerbeetle: []const u8,
+}) !void {
+    var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        .prebuilt = options.tigerbeetle,
+    });
     defer tmp_beetle.deinit(gpa);
 
+    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+
     try shell.exec("dotnet new console", .{});
-    try shell.exec("dotnet add package tigerbeetle", .{});
+    try shell.exec("dotnet add package tigerbeetle --version {version}", .{
+        .version = options.version,
+    });
 
     try Shell.copy_path(
         shell.project_root,
         "src/clients/dotnet/samples/basic/Program.cs",
-        tmp_dir,
+        shell.cwd,
         "Program.cs",
     );
     try shell.exec("dotnet run", .{});

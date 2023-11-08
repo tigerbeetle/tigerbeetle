@@ -1,8 +1,13 @@
 name: "Release (validate)"
 
 on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
   schedule:
-    - cron: 0 0 0 1 1 ? 1970 # Never for now, planned to run every six hours
+    - cron: 0 */6 * * * # Every six hours
 
 jobs:
   validate:
@@ -17,10 +22,7 @@ jobs:
 
       - run: ./scripts/install_zig.sh
 
-      - run: ./zig/zig build dotnet_client:ci -- --release-validate
-      - run: ./zig/zig build go_client:ci     -- --release-validate
-      - run: ./zig/zig build java_client:ci   -- --release-validate
-      - run: ./zig/zig build node_client:ci   -- --release-validate
+      - run: ./zig/zig build ci -- --verify-release
 
   alert_failure:
     runs-on: ubuntu-latest
