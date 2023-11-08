@@ -33,24 +33,36 @@ stderr_reader_thread: std.Thread,
 
 pub fn init(
     gpa: std.mem.Allocator,
-    options: struct { echo: bool = true },
+    options: struct {
+        echo: bool = true,
+        prebuilt: ?[]const u8 = null,
+    },
 ) !TmpTigerBeetle {
     const shell = try Shell.create(gpa);
     defer shell.destroy();
 
-    const tigerbeetle_exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
+    var from_source_path: ?[]const u8 = null;
+    defer if (from_source_path) |path| gpa.free(path);
 
-    // If tigerbeetle binary does not exist yet, build it.
-    // TODO: just run `zig build run` unconditionally here, when that doesn't do spurious rebuilds.
-    _ = shell.project_root.statFile(tigerbeetle_exe) catch {
-        log.info("building TigerBeetle", .{});
-        try shell.zig("build", .{});
+    if (options.prebuilt == null) {
+        const tigerbeetle_exe = comptime "tigerbeetle" ++ builtin.target.exeFileExt();
 
-        _ = try shell.project_root.statFile(tigerbeetle_exe);
-    };
+        // If tigerbeetle binary does not exist yet, build it.
+        //
+        // TODO: just run `zig build run` unconditionally here, when that doesn't do spurious
+        // rebuilds.
+        _ = shell.project_root.statFile(tigerbeetle_exe) catch {
+            log.info("building TigerBeetle", .{});
+            try shell.zig("build", .{});
 
-    const tigerbeetle: []const u8 = try shell.project_root.realpathAlloc(gpa, tigerbeetle_exe);
-    defer gpa.free(tigerbeetle);
+            _ = try shell.project_root.statFile(tigerbeetle_exe);
+        };
+
+        from_source_path = try shell.project_root.realpathAlloc(gpa, tigerbeetle_exe);
+    }
+
+    const tigerbeetle: []const u8 = options.prebuilt orelse from_source_path.?;
+    assert(std.fs.path.isAbsolute(tigerbeetle));
 
     var tmp_dir = std.testing.tmpDir(.{});
     errdefer tmp_dir.cleanup();
