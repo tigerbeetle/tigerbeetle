@@ -3,9 +3,6 @@ name: Linux
 on:
   workflow_call:
 
-env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
-
 jobs:
   lint:
     runs-on: ubuntu-latest
