@@ -4,11 +4,6 @@ set -eEuo pipefail
 # Number of replicas to benchmark
 REPLICAS=${REPLICAS:-0}
 
-cpu="${CPU:-}"
-if [ -n "${cpu}" ]; then
-    cpu="-Dcpu=${cpu}"
-fi
-
 # Install Zig if it does not already exist:
 if [ ! -d "zig" ]; then
     scripts/install_zig.sh
@@ -32,7 +27,7 @@ else
 fi
 
 # shellcheck disable=SC2086
-zig/zig build install -Doptimize=ReleaseSafe -Dconfig=production $cpu $ZIG_TARGET
+zig/zig build install -Doptimize=ReleaseSafe -Dconfig=production $ZIG_TARGET
 
 function onerror {
     if [ "$?" == "0" ]; then
@@ -75,7 +70,7 @@ done
 echo ""
 echo "Benchmarking..."
 # shellcheck disable=SC2086
-zig/zig build benchmark -Doptimize=ReleaseSafe -Dconfig=production $cpu $ZIG_TARGET -- --addresses="${PORT}" "$@"
+zig/zig build benchmark -Doptimize=ReleaseSafe -Dconfig=production $ZIG_TARGET -- --addresses="${PORT}" "$@"
 echo ""
 
 for I in $REPLICAS

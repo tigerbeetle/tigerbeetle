@@ -7,11 +7,51 @@ const Mode = std.builtin.Mode;
 const config = @import("./src/config.zig");
 const Shell = @import("./src/shell.zig");
 
+// TigerBeetle binary requires certain CPU feature and supports a closed set of CPUs. Here, we
+// specify exactly which features the binary needs. Client shared libraries might be more lax with
+// CPU features required.
+const supported_targets: []const CrossTarget = supported_targets: {
+    @setEvalBranchQuota(100_000);
+    var result: []const CrossTarget = &.{};
+    const triples = .{
+        "aarch64-linux",
+        "aarch64-macos",
+        "x86_64-linux",
+        "x86_64-macos",
+        "x86_64-windows",
+    };
+    const cpus = .{
+        "baseline+aes+neon",
+        "baseline+aes+neon",
+        "x86_64_v3+aes",
+        "x86_64_v3+aes",
+        "x86_64_v3+aes",
+    };
+    for (triples, cpus) |triple, cpu| {
+        result = result ++ .{CrossTarget.parse(.{
+            .arch_os_abi = triple,
+            .cpu_features = cpu,
+        }) catch unreachable};
+    }
+    break :supported_targets result;
+};
+
 pub fn build(b: *std.Build) !void {
     // A compile error stack trace of 10 is arbitrary in size but helps with debugging.
     b.reference_trace = 10;
 
-    const target = b.standardTargetOptions(.{});
+    var target = b.standardTargetOptions(.{});
+    // Patch the target to use the right CPU. This is a somewhat hacky way to do this, but the core
+    // idea here is to keep this file as the source of truth for what we need from the CPU.
+    for (supported_targets) |supported_target| {
+        if (target.getCpuArch() == supported_target.getCpuArch()) {
+            target.cpu_model = supported_target.cpu_model;
+            target.cpu_features_add = supported_target.cpu_features_add;
+            target.cpu_features_sub = supported_target.cpu_features_sub;
+            break;
+        }
+    } else @panic("error: unsupported target");
+
     const mode = b.standardOptimizeOption(.{});
     const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
 

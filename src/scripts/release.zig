@@ -153,29 +153,20 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         "aarch64-macos",
         "x86_64-macos",
     };
-    const cpus = .{
-        "baseline+aes+neon",
-        "x86_64_v3+aes",
-        "x86_64_v3+aes",
-        "baseline+aes+neon",
-        "x86_64_v3+aes",
-    };
-    comptime assert(targets.len == cpus.len);
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`. MacOS is special cased --- we use an extra step to merge x86 and arm binaries into
     // one.
     //TODO: use std.Target here
     inline for (.{ false, true }) |debug| {
-        inline for (targets, cpus) |target, cpu| {
+        inline for (targets) |target| {
             try shell.zig(
                 \\build install
-                \\    -Dtarget={target} -Dcpu={cpu}
+                \\    -Dtarget={target}
                 \\    -Doptimize={mode}
                 \\    -Dversion={version}
             , .{
                 .target = target,
-                .cpu = cpu,
                 .mode = if (debug) "Debug" else "ReleaseSafe",
                 .version = info.version,
             });
