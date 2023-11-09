@@ -47,8 +47,9 @@ pub fn build(b: *std.Build) !void {
             target.cpu_model = supported_target.cpu_model;
             target.cpu_features_add = supported_target.cpu_features_add;
             target.cpu_features_sub = supported_target.cpu_features_sub;
+            break;
         }
-    }
+    } else @panic("error: unsupported target");
 
     const mode = b.standardOptimizeOption(.{});
     const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
