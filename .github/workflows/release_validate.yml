@@ -35,7 +35,7 @@ jobs:
 
       - run: ./scripts/install_zig.sh
 
-      - run: ./zig/zig build ci -- --verify-release
+      - run: ./zig/zig build ci -- --validate-release
 
   alert_failure:
     runs-on: ubuntu-latest
