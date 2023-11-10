@@ -1,6 +1,7 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
+const testing = std.testing;
 const maybe = stdx.maybe;
 const mem = std.mem;
 
@@ -672,7 +673,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         });
                     }
 
-                    var demuxer = StateMachine.DemuxerType(op).init(@alignCast(reply.body()));
+                    var demuxer = StateMachine.DemuxerType(op).init(
+                        std.mem.bytesAsSlice(StateMachine.Result(op), reply.body()),
+                    );
                     while (inflight.demux_queue.pop()) |demux| {
                         // Extract/use the Demux node info to slice the results from the reply.
                         const info = demux.info;
@@ -684,7 +687,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         (info.callback.?)(
                             info.user_data,
                             operation,
-                            results,
+                            std.mem.sliceAsBytes(results),
                         );
                     }
                 },
@@ -862,59 +865,91 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
     };
 }
 
-test "Client Batching" {
-    const global_constants = constants;
+// Stub StateMachine which supports one batchable and non-batchable Operation for testing.
+const TestStateMachine = struct {
+    const config = constants.state_machine_config;
 
-    // Stub StateMachine which supports one batchable and non-batchable Operation for testing.
-    const StateMachine = struct {
-        const config = global_constants.state_machine_config;
-
-        pub const Operation = enum(u8) {
-            batched = config.vsr_operations_reserved + 0,
-            serial = config.vsr_operations_reserved + 1,
-        };
-
-        pub fn Event(comptime operation: Operation) type {
-            return switch (operation) {
-                .batched => [128]u8,
-                .serial => u128,
-            };
-        }
-
-        pub fn Result(comptime operation: Operation) type {
-            return switch (operation) {
-                .batched => u128,
-                .serial => u128,
-            };
-        }
-
-        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
-            .batched = true,
-            .serial = false,
-        });
-
-        // Demuxer which gives each Event a Result 1:1
-        pub fn DemuxerType(comptime operation: Operation) type {
-            comptime assert(batch_logical_allowed.get(operation));
-            return struct {
-                const Demuxer = @This();
-                const alignment = @alignOf(Result(operation));
-
-                results: []Result(operation),
-                offset: u32 = 0,
-
-                pub fn init(reply: []align(alignment) u8) Demuxer {
-                    return .{ .results = std.mem.bytesAsSlice(Result(operation), reply) };
-                }
-
-                pub fn decode(self: *Demuxer, offset: u32, size: u32) []align(alignment) u8 {
-                    assert(self.offset == offset);
-                    defer self.offset += size;
-                    return std.mem.sliceAsBytes(self.results[offset..][0..size]);
-                }
-            };
-        }
+    pub const Operation = enum(u8) {
+        batched = config.vsr_operations_reserved + 0,
+        serial = config.vsr_operations_reserved + 1,
     };
+
+    pub fn Event(comptime operation: Operation) type {
+        return switch (operation) {
+            .batched => [128]u8,
+            .serial => u128,
+        };
+    }
+
+    pub fn Result(comptime operation: Operation) type {
+        return switch (operation) {
+            .batched => u128,
+            .serial => u128,
+        };
+    }
+
+    pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
+        .batched = true,
+        .serial = false,
+    });
+
+    // Demuxer which gives each Event a Result 1:1
+    pub fn DemuxerType(comptime operation: Operation) type {
+        comptime assert(batch_logical_allowed.get(operation));
+        return struct {
+            const Demuxer = @This();
+            const alignment = @alignOf(Result(operation));
+
+            results: []Result(operation),
+            offset: u32 = 0,
+
+            pub fn init(reply: []Result(operation)) Demuxer {
+                return .{ .results = reply };
+            }
+
+            pub fn decode(self: *Demuxer, offset: u32, size: u32) []Result(operation) {
+                assert(self.offset == offset);
+                defer self.offset += size;
+                return self.results[offset..][0..size];
+            }
+        };
+    }
+};
+
+test "Result Demuxer" {
+    const StateMachine = TestStateMachine;
+    const Result = StateMachine.Result(.batched);
+
+    var results: [@divExact(constants.message_body_size_max, @sizeOf(Result))]Result = undefined;
+    for (0..results.len) |i| {
+        results[i] = i;
+    }
+
+    var prng = std.rand.DefaultPrng.init(42);
+    for (0..1000) |_| {
+        const events_total = @max(1, prng.random().uintAtMost(usize, results.len));
+        var demuxer = StateMachine.DemuxerType(.batched).init(results[0..events_total]);
+
+        var events_offset: usize = 0;
+        while (events_offset < events_total) {
+            const events_limit = events_total - events_offset;
+            const events_count = @max(1, prng.random().uintAtMost(usize, events_limit));
+
+            const reply = demuxer.decode(@intCast(events_offset), @intCast(events_count));
+            try testing.expectEqual(&reply[0], &results[events_offset]);
+            try testing.expectEqual(reply.len, results[events_offset..][0..events_count].len);
+
+            for (reply, 0..) |result, i| {
+                try testing.expectEqual(result, @as(Result, events_offset + i));
+            }
+
+            events_offset += events_count;
+        }
+    }
+}
+
+test "Client Batching" {
+    const StateMachine = TestStateMachine;
 
     // Stub MessageBus which simulates replica that provides matching Results for StateMachine.
     // This avoids pulling in ReplicaType and having to implement StateMachine.prefetch/commit/etc.
@@ -985,7 +1020,7 @@ test "Client Batching" {
             bus.timestamp += 1;
             assert(bus.timestamp != 0);
 
-            bus.commit += @intFromBool(bus.timestamp % global_constants.lsm_batch_multiple == 0);
+            bus.commit += @intFromBool(bus.timestamp % constants.lsm_batch_multiple == 0);
             assert(bus.commit != 0);
 
             reply.header.* = message.header.*;
