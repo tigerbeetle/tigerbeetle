@@ -515,7 +515,7 @@ fn publish_go(shell: *Shell, info: VersionInfo) !void {
         );
     }
 
-    try shell.pushd("tigerbeetle-go");
+    try shell.pushd("./tigerbeetle-go");
     defer shell.popd();
 
     try shell.exec("git add .", .{});
@@ -665,7 +665,7 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
     defer section.close();
 
     {
-        try shell.pushd("src/docs_website");
+        try shell.pushd("./src/docs_website");
         defer shell.popd();
 
         try shell.exec("npm install", .{});
@@ -698,7 +698,7 @@ fn publish_docs(shell: *Shell, info: VersionInfo) !void {
         );
     }
 
-    try shell.pushd("tigerebeetle-docs");
+    try shell.pushd("./tigerbeetle-docs");
     defer shell.popd();
 
     try shell.exec("git add .", .{});
