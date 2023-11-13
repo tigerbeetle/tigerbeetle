@@ -1,13 +1,56 @@
 # TigerBeetle Changelog
 
-## 2023-11-6
+## 2023-11-13
+
+### Safety And Performance
+
+- [#1264](https://github.com/tigerbeetle/tigerbeetle/pull/1264)
+
+  Implement last-mile release artifact verification in CI.
+
+- [#1268](https://github.com/tigerbeetle/tigerbeetle/pull/1268)
+
+  Bump the simulator's safety phase max-ticks to avoid false positives from the liveness check.
+
+- [#1270](https://github.com/tigerbeetle/tigerbeetle/pull/1270)
+
+  Fix a crash caused by a race between a commit and a repair acquiring a client-reply `Write`.
+
+- [#1278](https://github.com/tigerbeetle/tigerbeetle/pull/1278)
+
+  Fix a crash caused by a race between state (table) sync and a move-table compaction.
+
+  Both bugs didn't stand a chance in the [Line of Fire](https://www.youtube.com/watch?v=pq-G3EWO9XM)
+  of our deterministic simulator!
+
+### Internals
+
+- [#1244](https://github.com/tigerbeetle/tigerbeetle/pull/1244)
+
+  Specify which CPU features are supported in builds.
+
+- [#1275](https://github.com/tigerbeetle/tigerbeetle/pull/1275)
+
+  Improve `shell.zig`'s directory handling, to guard against mistakes with respect to the current
+  working directory.
+
+- [#1277](https://github.com/tigerbeetle/tigerbeetle/pull/1277)
+
+  Interpret a git hash as a VOPR seed, to enable reproducible simulator smoke tests in CI.
+
+- [#1288](https://github.com/tigerbeetle/tigerbeetle/pull/1288)
+
+  Explicitly target glibc 2.7 when building client libraries, to make sure TigerBeetle clients are
+  compatible with older distributions.
+
+## 2023-11-06
 
 ### Safety And Performance
 
 - [#1263](https://github.com/tigerbeetle/tigerbeetle/pull/1263)
 
   Revive the TigerBeetle [VOPRHub](https://github.com/tigerbeetle-vopr)! Some previous changes left
-  it on it's [Last Stand](https://open.spotify.com/track/1ibHApXtb0pgplmNDRLHrJ), but the bot is 
+  it on it's [Last Stand](https://open.spotify.com/track/1ibHApXtb0pgplmNDRLHrJ), but the bot is
   back in business finding liveness bugs: [#1266](https://github.com/tigerbeetle/tigerbeetle/issues/1266)
 
 ### Features
@@ -16,7 +59,7 @@
 
   Set the latest Docker image to track the latest release. Avoids language clients going out of sync
   with your default docker replica installations.
-  
+
 ### Internals
 
 - [#1261](https://github.com/tigerbeetle/tigerbeetle/pull/1261)
@@ -25,8 +68,8 @@
 
 - [#1265](https://github.com/tigerbeetle/tigerbeetle/pull/1265),
   [#1243](https://github.com/tigerbeetle/tigerbeetle/pull/1243)
-  
-  Addressed some release quirks with the .NET and Go client builds. 
+
+  Addressed some release quirks with the .NET and Go client builds.
 
 ## 2023-10-30
 
