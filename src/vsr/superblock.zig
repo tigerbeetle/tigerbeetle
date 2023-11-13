@@ -111,7 +111,7 @@ pub const SuperBlockHeader = extern struct {
     ///
     /// When `vsr_state.log_view < vsr_state.view`, the headers are for a DVC.
     /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
-    vsr_headers_all: [constants.view_change_headers_max]vsr.Header.Type(.prepare),
+    vsr_headers_all: [constants.view_change_headers_max]vsr.Header.Prepare,
     vsr_headers_reserved: [vsr_headers_reserved_size]u8 =
         [_]u8{0} ** vsr_headers_reserved_size,
 
@@ -176,7 +176,7 @@ pub const SuperBlockHeader = extern struct {
             return .{
                 .checkpoint = .{
                     .previous_checkpoint_id = 0,
-                    .commit_min_checksum = vsr.Header.Type(.prepare).root(options.cluster).checksum,
+                    .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
                     .commit_min = 0,
                     .snapshots_block_checksum = 0,
                     .snapshots_block_address = 0,
@@ -385,7 +385,7 @@ pub const SuperBlockHeader = extern struct {
         if (a.free_set_size != b.free_set_size) return false;
         if (a.vsr_headers_count != b.vsr_headers_count) return false;
         if (!stdx.equal_bytes(
-            [constants.view_change_headers_max]vsr.Header.Type(.prepare),
+            [constants.view_change_headers_max]vsr.Header.Prepare,
             &a.vsr_headers_all,
             &b.vsr_headers_all,
         )) return false;
@@ -784,7 +784,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .client_sessions_size = 0,
                 .vsr_headers_count = 0,
                 .vsr_headers_all = mem.zeroes(
-                    [constants.view_change_headers_max]vsr.Header.Type(.prepare),
+                    [constants.view_change_headers_max]vsr.Header.Prepare,
                 ),
             };
 
@@ -1006,13 +1006,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_headers_count = headers.array.count_as(u32);
                 stdx.copy_disjoint(
                     .exact,
-                    vsr.Header.Type(.prepare),
+                    vsr.Header.Prepare,
                     superblock.staging.vsr_headers_all[0..headers.array.count()],
                     headers.array.const_slice(),
                 );
                 @memset(
                     superblock.staging.vsr_headers_all[headers.array.count()..],
-                    std.mem.zeroes(vsr.Header.Type(.prepare)),
+                    std.mem.zeroes(vsr.Header.Prepare),
                 );
             } else {
                 assert(!context.caller.updates_vsr_headers());
@@ -1311,7 +1311,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.free_set_size == 0);
                     assert(working.client_sessions_size == ClientSessions.encode_size_max);
                     assert(working.vsr_state.checkpoint.commit_min_checksum ==
-                        vsr.Header.Type(.prepare).root(working.cluster).checksum);
+                        vsr.Header.Prepare.root(working.cluster).checksum);
                     assert(working.vsr_state.checkpoint.commit_min == 0);
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);

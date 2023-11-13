@@ -36,8 +36,8 @@ const block_body_size = block_size - @sizeOf(vsr.Header);
 const BlockPtr = *align(constants.sector_size) [block_size]u8;
 const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
 
-pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header.Type(.block) {
-    const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
+pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header.Block {
+    const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
     assert(header.command == .block);
     assert(header.address > 0);
     assert(header.size >= @sizeOf(vsr.Header)); // Every block has a header.

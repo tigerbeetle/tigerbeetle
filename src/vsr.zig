@@ -1034,7 +1034,7 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
 }
 
 pub const Headers = struct {
-    pub const Array = stdx.BoundedArray(Header.Type(.prepare), constants.view_change_headers_max);
+    pub const Array = stdx.BoundedArray(Header.Prepare, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
@@ -1043,7 +1043,7 @@ pub const Headers = struct {
     pub const ViewChangeSlice = ViewChangeHeadersSlice;
     pub const ViewChangeArray = ViewChangeHeadersArray;
 
-    fn dvc_blank(op: u64) Header.Type(.prepare) {
+    fn dvc_blank(op: u64) Header.Prepare {
         return .{
             .command = .prepare,
             .operation = .reserved,
@@ -1059,7 +1059,7 @@ pub const Headers = struct {
         };
     }
 
-    pub fn dvc_header_type(header: *const Header.Type(.prepare)) enum { blank, valid } {
+    pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
 
         if (constants.verify) assert(header.frame_const().valid_checksum());
@@ -1075,11 +1075,11 @@ pub const ViewChangeCommand = enum { do_view_change, start_view };
 const ViewChangeHeadersSlice = struct {
     command: ViewChangeCommand,
     /// Headers are ordered from high-to-low op.
-    slice: []const Header.Type(.prepare),
+    slice: []const Header.Prepare,
 
     pub fn init(
         command: ViewChangeCommand,
-        slice: []const Header.Type(.prepare),
+        slice: []const Header.Prepare,
     ) ViewChangeHeadersSlice {
         const headers = ViewChangeHeadersSlice{
             .command = command,
@@ -1196,8 +1196,8 @@ const ViewChangeHeadersSlice = struct {
 };
 
 test "Headers.ViewChangeSlice.view_for_op" {
-    var headers_array = [_]Header.Type(.prepare){
-        std.mem.zeroInit(Header.Type(.prepare), .{
+    var headers_array = [_]Header.Prepare{
+        std.mem.zeroInit(Header.Prepare, .{
             .checksum = undefined,
             .client = 6,
             .request = 7,
@@ -1209,7 +1209,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
         }),
         Headers.dvc_blank(8),
         Headers.dvc_blank(7),
-        std.mem.zeroInit(Header.Type(.prepare), .{
+        std.mem.zeroInit(Header.Prepare, .{
             .checksum = undefined,
             .client = 3,
             .request = 4,
@@ -1243,13 +1243,13 @@ const ViewChangeHeadersArray = struct {
 
     pub fn root(cluster: u32) ViewChangeHeadersArray {
         return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
-            Header.Type(.prepare).root(cluster),
+            Header.Prepare.root(cluster),
         });
     }
 
     pub fn init_from_slice(
         command: ViewChangeCommand,
-        slice: []const Header.Type(.prepare),
+        slice: []const Header.Prepare,
     ) ViewChangeHeadersArray {
         const headers = ViewChangeHeadersArray{
             .command = command,
@@ -1306,7 +1306,7 @@ const ViewChangeHeadersArray = struct {
     pub fn replace(
         headers: *ViewChangeHeadersArray,
         command: ViewChangeCommand,
-        slice: []const Header.Type(.prepare),
+        slice: []const Header.Prepare,
     ) void {
         headers.command = command;
         headers.array.clear();
@@ -1314,7 +1314,7 @@ const ViewChangeHeadersArray = struct {
         headers.verify();
     }
 
-    pub fn append(headers: *ViewChangeHeadersArray, header: *const Header.Type(.prepare)) void {
+    pub fn append(headers: *ViewChangeHeadersArray, header: *const Header.Prepare) void {
         // We don't do comprehensive validation here — assume that verify() will be called
         // after any series of appends.
         headers.array.append_assume_capacity(header.*);

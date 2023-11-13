@@ -66,7 +66,33 @@ comptime {
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
     pub const Message = struct {
-        pub const Type = MessageType;
+        pub const Reserved = MessageType(.reserved);
+        pub const Ping = MessageType(.ping);
+        pub const Pong = MessageType(.pong);
+        pub const PingClient = MessageType(.ping_client);
+        pub const PongClient = MessageType(.pong_client);
+        pub const Request = MessageType(.request);
+        pub const Prepare = MessageType(.prepare);
+        pub const PrepareOk = MessageType(.prepare_ok);
+        pub const Reply = MessageType(.reply);
+        pub const Commit = MessageType(.commit);
+        pub const StartViewChange = MessageType(.start_view_change);
+        pub const DoViewChange = MessageType(.do_view_change);
+        pub const StartView = MessageType(.start_view);
+        pub const RequestStartView = MessageType(.request_start_view);
+        pub const RequestHeaders = MessageType(.request_headers);
+        pub const RequestPrepare = MessageType(.request_prepare);
+        pub const RequestReply = MessageType(.request_reply);
+        pub const Headers = MessageType(.headers);
+        pub const Eviction = MessageType(.eviction);
+        pub const RequestBlocks = MessageType(.request_blocks);
+        pub const Block = MessageType(.block);
+        pub const RequestSyncCheckpoint = MessageType(.request_sync_checkpoint);
+        pub const SyncCheckpoint = MessageType(.sync_checkpoint);
+        pub const RequestSyncFreeSet = MessageType(.request_sync_free_set);
+        pub const RequestSyncClientSessions = MessageType(.request_sync_client_sessions);
+        pub const SyncFreeSet = MessageType(.sync_free_set);
+        pub const SyncClientSessions = MessageType(.sync_client_sessions);
 
         // TODO: replace this with a header() function to save memory
         header: *Header,

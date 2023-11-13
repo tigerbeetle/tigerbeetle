@@ -509,7 +509,7 @@ pub const Simulator = struct {
     //
     // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
     // if the core gets stuck, we verify that this is indeed due to storage faults.
-    pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header.Type(.prepare) {
+    pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header.Prepare {
         assert(simulator.core.count() > 0);
 
         var missing_op: ?u64 = null;
@@ -666,8 +666,8 @@ pub const Simulator = struct {
     fn on_cluster_reply(
         cluster: *Cluster,
         reply_client: usize,
-        request: Message.Type(.request),
-        reply: Message.Type(.reply),
+        request: Message.Request,
+        reply: Message.Reply,
     ) void {
         // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
@@ -833,7 +833,7 @@ pub const Simulator = struct {
             const headers_size = vsr.Zone.wal_headers.size().?;
             const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
             for (
-                mem.bytesAsSlice(vsr.Header.Type(.prepare), headers_bytes),
+                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
                 replica_storage.wal_prepares(),
             ) |*wal_header, *wal_prepare| {
                 if (wal_header.checksum == 0) {

@@ -514,7 +514,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             block_builder_schema.tables(block)[entry] = table.*;
 
             const block_header =
-                mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
+                mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
             const block_address = block_header.address;
 
             switch (table.label.event) {
@@ -893,7 +893,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             const block: BlockPtr = manifest_log.blocks.tail().?;
             const block_address = manifest_log.grid.acquire(manifest_log.grid_reservation.?);
 
-            const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
+            const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
             header.* = .{
                 .cluster = manifest_log.superblock.working.cluster,
                 .address = block_address,
@@ -919,7 +919,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(entry_count <= schema.ManifestNode.entry_count_max);
 
             const block_schema = schema.ManifestNode{ .entry_count = entry_count };
-            const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
+            const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
             assert(header.cluster == manifest_log.superblock.working.cluster);
             assert(header.command == .block);
             assert(header.address > 0);
