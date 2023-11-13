@@ -295,29 +295,29 @@ To correctly recover from application crashes
 
 ### `overflows_debits_pending`
 The transfer was not created.
-`debit_account.debits_pending + transfer.amount` would overflow a 64-bit unsigned integer.
+`debit_account.debits_pending + transfer.amount` would overflow a 128-bit unsigned integer.
 
 ### `overflows_credits_pending`
 The transfer was not created.
-`credit_account.credits_pending + transfer.amount` would overflow a 64-bit unsigned integer.
+`credit_account.credits_pending + transfer.amount` would overflow a 128-bit unsigned integer.
 
 ### `overflows_debits_posted`
 The transfer was not created.
-`debit_account.debits_posted + transfer.amount` would overflow a 64-bit unsigned integer.
+`debit_account.debits_posted + transfer.amount` would overflow a 128-bit unsigned integer.
 
 ### `overflows_credits_posted`
 The transfer was not created.
-`debit_account.credits_posted + transfer.amount` would overflow a 64-bit unsigned integer.
+`debit_account.credits_posted + transfer.amount` would overflow a 128-bit unsigned integer.
 
 ### `overflows_debits`
 The transfer was not created.
 `debit_account.debits_pending + debit_account.debits_posted + transfer.amount`
-would overflow a 64-bit unsigned integer.
+would overflow a 128-bit unsigned integer.
 
 ### `overflows_credits`
 The transfer was not created.
 `credit_account.credits_pending + credit_account.credits_posted + transfer.amount`
-would overflow a 64-bit unsigned integer.
+would overflow a 128-bit unsigned integer.
 
 ### `overflows_timeout`
 The transfer was not created.
