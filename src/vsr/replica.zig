@@ -1970,7 +1970,6 @@ pub fn ReplicaType(
 
             assert(self.node_count > 1);
             maybe(self.status == .recovering_head);
-            maybe(message.header.view != self.view);
             assert(message.header.replica != self.replica);
 
             const op = message.header.prepare_op;
@@ -2052,7 +2051,6 @@ pub fn ReplicaType(
             if (self.ignore_repair_message(message.base)) return;
 
             maybe(self.status == .recovering_head);
-            maybe(message.header.view == self.view);
             assert(message.header.replica != self.replica);
 
             const response = self.message_bus.get_message();
@@ -4015,6 +4013,9 @@ pub fn ReplicaType(
             assert(
                 header.view == self.view or
                     header.command == .request_start_view or
+                    header.command == .request_headers or
+                    header.command == .request_prepare or
+                    header.command == .request_reply or
                     header.command == .request_sync_checkpoint or
                     header.command == .reply or
                     header.command == .ping or header.command == .pong,
@@ -5367,7 +5368,6 @@ pub fn ReplicaType(
                         .command = .request_headers,
                         .cluster = self.cluster,
                         .replica = self.replica,
-                        .view = self.view,
                         .op_min = range.op_min,
                         .op_max = range.op_max,
                     }),
@@ -5392,7 +5392,6 @@ pub fn ReplicaType(
                         .command = .request_reply,
                         .cluster = self.cluster,
                         .replica = self.replica,
-                        .view = self.view,
                         .reply_client = entry.header.client,
                         .reply_op = entry.header.op,
                         .reply_checksum = entry.header.checksum,
@@ -5957,7 +5956,6 @@ pub fn ReplicaType(
                 .command = .request_prepare,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view,
                 .prepare_op = op,
                 .prepare_checksum = checksum,
             };
@@ -6632,18 +6630,15 @@ pub fn ReplicaType(
                 },
                 .request_headers => {
                     maybe(self.standby());
-                    assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
                 .request_prepare => {
                     maybe(self.standby());
-                    assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },
                 .request_reply => {
-                    assert(message.header.view == self.view);
                     assert(message.header.replica == self.replica);
                     assert(message.header.replica != replica);
                 },

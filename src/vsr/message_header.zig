@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
@@ -66,7 +67,7 @@ pub const Header = extern struct {
     comptime {
         assert(@sizeOf(Header) == 256);
         assert(stdx.no_padding(Header));
-        assert(@offsetOf(Header, "reserved_command") % @alignOf(u128) == 0);
+        assert(@offsetOf(Header, "reserved_command") % 16 == 0);
     }
 
     pub fn Type(comptime command: Command) type {
@@ -162,6 +163,7 @@ pub const Header = extern struct {
     /// Returns null if all fields are set correctly according to the command, or else a warning.
     /// This does not verify that checksum is valid, and expects that this has already been done.
     pub fn invalid(self: *const Header) ?[]const u8 {
+        if (self.reserved_nonce != 0) return "reserved_nonce != 0";
         if (self.version != vsr.Version) return "version != Version";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
@@ -205,8 +207,8 @@ pub const Header = extern struct {
         }
     }
 
-    /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header type
-    /// for each command.
+    /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
+    /// type for each command.
     pub const Reserved = extern struct {
         checksum: u128,
         checksum_body: u128,
@@ -232,8 +234,7 @@ pub const Header = extern struct {
 
         fn invalid(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
+            return "reserved is invalid";
         }
     };
 
@@ -272,6 +273,7 @@ pub const Header = extern struct {
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
+            if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -399,8 +401,8 @@ pub const Header = extern struct {
 
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
-        /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of the
-        ///   preceding request.
+        /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of
+        ///   the preceding request.
         parent: u128 = 0,
         /// Each client process generates a unique, random and ephemeral client ID at
         /// initialization. The client ID identifies connections made by the client to the cluster
@@ -423,7 +425,9 @@ pub const Header = extern struct {
         timestamp: u64 = 0,
         /// Each request is given a number by the client and later requests must have larger numbers
         /// than earlier ones. The request number is used by the replicas to avoid running requests
-        /// more than once; it is also used by the client to discard duplicate replies to its requests.
+        /// more than once; it is also used by the client to discard duplicate replies to its
+        /// requests.
+        ///
         /// A client is allowed to have at most one request inflight at a time.
         request: u32,
         operation: Operation,
@@ -468,6 +472,8 @@ pub const Header = extern struct {
                     // These requests should set `parent` to the `checksum` of the previous reply.
                     if (self.session == 0) return "session == 0";
                     if (self.request == 0) return "request == 0";
+                    // The Replica is responsible for checking the `Operation` is a valid variant –
+                    // the check requires the StateMachine type.
                 },
             }
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -488,10 +494,10 @@ pub const Header = extern struct {
         replica: u8 = 0,
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
-        /// A backpointer to the previous request or prepare checksum for hash chain verification.
-        /// This provides a cryptographic guarantee for linearizability:
-        /// 1. across our distributed log of prepares, and
-        /// 2. across a client's requests and our replies.
+        /// A backpointer to the previous prepare checksum for hash chain verification.
+        /// This provides a cryptographic guarantee for linearizability across our distributed log
+        /// of prepares.
+        ///
         /// This may also be used as the initialization vector for AEAD encryption at rest, provided
         /// that the primary ratchets the encryption key every view change to ensure that prepares
         /// reordered through a view change never repeat the same IV for the same encryption key.
@@ -524,33 +530,34 @@ pub const Header = extern struct {
             assert(self.command == .prepare);
             switch (self.operation) {
                 .reserved => {
-                    if (self.parent != 0) return "reserved: parent != 0";
-                    if (self.client != 0) return "reserved: client != 0";
-                    if (self.context != 0) return "reserved: context != 0";
-                    if (self.request != 0) return "reserved: request != 0";
-                    if (self.view != 0) return "reserved: view != 0";
-                    if (self.commit != 0) return "reserved: commit != 0";
-                    if (self.timestamp != 0) return "reserved: timestamp != 0";
                     if (self.size != @sizeOf(Header)) return "reserved: size != @sizeOf(Header)";
-                    if (self.replica != 0) return "reserved: replica != 0";
                     if (self.checksum_body != checksum_body_empty) {
                         return "reserved: checksum_body != expected";
                     }
+                    if (self.view != 0) return "reserved: view != 0";
+                    if (self.replica != 0) return "reserved: replica != 0";
+                    if (self.parent != 0) return "reserved: parent != 0";
+                    if (self.client != 0) return "reserved: client != 0";
+                    if (self.context != 0) return "reserved: context != 0";
+                    maybe(self.op == 0);
+                    if (self.commit != 0) return "reserved: commit != 0";
+                    if (self.request != 0) return "reserved: request != 0";
+                    if (self.timestamp != 0) return "reserved: timestamp != 0";
                 },
                 .root => {
-                    if (self.parent != 0) return "root: parent != 0";
-                    if (self.client != 0) return "root: client != 0";
-                    if (self.context != 0) return "root: context != 0";
-                    if (self.request != 0) return "root: request != 0";
-                    if (self.view != 0) return "root: view != 0";
-                    if (self.op != 0) return "root: op != 0";
-                    if (self.commit != 0) return "root: commit != 0";
-                    if (self.timestamp != 0) return "root: timestamp != 0";
                     if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
-                    if (self.replica != 0) return "root: replica != 0";
                     if (self.checksum_body != checksum_body_empty) {
                         return "root: checksum_body != expected";
                     }
+                    if (self.view != 0) return "root: view != 0";
+                    if (self.replica != 0) return "root: replica != 0";
+                    if (self.parent != 0) return "root: parent != 0";
+                    if (self.client != 0) return "root: client != 0";
+                    if (self.context != 0) return "root: context != 0";
+                    if (self.op != 0) return "root: op != 0";
+                    if (self.commit != 0) return "root: commit != 0";
+                    if (self.timestamp != 0) return "root: timestamp != 0";
+                    if (self.request != 0) return "root: request != 0";
                 },
                 else => {
                     if (self.client == 0) return "client == 0";
@@ -558,10 +565,8 @@ pub const Header = extern struct {
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
                     if (self.operation == .register) {
-                        // Client session numbers are replaced by the reference to the previous prepare.
                         if (self.request != 0) return "request != 0";
                     } else {
-                        // Client session numbers are replaced by the reference to the previous prepare.
                         if (self.request == 0) return "request == 0";
                     }
                 },
@@ -628,6 +633,7 @@ pub const Header = extern struct {
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         checkpoint_id: u128,
+        /// The corresponding request message's checksum.
         parent: u128,
         client: u128,
         prepare_checksum: u128,
@@ -648,8 +654,8 @@ pub const Header = extern struct {
 
         fn invalid(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
                 .root => {
@@ -778,6 +784,7 @@ pub const Header = extern struct {
             assert(self.command == .commit);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.commit < self.checkpoint_op) return "commit < checkpoint_op";
             if (self.timestamp_monotonic == 0) return "timestamp_monotonic == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -832,9 +839,9 @@ pub const Header = extern struct {
         /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
         /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
         present_bitset: u128,
-        /// A bitset, with set bits indicating headers in the message body which it has definitely not
-        /// prepared (i.e. "nack"). The corresponding header may be an actual prepare header, or it may
-        /// be a "blank" header.
+        /// A bitset, with set bits indicating headers in the message body which it has definitely
+        /// not prepared (i.e. "nack"). The corresponding header may be an actual prepare header, or
+        /// it may be a "blank" header.
         nack_bitset: u128,
         op: u64,
         /// Set to `commit_min`, to indicate the sending replica's progress.
@@ -854,6 +861,11 @@ pub const Header = extern struct {
 
         fn invalid(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
+            if ((self.size - @sizeOf(Header)) % @sizeOf(Header) != 0) {
+                return "size multiple invalid";
+            }
+            if (self.op < self.commit_min) return "op < commit_min";
+            if (self.commit_min < self.checkpoint_op) return "commit_min < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -891,6 +903,8 @@ pub const Header = extern struct {
 
         fn invalid(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
+            if (self.op < self.commit) return "op < commit_min";
+            if (self.commit < self.checkpoint_op) return "commit_min < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -924,6 +938,7 @@ pub const Header = extern struct {
             assert(self.command == .request_start_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.nonce == 0) return "nonce == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -936,7 +951,7 @@ pub const Header = extern struct {
         cluster: u32,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32,
+        view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
@@ -960,6 +975,7 @@ pub const Header = extern struct {
             assert(self.command == .request_headers);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view == 0";
             if (self.op_min > self.op_max) return "op_min > op_max";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -973,7 +989,7 @@ pub const Header = extern struct {
         cluster: u32,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32,
+        view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
@@ -995,6 +1011,7 @@ pub const Header = extern struct {
             assert(self.command == .request_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1007,7 +1024,7 @@ pub const Header = extern struct {
         cluster: u32,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32,
+        view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
@@ -1030,6 +1047,7 @@ pub const Header = extern struct {
             assert(self.command == .request_reply);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view == 0";
             if (self.reply_client == 0) return "reply_client == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -1095,6 +1113,7 @@ pub const Header = extern struct {
             assert(self.command == .eviction);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.client == 0) return "client == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1428,4 +1447,3 @@ comptime {
         }
     }
 }
-
