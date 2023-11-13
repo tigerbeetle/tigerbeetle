@@ -58,18 +58,18 @@ pub const AOFEntry = extern struct {
         return vsr.sector_ceil(unaligned_size);
     }
 
-    pub fn header(self: *AOFEntry) *Header.Type(.prepare) {
+    pub fn header(self: *AOFEntry) *Header.Prepare {
         return @ptrCast(&self.message);
     }
 
     /// Turn an AOFEntry back into a Message.
-    pub fn to_message(self: *AOFEntry, target: Message.Type(.prepare)) void {
+    pub fn to_message(self: *AOFEntry, target: Message.Prepare) void {
         stdx.copy_disjoint(.inexact, u8, target.base.buffer, self.message[0..self.header().size]);
     }
 
     pub fn from_message(
         self: *AOFEntry,
-        message: Message.Type(.prepare),
+        message: Message.Prepare,
         options: struct { replica: u64, primary: u64 },
         last_checksum: *?u128,
     ) void {
@@ -158,7 +158,7 @@ pub const AOF = struct {
     /// We don't bother returning a count of how much we wrote. Not being
     /// able to fully write the entire payload is an error, not an expected
     /// condition.
-    pub fn write(self: *AOF, message: Message.Type(.prepare), options: struct {
+    pub fn write(self: *AOF, message: Message.Prepare, options: struct {
         replica: u64,
         primary: u64,
     }) !void {
@@ -292,7 +292,7 @@ pub const AOFReplayClient = struct {
     client: *Client,
     io: *IO,
     message_pool: *MessagePool,
-    inflight_message: ?Message.Type(.request) = null,
+    inflight_message: ?Message.Request = null,
 
     pub fn init(allocator: std.mem.Allocator, raw_addresses: []const u8) !Self {
         var addresses = try vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max);

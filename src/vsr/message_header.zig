@@ -204,6 +204,1201 @@ pub const Header = extern struct {
             else => return .{ .replica = self.replica },
         }
     }
+
+    /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header type
+    /// for each command.
+    pub const Reserved = extern struct {
+        checksum: u128,
+        checksum_body: u128,
+        reserved_nonce: u128,
+        cluster: u32,
+        size: u32,
+        epoch: u32 = 0,
+        view: u32 = 0,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0,
+        reserved_frame: [12]u8,
+
+        reserved: [176]u8 = [_]u8{0} ** 176,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .reserved);
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Ping = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// Current checkpoint id (possibly uncanonical).
+        checkpoint_id: u128,
+        /// Current checkpoint op (possibly uncanonical).
+        checkpoint_op: u64,
+
+        ping_timestamp_monotonic: u64,
+
+        reserved: [144]u8 = [_]u8{0} ** 144,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .ping);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view != 0";
+            if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Pong = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        ping_timestamp_monotonic: u64,
+        pong_timestamp_wall: u64,
+
+        reserved: [160]u8 = [_]u8{0} ** 160,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .pong);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view != 0";
+            if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic == 0";
+            if (self.pong_timestamp_wall == 0) return "pong_timestamp_wall == 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const PingClient = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0, // Always 0.
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        client: u128,
+        reserved: [160]u8 = [_]u8{0} ** 160,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .ping_client);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.replica != 0) return "replica != 0";
+            if (self.view != 0) return "view != 0";
+            if (self.client == 0) return "client == 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const PongClient = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        reserved: [176]u8 = [_]u8{0} ** 176,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .pong_client);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Request = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0, // Always 0.
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// Clients hash-chain their requests to verify linearizability:
+        /// - A session's first request (operation=register) sets `parent=0`.
+        /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of the
+        ///   preceding request.
+        parent: u128 = 0,
+        /// Each client process generates a unique, random and ephemeral client ID at
+        /// initialization. The client ID identifies connections made by the client to the cluster
+        /// for the sake of routing messages back to the client.
+        ///
+        /// With the client ID in hand, the client then registers a monotonically increasing session
+        /// number (committed through the cluster) to allow the client's session to be evicted
+        /// safely from the client table if too many concurrent clients cause the client table to
+        /// overflow. The monotonically increasing session number prevents duplicate client requests
+        /// from being replayed.
+        ///
+        /// The problem of routing is therefore solved by the 128-bit client ID, and the problem of
+        /// detecting whether a session has been evicted is solved by the session number.
+        client: u128,
+        /// When operation=register, this is zero.
+        /// When operation≠register, this is the commit number of register.
+        session: u64 = 0,
+        /// Only nonzero during AOF recovery.
+        /// TODO: Use this for bulk-import to state machine?
+        timestamp: u64 = 0,
+        /// Each request is given a number by the client and later requests must have larger numbers
+        /// than earlier ones. The request number is used by the replicas to avoid running requests
+        /// more than once; it is also used by the client to discard duplicate replies to its requests.
+        /// A client is allowed to have at most one request inflight at a time.
+        request: u32,
+        operation: Operation,
+        reserved: [123]u8 = [_]u8{0} ** 123,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request);
+            if (self.replica != 0) return "replica != 0";
+            if (self.client == 0) return "client == 0";
+            if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
+            switch (self.operation) {
+                .reserved => return "operation == .reserved",
+                .root => return "operation == .root",
+                .register => {
+                    // The first request a client makes must be to register with the cluster:
+                    if (self.parent != 0) return "register: parent != 0";
+                    if (self.session != 0) return "register: session != 0";
+                    if (self.request != 0) return "register: request != 0";
+                    // The .register operation carries no payload:
+                    if (self.checksum_body != checksum_body_empty) {
+                        return "register: checksum_body != expected";
+                    }
+                    if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+                },
+                else => {
+                    if (self.operation == .reconfigure) {
+                        if (self.size != @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)) {
+                            return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
+                        }
+                    } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
+                        return "operation is reserved";
+                    }
+                    // Thereafter, the client must provide the session number:
+                    // These requests should set `parent` to the `checksum` of the previous reply.
+                    if (self.session == 0) return "session == 0";
+                    if (self.request == 0) return "request == 0";
+                },
+            }
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Prepare = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// A backpointer to the previous request or prepare checksum for hash chain verification.
+        /// This provides a cryptographic guarantee for linearizability:
+        /// 1. across our distributed log of prepares, and
+        /// 2. across a client's requests and our replies.
+        /// This may also be used as the initialization vector for AEAD encryption at rest, provided
+        /// that the primary ratchets the encryption key every view change to ensure that prepares
+        /// reordered through a view change never repeat the same IV for the same encryption key.
+        parent: u128,
+        client: u128,
+        /// The checksum of the client's request.
+        context: u128,
+        /// The op number of the latest prepare that may or may not yet be committed. Uncommitted
+        /// ops may be replaced by different ops if they do not survive through a view change.
+        op: u64,
+        /// The commit number of the latest committed prepare. Committed ops are immutable.
+        commit: u64,
+        /// The primary's state machine `prepare_timestamp`.
+        /// For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
+        timestamp: u64,
+        request: u32,
+        /// The state machine operation to apply.
+        operation: Operation,
+        reserved: [99]u8 = [_]u8{0} ** 99,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const Prepare) ?[]const u8 {
+            assert(self.command == .prepare);
+            switch (self.operation) {
+                .reserved => {
+                    if (self.parent != 0) return "reserved: parent != 0";
+                    if (self.client != 0) return "reserved: client != 0";
+                    if (self.context != 0) return "reserved: context != 0";
+                    if (self.request != 0) return "reserved: request != 0";
+                    if (self.view != 0) return "reserved: view != 0";
+                    if (self.commit != 0) return "reserved: commit != 0";
+                    if (self.timestamp != 0) return "reserved: timestamp != 0";
+                    if (self.size != @sizeOf(Header)) return "reserved: size != @sizeOf(Header)";
+                    if (self.replica != 0) return "reserved: replica != 0";
+                    if (self.checksum_body != checksum_body_empty) {
+                        return "reserved: checksum_body != expected";
+                    }
+                },
+                .root => {
+                    if (self.parent != 0) return "root: parent != 0";
+                    if (self.client != 0) return "root: client != 0";
+                    if (self.context != 0) return "root: context != 0";
+                    if (self.request != 0) return "root: request != 0";
+                    if (self.view != 0) return "root: view != 0";
+                    if (self.op != 0) return "root: op != 0";
+                    if (self.commit != 0) return "root: commit != 0";
+                    if (self.timestamp != 0) return "root: timestamp != 0";
+                    if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
+                    if (self.replica != 0) return "root: replica != 0";
+                    if (self.checksum_body != checksum_body_empty) {
+                        return "root: checksum_body != expected";
+                    }
+                },
+                else => {
+                    if (self.client == 0) return "client == 0";
+                    if (self.op == 0) return "op == 0";
+                    if (self.op <= self.commit) return "op <= commit";
+                    if (self.timestamp == 0) return "timestamp == 0";
+                    if (self.operation == .register) {
+                        // Client session numbers are replaced by the reference to the previous prepare.
+                        if (self.request != 0) return "request != 0";
+                    } else {
+                        // Client session numbers are replaced by the reference to the previous prepare.
+                        if (self.request == 0) return "request == 0";
+                    }
+                },
+            }
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+
+        pub fn reserved(cluster: u32, slot: u64) Prepare {
+            assert(slot < constants.journal_slot_count);
+
+            var header = Prepare{
+                .command = .prepare,
+                .cluster = cluster,
+                .op = slot,
+                .operation = .reserved,
+                .view = 0,
+                .context = 0,
+                .parent = 0,
+                .client = 0,
+                .commit = 0,
+                .timestamp = 0,
+                .request = 0,
+            };
+            header.frame().set_checksum_body(&[0]u8{});
+            header.frame().set_checksum();
+            assert(header.frame().invalid() == null);
+            return header;
+        }
+
+        pub fn root(cluster: u32) Prepare {
+            var header = Prepare{
+                .cluster = cluster,
+                .size = @sizeOf(Header),
+                .command = .prepare,
+                .operation = .root,
+                .op = 0,
+                .view = 0,
+                .context = 0,
+                .parent = 0,
+                .client = 0,
+                .commit = 0,
+                .timestamp = 0,
+                .request = 0,
+            };
+            header.frame().set_checksum_body(&[0]u8{});
+            header.frame().set_checksum();
+            assert(header.frame().invalid() == null);
+            return header;
+        }
+    };
+
+    pub const PrepareOk = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        checkpoint_id: u128,
+        parent: u128,
+        client: u128,
+        prepare_checksum: u128,
+        op: u64,
+        commit: u64,
+        timestamp: u64,
+        request: u32,
+        operation: Operation = .reserved,
+        reserved: [83]u8 = [_]u8{0} ** 83,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .prepare_ok);
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            switch (self.operation) {
+                .reserved => return "operation == .reserved",
+                .root => {
+                    const root_checksum = Header.Prepare.root(self.cluster).checksum;
+                    if (self.parent != 0) return "root: parent != 0";
+                    if (self.client != 0) return "root: client != 0";
+                    if (self.prepare_checksum != root_checksum) {
+                        return "root: prepare_checksum != expected";
+                    }
+                    if (self.request != 0) return "root: request != 0";
+                    if (self.op != 0) return "root: op != 0";
+                    if (self.commit != 0) return "root: commit != 0";
+                    if (self.timestamp != 0) return "root: timestamp != 0";
+                },
+                else => {
+                    if (self.client == 0) return "client == 0";
+                    if (self.op == 0) return "op == 0";
+                    if (self.op <= self.commit) return "op <= commit";
+                    if (self.timestamp == 0) return "timestamp == 0";
+                    if (self.operation == .register) {
+                        if (self.request != 0) return "request != 0";
+                    } else {
+                        if (self.request == 0) return "request == 0";
+                    }
+                },
+            }
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Reply = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        parent: u128,
+        client: u128,
+        /// The checksum of the prepare message to which this message refers.
+        /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which
+        /// have low entropy and may otherwise collide in the event of any correctness bugs.
+        context: u128 = 0,
+        op: u64,
+        commit: u64,
+        /// The corresponding `prepare`'s timestamp.
+        /// This allows the test workload to verify transfer timeouts.
+        timestamp: u64,
+        request: u32,
+        operation: Operation = .reserved,
+        reserved: [99]u8 = [_]u8{0} ** 99,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .reply);
+            // Initialization within `client.zig` asserts that client `id` is greater than zero:
+            if (self.client == 0) return "client == 0";
+            if (self.op != self.commit) return "op != commit";
+            if (self.timestamp == 0) return "timestamp == 0";
+            if (self.operation == .register) {
+                // In this context, the commit number is the newly registered session number.
+                // The `0` commit number is reserved for cluster initialization.
+                if (self.commit == 0) return "commit == 0";
+                if (self.request != 0) return "request != 0";
+            } else {
+                if (self.commit == 0) return "commit == 0";
+                if (self.request == 0) return "request == 0";
+            }
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Commit = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// Current checkpoint id (possibly uncanonical).
+        checkpoint_id: u128,
+
+        /// The latest committed prepare's checksum.
+        commit_checksum: u128,
+
+        /// Current checkpoint op (possibly uncanonical).
+        checkpoint_op: u64,
+
+        /// The latest committed prepare's op.
+        commit: u64,
+
+        timestamp_monotonic: u64,
+
+        reserved: [120]u8 = [_]u8{0} ** 120,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .commit);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.timestamp_monotonic == 0) return "timestamp_monotonic == 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const StartViewChange = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        reserved: [176]u8 = [_]u8{0} ** 176,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .start_view_change);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const DoViewChange = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
+        /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
+        present_bitset: u128,
+        /// A bitset, with set bits indicating headers in the message body which it has definitely not
+        /// prepared (i.e. "nack"). The corresponding header may be an actual prepare header, or it may
+        /// be a "blank" header.
+        nack_bitset: u128,
+        op: u64,
+        /// Set to `commit_min`, to indicate the sending replica's progress.
+        /// The sending replica may continue to commit after sending the DVC.
+        commit_min: u64,
+        checkpoint_op: u64,
+        log_view: u32,
+        reserved: [116]u8 = [_]u8{0} ** 116,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .do_view_change);
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const StartView = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
+        nonce: u128,
+        op: u64,
+        /// Set to `commit_min`/`commit_max` (they are the same).
+        commit: u64,
+        /// The replica's `op_checkpoint`.
+        checkpoint_op: u64,
+        reserved: [136]u8 = [_]u8{0} ** 136,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .start_view);
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestStartView = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        nonce: u128,
+        reserved: [160]u8 = [_]u8{0} ** 160,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_start_view);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestHeaders = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        /// The minimum op requested (inclusive).
+        op_min: u64,
+        /// The maximum op requested (inclusive).
+        op_max: u64,
+        reserved: [160]u8 = [_]u8{0} ** 160,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_headers);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.op_min > self.op_max) return "op_min > op_max";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestPrepare = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        prepare_checksum: u128,
+        prepare_op: u64,
+        reserved: [152]u8 = [_]u8{0} ** 152,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_prepare);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestReply = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        reply_client: u128,
+        reply_checksum: u128,
+        reply_op: u64,
+        reserved: [136]u8 = [_]u8{0} ** 136,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_reply);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.reply_client == 0) return "reply_client == 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Headers = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        reserved: [176]u8 = [_]u8{0} ** 176,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .headers);
+            if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Eviction = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32,
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        client: u128,
+        reserved: [160]u8 = [_]u8{0} ** 160,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .eviction);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestBlocks = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        reserved: [176]u8 = [_]u8{0} ** 176,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_blocks);
+            if (self.view != 0) return "view != 0";
+            if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
+            if ((self.size - @sizeOf(Header)) % @sizeOf(vsr.BlockRequest) != 0) {
+                return "size multiple invalid";
+            }
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const Block = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0, // Always 0.
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        // Schema is determined by `block_type`.
+        metadata_bytes: [144]u8,
+
+        // Fields shared by all block types:
+        address: u64,
+        snapshot: u64,
+        block_type: schema.BlockType,
+        reserved_block: [15]u8 = [_]u8{0} ** 15,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .block);
+            if (self.size > constants.block_size) return "size > block_size";
+            if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
+            if (self.view != 0) return "view != 0";
+            if (self.replica != 0) return "replica != 0";
+            if (self.address == 0) return "address == 0"; // address ≠ 0
+            if (!self.block_type.valid()) return "block_type invalid";
+            if (self.block_type == .reserved) return "block_type == .reserved";
+            // TODO When manifest blocks include a snapshot, verify that snapshot≠0.
+            return null;
+        }
+    };
+
+    pub const RequestSyncCheckpoint = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        checkpoint_id: u128,
+        checkpoint_op: u64,
+        reserved: [152]u8 = [_]u8{0} ** 152,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_sync_checkpoint);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view != 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const SyncCheckpoint = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        checkpoint_id: u128,
+        checkpoint_op: u64,
+        reserved: [152]u8 = [_]u8{0} ** 152,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .sync_checkpoint);
+            if (self.size != @sizeOf(Header) + @sizeOf(vsr.CheckpointState)) {
+                return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
+            }
+            if (self.view != 0) return "view != 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestSyncFreeSet = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        checkpoint_id: u128,
+        checkpoint_op: u64,
+        trailer_offset: u32,
+        reserved: [148]u8 = [_]u8{0} ** 148,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_sync_free_set);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view != 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const RequestSyncClientSessions = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        checkpoint_id: u128,
+        checkpoint_op: u64,
+        trailer_offset: u32 = 0,
+        reserved: [148]u8 = [_]u8{0} ** 148,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .request_sync_client_sessions);
+            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0) return "view != 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const SyncFreeSet = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        trailer_checksum: u128,
+        checkpoint_id: u128,
+        checkpoint_op: u64,
+        trailer_size: u32,
+        trailer_offset: u32,
+        reserved: [128]u8 = [_]u8{0} ** 128,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .sync_free_set);
+            if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
+                return "size > max";
+            }
+            if (self.view != 0) return "view != 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
+
+    pub const SyncClientSessions = extern struct {
+        checksum: u128 = 0,
+        checksum_body: u128 = 0,
+        reserved_nonce: u128 = 0,
+        cluster: u32,
+        size: u32 = @sizeOf(Header),
+        epoch: u32 = 0,
+        view: u32 = 0, // Always 0.
+        version: u16 = vsr.Version,
+        command: Command,
+        replica: u8,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+
+        trailer_checksum: u128,
+        checkpoint_id: u128,
+        checkpoint_op: u64,
+        trailer_size: u32,
+        trailer_offset: u32,
+        reserved: [128]u8 = [_]u8{0} ** 128,
+
+        pub fn frame(header: *@This()) *Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        pub fn frame_const(header: *const @This()) *const Header {
+            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+        }
+
+        fn invalid(self: *const @This()) ?[]const u8 {
+            assert(self.command == .sync_client_sessions);
+            if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
+                return "size > max";
+            }
+            if (self.view != 0) return "view != 0";
+            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+            return null;
+        }
+    };
 };
 
 // Verify each Command's header type.
@@ -234,1197 +1429,3 @@ comptime {
     }
 }
 
-/// This type isn't ever actually a constructed, but makes Type() simpler by providing a header type
-/// for each command.
-const Reserved = extern struct {
-    checksum: u128,
-    checksum_body: u128,
-    reserved_nonce: u128,
-    cluster: u32,
-    size: u32,
-    epoch: u32 = 0,
-    view: u32 = 0,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8 = 0,
-    reserved_frame: [12]u8,
-
-    reserved: [176]u8 = [_]u8{0} ** 176,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .reserved);
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Ping = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// Current checkpoint id (possibly uncanonical).
-    checkpoint_id: u128,
-    /// Current checkpoint op (possibly uncanonical).
-    checkpoint_op: u64,
-
-    ping_timestamp_monotonic: u64,
-
-    reserved: [144]u8 = [_]u8{0} ** 144,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .ping);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.view != 0) return "view != 0";
-        if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Pong = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8 = 0,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    ping_timestamp_monotonic: u64,
-    pong_timestamp_wall: u64,
-
-    reserved: [160]u8 = [_]u8{0} ** 160,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .pong);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.view != 0) return "view != 0";
-        if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic == 0";
-        if (self.pong_timestamp_wall == 0) return "pong_timestamp_wall == 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const PingClient = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8 = 0, // Always 0.
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    client: u128,
-    reserved: [160]u8 = [_]u8{0} ** 160,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .ping_client);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.replica != 0) return "replica != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.client == 0) return "client == 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const PongClient = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    reserved: [176]u8 = [_]u8{0} ** 176,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .pong_client);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Request = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8 = 0, // Always 0.
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// Clients hash-chain their requests to verify linearizability:
-    /// - A session's first request (operation=register) sets `parent=0`.
-    /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of the
-    ///   preceding request.
-    parent: u128 = 0,
-    /// Each client process generates a unique, random and ephemeral client ID at
-    /// initialization. The client ID identifies connections made by the client to the cluster
-    /// for the sake of routing messages back to the client.
-    ///
-    /// With the client ID in hand, the client then registers a monotonically increasing session
-    /// number (committed through the cluster) to allow the client's session to be evicted
-    /// safely from the client table if too many concurrent clients cause the client table to
-    /// overflow. The monotonically increasing session number prevents duplicate client requests
-    /// from being replayed.
-    ///
-    /// The problem of routing is therefore solved by the 128-bit client ID, and the problem of
-    /// detecting whether a session has been evicted is solved by the session number.
-    client: u128,
-    /// When operation=register, this is zero.
-    /// When operation≠register, this is the commit number of register.
-    session: u64 = 0,
-    /// Only nonzero during AOF recovery.
-    /// TODO: Use this for bulk-import to state machine?
-    timestamp: u64 = 0,
-    /// Each request is given a number by the client and later requests must have larger numbers
-    /// than earlier ones. The request number is used by the replicas to avoid running requests
-    /// more than once; it is also used by the client to discard duplicate replies to its requests.
-    /// A client is allowed to have at most one request inflight at a time.
-    request: u32,
-    operation: Operation,
-    reserved: [123]u8 = [_]u8{0} ** 123,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request);
-        if (self.replica != 0) return "replica != 0";
-        if (self.client == 0) return "client == 0";
-        if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
-        switch (self.operation) {
-            .reserved => return "operation == .reserved",
-            .root => return "operation == .root",
-            .register => {
-                // The first request a client makes must be to register with the cluster:
-                if (self.parent != 0) return "register: parent != 0";
-                if (self.session != 0) return "register: session != 0";
-                if (self.request != 0) return "register: request != 0";
-                // The .register operation carries no payload:
-                if (self.checksum_body != checksum_body_empty) {
-                    return "register: checksum_body != expected";
-                }
-                if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            },
-            else => {
-                if (self.operation == .reconfigure) {
-                    if (self.size != @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)) {
-                        return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
-                    }
-                } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
-                    return "operation is reserved";
-                }
-                // Thereafter, the client must provide the session number:
-                // These requests should set `parent` to the `checksum` of the previous reply.
-                if (self.session == 0) return "session == 0";
-                if (self.request == 0) return "request == 0";
-            },
-        }
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Prepare = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8 = 0,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// A backpointer to the previous request or prepare checksum for hash chain verification.
-    /// This provides a cryptographic guarantee for linearizability:
-    /// 1. across our distributed log of prepares, and
-    /// 2. across a client's requests and our replies.
-    /// This may also be used as the initialization vector for AEAD encryption at rest, provided
-    /// that the primary ratchets the encryption key every view change to ensure that prepares
-    /// reordered through a view change never repeat the same IV for the same encryption key.
-    parent: u128,
-    client: u128,
-    /// The checksum of the client's request.
-    context: u128,
-    /// The op number of the latest prepare that may or may not yet be committed. Uncommitted
-    /// ops may be replaced by different ops if they do not survive through a view change.
-    op: u64,
-    /// The commit number of the latest committed prepare. Committed ops are immutable.
-    commit: u64,
-    /// The primary's state machine `prepare_timestamp`.
-    /// For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
-    timestamp: u64,
-    request: u32,
-    /// The state machine operation to apply.
-    operation: Operation,
-    reserved: [99]u8 = [_]u8{0} ** 99,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const Prepare) ?[]const u8 {
-        assert(self.command == .prepare);
-        switch (self.operation) {
-            .reserved => {
-                if (self.parent != 0) return "reserved: parent != 0";
-                if (self.client != 0) return "reserved: client != 0";
-                if (self.context != 0) return "reserved: context != 0";
-                if (self.request != 0) return "reserved: request != 0";
-                if (self.view != 0) return "reserved: view != 0";
-                if (self.commit != 0) return "reserved: commit != 0";
-                if (self.timestamp != 0) return "reserved: timestamp != 0";
-                if (self.size != @sizeOf(Header)) return "reserved: size != @sizeOf(Header)";
-                if (self.replica != 0) return "reserved: replica != 0";
-                if (self.checksum_body != checksum_body_empty) {
-                    return "reserved: checksum_body != expected";
-                }
-            },
-            .root => {
-                if (self.parent != 0) return "root: parent != 0";
-                if (self.client != 0) return "root: client != 0";
-                if (self.context != 0) return "root: context != 0";
-                if (self.request != 0) return "root: request != 0";
-                if (self.view != 0) return "root: view != 0";
-                if (self.op != 0) return "root: op != 0";
-                if (self.commit != 0) return "root: commit != 0";
-                if (self.timestamp != 0) return "root: timestamp != 0";
-                if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
-                if (self.replica != 0) return "root: replica != 0";
-                if (self.checksum_body != checksum_body_empty) {
-                    return "root: checksum_body != expected";
-                }
-            },
-            else => {
-                if (self.client == 0) return "client == 0";
-                if (self.op == 0) return "op == 0";
-                if (self.op <= self.commit) return "op <= commit";
-                if (self.timestamp == 0) return "timestamp == 0";
-                if (self.operation == .register) {
-                    // Client session numbers are replaced by the reference to the previous prepare.
-                    if (self.request != 0) return "request != 0";
-                } else {
-                    // Client session numbers are replaced by the reference to the previous prepare.
-                    if (self.request == 0) return "request == 0";
-                }
-            },
-        }
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-
-    pub fn reserved(cluster: u32, slot: u64) Prepare {
-        assert(slot < constants.journal_slot_count);
-
-        var header = Prepare{
-            .command = .prepare,
-            .cluster = cluster,
-            .op = slot,
-            .operation = .reserved,
-            .view = 0,
-            .context = 0,
-            .parent = 0,
-            .client = 0,
-            .commit = 0,
-            .timestamp = 0,
-            .request = 0,
-        };
-        header.frame().set_checksum_body(&[0]u8{});
-        header.frame().set_checksum();
-        assert(header.frame().invalid() == null);
-        return header;
-    }
-
-    pub fn root(cluster: u32) Prepare {
-        var header = Prepare{
-            .cluster = cluster,
-            .size = @sizeOf(Header),
-            .command = .prepare,
-            .operation = .root,
-            .op = 0,
-            .view = 0,
-            .context = 0,
-            .parent = 0,
-            .client = 0,
-            .commit = 0,
-            .timestamp = 0,
-            .request = 0,
-        };
-        header.frame().set_checksum_body(&[0]u8{});
-        header.frame().set_checksum();
-        assert(header.frame().invalid() == null);
-        return header;
-    }
-};
-
-const PrepareOk = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    checkpoint_id: u128,
-    parent: u128,
-    client: u128,
-    prepare_checksum: u128,
-    op: u64,
-    commit: u64,
-    timestamp: u64,
-    request: u32,
-    operation: Operation = .reserved,
-    reserved: [83]u8 = [_]u8{0} ** 83,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .prepare_ok);
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        switch (self.operation) {
-            .reserved => return "operation == .reserved",
-            .root => {
-                const root_checksum = Header.Type(.prepare).root(self.cluster).checksum;
-                if (self.parent != 0) return "root: parent != 0";
-                if (self.client != 0) return "root: client != 0";
-                if (self.prepare_checksum != root_checksum) {
-                    return "root: prepare_checksum != expected";
-                }
-                if (self.request != 0) return "root: request != 0";
-                if (self.op != 0) return "root: op != 0";
-                if (self.commit != 0) return "root: commit != 0";
-                if (self.timestamp != 0) return "root: timestamp != 0";
-            },
-            else => {
-                if (self.client == 0) return "client == 0";
-                if (self.op == 0) return "op == 0";
-                if (self.op <= self.commit) return "op <= commit";
-                if (self.timestamp == 0) return "timestamp == 0";
-                if (self.operation == .register) {
-                    if (self.request != 0) return "request != 0";
-                } else {
-                    if (self.request == 0) return "request == 0";
-                }
-            },
-        }
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Reply = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    parent: u128,
-    client: u128,
-    /// The checksum of the prepare message to which this message refers.
-    /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which
-    /// have low entropy and may otherwise collide in the event of any correctness bugs.
-    context: u128 = 0,
-    op: u64,
-    commit: u64,
-    /// The corresponding `prepare`'s timestamp.
-    /// This allows the test workload to verify transfer timeouts.
-    timestamp: u64,
-    request: u32,
-    operation: Operation = .reserved,
-    reserved: [99]u8 = [_]u8{0} ** 99,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .reply);
-        // Initialization within `client.zig` asserts that client `id` is greater than zero:
-        if (self.client == 0) return "client == 0";
-        if (self.op != self.commit) return "op != commit";
-        if (self.timestamp == 0) return "timestamp == 0";
-        if (self.operation == .register) {
-            // In this context, the commit number is the newly registered session number.
-            // The `0` commit number is reserved for cluster initialization.
-            if (self.commit == 0) return "commit == 0";
-            if (self.request != 0) return "request != 0";
-        } else {
-            if (self.commit == 0) return "commit == 0";
-            if (self.request == 0) return "request == 0";
-        }
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Commit = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// Current checkpoint id (possibly uncanonical).
-    checkpoint_id: u128,
-
-    /// The latest committed prepare's checksum.
-    commit_checksum: u128,
-
-    /// Current checkpoint op (possibly uncanonical).
-    checkpoint_op: u64,
-
-    /// The latest committed prepare's op.
-    commit: u64,
-
-    timestamp_monotonic: u64,
-
-    reserved: [120]u8 = [_]u8{0} ** 120,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .commit);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.timestamp_monotonic == 0) return "timestamp_monotonic == 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const StartViewChange = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    reserved: [176]u8 = [_]u8{0} ** 176,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .start_view_change);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const DoViewChange = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
-    /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
-    present_bitset: u128,
-    /// A bitset, with set bits indicating headers in the message body which it has definitely not
-    /// prepared (i.e. "nack"). The corresponding header may be an actual prepare header, or it may
-    /// be a "blank" header.
-    nack_bitset: u128,
-    op: u64,
-    /// Set to `commit_min`, to indicate the sending replica's progress.
-    /// The sending replica may continue to commit after sending the DVC.
-    commit_min: u64,
-    checkpoint_op: u64,
-    log_view: u32,
-    reserved: [116]u8 = [_]u8{0} ** 116,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .do_view_change);
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const StartView = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
-    nonce: u128,
-    op: u64,
-    /// Set to `commit_min`/`commit_max` (they are the same).
-    commit: u64,
-    /// The replica's `op_checkpoint`.
-    checkpoint_op: u64,
-    reserved: [136]u8 = [_]u8{0} ** 136,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .start_view);
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestStartView = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    nonce: u128,
-    reserved: [160]u8 = [_]u8{0} ** 160,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_start_view);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestHeaders = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    /// The minimum op requested (inclusive).
-    op_min: u64,
-    /// The maximum op requested (inclusive).
-    op_max: u64,
-    reserved: [160]u8 = [_]u8{0} ** 160,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_headers);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.op_min > self.op_max) return "op_min > op_max";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestPrepare = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    prepare_checksum: u128,
-    prepare_op: u64,
-    reserved: [152]u8 = [_]u8{0} ** 152,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_prepare);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestReply = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    reply_client: u128,
-    reply_checksum: u128,
-    reply_op: u64,
-    reserved: [136]u8 = [_]u8{0} ** 136,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_reply);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.reply_client == 0) return "reply_client == 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Headers = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    reserved: [176]u8 = [_]u8{0} ** 176,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .headers);
-        if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Eviction = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32,
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    client: u128,
-    reserved: [160]u8 = [_]u8{0} ** 160,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .eviction);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestBlocks = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    reserved: [176]u8 = [_]u8{0} ** 176,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_blocks);
-        if (self.view != 0) return "view != 0";
-        if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
-        if ((self.size - @sizeOf(Header)) % @sizeOf(vsr.BlockRequest) != 0) {
-            return "size multiple invalid";
-        }
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const Block = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8 = 0, // Always 0.
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    // Schema is determined by `block_type`.
-    metadata_bytes: [144]u8,
-
-    // Fields shared by all block types:
-    address: u64,
-    snapshot: u64,
-    block_type: schema.BlockType,
-    reserved_block: [15]u8 = [_]u8{0} ** 15,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .block);
-        if (self.size > constants.block_size) return "size > block_size";
-        if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
-        if (self.view != 0) return "view != 0";
-        if (self.replica != 0) return "replica != 0";
-        if (self.address == 0) return "address == 0"; // address ≠ 0
-        if (!self.block_type.valid()) return "block_type invalid";
-        if (self.block_type == .reserved) return "block_type == .reserved";
-        // TODO When manifest blocks include a snapshot, verify that snapshot≠0.
-        return null;
-    }
-};
-
-const RequestSyncCheckpoint = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    checkpoint_id: u128,
-    checkpoint_op: u64,
-    reserved: [152]u8 = [_]u8{0} ** 152,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_sync_checkpoint);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.view != 0) return "view != 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const SyncCheckpoint = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    checkpoint_id: u128,
-    checkpoint_op: u64,
-    reserved: [152]u8 = [_]u8{0} ** 152,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .sync_checkpoint);
-        if (self.size != @sizeOf(Header) + @sizeOf(vsr.CheckpointState)) {
-            return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
-        }
-        if (self.view != 0) return "view != 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestSyncFreeSet = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    checkpoint_id: u128,
-    checkpoint_op: u64,
-    trailer_offset: u32,
-    reserved: [148]u8 = [_]u8{0} ** 148,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_sync_free_set);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.view != 0) return "view != 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const RequestSyncClientSessions = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    checkpoint_id: u128,
-    checkpoint_op: u64,
-    trailer_offset: u32 = 0,
-    reserved: [148]u8 = [_]u8{0} ** 148,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .request_sync_client_sessions);
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.view != 0) return "view != 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const SyncFreeSet = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    trailer_checksum: u128,
-    checkpoint_id: u128,
-    checkpoint_op: u64,
-    trailer_size: u32,
-    trailer_offset: u32,
-    reserved: [128]u8 = [_]u8{0} ** 128,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .sync_free_set);
-        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
-            return "size > max";
-        }
-        if (self.view != 0) return "view != 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};
-
-const SyncClientSessions = extern struct {
-    checksum: u128 = 0,
-    checksum_body: u128 = 0,
-    reserved_nonce: u128 = 0,
-    cluster: u32,
-    size: u32 = @sizeOf(Header),
-    epoch: u32 = 0,
-    view: u32 = 0, // Always 0.
-    version: u16 = vsr.Version,
-    command: Command,
-    replica: u8,
-    reserved_frame: [12]u8 = [_]u8{0} ** 12,
-
-    trailer_checksum: u128,
-    checkpoint_id: u128,
-    checkpoint_op: u64,
-    trailer_size: u32,
-    trailer_offset: u32,
-    reserved: [128]u8 = [_]u8{0} ** 128,
-
-    pub fn frame(header: *@This()) *Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    pub fn frame_const(header: *const @This()) *const Header {
-        return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-    }
-
-    fn invalid(self: *const @This()) ?[]const u8 {
-        assert(self.command == .sync_client_sessions);
-        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
-            return "size > max";
-        }
-        if (self.view != 0) return "view != 0";
-        if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-        return null;
-    }
-};

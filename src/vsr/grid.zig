@@ -925,7 +925,7 @@ pub fn GridType(comptime Storage: type) type {
 
             if (result != .valid) {
                 const header =
-                    mem.bytesAsValue(vsr.Header.Type(.block), block.*[0..@sizeOf(vsr.Header)]);
+                    mem.bytesAsValue(vsr.Header.Block, block.*[0..@sizeOf(vsr.Header)]);
                 log.err(
                     "{}: {s}: expected address={} checksum={}, found address={} checksum={}",
                     .{
@@ -952,7 +952,7 @@ pub fn GridType(comptime Storage: type) type {
             address: u64,
             checksum: u128,
         }) ReadBlockResult {
-            const header = mem.bytesAsValue(vsr.Header.Type(.block), block[0..@sizeOf(vsr.Header)]);
+            const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
 
             if (!header.frame_const().valid_checksum()) return .invalid_checksum;
             if (header.command != .block) return .unexpected_command;

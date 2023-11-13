@@ -11,7 +11,7 @@ const Message = MessagePool.Message;
 
 const ReplicaSet = std.StaticBitSet(constants.members_max);
 const Commits = std.ArrayList(struct {
-    header: vsr.Header.Type(.prepare),
+    header: vsr.Header.Prepare,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
 });
 
@@ -46,7 +46,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             replicas: []const Replica,
             clients: []const Client,
         }) !Self {
-            const root_prepare = vsr.Header.Type(.prepare).root(options.cluster_id);
+            const root_prepare = vsr.Header.Prepare.root(options.cluster_id);
 
             var commits = Commits.init(allocator);
             errdefer commits.deinit();
@@ -204,7 +204,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
-        pub fn header_with_op(state_checker: *Self, op: u64) vsr.Header.Type(.prepare) {
+        pub fn header_with_op(state_checker: *Self, op: u64) vsr.Header.Prepare {
             const commit = &state_checker.commits.items[op];
             assert(commit.header.op == op);
             assert(commit.replicas.count() > 0);

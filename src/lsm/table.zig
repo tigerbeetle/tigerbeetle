@@ -307,7 +307,7 @@ pub fn TableType(
 
                 const block = builder.data_block;
                 const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                header.* = @bitCast(vsr.Header.Type(.block){
+                header.* = @bitCast(vsr.Header.Block{
                     .cluster = options.cluster,
                     .metadata_bytes = @bitCast(schema.TableData.Metadata{
                         .value_count_max = data.value_count_max,
@@ -406,7 +406,7 @@ pub fn TableType(
 
                 const index_block = builder.index_block;
                 const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                header.* = @bitCast(vsr.Header.Type(.block){
+                header.* = @bitCast(vsr.Header.Block{
                     .cluster = options.cluster,
                     .metadata_bytes = @bitCast(schema.TableIndex.Metadata{
                         .data_block_count = builder.data_block_count,

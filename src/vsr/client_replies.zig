@@ -54,14 +54,14 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             completion: Storage.Read,
             callback: *const fn (
                 client_replies: *ClientReplies,
-                reply_header: *const vsr.Header.Type(.reply),
-                reply: ?Message.Type(.reply),
+                reply_header: *const vsr.Header.Reply,
+                reply: ?Message.Reply,
                 destination_replica: ?u8,
             ) void,
             slot: Slot,
-            message: Message.Type(.reply),
+            message: Message.Reply,
             /// The header of the expected reply.
-            header: vsr.Header.Type(.reply),
+            header: vsr.Header.Reply,
             destination_replica: ?u8,
         };
 
@@ -69,7 +69,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             completion: Storage.Write,
             slot: Slot,
-            message: Message.Type(.reply),
+            message: Message.Reply,
         };
 
         const WriteQueue = RingBuffer(*Write, .{
@@ -133,7 +133,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-        ) ?Message.Type(.reply) {
+        ) ?Message.Reply {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
@@ -166,8 +166,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             session: *const ClientSessions.Entry,
             callback: *const fn (
                 *ClientReplies,
-                *const vsr.Header.Type(.reply),
-                ?Message.Type(.reply),
+                *const vsr.Header.Reply,
+                ?Message.Reply,
                 ?u8,
             ) void,
             destination_replica: ?u8,
@@ -299,7 +299,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         pub fn write_reply(
             client_replies: *ClientReplies,
             slot: Slot,
-            message: Message.Type(.reply),
+            message: Message.Reply,
             trigger: enum { commit, repair },
         ) void {
             assert(client_replies.ready_sync());

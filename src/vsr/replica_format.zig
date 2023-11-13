@@ -78,7 +78,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
-                for (std.mem.bytesAsSlice(Header.Type(.prepare), wal_buffer[0..size])) |*header| {
+                for (std.mem.bytesAsSlice(Header.Prepare, wal_buffer[0..size])) |*header| {
                     if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
                         // This is the (empty) body of a reserved or root Prepare.
                     } else {
@@ -112,7 +112,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 const size = format_wal_headers(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
-                for (std.mem.bytesAsSlice(Header.Type(.prepare), wal_buffer[0..size])) |*header| {
+                for (std.mem.bytesAsSlice(Header.Prepare, wal_buffer[0..size])) |*header| {
                     assert(header.frame_const().valid_checksum());
 
                     if (header.operation == .root) {

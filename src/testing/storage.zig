@@ -548,11 +548,11 @@ pub const Storage = struct {
         return @alignCast(mem.bytesAsValue(superblock.SuperBlockHeader, bytes));
     }
 
-    pub fn wal_headers(storage: *const Storage) []const vsr.Header.Type(.prepare) {
+    pub fn wal_headers(storage: *const Storage) []const vsr.Header.Prepare {
         const offset = vsr.Zone.wal_headers.offset(0);
         const size = vsr.Zone.wal_headers.size().?;
         return @alignCast(mem.bytesAsSlice(
-            vsr.Header.Type(.prepare),
+            vsr.Header.Prepare,
             storage.memory[offset..][0..size],
         ));
     }

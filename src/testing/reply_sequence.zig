@@ -17,8 +17,8 @@ const PriorityQueue = std.PriorityQueue;
 /// Both messages belong to the ReplySequence's `MessagePool`.
 const PendingReply = struct {
     client_index: usize,
-    request: Message.Type(.request),
-    reply: Message.Type(.reply),
+    request: Message.Request,
+    reply: Message.Reply,
 
     /// `PendingReply`s are ordered by ascending reply op.
     fn compare(context: void, a: PendingReply, b: PendingReply) std.math.Order {
@@ -84,8 +84,8 @@ pub const ReplySequence = struct {
     pub fn insert(
         sequence: *ReplySequence,
         client_index: usize,
-        request_message: Message.Type(.request),
-        reply_message: Message.Type(.reply),
+        request_message: Message.Request,
+        reply_message: Message.Reply,
     ) void {
         assert(request_message.header.frame_const().invalid() == null);
         assert(request_message.header.command == .request);

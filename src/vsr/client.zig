@@ -29,7 +29,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             user_data: u128,
             // Null iff operation=register.
             callback: ?Callback,
-            message: Message.Type(.request),
+            message: Message.Request,
         };
 
         const RequestQueue = RingBuffer(Request, .{ .array = constants.client_request_queue_max });
@@ -98,8 +98,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Used for testing. Called for replies to all operations (including `register`).
         on_reply_callback: ?*const fn (
             client: *Self,
-            request: Message.Type(.request),
-            reply: Message.Type(.reply),
+            request: Message.Request,
+            reply: Message.Reply,
         ) void = null,
 
         pub fn init(
@@ -250,7 +250,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self: *Self,
             user_data: u128,
             callback: Request.Callback,
-            message: Message.Type(.request),
+            message: Message.Request,
         ) void {
             assert(!message.header.operation.vsr_reserved());
             const operation = message.header.operation.cast(StateMachine);
@@ -304,7 +304,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.unref(message);
         }
 
-        fn on_eviction(self: *Self, eviction: Message.Type(.eviction)) void {
+        fn on_eviction(self: *Self, eviction: Message.Eviction) void {
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);
 
@@ -331,7 +331,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             @panic("session evicted: too many concurrent client sessions");
         }
 
-        fn on_pong_client(self: *Self, pong: Message.Type(.pong_client)) void {
+        fn on_pong_client(self: *Self, pong: Message.PongClient) void {
             assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
@@ -348,7 +348,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.register();
         }
 
-        fn on_reply(self: *Self, reply: Message.Type(.reply)) void {
+        fn on_reply(self: *Self, reply: Message.Reply) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
             assert(reply.header.frame_const().valid_checksum());
@@ -452,7 +452,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn on_ping_timeout(self: *Self) void {
             self.ping_timeout.reset();
 
-            const ping = Header.Type(.ping_client){
+            const ping = Header.PingClient{
                 .command = .ping_client,
                 .cluster = self.cluster,
                 .client = self.id,
@@ -570,7 +570,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.send_message_to_replica(replica, message);
         }
 
-        fn send_request_for_the_first_time(self: *Self, message: Message.Type(.request)) void {
+        fn send_request_for_the_first_time(self: *Self, message: Message.Request) void {
             assert(self.request_queue.head_ptr().?.message.base == message.base);
 
             assert(message.header.command == .request);

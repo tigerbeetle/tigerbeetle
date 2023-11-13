@@ -76,8 +76,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         on_client_reply: *const fn (
             cluster: *Self,
             client: usize,
-            request: Message.Type(.request),
-            reply: Message.Type(.reply),
+            request: Message.Request,
+            reply: Message.Reply,
         ) void,
 
         network: *Network,
@@ -111,8 +111,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             on_client_reply: *const fn (
                 cluster: *Self,
                 client: usize,
-                request: Message.Type(.request),
-                reply: Message.Type(.reply),
+                request: Message.Request,
+                reply: Message.Reply,
             ) void,
             options: Options,
         ) !*Self {
@@ -487,8 +487,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         fn client_on_reply(
             client: *Client,
-            request_message: Message.Type(.request),
-            reply_message: Message.Type(.reply),
+            request_message: Message.Request,
+            reply_message: Message.Reply,
         ) void {
             const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
             assert(reply_message.header.frame_const().invalid() == null);
