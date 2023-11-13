@@ -293,6 +293,10 @@ pub fn no_padding(comptime T: type) bool {
             switch (info.layout) {
                 .Auto => return false,
                 .Extern => {
+                    for (info.fields) |field| {
+                        if (!no_padding(field.type)) return false;
+                    }
+
                     var offset = 0;
                     for (info.fields) |field| {
                         const field_offset = @offsetOf(T, field.name);
@@ -319,6 +323,7 @@ test no_padding {
         u8,
         extern struct { x: u8 },
         packed struct { x: u7, y: u1 },
+        extern struct { x: extern struct { y: u64, z: u64 } },
         enum(u8) { x },
     }) |T| {
         assert(no_padding(T));
@@ -329,6 +334,7 @@ test no_padding {
         struct { x: u7 },
         struct { x: u8 },
         struct { x: u64, y: u32 },
+        extern struct { x: extern struct { y: u64, z: u32 } },
         packed struct { x: u7 },
         enum(u7) { x },
     }) |T| {
