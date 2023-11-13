@@ -115,7 +115,9 @@ pub fn ContextType(
             errdefer allocator.destroy(context);
 
             context.allocator = allocator;
-            context.client_id = std.crypto.random.int(u128);
+            context.client_id = std.crypto.random.int(u128) +| 1;
+            assert(context.client_id != 0);
+
             log.debug("{}: init: initializing", .{context.client_id});
 
             if (concurrency_max == 0 or concurrency_max > 4096) {
