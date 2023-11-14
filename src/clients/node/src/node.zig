@@ -372,7 +372,8 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                     const value = try @field(translate, @typeName(FieldInt) ++ "_from_object")(
                         env,
                         object,
-                        @ptrCast(field.name ++ "\x00"),
+                        // Use `comptimePrint` to ensure the sentinel terminated string.
+                        std.fmt.comptimePrint("{s}", .{field.name}),
                     );
 
                     if (std.mem.eql(u8, field.name, "timestamp") and value != 0) {

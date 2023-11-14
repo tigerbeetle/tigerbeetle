@@ -92,7 +92,7 @@ pub fn slice_from_object(
     comptime key: [:0]const u8,
 ) ![]const u8 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, @as([*c]const u8, @ptrCast(key)), &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -120,7 +120,7 @@ pub fn slice_from_value(
 
 pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u128 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, @as([*c]const u8, @ptrCast(key)), &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -129,7 +129,7 @@ pub fn u128_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0
 
 pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u64 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, @as([*c]const u8, @ptrCast(key)), &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -138,7 +138,7 @@ pub fn u64_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 
 pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u32 {
     var property: c.napi_value = undefined;
-    if (c.napi_get_named_property(env, object, @as([*c]const u8, @ptrCast(key)), &property) != c.napi_ok) {
+    if (c.napi_get_named_property(env, object, key, &property) != c.napi_ok) {
         return throw(env, key ++ " must be defined");
     }
 
@@ -147,7 +147,7 @@ pub fn u32_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]
 
 pub fn u16_from_object(env: c.napi_env, object: c.napi_value, comptime key: [:0]const u8) !u16 {
     const result = try u32_from_object(env, object, key);
-    if (result > 65535) {
+    if (result > std.math.maxInt(u16)) {
         return throw(env, key ++ " must be a u16.");
     }
 
