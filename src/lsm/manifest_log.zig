@@ -936,8 +936,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             // Zero padding:
             @memset(block[header.size..], 0);
 
-            header.frame().set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
-            header.frame().set_checksum();
+            header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
+            header.set_checksum();
             verify_block(block, null, null);
 
             manifest_log.log_block_checksums.push_assume_capacity(header.checksum);

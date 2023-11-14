@@ -954,14 +954,14 @@ pub fn GridType(comptime Storage: type) type {
         }) ReadBlockResult {
             const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
 
-            if (!header.frame_const().valid_checksum()) return .invalid_checksum;
+            if (!header.valid_checksum()) return .invalid_checksum;
             if (header.command != .block) return .unexpected_command;
 
             assert(header.size >= @sizeOf(vsr.Header));
             assert(header.size <= constants.block_size);
 
             const block_body = block[@sizeOf(vsr.Header)..header.size];
-            if (!header.frame_const().valid_checksum_body(block_body)) {
+            if (!header.valid_checksum_body(block_body)) {
                 return .invalid_checksum_body;
             }
 

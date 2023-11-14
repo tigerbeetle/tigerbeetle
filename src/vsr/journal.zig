@@ -352,8 +352,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.prepare_checksums.len == slot_count);
             assert(journal.prepare_inhabited.len == slot_count);
 
-            for (journal.headers) |*h| assert(!h.frame_const().valid_checksum());
-            for (journal.headers_redundant) |*h| assert(!h.frame_const().valid_checksum());
+            for (journal.headers) |*h| assert(!h.valid_checksum());
+            for (journal.headers_redundant) |*h| assert(!h.valid_checksum());
 
             return journal;
         }
@@ -574,7 +574,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
                 if (journal.header_with_op(op)) |header| {
                     dest[copied] = header.*;
-                    assert(dest[copied].frame_const().invalid() == null);
+                    assert(dest[copied].invalid() == null);
                     copied += 1;
                     if (copied == dest.len) break;
                 }
@@ -876,7 +876,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // * The in-memory header is reserved+faulty; the read was via `prepare_checksums`
             const slot = journal.slot_with_op_and_checksum(op, checksum);
 
-            if (!message.header.frame_const().valid_checksum()) {
+            if (!message.header.valid_checksum()) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
@@ -886,7 +886,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 callback(replica, null, null);
                 return;
             }
-            assert(message.header.frame().invalid() == null);
+            assert(message.header.invalid() == null);
 
             if (message.header.cluster != replica.cluster) {
                 // This could be caused by a misdirected read or write.
@@ -930,7 +930,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            if (!message.header.frame_const().valid_checksum_body(message.body())) {
+            if (!message.header.valid_checksum_body(message.body())) {
                 if (slot) |s| {
                     journal.faulty.set(s);
                     journal.dirty.set(s);
@@ -1163,8 +1163,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // Check `valid_checksum_body` here rather than in `recover_done` so that we don't need
             // to hold onto the whole message (just the header).
-            if (read.message.header.frame_const().valid_checksum() and
-                read.message.header.frame_const().valid_checksum_body(read.message.body()))
+            if (read.message.header.valid_checksum() and
+                read.message.header.valid_checksum_body(read.message.body()))
             {
                 journal.headers[slot.index] = read.message.header.*;
             }
@@ -1367,7 +1367,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const torn_slot = journal.slot_for_op(torn_op);
 
             const torn_prepare_untrusted = &journal.headers[torn_slot.index];
-            if (torn_prepare_untrusted.frame_const().valid_checksum()) return null;
+            if (torn_prepare_untrusted.valid_checksum()) return null;
             // The prepare is at least corrupt, possibly torn, but not valid and simply misdirected.
 
             const header_untrusted = &journal.headers_redundant[torn_slot.index];
@@ -1422,7 +1422,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // The prepare is torn.
             assert(!journal.prepare_inhabited[torn_slot.index]);
-            assert(!torn_prepare_untrusted.frame_const().valid_checksum());
+            assert(!torn_prepare_untrusted.valid_checksum());
             assert(cases[torn_slot.index].decision(replica.solo()) == .vsr);
             return torn_slot;
         }
@@ -1607,7 +1607,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
 
             for (journal.headers, 0..) |*header, index| {
-                assert(header.frame_const().valid_checksum());
+                assert(header.valid_checksum());
                 assert(header.cluster == replica.cluster);
                 assert(header.command == .prepare);
                 assert(std.meta.eql(header.*, journal.headers_redundant[index]));
@@ -2092,7 +2092,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // a case `@D` to a `@I` after a restart).
                     sector_headers[i] = Header.Prepare.reserved(replica.cluster, i);
                     sector_headers[i].checksum = 0; // Invalidate the checksum.
-                    assert(!sector_headers[i].frame_const().valid_checksum());
+                    assert(!sector_headers[i].valid_checksum());
                 } else {
                     // Write headers from `headers_redundant` instead of `headers` — we need to
                     // avoid writing (leaking) a redundant header before its corresponding prepare
@@ -2335,8 +2335,8 @@ fn recovery_case(
     const h_ok = header != null;
     const p_ok = prepare != null;
 
-    if (h_ok) assert(header.?.frame_const().invalid() == null);
-    if (p_ok) assert(prepare.?.frame_const().invalid() == null);
+    if (h_ok) assert(header.?.invalid() == null);
+    if (p_ok) assert(prepare.?.invalid() == null);
 
     const parameters = .{
         h_ok,
@@ -2382,7 +2382,7 @@ fn header_ok(
 ) ?*const Header.Prepare {
     // We must first validate the header checksum before accessing any fields.
     // Otherwise, we may hit undefined data or an out-of-bounds enum and cause a runtime crash.
-    if (!header.frame_const().valid_checksum()) return null;
+    if (!header.valid_checksum()) return null;
     if (header.command != .prepare) return null;
 
     // A header with the wrong cluster, or in the wrong slot, may indicate a misdirected read/write.

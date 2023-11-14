@@ -3755,10 +3755,10 @@ pub fn ReplicaType(
             };
             assert(reply.header.epoch == 0);
 
-            reply.header.frame().set_checksum_body(reply.body());
+            reply.header.set_checksum_body(reply.body());
             // See `send_reply_message_to_client` for why we compute the checksum twice.
-            reply.header.context = reply.header.frame_const().calculate_checksum();
-            reply.header.frame().set_checksum();
+            reply.header.context = reply.header.calculate_checksum();
+            reply.header.set_checksum();
 
             if (self.superblock.working.vsr_state.op_compacted(prepare.header.op)) {
                 // We are recovering from a checkpoint. Prior to the crash, the client table was
@@ -3961,8 +3961,8 @@ pub fn ReplicaType(
                 std.mem.bytesAsSlice(Header.Prepare, message.body()),
                 self.view_headers.array.const_slice(),
             );
-            message.header.frame().set_checksum_body(message.body());
-            message.header.frame().set_checksum();
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
 
             return message.ref();
         }
@@ -5113,8 +5113,8 @@ pub fn ReplicaType(
             assert(b.command == .prepare);
             assert(a.cluster == b.cluster);
             if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.parent) {
-                assert(a.frame_const().valid_checksum());
-                assert(b.frame_const().valid_checksum());
+                assert(a.valid_checksum());
+                assert(b.valid_checksum());
                 log.err("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
                 log.err("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
                 @panic("hash chain would break");
@@ -5196,8 +5196,8 @@ pub fn ReplicaType(
                 .request = request_header.request,
                 .operation = request_header.operation,
             };
-            message.header.frame().set_checksum_body(message.body());
-            message.header.frame().set_checksum();
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
 
             log.debug("{}: primary_pipeline_prepare: prepare {}", .{ self.replica, message.header.checksum });
 
@@ -5470,8 +5470,8 @@ pub fn ReplicaType(
         ///
         fn repair_header(self: *Self, header: *const Header.Prepare) bool {
             assert(self.status == .normal or self.status == .view_change);
-            assert(header.frame_const().valid_checksum());
-            assert(header.frame_const().invalid() == null);
+            assert(header.valid_checksum());
+            assert(header.invalid() == null);
             assert(header.command == .prepare);
 
             if (header.view > self.view) {
@@ -6019,8 +6019,8 @@ pub fn ReplicaType(
                 self.status == .recovering_head);
             assert(self.op_checkpoint() <= self.commit_min);
 
-            assert(header.frame_const().valid_checksum());
-            assert(header.frame_const().invalid() == null);
+            assert(header.valid_checksum());
+            assert(header.invalid() == null);
             assert(header.command == .prepare);
             assert(header.view <= self.view);
             assert(header.op <= self.op); // Never advance the op.
@@ -6374,8 +6374,8 @@ pub fn ReplicaType(
                 std.mem.bytesAsSlice(Header.Prepare, message.body()),
                 self.view_headers.array.const_slice(),
             );
-            message.header.frame().set_checksum_body(message.body());
-            message.header.frame().set_checksum();
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
 
             assert(message.header.op >= self.op);
             // Each replica must advertise its own commit number, so that the new primary can know
@@ -6450,7 +6450,7 @@ pub fn ReplicaType(
                 reply.buffer[0..reply.header.size],
             );
             reply_copy.header.view = self.view;
-            reply_copy.header.frame().set_checksum();
+            reply_copy.header.set_checksum();
 
             self.message_bus.send_message_to_client(reply.header.client, reply_copy.base);
         }
@@ -8575,8 +8575,8 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .size = @sizeOf(Header) + requests_count * @sizeOf(vsr.BlockRequest),
             };
-            message.header.frame().set_checksum_body(message.body());
-            message.header.frame().set_checksum();
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
 
             self.send_message_to_replica(self.choose_any_other_replica(), message);
         }
@@ -8625,8 +8625,8 @@ pub fn ReplicaType(
                 std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
             );
 
-            reply.header.frame().set_checksum_body(reply.body());
-            reply.header.frame().set_checksum();
+            reply.header.set_checksum_body(reply.body());
+            reply.header.set_checksum();
 
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
@@ -8714,8 +8714,8 @@ pub fn ReplicaType(
                 .trailer_checksum = trailer_checksum,
                 .trailer_size = trailer_size,
             };
-            reply.header.frame().set_checksum_body(reply.body());
-            reply.header.frame().set_checksum();
+            reply.header.set_checksum_body(reply.body());
+            reply.header.set_checksum();
 
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
@@ -9218,7 +9218,7 @@ fn message_body_as_prepare_headers(message: *const Message) []const Header.Prepa
     const headers = message_body_as_headers_unchecked(message);
     var child: ?*const Header.Prepare = null;
     for (headers) |*header| {
-        if (constants.verify) assert(header.frame_const().valid_checksum());
+        if (constants.verify) assert(header.valid_checksum());
         assert(header.command == .prepare);
         assert(header.cluster == message.header.cluster);
         assert(header.view <= message.header.view);

@@ -160,7 +160,7 @@ pub const ClientSessions = struct {
             if (session == 0) {
                 assert(stdx.zeroed(std.mem.asBytes(header)));
             } else {
-                assert(header.frame_const().valid_checksum());
+                assert(header.valid_checksum());
                 assert(header.command == .reply);
                 assert(header.commit >= session);
 

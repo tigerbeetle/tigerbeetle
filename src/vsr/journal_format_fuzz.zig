@@ -97,9 +97,9 @@ pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
 }
 
 fn verify_slot_header(slot: usize, header: vsr.Header.Prepare) !void {
-    try std.testing.expect(header.frame_const().valid_checksum());
-    try std.testing.expect(header.frame_const().valid_checksum_body(&[0]u8{}));
-    try std.testing.expectEqual(header.frame_const().invalid(), null);
+    try std.testing.expect(header.valid_checksum());
+    try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
+    try std.testing.expectEqual(header.invalid(), null);
     try std.testing.expectEqual(header.cluster, cluster);
     try std.testing.expectEqual(header.op, slot);
     try std.testing.expectEqual(header.size, @sizeOf(vsr.Header));

@@ -83,7 +83,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                         // This is the (empty) body of a reserved or root Prepare.
                     } else {
                         // This is a Prepare's header.
-                        assert(header.frame_const().valid_checksum());
+                        assert(header.valid_checksum());
 
                         if (header.operation == .root) {
                             assert(header.op == 0);
@@ -113,7 +113,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 assert(size > 0);
 
                 for (std.mem.bytesAsSlice(Header.Prepare, wal_buffer[0..size])) |*header| {
-                    assert(header.frame_const().valid_checksum());
+                    assert(header.valid_checksum());
 
                     if (header.operation == .root) {
                         assert(header.op == 0);
@@ -266,9 +266,9 @@ test "format" {
     for (storage.wal_headers(), storage.wal_prepares(), 0..) |header, *message, slot| {
         try std.testing.expect(std.meta.eql(header, message.header));
 
-        try std.testing.expect(header.frame_const().valid_checksum());
-        try std.testing.expect(header.frame_const().valid_checksum_body(&[0]u8{}));
-        try std.testing.expectEqual(header.frame_const().invalid(), null);
+        try std.testing.expect(header.valid_checksum());
+        try std.testing.expect(header.valid_checksum_body(&[0]u8{}));
+        try std.testing.expectEqual(header.invalid(), null);
         try std.testing.expectEqual(header.cluster, cluster);
         try std.testing.expectEqual(header.op, slot);
         try std.testing.expectEqual(header.size, @sizeOf(vsr.Header));
