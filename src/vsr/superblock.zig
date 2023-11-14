@@ -317,6 +317,8 @@ pub const SuperBlockHeader = extern struct {
     }
 
     pub fn valid_checksum(superblock: *const SuperBlockHeader) bool {
+        //    _ = superblock;
+        //    return true;
         return superblock.checksum == superblock.calculate_checksum();
     }
 
@@ -1256,6 +1258,24 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             assert(superblock.queue_head == context);
 
+            const h = superblock.reading[context.copy.?];
+            log.debug(
+                "{[copy]?}: " ++
+                    "sequence={[sequence]} cluster={[cluster]} replica_id={[replica_id]} " ++
+                    "size={[size]} " ++
+                    "free_set_checksum={[free_set_checksum]x:0>32} " ++
+                    "free_set_size={[free_set_size]x:0>32} ",
+                .{
+                    .copy = context.copy.?,
+                    .sequence = h.sequence,
+                    .cluster = h.cluster,
+                    .replica_id = h.vsr_state.replica_id,
+                    .size = h.storage_size,
+                    .free_set_checksum = h.free_set_checksum,
+                    .free_set_size = h.free_set_size,
+                },
+            );
+
             assert(context.copy.? < constants.superblock_copies);
             if (context.copy.? + 1 != constants.superblock_copies) {
                 context.copy = context.copy.? + 1;
@@ -1312,6 +1332,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "size={[size]} checkpoint_id={[checkpoint_id]x:0>32} " ++
                         "manifest_checksum={[manifest_checksum]x:0>32} " ++
                         "free_set_checksum={[free_set_checksum]x:0>32} " ++
+                        "free_set_size={[free_set_size]x:0>32} " ++
                         "client_sessions_checksum={[client_sessions_checksum]x:0>32} " ++
                         "commit_min_checksum={[commit_min_checksum]} commit_min={[commit_min]} " ++
                         "commit_max={[commit_max]} log_view={[log_view]} view={[view]}",
@@ -1326,6 +1347,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .checkpoint_id = superblock.working.checkpoint_id(),
                         .manifest_checksum = superblock.working.manifest_checksum,
                         .free_set_checksum = superblock.working.free_set_checksum,
+                        .free_set_size = superblock.working.free_set_size,
                         .client_sessions_checksum = superblock.working.client_sessions_checksum,
                         .commit_min_checksum = superblock.working.vsr_state.commit_min_checksum,
                         .commit_min = superblock.working.vsr_state.commit_min,

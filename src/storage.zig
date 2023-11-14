@@ -324,6 +324,7 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
+        if (true) @panic("readonly mode");
         if (zone.size()) |zone_size| {
             assert(offset_in_zone + buffer.len <= zone_size);
         }
