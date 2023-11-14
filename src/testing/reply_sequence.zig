@@ -87,10 +87,10 @@ pub const ReplySequence = struct {
         request_message: Message.Request,
         reply_message: Message.Reply,
     ) void {
-        assert(request_message.header.frame_const().invalid() == null);
+        assert(request_message.header.invalid() == null);
         assert(request_message.header.command == .request);
 
-        assert(reply_message.header.frame_const().invalid() == null);
+        assert(reply_message.header.invalid() == null);
         assert(reply_message.header.request == request_message.header.request);
         assert(reply_message.header.op >= sequence.stalled_op);
         assert(reply_message.header.command == .reply);

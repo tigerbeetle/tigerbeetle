@@ -225,8 +225,8 @@ const Environment = struct {
                 .op = op,
                 .commit = op,
             });
-            reply.frame().set_checksum_body(&.{});
-            reply.frame().set_checksum();
+            reply.set_checksum_body(&.{});
+            reply.set_checksum();
 
             _ = env.superblock.client_sessions.put(1, &reply);
         }

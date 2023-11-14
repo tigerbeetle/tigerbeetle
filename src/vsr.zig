@@ -1062,10 +1062,10 @@ pub const Headers = struct {
     pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
 
-        if (constants.verify) assert(header.frame_const().valid_checksum());
+        if (constants.verify) assert(header.valid_checksum());
         assert(header.command == .prepare);
         assert(header.operation != .reserved);
-        assert(header.frame_const().invalid() == null);
+        assert(header.invalid() == null);
         return .valid;
     }
 };
@@ -1222,8 +1222,8 @@ test "Headers.ViewChangeSlice.view_for_op" {
         Headers.dvc_blank(5),
     };
 
-    headers_array[0].frame().set_checksum();
-    headers_array[3].frame().set_checksum();
+    headers_array[0].set_checksum();
+    headers_array[3].set_checksum();
 
     const headers = Headers.ViewChangeSlice.init(.do_view_change, &headers_array);
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));

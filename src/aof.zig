@@ -210,13 +210,11 @@ pub const AOF = struct {
                 }
 
                 const header = target.header();
-                if (!header.frame_const().valid_checksum()) {
+                if (!header.valid_checksum()) {
                     return error.AOFChecksumMismatch;
                 }
 
-                if (!header.frame_const().valid_checksum_body(
-                    target.message[@sizeOf(Header)..header.size],
-                )) {
+                if (!header.valid_checksum_body(target.message[@sizeOf(Header)..header.size])) {
                     return error.AOFBodyChecksumMismatch;
                 }
 
@@ -536,13 +534,11 @@ pub fn aof_merge(
         }
 
         const header = target.header();
-        if (!header.frame_const().valid_checksum()) {
+        if (!header.valid_checksum()) {
             @panic("unexpected checksum error while merging");
         }
 
-        if (!header.frame_const().valid_checksum_body(
-            target.message[@sizeOf(Header)..header.size],
-        )) {
+        if (!header.valid_checksum_body(target.message[@sizeOf(Header)..header.size])) {
             @panic("unexpected body checksum error while merging");
         }
 
@@ -621,8 +617,8 @@ test "aof write / read" {
     };
 
     stdx.copy_disjoint(.exact, u8, demo_message.body(), demo_payload);
-    demo_message.header.frame().set_checksum_body(demo_payload);
-    demo_message.header.frame().set_checksum();
+    demo_message.header.set_checksum_body(demo_payload);
+    demo_message.header.set_checksum();
 
     try aof.write(demo_message, .{ .replica = 1, .primary = 1 });
     aof.close();

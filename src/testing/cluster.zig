@@ -491,7 +491,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             reply_message: Message.Reply,
         ) void {
             const cluster: *Self = @ptrCast(@alignCast(client.on_reply_context.?));
-            assert(reply_message.header.frame_const().invalid() == null);
+            assert(reply_message.header.invalid() == null);
             assert(reply_message.header.cluster == cluster.options.cluster_id);
             assert(reply_message.header.client == client.id);
             assert(reply_message.header.request == request_message.header.request);
@@ -632,7 +632,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var wal_op_min: u64 = std.math.maxInt(u64);
                 var wal_op_max: u64 = 0;
                 for (cluster.storages[replica_index].wal_prepares()) |*prepare| {
-                    if (prepare.header.frame_const().valid_checksum() and
+                    if (prepare.header.valid_checksum() and
                         prepare.header.command == .prepare)
                     {
                         if (wal_op_min > prepare.header.op) wal_op_min = prepare.header.op;

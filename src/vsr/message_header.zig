@@ -170,7 +170,7 @@ pub const Header = extern struct {
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
 
         switch (self.into_any()) {
-            inline else => |command_header| return command_header.invalid(),
+            inline else => |command_header| return command_header.invalid_header(),
             // The `Command` enum is exhaustive, so we can't write an "else" branch here. An unknown
             // command is a possibility, but that means that someone has send us a message with
             // matching cluster, matching version, correct checksum, and a command we don't know
@@ -207,9 +207,51 @@ pub const Header = extern struct {
         }
     }
 
+    fn HeaderFunctions(comptime CommandHeader: type) type {
+        return struct {
+            pub fn frame(header: *CommandHeader) *Header {
+                return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+            }
+
+            pub fn frame_const(header: *const CommandHeader) *const Header {
+                return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
+            }
+
+            pub fn invalid(self: *const CommandHeader) ?[]const u8 {
+                return self.frame_const().invalid();
+            }
+
+            pub fn calculate_checksum(self: *const CommandHeader) u128 {
+                return self.frame_const().calculate_checksum();
+            }
+
+            pub fn calculate_checksum_body(self: *const CommandHeader, body: []const u8) u128 {
+                return self.frame_const().calculate_checksum_body(body);
+            }
+
+            pub fn set_checksum(self: *CommandHeader) void {
+                self.frame().set_checksum();
+            }
+
+            pub fn set_checksum_body(self: *CommandHeader, body: []const u8) void {
+                self.frame().set_checksum_body(body);
+            }
+
+            pub fn valid_checksum(self: *const CommandHeader) bool {
+                return self.frame_const().valid_checksum();
+            }
+
+            pub fn valid_checksum_body(self: *const CommandHeader, body: []const u8) bool {
+                return self.frame_const().valid_checksum_body(body);
+            }
+        };
+    }
+
     /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
     /// type for each command.
     pub const Reserved = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128,
         checksum_body: u128,
         reserved_nonce: u128,
@@ -224,21 +266,15 @@ pub const Header = extern struct {
 
         reserved: [176]u8 = [_]u8{0} ** 176,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
             return "reserved is invalid";
         }
     };
 
     pub const Ping = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -260,15 +296,7 @@ pub const Header = extern struct {
 
         reserved: [144]u8 = [_]u8{0} ** 144,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -281,6 +309,8 @@ pub const Header = extern struct {
     };
 
     pub const Pong = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -298,15 +328,7 @@ pub const Header = extern struct {
 
         reserved: [160]u8 = [_]u8{0} ** 160,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -319,6 +341,8 @@ pub const Header = extern struct {
     };
 
     pub const PingClient = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -334,15 +358,7 @@ pub const Header = extern struct {
         client: u128,
         reserved: [160]u8 = [_]u8{0} ** 160,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -355,6 +371,8 @@ pub const Header = extern struct {
     };
 
     pub const PongClient = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -369,15 +387,7 @@ pub const Header = extern struct {
 
         reserved: [176]u8 = [_]u8{0} ** 176,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -387,6 +397,8 @@ pub const Header = extern struct {
     };
 
     pub const Request = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -433,15 +445,7 @@ pub const Header = extern struct {
         operation: Operation,
         reserved: [123]u8 = [_]u8{0} ** 123,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
             if (self.replica != 0) return "replica != 0";
             if (self.client == 0) return "client == 0";
@@ -482,6 +486,8 @@ pub const Header = extern struct {
     };
 
     pub const Prepare = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -518,15 +524,7 @@ pub const Header = extern struct {
         operation: Operation,
         reserved: [99]u8 = [_]u8{0} ** 99,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const Prepare) ?[]const u8 {
+        fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
             switch (self.operation) {
                 .reserved => {
@@ -591,9 +589,9 @@ pub const Header = extern struct {
                 .timestamp = 0,
                 .request = 0,
             };
-            header.frame().set_checksum_body(&[0]u8{});
-            header.frame().set_checksum();
-            assert(header.frame().invalid() == null);
+            header.set_checksum_body(&[0]u8{});
+            header.set_checksum();
+            assert(header.invalid() == null);
             return header;
         }
 
@@ -612,14 +610,16 @@ pub const Header = extern struct {
                 .timestamp = 0,
                 .request = 0,
             };
-            header.frame().set_checksum_body(&[0]u8{});
-            header.frame().set_checksum();
-            assert(header.frame().invalid() == null);
+            header.set_checksum_body(&[0]u8{});
+            header.set_checksum();
+            assert(header.invalid() == null);
             return header;
         }
     };
 
     pub const PrepareOk = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -644,15 +644,7 @@ pub const Header = extern struct {
         operation: Operation = .reserved,
         reserved: [83]u8 = [_]u8{0} ** 83,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -688,6 +680,8 @@ pub const Header = extern struct {
     };
 
     pub const Reply = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -715,15 +709,7 @@ pub const Header = extern struct {
         operation: Operation = .reserved,
         reserved: [99]u8 = [_]u8{0} ** 99,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
             // Initialization within `client.zig` asserts that client `id` is greater than zero:
             if (self.client == 0) return "client == 0";
@@ -744,6 +730,8 @@ pub const Header = extern struct {
     };
 
     pub const Commit = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -772,15 +760,7 @@ pub const Header = extern struct {
 
         reserved: [120]u8 = [_]u8{0} ** 120,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -792,6 +772,8 @@ pub const Header = extern struct {
     };
 
     pub const StartViewChange = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -806,15 +788,7 @@ pub const Header = extern struct {
 
         reserved: [176]u8 = [_]u8{0} ** 176,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -824,6 +798,8 @@ pub const Header = extern struct {
     };
 
     pub const DoViewChange = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -851,15 +827,7 @@ pub const Header = extern struct {
         log_view: u32,
         reserved: [116]u8 = [_]u8{0} ** 116,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
             if ((self.size - @sizeOf(Header)) % @sizeOf(Header) != 0) {
                 return "size multiple invalid";
@@ -872,6 +840,8 @@ pub const Header = extern struct {
     };
 
     pub const StartView = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -893,15 +863,7 @@ pub const Header = extern struct {
         checkpoint_op: u64,
         reserved: [136]u8 = [_]u8{0} ** 136,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
             if (self.op < self.commit) return "op < commit_min";
             if (self.commit < self.checkpoint_op) return "commit_min < checkpoint_op";
@@ -911,6 +873,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestStartView = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -926,15 +890,7 @@ pub const Header = extern struct {
         nonce: u128,
         reserved: [160]u8 = [_]u8{0} ** 160,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -945,6 +901,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestHeaders = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -963,15 +921,7 @@ pub const Header = extern struct {
         op_max: u64,
         reserved: [160]u8 = [_]u8{0} ** 160,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -983,6 +933,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestPrepare = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -999,15 +951,7 @@ pub const Header = extern struct {
         prepare_op: u64,
         reserved: [152]u8 = [_]u8{0} ** 152,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -1018,6 +962,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestReply = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1035,15 +981,7 @@ pub const Header = extern struct {
         reply_op: u64,
         reserved: [136]u8 = [_]u8{0} ** 136,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -1055,6 +993,8 @@ pub const Header = extern struct {
     };
 
     pub const Headers = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1069,15 +1009,7 @@ pub const Header = extern struct {
 
         reserved: [176]u8 = [_]u8{0} ** 176,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
             if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -1086,6 +1018,8 @@ pub const Header = extern struct {
     };
 
     pub const Eviction = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1101,15 +1035,7 @@ pub const Header = extern struct {
         client: u128,
         reserved: [160]u8 = [_]u8{0} ** 160,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -1120,6 +1046,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestBlocks = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1134,15 +1062,7 @@ pub const Header = extern struct {
 
         reserved: [176]u8 = [_]u8{0} ** 176,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
             if (self.view != 0) return "view != 0";
             if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
@@ -1155,6 +1075,8 @@ pub const Header = extern struct {
     };
 
     pub const Block = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1176,15 +1098,7 @@ pub const Header = extern struct {
         block_type: schema.BlockType,
         reserved_block: [15]u8 = [_]u8{0} ** 15,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .block);
             if (self.size > constants.block_size) return "size > block_size";
             if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
@@ -1199,6 +1113,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestSyncCheckpoint = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1215,15 +1131,7 @@ pub const Header = extern struct {
         checkpoint_op: u64,
         reserved: [152]u8 = [_]u8{0} ** 152,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_checkpoint);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -1234,6 +1142,8 @@ pub const Header = extern struct {
     };
 
     pub const SyncCheckpoint = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1250,15 +1160,7 @@ pub const Header = extern struct {
         checkpoint_op: u64,
         reserved: [152]u8 = [_]u8{0} ** 152,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_checkpoint);
             if (self.size != @sizeOf(Header) + @sizeOf(vsr.CheckpointState)) {
                 return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
@@ -1270,6 +1172,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestSyncFreeSet = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1287,15 +1191,7 @@ pub const Header = extern struct {
         trailer_offset: u32,
         reserved: [148]u8 = [_]u8{0} ** 148,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_free_set);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -1306,6 +1202,8 @@ pub const Header = extern struct {
     };
 
     pub const RequestSyncClientSessions = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1323,15 +1221,7 @@ pub const Header = extern struct {
         trailer_offset: u32 = 0,
         reserved: [148]u8 = [_]u8{0} ** 148,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_client_sessions);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
@@ -1342,6 +1232,8 @@ pub const Header = extern struct {
     };
 
     pub const SyncFreeSet = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1361,15 +1253,7 @@ pub const Header = extern struct {
         trailer_offset: u32,
         reserved: [128]u8 = [_]u8{0} ** 128,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_free_set);
             if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
                 return "size > max";
@@ -1381,6 +1265,8 @@ pub const Header = extern struct {
     };
 
     pub const SyncClientSessions = extern struct {
+        pub usingnamespace HeaderFunctions(@This());
+
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
@@ -1400,15 +1286,7 @@ pub const Header = extern struct {
         trailer_offset: u32,
         reserved: [128]u8 = [_]u8{0} ** 128,
 
-        pub fn frame(header: *@This()) *Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        pub fn frame_const(header: *const @This()) *const Header {
-            return std.mem.bytesAsValue(Header, std.mem.asBytes(header));
-        }
-
-        fn invalid(self: *const @This()) ?[]const u8 {
+        fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_client_sessions);
             if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
                 return "size > max";

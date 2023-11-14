@@ -351,8 +351,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn on_reply(self: *Self, reply: Message.Reply) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
-            assert(reply.header.frame_const().valid_checksum());
-            assert(reply.header.frame_const().valid_checksum_body(reply.body()));
+            assert(reply.header.valid_checksum());
+            assert(reply.header.valid_checksum_body(reply.body()));
             assert(reply.header.command == .reply);
 
             if (reply.header.client != self.id) {
@@ -590,8 +590,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // to be sent for the first time. However, beyond that, it is not necessary to update
             // the view number again, for example if it should change between now and resending.
             message.header.view = self.view;
-            message.header.frame().set_checksum_body(message.body());
-            message.header.frame().set_checksum();
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
 
             // The checksum of this request becomes the parent of our next reply:
             self.parent = message.header.checksum;

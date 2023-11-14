@@ -227,8 +227,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 client_replies.write_reply_next();
             }
 
-            if (!message.header.frame_const().valid_checksum() or
-                !message.header.frame_const().valid_checksum_body(message.body()))
+            if (!message.header.valid_checksum() or
+                !message.header.valid_checksum_body(message.body()))
             {
                 log.warn("{}: read_reply: corrupt reply (client={} reply={})", .{
                     client_replies.replica,
