@@ -93,7 +93,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         pub fn get_message(self: *Self) *Message {
             assert(self.messages_available > 0);
             self.messages_available -= 1;
-            return self.message_pool.get_message();
+            return self.message_pool.get_message(null);
         }
 
         pub fn release(self: *Self, message: *Message) void {
@@ -104,14 +104,14 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
         fn reply(self: *Self) void {
             while (self.request_queue.pop()) |inflight| {
-                const reply_message = self.message_pool.get_message().build(.request);
+                const reply_message = self.message_pool.get_message(.request);
                 defer self.message_pool.unref(reply_message.base);
 
                 stdx.copy_disjoint(
                     .exact,
                     u8,
-                    reply_message.base.buffer,
-                    inflight.message.base.buffer,
+                    reply_message.buffer,
+                    inflight.message.buffer,
                 );
 
                 // Similarly to the real client, release the request message before invoking the

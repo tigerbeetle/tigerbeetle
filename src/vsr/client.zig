@@ -293,7 +293,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(self.messages_available > 0);
             self.messages_available -= 1;
 
-            return self.message_bus.get_message();
+            return self.message_bus.get_message(null);
         }
 
         /// Releases a message back to the message bus.
@@ -489,7 +489,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.get_message();
+            const message = self.message_bus.get_message(null);
             defer self.message_bus.unref(message);
 
             message.header.* = header;
@@ -504,7 +504,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             if (self.request_number > 0) return;
 
             const message = self.get_message().build(.request);
-            errdefer self.release(message.base);
+            errdefer self.release(message);
 
             // We will set parent, session, view and checksums only when sending for the first time:
             message.header.* = .{

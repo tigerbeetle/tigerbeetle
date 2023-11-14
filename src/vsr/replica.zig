@@ -983,17 +983,17 @@ pub fn ReplicaType(
 
             if (self.commit_prepare) |message| {
                 assert(self.commit_stage != .idle);
-                self.message_bus.unref(message.base);
+                self.message_bus.unref(message);
                 self.commit_prepare = null;
             }
 
             var grid_reads = self.grid_reads.iterate();
-            while (grid_reads.next()) |read| self.message_bus.unref(read.message.base);
+            while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
             for (self.grid_repair_write_blocks) |block| allocator.free(block);
 
             for (self.do_view_change_from_all_replicas) |message| {
-                if (message) |m| self.message_bus.unref(m.base);
+                if (message) |m| self.message_bus.unref(m);
             }
         }
 
@@ -1944,7 +1944,7 @@ pub fn ReplicaType(
             assert(self.primary());
 
             const start_view = self.create_start_view_message(message.header.nonce);
-            defer self.message_bus.unref(start_view.base);
+            defer self.message_bus.unref(start_view);
 
             assert(start_view.base.references == 1);
             assert(start_view.header.command == .start_view);
@@ -1952,7 +1952,7 @@ pub fn ReplicaType(
             assert(start_view.header.op == self.op);
             assert(start_view.header.commit == self.commit_max);
 
-            self.send_message_to_replica(message.header.replica, start_view.base);
+            self.send_message_to_replica(message.header.replica, start_view);
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -1985,7 +1985,7 @@ pub fn ReplicaType(
                     op,
                     checksum,
                 });
-                self.send_message_to_replica(message.header.replica, prepare.base);
+                self.send_message_to_replica(message.header.replica, prepare);
                 return;
             }
 
@@ -2043,7 +2043,7 @@ pub fn ReplicaType(
             });
 
             assert(destination_replica.? != self.replica);
-            self.send_message_to_replica(destination_replica.?, message.base);
+            self.send_message_to_replica(destination_replica.?, message);
         }
 
         fn on_request_headers(self: *Self, message: Message.RequestHeaders) void {
@@ -2053,10 +2053,10 @@ pub fn ReplicaType(
             maybe(self.status == .recovering_head);
             assert(message.header.replica != self.replica);
 
-            const response = self.message_bus.get_message();
+            const response = self.message_bus.get_message(.headers);
             defer self.message_bus.unref(response);
 
-            response.build(.headers).header.* = .{
+            response.header.* = .{
                 .command = .headers,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -2095,7 +2095,7 @@ pub fn ReplicaType(
             response.header.set_checksum();
 
             // Assert that the headers are valid.
-            _ = message_body_as_prepare_headers(response);
+            _ = message_body_as_prepare_headers(response.base);
 
             self.send_message_to_replica(message.header.replica, response);
         }
@@ -2178,7 +2178,7 @@ pub fn ReplicaType(
                 reply_header.checksum,
             });
 
-            self.send_message_to_replica(destination_replica.?, reply.base);
+            self.send_message_to_replica(destination_replica.?, reply);
         }
 
         fn on_headers(self: *Self, message: Message.Headers) void {
@@ -2266,14 +2266,14 @@ pub fn ReplicaType(
                     request.block_checksum,
                 });
 
-                const reply = self.message_bus.get_message();
+                const reply = self.message_bus.get_message(.block);
                 defer self.message_bus.unref(reply);
 
                 read.* = .{
                     .replica = self,
                     .destination = message.header.replica,
                     .read = undefined,
-                    .message = reply.ref().build(.block),
+                    .message = reply.ref(),
                 };
 
                 self.grid.read_block(
@@ -2293,7 +2293,7 @@ pub fn ReplicaType(
             const read = @fieldParentPtr(BlockRead, "read", grid_read);
             const self = read.replica;
             defer {
-                self.message_bus.unref(read.message.base);
+                self.message_bus.unref(read.message);
                 self.grid_reads.release(read);
             }
 
@@ -2318,14 +2318,14 @@ pub fn ReplicaType(
                 grid_read.checksum,
             });
 
-            stdx.copy_disjoint(.inexact, u8, read.message.base.buffer, result.valid);
+            stdx.copy_disjoint(.inexact, u8, read.message.buffer, result.valid);
 
             assert(read.message.header.command == .block);
             assert(read.message.header.address == grid_read.address);
             assert(read.message.header.checksum == grid_read.checksum);
             assert(read.message.header.size <= constants.block_size);
 
-            self.send_message_to_replica(read.destination, read.message.base);
+            self.send_message_to_replica(read.destination, read.message);
         }
 
         fn on_block(self: *Self, message: Message.Block) void {
@@ -2345,7 +2345,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            const block = message.base.buffer[0..constants.block_size];
+            const block = message.buffer[0..constants.block_size];
 
             const grid_fulfill = self.grid.fulfill_block(block);
             if (grid_fulfill) {
@@ -2377,7 +2377,7 @@ pub fn ReplicaType(
                         .inexact,
                         u8,
                         write_block.*,
-                        message.base.buffer[0..message.header.size],
+                        message.buffer[0..message.header.size],
                     );
                     assert(stdx.zeroed(write_block.*[message.header.size..]));
 
@@ -2623,7 +2623,7 @@ pub fn ReplicaType(
                 self.replica,
                 replica,
             });
-            self.send_message_to_replica(replica, prepare.message.base);
+            self.send_message_to_replica(replica, prepare.message);
         }
 
         fn on_primary_abdicate_timeout(self: *Self) void {
@@ -2879,7 +2879,7 @@ pub fn ReplicaType(
                 .requesting_trailers => |*stage| {
                     self.send_request_sync_checkpoint();
 
-                    for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
+                    inline for (comptime std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
                         if (!stage.trailers.get(trailer).done) {
                             self.send_request_sync_trailer(
                                 SyncTrailer.requests.get(trailer),
@@ -2936,7 +2936,7 @@ pub fn ReplicaType(
                         message.header.commit_min,
                     });
                     // TODO(Buggify): skip updating the DVC, since it isn't required for correctness.
-                    self.message_bus.unref(m.base);
+                    self.message_bus.unref(m);
                     self.do_view_change_from_all_replicas[message.header.replica] = message.ref();
                 } else if (m.header.checkpoint_op != message.header.checkpoint_op or
                     m.header.commit_min != message.header.commit_min or
@@ -3442,7 +3442,7 @@ pub fn ReplicaType(
             if (self.status == .normal and self.primary()) {
                 {
                     const prepare = self.pipeline.queue.pop_prepare().?;
-                    defer self.message_bus.unref(prepare.message.base);
+                    defer self.message_bus.unref(prepare.message);
 
                     assert(prepare.message.header.command == .prepare);
                     assert(prepare.message.header.checksum == self.commit_prepare.?.header.checksum);
@@ -3632,7 +3632,7 @@ pub fn ReplicaType(
 
             const op = self.commit_prepare.?.header.op;
 
-            self.message_bus.unref(self.commit_prepare.?.base);
+            self.message_bus.unref(self.commit_prepare.?);
             self.commit_prepare = null;
 
             tracer.end(
@@ -3681,8 +3681,8 @@ pub fn ReplicaType(
                 prepare.header.operation.tag_name(StateMachine),
             });
 
-            const reply = self.message_bus.get_message().build(.reply);
-            defer self.message_bus.unref(reply.base);
+            const reply = self.message_bus.get_message(.reply);
+            defer self.message_bus.unref(reply);
 
             log.debug("{}: commit_op: commit_timestamp={} prepare.header.timestamp={}", .{
                 self.replica,
@@ -3718,15 +3718,15 @@ pub fn ReplicaType(
                 .register => 0,
                 .reconfigure => self.commit_reconfiguration(
                     prepare,
-                    reply.base.buffer[@sizeOf(Header)..],
+                    reply.buffer[@sizeOf(Header)..],
                 ),
                 else => self.state_machine.commit(
                     prepare.header.client,
                     prepare.header.op,
                     prepare.header.timestamp,
                     prepare.header.operation.cast(StateMachine),
-                    prepare.base.buffer[@sizeOf(Header)..prepare.header.size],
-                    reply.base.buffer[@sizeOf(Header)..],
+                    prepare.buffer[@sizeOf(Header)..prepare.header.size],
+                    reply.buffer[@sizeOf(Header)..],
                 ),
             };
 
@@ -3940,8 +3940,8 @@ pub fn ReplicaType(
             assert(self.view_headers.array.get(0).op == self.op);
             self.view_headers.verify();
 
-            const message = self.message_bus.get_message().build(.start_view);
-            defer self.message_bus.unref(message.base);
+            const message = self.message_bus.get_message(.start_view);
+            defer self.message_bus.unref(message);
 
             message.header.* = .{
                 .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)),
@@ -4022,7 +4022,7 @@ pub fn ReplicaType(
             );
             assert(header.size == @sizeOf(Header));
 
-            const message = self.message_bus.pool.get_message();
+            const message = self.message_bus.pool.get_message(null);
             defer self.message_bus.unref(message);
 
             message.header.* = header;
@@ -4450,7 +4450,7 @@ pub fn ReplicaType(
 
             if (entry.header.size == @sizeOf(Header)) {
                 const reply = self.create_message_from_header(@bitCast(entry.header)).into(.reply).?;
-                defer self.message_bus.unref(reply.base);
+                defer self.message_bus.unref(reply);
 
                 self.send_reply_message_to_client(reply);
                 return;
@@ -4538,7 +4538,7 @@ pub fn ReplicaType(
                 // Since the client is already connected to all replicas, the client may yet receive the
                 // reply from the new primary directly.
                 log.debug("{}: on_request: forwarding (backup)", .{self.replica});
-                self.send_message_to_replica(self.primary_index(self.view), message.base);
+                self.send_message_to_replica(self.primary_index(self.view), message);
             } else {
                 assert(message.header.view == self.view);
                 // The client has the correct view, but has retried against a backup.
@@ -5131,6 +5131,8 @@ pub fn ReplicaType(
 
             assert(!self.ignore_request_message(request.message));
 
+            defer self.message_bus.unref(request.message);
+
             log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
                 self.replica,
                 request.message.header.checksum,
@@ -5162,7 +5164,6 @@ pub fn ReplicaType(
 
             // Reuse the Request message as a Prepare message by replacing the header.
             const message = request.message.base.build(.prepare);
-            defer self.message_bus.unref(message.base);
 
             // Copy the header to the stack before overwriting it to avoid UB.
             const request_header: Header.Request = request.message.header.*;
@@ -5780,7 +5781,7 @@ pub fn ReplicaType(
             });
 
             const prepare_evicted = self.pipeline.cache.insert(prepare.?.ref());
-            if (prepare_evicted) |message_evicted| self.message_bus.unref(message_evicted.base);
+            if (prepare_evicted) |message_evicted| self.message_bus.unref(message_evicted);
 
             if (self.primary_repair_pipeline_op()) |_| {
                 assert(!self.pipeline_repairing);
@@ -6080,7 +6081,7 @@ pub fn ReplicaType(
             if (self.standby()) assert(next >= self.replica_count);
 
             log.debug("{}: replicate: replicating to replica {}", .{ self.replica, next });
-            self.send_message_to_replica(next, message.base);
+            self.send_message_to_replica(next, message);
         }
 
         /// Conversions between usual `self.replica` and "nth standby" coordinate spaces.
@@ -6115,7 +6116,7 @@ pub fn ReplicaType(
                         view = message.header.view;
                     }
 
-                    self.message_bus.unref(message.base);
+                    self.message_bus.unref(message);
                     count += 1;
                 }
                 received.* = null;
@@ -6339,8 +6340,8 @@ pub fn ReplicaType(
                 }
             }
 
-            const message = self.message_bus.get_message().build(.do_view_change);
-            defer self.message_bus.unref(message.base);
+            const message = self.message_bus.get_message(.do_view_change);
+            defer self.message_bus.unref(message);
 
             message.header.* = .{
                 .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)),
@@ -6389,12 +6390,12 @@ pub fn ReplicaType(
 
             if (self.standby()) return;
 
-            self.send_message_to_other_replicas(message.base);
+            self.send_message_to_other_replicas(message);
 
             if (self.replica == self.primary_index(self.view) and
                 self.do_view_change_from_all_replicas[self.replica] == null)
             {
-                self.send_message_to_replica(self.replica, message.base);
+                self.send_message_to_replica(self.replica, message);
                 defer self.flush_loopback_queue();
             }
         }
@@ -6435,8 +6436,8 @@ pub fn ReplicaType(
                 return;
             }
 
-            const reply_copy = self.message_bus.get_message().build(.reply);
-            defer self.message_bus.unref(reply_copy.base);
+            const reply_copy = self.message_bus.get_message(.reply);
+            defer self.message_bus.unref(reply_copy);
 
             // Copy the message and update the view.
             // We could optimize this by using in-place modification if `reply.references == 1`.
@@ -6445,8 +6446,8 @@ pub fn ReplicaType(
             stdx.copy_disjoint(
                 .inexact,
                 u8,
-                reply_copy.base.buffer,
-                reply.base.buffer[0..reply.header.size],
+                reply_copy.buffer,
+                reply.buffer[0..reply.header.size],
             );
             reply_copy.header.view = self.view;
             reply_copy.header.frame().set_checksum();
@@ -6471,7 +6472,7 @@ pub fn ReplicaType(
             var replica: u8 = 0;
             while (replica < self.replica_count) : (replica += 1) {
                 if (replica != self.replica) {
-                    self.send_message_to_replica(replica, message);
+                    self.send_message_to_replica_base(replica, message);
                 }
             }
         }
@@ -6483,7 +6484,7 @@ pub fn ReplicaType(
             var replica: u8 = 0;
             while (replica < self.node_count) : (replica += 1) {
                 if (replica != self.replica) {
-                    self.send_message_to_replica(replica, message);
+                    self.send_message_to_replica_base(replica, message);
                 }
             }
         }
@@ -6492,19 +6493,29 @@ pub fn ReplicaType(
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
-            self.send_message_to_replica(replica, message);
+            self.send_message_to_replica_base(replica, message);
         }
 
-        fn send_message_to_other_replicas(self: *Self, message: *Message) void {
+        /// `message` is a `MessageType(command)`.
+        fn send_message_to_other_replicas(self: *Self, message: anytype) void {
+            self.send_message_to_other_replicas_base(message.base);
+        }
+
+        fn send_message_to_other_replicas_base(self: *Self, message: *Message) void {
             var replica: u8 = 0;
             while (replica < self.replica_count) : (replica += 1) {
                 if (replica != self.replica) {
-                    self.send_message_to_replica(replica, message);
+                    self.send_message_to_replica_base(replica, message);
                 }
             }
         }
 
-        fn send_message_to_replica(self: *Self, replica: u8, message: *Message) void {
+        /// `message` is a `MessageType(command)`.
+        fn send_message_to_replica(self: *Self, replica: u8, message: anytype) void {
+            self.send_message_to_replica_base(replica, message.base);
+        }
+
+        fn send_message_to_replica_base(self: *Self, replica: u8, message: *Message) void {
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
@@ -6889,9 +6900,9 @@ pub fn ReplicaType(
                     // to guarantee freshness of the message.
                     const nonce = 0;
                     const start_view = self.create_start_view_message(nonce);
-                    defer self.message_bus.unref(start_view.base);
+                    defer self.message_bus.unref(start_view);
 
-                    self.send_message_to_other_replicas(start_view.base);
+                    self.send_message_to_other_replicas(start_view);
                 } else {
                     self.send_prepare_oks_after_view_change();
                 }
@@ -7827,7 +7838,7 @@ pub fn ReplicaType(
             if (self.commit_stage == .idle) {
                 assert(self.commit_prepare == null);
             } else {
-                if (self.commit_prepare) |prepare| self.message_bus.unref(prepare.base);
+                if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
                 self.commit_prepare = null;
                 self.commit_stage = .idle;
             }
@@ -7836,7 +7847,7 @@ pub fn ReplicaType(
             while (grid_reads.next()) |grid_read| {
                 assert(grid_read.message.base.references == 1);
 
-                self.message_bus.unref(grid_read.message.base);
+                self.message_bus.unref(grid_read.message);
                 self.grid_reads.release(grid_read);
             }
 
@@ -8504,7 +8515,7 @@ pub fn ReplicaType(
                 self.commit_min < message.header.op)
             {
                 const prepare_evicted = self.pipeline.cache.insert(message.ref());
-                if (prepare_evicted) |m| self.message_bus.unref(m.base);
+                if (prepare_evicted) |m| self.message_bus.unref(m);
             }
 
             self.journal.write_prepare(write_prepare_callback, message, trigger);
@@ -8536,12 +8547,12 @@ pub fn ReplicaType(
             assert(self.grid.canceling == null);
             maybe(self.state_machine_opened);
 
-            var message = self.message_bus.get_message().build(.request_blocks);
-            defer self.message_bus.unref(message.base);
+            var message = self.message_bus.get_message(.request_blocks);
+            defer self.message_bus.unref(message);
 
             const requests = std.mem.bytesAsSlice(
                 vsr.BlockRequest,
-                message.base.buffer[@sizeOf(Header)..],
+                message.buffer[@sizeOf(Header)..],
             )[0..constants.grid_repair_request_max];
             assert(requests.len > 0);
 
@@ -8567,7 +8578,7 @@ pub fn ReplicaType(
             message.header.frame().set_checksum_body(message.body());
             message.header.frame().set_checksum();
 
-            self.send_message_to_replica(self.choose_any_other_replica(), message.base);
+            self.send_message_to_replica(self.choose_any_other_replica(), message);
         }
 
         fn send_request_sync_checkpoint(self: *Self) void {
@@ -8595,8 +8606,8 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.replica != parameters.replica);
 
-            const reply = self.message_bus.get_message().build(.sync_checkpoint);
-            defer self.message_bus.unref(reply.base);
+            const reply = self.message_bus.get_message(.sync_checkpoint);
+            defer self.message_bus.unref(reply);
 
             reply.header.* = .{
                 .command = .sync_checkpoint,
@@ -8619,10 +8630,10 @@ pub fn ReplicaType(
 
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
-            self.send_message_to_replica(parameters.replica, reply.base);
+            self.send_message_to_replica(parameters.replica, reply);
         }
 
-        fn send_request_sync_trailer(self: *Self, command: vsr.Command, offset: u32) void {
+        fn send_request_sync_trailer(self: *Self, comptime command: vsr.Command, offset: u32) void {
             assert(!self.solo());
             assert(self.syncing == .requesting_trailers);
             assert(self.sync_message_timeout.ticking);
@@ -8631,25 +8642,18 @@ pub fn ReplicaType(
             assert(@mod(offset, SyncTrailer.chunk_size_max) == 0);
 
             const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
-            const message = self.message_bus.get_message();
+            const message = self.message_bus.get_message(command);
             defer self.message_bus.unref(message);
 
-            switch (command) {
-                inline .request_sync_free_set,
-                .request_sync_client_sessions,
-                => |command_comptime| {
-                    message.header.* = @bitCast(Header.Type(command_comptime){
-                        .command = command,
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                        .size = @sizeOf(Header),
-                        .checkpoint_id = stage.target.checkpoint_id,
-                        .checkpoint_op = stage.target.checkpoint_op,
-                        .trailer_offset = offset,
-                    });
-                },
-                else => unreachable,
-            }
+            message.header.* = .{
+                .command = command,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .size = @sizeOf(Header),
+                .checkpoint_id = stage.target.checkpoint_id,
+                .checkpoint_op = stage.target.checkpoint_op,
+                .trailer_offset = offset,
+            };
 
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -8671,8 +8675,8 @@ pub fn ReplicaType(
                 if (command == SyncTrailer.requests.get(trailer)) break trailer;
             } else unreachable;
 
-            const reply = self.message_bus.get_message().build(SyncTrailer.responses.get(trailer));
-            defer self.message_bus.unref(reply.base);
+            const reply = self.message_bus.get_message(SyncTrailer.responses.get(trailer));
+            defer self.message_bus.unref(reply);
 
             const trailer_buffer_all = self.superblock.trailer_buffer(trailer);
             const trailer_checksum = self.superblock.staging.trailer_checksum(trailer);
@@ -8691,7 +8695,7 @@ pub fn ReplicaType(
             stdx.copy_disjoint(
                 .inexact,
                 u8,
-                reply.base.buffer[@sizeOf(Header)..],
+                reply.buffer[@sizeOf(Header)..],
                 trailer_buffer_all[parameters.offset..][0..body_size],
             );
 
@@ -8715,7 +8719,7 @@ pub fn ReplicaType(
 
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
-            self.send_message_to_replica(parameters.replica, reply.base);
+            self.send_message_to_replica(parameters.replica, reply);
         }
     };
 }
@@ -9270,8 +9274,8 @@ const PipelineQueue = struct {
     request_queue: RequestQueue = RequestQueue.init(),
 
     fn deinit(pipeline: *PipelineQueue, message_pool: *MessagePool) void {
-        while (pipeline.request_queue.pop()) |r| message_pool.unref(r.message.base);
-        while (pipeline.prepare_queue.pop()) |p| message_pool.unref(p.message.base);
+        while (pipeline.request_queue.pop()) |r| message_pool.unref(r.message);
+        while (pipeline.prepare_queue.pop()) |p| message_pool.unref(p.message);
     }
 
     fn verify(pipeline: PipelineQueue) void {
@@ -9453,7 +9457,7 @@ const PipelineCache = struct {
     fn deinit(pipeline: *PipelineCache, message_pool: *MessagePool) void {
         for (&pipeline.prepares) |*entry| {
             if (entry.*) |m| {
-                message_pool.unref(m.base);
+                message_pool.unref(m);
                 entry.* = null;
             }
         }

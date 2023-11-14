@@ -120,11 +120,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         pub fn deinit(client_replies: *ClientReplies) void {
             {
                 var it = client_replies.reads.iterate();
-                while (it.next()) |read| client_replies.message_pool.unref(read.message.base);
+                while (it.next()) |read| client_replies.message_pool.unref(read.message);
             }
             {
                 var it = client_replies.writes.iterate();
-                while (it.next()) |write| client_replies.message_pool.unref(write.message.base);
+                while (it.next()) |write| client_replies.message_pool.unref(write.message);
             }
             // Don't unref `write_queue`'s Writes — they are a subset of `writes`.
         }
@@ -190,14 +190,14 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 session.header.checksum,
             });
 
-            const message = client_replies.message_pool.get_message();
+            const message = client_replies.message_pool.get_message(.reply);
             defer client_replies.message_pool.unref(message);
 
             read.* = .{
                 .client_replies = client_replies,
                 .completion = undefined,
                 .slot = slot,
-                .message = message.ref().build(.reply),
+                .message = message.ref(),
                 .callback = callback,
                 .header = session.header,
                 .destination_replica = destination_replica,
@@ -223,7 +223,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.reads.release(read);
 
             defer {
-                client_replies.message_pool.unref(message.base);
+                client_replies.message_pool.unref(message);
                 client_replies.write_reply_next();
             }
 
@@ -339,7 +339,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             var write_queue = client_replies.write_queue.iterator_mutable();
             while (write_queue.next_ptr()) |queued| {
                 if (queued.*.slot.index == slot.index) {
-                    client_replies.message_pool.unref(queued.*.message.base);
+                    client_replies.message_pool.unref(queued.*.message);
                     client_replies.writes.release(queued.*);
 
                     queued.* = write;
@@ -366,13 +366,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 // Zero sector padding to ensure deterministic storage.
                 const size = message.header.size;
                 const size_ceil = vsr.sector_ceil(size);
-                @memset(message.base.buffer[size..size_ceil], 0);
+                @memset(message.buffer[size..size_ceil], 0);
 
                 client_replies.writing.set(write.slot.index);
                 client_replies.storage.write_sectors(
                     write_reply_callback,
                     &write.completion,
-                    message.base.buffer[0..size_ceil],
+                    message.buffer[0..size_ceil],
                     .client_replies,
                     slot_offset(write.slot),
                 );
@@ -397,7 +397,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies.writing.unset(write.slot.index);
             client_replies.writes.release(write);
 
-            client_replies.message_pool.unref(message.base);
+            client_replies.message_pool.unref(message);
             client_replies.write_reply_next();
 
             if (client_replies.ready_callback) |ready_callback| {

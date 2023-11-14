@@ -122,6 +122,7 @@ pub const MessagePool = struct {
                     Header.Type(command),
                     std.mem.asBytes(message.header),
                 ),
+                .buffer = message.buffer,
                 .base = message,
             };
         }
@@ -129,7 +130,11 @@ pub const MessagePool = struct {
         /// NOTE: Does *not* alter the reference count.
         pub fn into(message: *Message, comptime command: vsr.Command) ?MessageType(command) {
             const header = message.header.into(command) orelse return null;
-            return .{ .header = header, .base = message };
+            return .{
+                .header = header,
+                .buffer = message.buffer,
+                .base = message,
+            };
         }
 
         pub const AnyMessage = stdx.EnumUnionType(vsr.Command, MessageType);
@@ -201,9 +206,25 @@ pub const MessagePool = struct {
         assert(free_count == pool.messages_max);
     }
 
+    pub fn GetMessageType(comptime command: ?vsr.Command) type {
+        if (command) |c| {
+            return MessageType(c);
+        } else {
+            return *Message;
+        }
+    }
+
     /// Get an unused message with a buffer of constants.message_size_max.
     /// The returned message has exactly one reference.
-    pub fn get_message(pool: *MessagePool) *Message {
+    pub fn get_message(pool: *MessagePool, comptime command: ?vsr.Command) GetMessageType(command) {
+        if (command) |c| {
+            return pool.get_message_base().build(c);
+        } else {
+            return pool.get_message_base();
+        }
+    }
+
+    fn get_message_base(pool: *MessagePool) *Message {
         const message = pool.free_list.?;
         pool.free_list = message.next;
         message.next = null;
@@ -215,7 +236,23 @@ pub const MessagePool = struct {
     }
 
     /// Decrement the reference count of the message, possibly freeing it.
-    pub fn unref(pool: *MessagePool, message: *Message) void {
+    ///
+    /// `@TypeOf(message)` is one of:
+    /// - `*Message`
+    /// - `MessageType(command)` for any `command`.
+    pub fn unref(pool: *MessagePool, message: anytype) void {
+        if (@TypeOf(message) == *Message) {
+            pool.unref_base(message);
+        } else {
+            assert(@typeInfo(@TypeOf(message)) == .Struct);
+            assert(@hasField(@TypeOf(message), "base"));
+            assert(std.meta.FieldType(@TypeOf(message), .base) == *Message);
+
+            pool.unref_base(message.base);
+        }
+    }
+
+    fn unref_base(pool: *MessagePool, message: *Message) void {
         assert(message.next == null);
 
         message.references -= 1;
@@ -235,13 +272,16 @@ fn MessageType(comptime command: vsr.Command) type {
         const CommandMessage = @This();
         const CommandHeader = Header.Type(command);
 
-        /// Points into `base.buffer`.
+        /// Points into `base.buffer`/`buffer`.
         header: *CommandHeader,
+        /// Identical to `base.buffer`.
+        buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         base: *MessagePool.Message,
 
         pub fn ref(message: CommandMessage) CommandMessage {
             return .{
                 .header = message.header,
+                .buffer = message.buffer,
                 .base = message.base.ref(),
             };
         }

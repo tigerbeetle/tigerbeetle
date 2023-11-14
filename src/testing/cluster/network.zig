@@ -218,7 +218,7 @@ pub const Network = struct {
             message.header.command,
         });
 
-        const network_message = network.message_pool.get_message();
+        const network_message = network.message_pool.get_message(null);
         defer network.message_pool.unref(network_message);
 
         stdx.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
@@ -271,7 +271,7 @@ pub const Network = struct {
         }
 
         const target_bus = network.buses.items[path.target];
-        const target_message = target_bus.get_message();
+        const target_message = target_bus.get_message(null);
         defer target_bus.unref(target_message);
 
         stdx.copy_disjoint(.exact, u8, target_message.buffer, packet.message.buffer);
