@@ -371,11 +371,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             {
                 var it = journal.reads.iterate();
-                while (it.next()) |read| replica.message_bus.unref(read.message.base);
+                while (it.next()) |read| replica.message_bus.unref(read.message);
             }
             {
                 var it = journal.writes.iterate();
-                while (it.next()) |write| replica.message_bus.unref(write.message.base);
+                while (it.next()) |write| replica.message_bus.unref(write.message);
             }
         }
 
@@ -773,8 +773,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(journal.reads.available() > 0);
             }
 
-            const message = replica.message_bus.get_message().build(.prepare);
-            defer replica.message_bus.unref(message.base);
+            const message = replica.message_bus.get_message(.prepare);
+            defer replica.message_bus.unref(message);
 
             var message_size: usize = constants.message_size_max;
 
@@ -784,7 +784,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     message.header.* = exact.*;
                     // Normally the message's padding would have been zeroed by the MessageBus,
                     // but we are copying (only) a message header into a new buffer.
-                    @memset(message.base.buffer[@sizeOf(Header)..constants.sector_size], 0);
+                    @memset(message.buffer[@sizeOf(Header)..constants.sector_size], 0);
                     callback(replica, message, destination_replica);
                     return;
                 } else {
@@ -821,7 +821,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .destination_replica = destination_replica,
             };
 
-            const buffer: []u8 = message.base.buffer[0..message_size];
+            const buffer: []u8 = message.buffer[0..message_size];
 
             // Memory must not be owned by `journal.headers` as these may be modified concurrently:
             assert(@intFromPtr(buffer.ptr) < @intFromPtr(journal.headers.ptr) or
@@ -845,7 +845,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const checksum = read.checksum;
             const destination_replica = read.destination_replica;
             const message = read.message;
-            defer replica.message_bus.unref(message.base);
+            defer replica.message_bus.unref(message);
 
             assert(journal.status == .recovered);
 
@@ -986,14 +986,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const chunk_index = journal.header_chunks_requested.findFirstSet() orelse return;
             assert(!journal.header_chunks_recovered.isSet(chunk_index));
 
-            const message = replica.message_bus.get_message();
+            const message = replica.message_bus.get_message(.prepare);
             defer replica.message_bus.unref(message);
 
             const chunk_read = journal.reads.acquire().?;
             chunk_read.* = .{
                 .journal = journal,
                 .completion = undefined,
-                .message = message.ref().build(.prepare),
+                .message = message.ref(),
                 .callback = undefined,
                 .op = chunk_index,
                 .checksum = undefined,
@@ -1036,7 +1036,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(!journal.header_chunks_recovered.isSet(chunk_index));
 
             const chunk_buffer = recover_headers_buffer(
-                chunk_read.message.base,
+                chunk_read.message,
                 chunk_index * constants.message_size_max,
             );
             assert(chunk_buffer.len >= @sizeOf(Header));
@@ -1061,14 +1061,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             // We must release before we call `recover_headers()` in case Storage is synchronous.
             // Otherwise, we would run out of messages and reads.
-            replica.message_bus.unref(chunk_read.message.base);
+            replica.message_bus.unref(chunk_read.message);
             journal.reads.release(chunk_read);
 
             journal.header_chunks_recovered.set(chunk_index);
             journal.recover_headers();
         }
 
-        fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
+        fn recover_headers_buffer(
+            message: Message.Prepare,
+            offset: u64,
+        ) []align(@alignOf(Header)) u8 {
             const max = @min(constants.message_size_max, headers_size - offset);
             assert(max % constants.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
@@ -1113,14 +1116,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const slot_index = journal.dirty.bits.findFirstSet() orelse return;
             const slot = Slot{ .index = slot_index };
-            const message = replica.message_bus.get_message();
+            const message = replica.message_bus.get_message(.prepare);
             defer replica.message_bus.unref(message);
 
             const read = journal.reads.acquire().?;
             read.* = .{
                 .journal = journal,
                 .completion = undefined,
-                .message = message.ref().build(.prepare),
+                .message = message.ref(),
                 .callback = undefined,
                 .op = slot.index,
                 .checksum = undefined,
@@ -1166,7 +1169,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.headers[slot.index] = read.message.header.*;
             }
 
-            replica.message_bus.unref(read.message.base);
+            replica.message_bus.unref(read.message);
             journal.reads.release(read);
 
             journal.faulty.clear(slot);
@@ -1722,14 +1725,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(message.header.command == .prepare);
             assert(message.header.operation != .reserved);
             assert(message.header.size >= @sizeOf(Header));
-            assert(message.header.size <= message.base.buffer.len);
+            assert(message.header.size <= message.buffer.len);
             assert(journal.has(message.header));
             assert(!journal.writing(message.header.op, message.header.checksum));
             if (replica.solo()) assert(journal.writes.executing() == 0);
 
             // The underlying header memory must be owned by the buffer and not by journal.headers:
             // Otherwise, concurrent writes may modify the memory of the pointer while we write.
-            assert(@intFromPtr(message.header) == @intFromPtr(message.base.buffer));
+            assert(@intFromPtr(message.header) == @intFromPtr(message.buffer));
 
             const slot = journal.slot_with_header(message.header).?;
 
@@ -1765,7 +1768,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             };
 
             // Slice the message to the nearest sector, we don't want to write the whole buffer:
-            const buffer = message.base.buffer[0..vsr.sector_ceil(message.header.size)];
+            const buffer = message.buffer[0..vsr.sector_ceil(message.header.size)];
             const offset = Ring.prepares.offset(slot);
 
             // Assert that any sector padding has already been zeroed:
@@ -1923,7 +1926,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // callback may immediately start the next write.
             journal.writes.release(write);
             write_callback(replica, wrote, write_trigger);
-            replica.message_bus.unref(write_message.base);
+            replica.message_bus.unref(write_message);
         }
 
         fn write_prepare_debug(

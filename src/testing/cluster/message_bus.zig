@@ -3,8 +3,9 @@ const assert = std.debug.assert;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
-const Header = @import("../../vsr.zig").Header;
-const ProcessType = @import("../../vsr.zig").ProcessType;
+const vsr = @import("../../vsr.zig");
+const Header = vsr.Header;
+const ProcessType = vsr.ProcessType;
 
 const Network = @import("network.zig").Network;
 
@@ -51,11 +52,17 @@ pub const MessageBus = struct {
 
     pub fn tick(_: *MessageBus) void {}
 
-    pub fn get_message(bus: *MessageBus) *Message {
-        return bus.pool.get_message();
+    pub fn get_message(
+        bus: *MessageBus,
+        comptime command: ?vsr.Command,
+    ) MessagePool.GetMessageType(command) {
+        return bus.pool.get_message(command);
     }
 
-    pub fn unref(bus: *MessageBus, message: *Message) void {
+    /// `@TypeOf(message)` is one of:
+    /// - `*Message`
+    /// - `MessageType(command)` for any `command`.
+    pub fn unref(bus: *MessageBus, message: anytype) void {
         bus.pool.unref(message);
     }
 

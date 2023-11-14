@@ -64,7 +64,7 @@ pub const AOFEntry = extern struct {
 
     /// Turn an AOFEntry back into a Message.
     pub fn to_message(self: *AOFEntry, target: Message.Prepare) void {
-        stdx.copy_disjoint(.inexact, u8, target.base.buffer, self.message[0..self.header().size]);
+        stdx.copy_disjoint(.inexact, u8, target.buffer, self.message[0..self.header().size]);
     }
 
     pub fn from_message(
@@ -106,7 +106,7 @@ pub const AOFEntry = extern struct {
             .exact,
             u8,
             self.message[0..message.header.size],
-            message.base.buffer[0..message.header.size],
+            message.buffer[0..message.header.size],
         );
         @memset(self.message[message.header.size..self.message.len], 0);
     }
@@ -520,8 +520,8 @@ pub fn aof_merge(
     // Next, start from our root checksum, walk down the hash chain until there's nothing left. We
     // currently take the root checksum as the first entry in the first AOF.
     while (entries_by_parent.count() > 0) {
-        var message = message_pool.get_message().build(.prepare);
-        defer message_pool.unref(message.base);
+        var message = message_pool.get_message(.prepare);
+        defer message_pool.unref(message);
 
         assert(current_parent != null);
         const entry = entries_by_parent.getPtr(current_parent.?) orelse unreachable;
@@ -596,8 +596,8 @@ test "aof write / read" {
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
 
-    const demo_message = message_pool.get_message().build(.prepare);
-    defer message_pool.unref(demo_message.base);
+    const demo_message = message_pool.get_message(.prepare);
+    defer message_pool.unref(demo_message);
 
     var target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
@@ -633,13 +633,13 @@ test "aof write / read" {
     const read_entry = (try it.next(target)).?;
 
     // Check that to_message also works as expected
-    const read_message = message_pool.get_message();
+    const read_message = message_pool.get_message(.prepare);
     defer message_pool.unref(read_message);
 
-    read_entry.to_message(read_message.build(.prepare));
+    read_entry.to_message(read_message);
     try testing.expect(std.mem.eql(
         u8,
-        demo_message.base.buffer[0..demo_message.header.size],
+        demo_message.buffer[0..demo_message.header.size],
         read_message.buffer[0..read_message.header.size],
     ));
 
@@ -647,7 +647,7 @@ test "aof write / read" {
     try testing.expect(read_entry.metadata.primary == 1);
     try testing.expect(std.mem.eql(
         u8,
-        demo_message.base.buffer[0..demo_message.header.size],
+        demo_message.buffer[0..demo_message.header.size],
         read_entry.message[0..read_entry.header().size],
     ));
 

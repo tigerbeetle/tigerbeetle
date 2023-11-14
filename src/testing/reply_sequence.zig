@@ -131,7 +131,7 @@ pub const ReplySequence = struct {
     ///
     /// Returns the ReplySequence's message.
     fn clone_message(sequence: *ReplySequence, message_client: *const Message) *Message {
-        const message_sequence = sequence.message_pool.get_message();
+        const message_sequence = sequence.message_pool.get_message(null);
         stdx.copy_disjoint(.exact, u8, message_sequence.buffer, message_client.buffer);
         return message_sequence;
     }
