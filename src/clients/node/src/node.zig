@@ -372,7 +372,7 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                     const value = try @field(translate, @typeName(FieldInt) ++ "_from_object")(
                         env,
                         object,
-                        @ptrCast(field.name ++ "\x00"),
+                        add_trailing_null(field.name),
                     );
 
                     if (std.mem.eql(u8, field.name, "timestamp") and value != 0) {
@@ -439,6 +439,15 @@ fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result)
     }
 
     return array;
+}
+
+fn add_trailing_null(comptime input: []const u8) [:0]const u8 {
+    // Concatenating `[]const u8` with an empty string `[0:0]const u8`,
+    // gives us a null-terminated string `[:0]const u8`.
+    const output = input ++ "";
+    comptime assert(output.len == input.len);
+    comptime assert(output[output.len] == 0);
+    return output;
 }
 
 /// Each packet allocates enough room to hold both its Events and its Results.
