@@ -85,8 +85,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
                         // This is a Prepare's header.
                         assert(header.valid_checksum());
 
-                        if (header.operation == .root) {
-                            assert(header.op == 0);
+                        if (header.op == 0) {
+                            assert(header.operation == .root);
                         } else {
                             assert(header.operation == .reserved);
                         }
@@ -115,8 +115,8 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 for (std.mem.bytesAsSlice(Header.Prepare, wal_buffer[0..size])) |*header| {
                     assert(header.valid_checksum());
 
-                    if (header.operation == .root) {
-                        assert(header.op == 0);
+                    if (header.op == 0) {
+                        assert(header.operation == .root);
                     } else {
                         assert(header.operation == .reserved);
                     }
