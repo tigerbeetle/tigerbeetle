@@ -1076,6 +1076,7 @@ pub const Header = extern struct {
 
     pub const Block = extern struct {
         pub usingnamespace HeaderFunctions(@This());
+        pub const metadata_size = 144;
 
         checksum: u128 = 0,
         checksum_body: u128 = 0,
@@ -1090,7 +1091,7 @@ pub const Header = extern struct {
         reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         // Schema is determined by `block_type`.
-        metadata_bytes: [144]u8,
+        metadata_bytes: [metadata_size]u8,
 
         // Fields shared by all block types:
         address: u64,

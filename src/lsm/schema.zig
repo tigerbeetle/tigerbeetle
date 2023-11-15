@@ -83,6 +83,7 @@ pub const TableIndex = struct {
 
         comptime {
             assert(stdx.no_padding(Metadata));
+            assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
         }
     };
 
@@ -226,6 +227,7 @@ pub const TableData = struct {
 
         comptime {
             assert(stdx.no_padding(Metadata));
+            assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
         }
     };
 
@@ -294,6 +296,9 @@ pub const TableData = struct {
         assert(header_metadata.value_count <= header_metadata.value_count_max);
         assert(header_metadata.tree_id > 0);
         assert(stdx.zeroed(&header_metadata.reserved));
+        assert(@sizeOf(vsr.Header) + header_metadata.value_size * header_metadata.value_count ==
+            header.size);
+
         return header_metadata;
     }
 
@@ -363,6 +368,7 @@ pub const ManifestNode = struct {
 
         comptime {
             assert(stdx.no_padding(Metadata));
+            assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
         }
     };
 

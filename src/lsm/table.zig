@@ -306,8 +306,8 @@ pub fn TableType(
                 assert(builder.value_count > 0);
 
                 const block = builder.data_block;
-                const header = mem.bytesAsValue(vsr.Header, block[0..@sizeOf(vsr.Header)]);
-                header.* = @bitCast(vsr.Header.Block{
+                const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
+                header.* = .{
                     .cluster = options.cluster,
                     .metadata_bytes = @bitCast(schema.TableData.Metadata{
                         .value_count_max = data.value_count_max,
@@ -320,7 +320,7 @@ pub fn TableType(
                     .size = @sizeOf(vsr.Header) + builder.value_count * @sizeOf(Value),
                     .command = .block,
                     .block_type = .data,
-                });
+                };
 
                 header.set_checksum_body(block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
@@ -405,8 +405,9 @@ pub fn TableType(
                 assert(builder.value_count == 0);
 
                 const index_block = builder.index_block;
-                const header = mem.bytesAsValue(vsr.Header, index_block[0..@sizeOf(vsr.Header)]);
-                header.* = @bitCast(vsr.Header.Block{
+                const header =
+                    mem.bytesAsValue(vsr.Header.Block, index_block[0..@sizeOf(vsr.Header)]);
+                header.* = .{
                     .cluster = options.cluster,
                     .metadata_bytes = @bitCast(schema.TableIndex.Metadata{
                         .data_block_count = builder.data_block_count,
@@ -419,7 +420,7 @@ pub fn TableType(
                     .size = index.size,
                     .command = .block,
                     .block_type = .index,
-                });
+                };
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 
