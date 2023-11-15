@@ -1163,8 +1163,8 @@ const TestContext = struct {
     fn on_client_reply(
         cluster: *Cluster,
         client: usize,
-        request: Message.Request,
-        reply: Message.Reply,
+        request: *Message.Request,
+        reply: *Message.Reply,
     ) void {
         _ = request;
         _ = reply;

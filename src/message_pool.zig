@@ -65,7 +65,7 @@ comptime {
 /// A pool of reference-counted Messages, memory for which is allocated only once during
 /// initialization and reused thereafter. The messages_max values determine the size of this pool.
 pub const MessagePool = struct {
-    pub const Message = struct {
+    pub const Message = extern struct {
         pub const Reserved = MessageType(.reserved);
         pub const Ping = MessageType(.ping);
         pub const Pong = MessageType(.pong);
@@ -94,7 +94,8 @@ pub const MessagePool = struct {
         pub const SyncFreeSet = MessageType(.sync_free_set);
         pub const SyncClientSessions = MessageType(.sync_client_sessions);
 
-        // TODO: replace this with a header() function to save memory
+        // TODO Avoid the extra level of indirection.
+        // (https://github.com/tigerbeetle/tigerbeetle/pull/1295#discussion_r1394265250)
         header: *Header,
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32 = 0,
@@ -116,28 +117,21 @@ pub const MessagePool = struct {
         /// NOTE:
         /// - Does *not* alter the reference count.
         /// - Does *not* verify the command. (Use this function for constructing the message.)
-        pub fn build(message: *Message, comptime command: vsr.Command) MessageType(command) {
-            return .{
-                .header = std.mem.bytesAsValue(
-                    Header.Type(command),
-                    std.mem.asBytes(message.header),
-                ),
-                .buffer = message.buffer,
-                .base = message,
-            };
+        pub fn build(message: *Message, comptime command: vsr.Command) *MessageType(command) {
+            return @ptrCast(message);
         }
 
         /// NOTE: Does *not* alter the reference count.
-        pub fn into(message: *Message, comptime command: vsr.Command) ?MessageType(command) {
-            const header = message.header.into(command) orelse return null;
-            return .{
-                .header = header,
-                .buffer = message.buffer,
-                .base = message,
-            };
+        pub fn into(message: *Message, comptime command: vsr.Command) ?*MessageType(command) {
+            if (message.header.command != command) return null;
+            return @ptrCast(message);
         }
 
-        pub const AnyMessage = stdx.EnumUnionType(vsr.Command, MessageType);
+        pub const AnyMessage = stdx.EnumUnionType(vsr.Command, MessagePointerType);
+
+        fn MessagePointerType(comptime command: vsr.Command) type {
+            return *MessageType(command);
+        }
 
         /// NOTE: Does *not* alter the reference count.
         pub fn into_any(message: *Message) AnyMessage {
@@ -208,7 +202,7 @@ pub const MessagePool = struct {
 
     pub fn GetMessageType(comptime command: ?vsr.Command) type {
         if (command) |c| {
-            return MessageType(c);
+            return *MessageType(c);
         } else {
             return *Message;
         }
@@ -239,16 +233,15 @@ pub const MessagePool = struct {
     ///
     /// `@TypeOf(message)` is one of:
     /// - `*Message`
-    /// - `MessageType(command)` for any `command`.
+    /// - `*MessageType(command)` for any `command`.
     pub fn unref(pool: *MessagePool, message: anytype) void {
+        assert(@typeInfo(@TypeOf(message)) == .Pointer);
+        assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+
         if (@TypeOf(message) == *Message) {
             pool.unref_base(message);
         } else {
-            assert(@typeInfo(@TypeOf(message)) == .Struct);
-            assert(@hasField(@TypeOf(message), "base"));
-            assert(std.meta.FieldType(@TypeOf(message), .base) == *Message);
-
-            pool.unref_base(message.base);
+            pool.unref_base(message.base());
         }
     }
 
@@ -268,26 +261,47 @@ pub const MessagePool = struct {
 };
 
 fn MessageType(comptime command: vsr.Command) type {
-    return struct {
+    return extern struct {
         const CommandMessage = @This();
         const CommandHeader = Header.Type(command);
+        const Message = MessagePool.Message;
 
-        /// Points into `base.buffer`/`buffer`.
-        header: *CommandHeader,
-        /// Identical to `base.buffer`.
-        buffer: *align(constants.sector_size) [constants.message_size_max]u8,
-        base: *MessagePool.Message,
+        // The underlying structure of Message and CommandMessage should be identical, so that their
+        // memory can be cast back-and-forth.
+        comptime {
+            assert(@sizeOf(Message) == @sizeOf(CommandMessage));
 
-        pub fn ref(message: CommandMessage) CommandMessage {
-            return .{
-                .header = message.header,
-                .buffer = message.buffer,
-                .base = message.base.ref(),
-            };
+            for (
+                std.meta.fields(Message),
+                std.meta.fields(CommandMessage),
+            ) |message_field, command_message_field| {
+                assert(std.mem.eql(u8, message_field.name, command_message_field.name));
+                assert(@sizeOf(message_field.type) == @sizeOf(command_message_field.type));
+                assert(@offsetOf(Message, message_field.name) ==
+                    @offsetOf(CommandMessage, command_message_field.name));
+            }
         }
 
-        pub fn body(message: CommandMessage) []align(@sizeOf(Header)) u8 {
-            return message.base.body();
+        /// Points into `buffer`.
+        header: *CommandHeader,
+        buffer: *align(constants.sector_size) [constants.message_size_max]u8,
+        references: u32,
+        next: ?*Message,
+
+        pub fn base(message: *CommandMessage) *Message {
+            return @ptrCast(message);
+        }
+
+        pub fn base_const(message: *const CommandMessage) *const Message {
+            return @ptrCast(message);
+        }
+
+        pub fn ref(message: *CommandMessage) *CommandMessage {
+            return @ptrCast(message.base().ref());
+        }
+
+        pub fn body(message: *const CommandMessage) []align(@sizeOf(Header)) u8 {
+            return message.base_const().body();
         }
     };
 }

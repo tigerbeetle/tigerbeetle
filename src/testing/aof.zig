@@ -107,7 +107,7 @@ pub const AOF = struct {
 
     pub fn write(
         self: *AOF,
-        message: Message.Prepare,
+        message: *const Message.Prepare,
         options: struct { replica: u8, primary: u8 },
     ) !void {
         var entry: AOFEntry align(constants.sector_size) = undefined;

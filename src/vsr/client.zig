@@ -29,7 +29,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             user_data: u128,
             // Null iff operation=register.
             callback: ?Callback,
-            message: Message.Request,
+            message: *Message.Request,
         };
 
         const RequestQueue = RingBuffer(Request, .{ .array = constants.client_request_queue_max });
@@ -98,8 +98,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Used for testing. Called for replies to all operations (including `register`).
         on_reply_callback: ?*const fn (
             client: *Self,
-            request: Message.Request,
-            reply: Message.Reply,
+            request: *Message.Request,
+            reply: *Message.Reply,
         ) void = null,
 
         pub fn init(
@@ -149,7 +149,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             while (self.request_queue.pop()) |inflight| {
-                self.release(inflight.message.base);
+                self.release(inflight.message.base());
             }
             assert(self.messages_available == constants.client_request_queue_max);
             self.message_bus.deinit(allocator);
@@ -250,7 +250,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self: *Self,
             user_data: u128,
             callback: Request.Callback,
-            message: Message.Request,
+            message: *Message.Request,
         ) void {
             assert(!message.header.operation.vsr_reserved());
             const operation = message.header.operation.cast(StateMachine);
@@ -304,7 +304,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.unref(message);
         }
 
-        fn on_eviction(self: *Self, eviction: Message.Eviction) void {
+        fn on_eviction(self: *Self, eviction: *const Message.Eviction) void {
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);
 
@@ -331,7 +331,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             @panic("session evicted: too many concurrent client sessions");
         }
 
-        fn on_pong_client(self: *Self, pong: Message.PongClient) void {
+        fn on_pong_client(self: *Self, pong: *const Message.PongClient) void {
             assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
@@ -348,7 +348,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.register();
         }
 
-        fn on_reply(self: *Self, reply: Message.Reply) void {
+        fn on_reply(self: *Self, reply: *Message.Reply) void {
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
             assert(reply.header.valid_checksum());
@@ -387,12 +387,12 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Eagerly release request message, to ensure that user's callback can submit a new
             // request.
-            self.release(inflight.message.base);
+            self.release(inflight.message.base());
             assert(self.messages_available > 0);
 
             // Even though we release our reference to the message, we might have another one
             // retained by the send queue in case of timeout.
-            maybe(inflight.message.base.references > 0);
+            maybe(inflight.message.references > 0);
             inflight.message = undefined;
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
@@ -480,7 +480,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // We assume the primary is down and round-robin through the cluster:
             self.send_message_to_replica(
                 @as(u8, @intCast((self.view + self.request_timeout.attempts) % self.replica_count)),
-                message.base,
+                message.base(),
             );
         }
 
@@ -570,8 +570,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.send_message_to_replica(replica, message);
         }
 
-        fn send_request_for_the_first_time(self: *Self, message: Message.Request) void {
-            assert(self.request_queue.head_ptr().?.message.base == message.base);
+        fn send_request_for_the_first_time(self: *Self, message: *Message.Request) void {
+            assert(self.request_queue.head_ptr().?.message == message);
 
             assert(message.header.command == .request);
             assert(message.header.parent == 0);
@@ -609,7 +609,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // If the primary is offline, then our request timeout will fire and we will round-robin.
             self.send_message_to_replica(
                 @as(u8, @intCast(self.view % self.replica_count)),
-                message.base,
+                message.base(),
             );
         }
     };
