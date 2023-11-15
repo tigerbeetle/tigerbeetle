@@ -55,11 +55,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             callback: *const fn (
                 client_replies: *ClientReplies,
                 reply_header: *const vsr.Header.Reply,
-                reply: ?Message.Reply,
+                reply: ?*Message.Reply,
                 destination_replica: ?u8,
             ) void,
             slot: Slot,
-            message: Message.Reply,
+            message: *Message.Reply,
             /// The header of the expected reply.
             header: vsr.Header.Reply,
             destination_replica: ?u8,
@@ -69,7 +69,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             completion: Storage.Write,
             slot: Slot,
-            message: Message.Reply,
+            message: *Message.Reply,
         };
 
         const WriteQueue = RingBuffer(*Write, .{
@@ -133,7 +133,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-        ) ?Message.Reply {
+        ) ?*Message.Reply {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
@@ -167,7 +167,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             callback: *const fn (
                 *ClientReplies,
                 *const vsr.Header.Reply,
-                ?Message.Reply,
+                ?*Message.Reply,
                 ?u8,
             ) void,
             destination_replica: ?u8,
@@ -299,7 +299,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         pub fn write_reply(
             client_replies: *ClientReplies,
             slot: Slot,
-            message: Message.Reply,
+            message: *Message.Reply,
             trigger: enum { commit, repair },
         ) void {
             assert(client_replies.ready_sync());

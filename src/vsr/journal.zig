@@ -141,11 +141,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             completion: Storage.Read,
             callback: *const fn (
                 replica: *Replica,
-                prepare: ?Message.Prepare,
+                prepare: ?*Message.Prepare,
                 destination_replica: ?u8,
             ) void,
 
-            message: Message.Prepare,
+            message: *Message.Prepare,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -157,11 +157,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal: *Journal,
             callback: *const fn (
                 replica: *Replica,
-                wrote: ?Message.Prepare,
+                wrote: ?*Message.Prepare,
                 trigger: Trigger,
             ) void,
 
-            message: Message.Prepare,
+            message: *Message.Prepare,
             trigger: Trigger,
 
             /// True if this Write has acquired a lock on a sector of headers.
@@ -716,7 +716,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal: *Journal,
             callback: *const fn (
                 replica: *Replica,
-                prepare: ?Message.Prepare,
+                prepare: ?*Message.Prepare,
                 destination_replica: ?u8,
             ) void,
             op: u64,
@@ -757,7 +757,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal: *Journal,
             callback: *const fn (
                 replica: *Replica,
-                prepare: ?Message.Prepare,
+                prepare: ?*Message.Prepare,
                 destination_replica: ?u8,
             ) void,
             op: u64,
@@ -1069,7 +1069,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         }
 
         fn recover_headers_buffer(
-            message: Message.Prepare,
+            message: *Message.Prepare,
             offset: u64,
         ) []align(@alignOf(Header)) u8 {
             const max = @min(constants.message_size_max, headers_size - offset);
@@ -1713,10 +1713,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal: *Journal,
             callback: *const fn (
                 journal: *Replica,
-                wrote: ?Message.Prepare,
+                wrote: ?*Message.Prepare,
                 trigger: Write.Trigger,
             ) void,
-            message: Message.Prepare,
+            message: *Message.Prepare,
             trigger: Journal.Write.Trigger,
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
@@ -1914,7 +1914,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn write_prepare_release(
             journal: *Journal,
             write: *Journal.Write,
-            wrote: ?Message.Prepare,
+            wrote: ?*Message.Prepare,
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
             const write_callback = write.callback;
@@ -1951,7 +1951,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         fn offset_logical_in_headers_for_message(
             journal: *const Journal,
-            message: Message.Prepare,
+            message: *const Message.Prepare,
         ) u64 {
             return Ring.headers.offset(journal.slot_for_header(message.header));
         }

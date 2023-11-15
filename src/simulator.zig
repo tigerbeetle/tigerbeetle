@@ -666,8 +666,8 @@ pub const Simulator = struct {
     fn on_cluster_reply(
         cluster: *Cluster,
         reply_client: usize,
-        request: Message.Request,
-        reply: Message.Reply,
+        request: *Message.Request,
+        reply: *Message.Reply,
     ) void {
         // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
@@ -677,13 +677,13 @@ pub const Simulator = struct {
             defer simulator.reply_sequence.next();
 
             const commit_client = simulator.cluster.clients[commit.client_index];
-            assert(commit.reply.base.references == 1);
+            assert(commit.reply.references == 1);
             assert(commit.reply.header.command == .reply);
             assert(commit.reply.header.client == commit_client.id);
             assert(commit.reply.header.request == commit.request.header.request);
             assert(commit.reply.header.operation == commit.request.header.operation);
 
-            assert(commit.request.base.references == 1);
+            assert(commit.request.references == 1);
             assert(commit.request.header.command == .request);
             assert(commit.request.header.client == commit_client.id);
 
@@ -759,7 +759,7 @@ pub const Simulator = struct {
         );
         // Since we already checked the client's request queue for free space, `client.request()`
         // should always queue the request.
-        assert(request_message == client.request_queue.tail_ptr().?.message.base);
+        assert(request_message == client.request_queue.tail_ptr().?.message.base());
         assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
         assert(request_message.header.into(.request).?.operation.cast(StateMachine) ==
             request_metadata.operation);

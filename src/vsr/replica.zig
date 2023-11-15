@@ -95,7 +95,7 @@ const Nonce = u128;
 
 const Prepare = struct {
     /// The current prepare message (used to cross-check prepare_ok messages, and for resending).
-    message: Message.Prepare,
+    message: *Message.Prepare,
 
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas.
     ok_from_all_replicas: QuorumCounter = quorum_counter_null,
@@ -105,12 +105,12 @@ const Prepare = struct {
 };
 
 const Request = struct {
-    message: Message.Request,
+    message: *Message.Request,
     realtime: i64,
 };
 
-const DVCQuorumMessages = [constants.replicas_max]?Message.DoViewChange;
-const dvc_quorum_messages_null = [_]?Message.DoViewChange{null} ** constants.replicas_max;
+const DVCQuorumMessages = [constants.replicas_max]?*Message.DoViewChange;
+const dvc_quorum_messages_null = [_]?*Message.DoViewChange{null} ** constants.replicas_max;
 
 const QuorumCounter = std.StaticBitSet(constants.replicas_max);
 const quorum_counter_null = QuorumCounter.initEmpty();
@@ -137,7 +137,7 @@ pub fn ReplicaType(
             read: Grid.Read,
             replica: *Self,
             destination: u8,
-            message: Message.Block,
+            message: *Message.Block,
         };
 
         const BlockWrite = struct {
@@ -439,7 +439,7 @@ pub fn ReplicaType(
         event_callback: ?*const fn (replica: *const Self, event: ReplicaEvent) void = null,
 
         /// The prepare message being committed.
-        commit_prepare: ?Message.Prepare = null,
+        commit_prepare: ?*Message.Prepare = null,
 
         tracer_slot_commit: ?tracer.SpanStart = null,
         tracer_slot_checkpoint: ?tracer.SpanStart = null,
@@ -1147,7 +1147,7 @@ pub fn ReplicaType(
         }
 
         /// Pings are used by replicas to synchronise cluster time and to probe for network connectivity.
-        fn on_ping(self: *Self, message: Message.Ping) void {
+        fn on_ping(self: *Self, message: *const Message.Ping) void {
             assert(message.header.command == .ping);
             if (self.status != .normal and self.status != .view_change) return;
 
@@ -1170,7 +1170,7 @@ pub fn ReplicaType(
             }));
         }
 
-        fn on_pong(self: *Self, message: Message.Pong) void {
+        fn on_pong(self: *Self, message: *const Message.Pong) void {
             assert(message.header.command == .pong);
             if (message.header.replica == self.replica) {
                 log.warn("{}: on_pong: misdirected message (self)", .{self.replica});
@@ -1188,7 +1188,7 @@ pub fn ReplicaType(
         }
 
         /// Pings are used by clients to learn about the current view.
-        fn on_ping_client(self: *Self, message: Message.PingClient) void {
+        fn on_ping_client(self: *Self, message: *const Message.PingClient) void {
             assert(message.header.command == .ping_client);
             assert(message.header.client != 0);
 
@@ -1211,7 +1211,7 @@ pub fn ReplicaType(
         /// Otherwise, when there is room in the pipeline's request queue:
         ///   The request is queued, and will be dequeued & prepared when the pipeline head commits.
         /// Otherwise, drop the request.
-        fn on_request(self: *Self, message: Message.Request) void {
+        fn on_request(self: *Self, message: *Message.Request) void {
             if (self.ignore_request_message(message)) return;
 
             assert(self.status == .normal);
@@ -1267,7 +1267,7 @@ pub fn ReplicaType(
         /// The remaining problem then is tail latency tolerance for network latency spikes.
         /// If the next replica is down or partitioned, then the primary's prepare timeout will fire,
         /// and the primary will resend but to another replica, until it receives enough prepare_ok's.
-        fn on_prepare(self: *Self, message: Message.Prepare) void {
+        fn on_prepare(self: *Self, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
@@ -1352,7 +1352,7 @@ pub fn ReplicaType(
             self.append(message);
         }
 
-        fn on_prepare_ok(self: *Self, message: Message.PrepareOk) void {
+        fn on_prepare_ok(self: *Self, message: *Message.PrepareOk) void {
             assert(message.header.command == .prepare_ok);
             if (self.ignore_prepare_ok(message)) return;
 
@@ -1437,7 +1437,7 @@ pub fn ReplicaType(
             self.commit_pipeline();
         }
 
-        fn on_reply(self: *Self, message: Message.Reply) void {
+        fn on_reply(self: *Self, message: *Message.Reply) void {
             assert(message.header.command == .reply);
             assert(message.header.replica < self.replica_count);
 
@@ -1491,7 +1491,7 @@ pub fn ReplicaType(
         /// TODO The primary should stand down if it sees too many retries in on_prepare_timeout().
         /// It's possible for the network to be one-way partitioned so that backups don't see the
         /// primary as down, but neither can the primary hear from the backups.
-        fn on_commit(self: *Self, message: Message.Commit) void {
+        fn on_commit(self: *Self, message: *const Message.Commit) void {
             assert(message.header.command == .commit);
             assert(message.header.replica < self.replica_count);
 
@@ -1544,7 +1544,7 @@ pub fn ReplicaType(
             self.commit_journal(message.header.commit);
         }
 
-        fn on_repair(self: *Self, message: Message.Prepare) void {
+        fn on_repair(self: *Self, message: *Message.Prepare) void {
             assert(message.header.command == .prepare);
 
             if (self.status != .normal and self.status != .view_change) {
@@ -1601,7 +1601,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn on_start_view_change(self: *Self, message: Message.StartViewChange) void {
+        fn on_start_view_change(self: *Self, message: *Message.StartViewChange) void {
             assert(message.header.command == .start_view_change);
             if (self.ignore_start_view_change_message(message)) return;
 
@@ -1660,9 +1660,9 @@ pub fn ReplicaType(
         ///
         /// When a new backup receives a do_view_change message for a new view, it transitions to
         /// that new view in view-change status and begins to broadcast its own DVC.
-        fn on_do_view_change(self: *Self, message: Message.DoViewChange) void {
+        fn on_do_view_change(self: *Self, message: *Message.DoViewChange) void {
             assert(message.header.command == .do_view_change);
-            if (self.ignore_view_change_message(message.base)) return;
+            if (self.ignore_view_change_message(message.base_const())) return;
 
             assert(!self.solo());
             assert(self.status == .view_change);
@@ -1817,9 +1817,9 @@ pub fn ReplicaType(
         /// they send a ⟨prepare_ok v, n, i⟩ message to the primary; here n is the op-number. Then
         /// they execute all operations known to be committed that they haven’t executed previously,
         /// advance their commit number, and update the information in their client table.
-        fn on_start_view(self: *Self, message: Message.StartView) void {
+        fn on_start_view(self: *Self, message: *const Message.StartView) void {
             assert(message.header.command == .start_view);
-            if (self.ignore_view_change_message(message.base)) return;
+            if (self.ignore_view_change_message(message.base_const())) return;
 
             assert(self.status == .view_change or
                 self.status == .normal or
@@ -1860,7 +1860,7 @@ pub fn ReplicaType(
             }
             assert(self.view == message.header.view);
 
-            const view_headers = message_body_as_view_headers(message.base);
+            const view_headers = message_body_as_view_headers(message.base_const());
             assert(view_headers.command == .start_view);
             assert(view_headers.slice[0].op == message.header.op);
 
@@ -1932,10 +1932,10 @@ pub fn ReplicaType(
 
         fn on_request_start_view(
             self: *Self,
-            message: Message.RequestStartView,
+            message: *const Message.RequestStartView,
         ) void {
             assert(message.header.command == .request_start_view);
-            if (self.ignore_repair_message(message.base)) return;
+            if (self.ignore_repair_message(message.base_const())) return;
 
             assert(self.status == .normal);
             assert(self.view == self.log_view);
@@ -1946,7 +1946,7 @@ pub fn ReplicaType(
             const start_view = self.create_start_view_message(message.header.nonce);
             defer self.message_bus.unref(start_view);
 
-            assert(start_view.base.references == 1);
+            assert(start_view.references == 1);
             assert(start_view.header.command == .start_view);
             assert(start_view.header.view == self.view);
             assert(start_view.header.op == self.op);
@@ -1964,9 +1964,9 @@ pub fn ReplicaType(
         /// to the cluster. The cluster sees the replica as an underwriter of a guaranteed
         /// prepare. If a guaranteed prepare is found to by faulty, the replica must repair it
         /// to restore durability.
-        fn on_request_prepare(self: *Self, message: Message.RequestPrepare) void {
+        fn on_request_prepare(self: *Self, message: *const Message.RequestPrepare) void {
             assert(message.header.command == .request_prepare);
-            if (self.ignore_repair_message(message.base)) return;
+            if (self.ignore_repair_message(message.base_const())) return;
 
             assert(self.node_count > 1);
             maybe(self.status == .recovering_head);
@@ -2026,7 +2026,7 @@ pub fn ReplicaType(
 
         fn on_request_prepare_read(
             self: *Self,
-            prepare: ?Message.Prepare,
+            prepare: ?*Message.Prepare,
             destination_replica: ?u8,
         ) void {
             const message = prepare orelse {
@@ -2046,9 +2046,9 @@ pub fn ReplicaType(
             self.send_message_to_replica(destination_replica.?, message);
         }
 
-        fn on_request_headers(self: *Self, message: Message.RequestHeaders) void {
+        fn on_request_headers(self: *Self, message: *const Message.RequestHeaders) void {
             assert(message.header.command == .request_headers);
-            if (self.ignore_repair_message(message.base)) return;
+            if (self.ignore_repair_message(message.base_const())) return;
 
             maybe(self.status == .recovering_head);
             assert(message.header.replica != self.replica);
@@ -2095,16 +2095,16 @@ pub fn ReplicaType(
             response.header.set_checksum();
 
             // Assert that the headers are valid.
-            _ = message_body_as_prepare_headers(response.base);
+            _ = message_body_as_prepare_headers(response.base_const());
 
             self.send_message_to_replica(message.header.replica, response);
         }
 
-        fn on_request_reply(self: *Self, message: Message.RequestReply) void {
+        fn on_request_reply(self: *Self, message: *const Message.RequestReply) void {
             assert(message.header.command == .request_reply);
             assert(message.header.reply_client != 0);
 
-            if (self.ignore_repair_message(message.base)) return;
+            if (self.ignore_repair_message(message.base_const())) return;
             assert(message.header.replica != self.replica);
 
             const entry = self.client_sessions().get(message.header.reply_client) orelse {
@@ -2152,7 +2152,7 @@ pub fn ReplicaType(
         fn on_request_reply_read_callback(
             client_replies: *ClientReplies,
             reply_header: *const Header.Reply,
-            reply_: ?Message.Reply,
+            reply_: ?*Message.Reply,
             destination_replica: ?u8,
         ) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
@@ -2181,9 +2181,9 @@ pub fn ReplicaType(
             self.send_message_to_replica(destination_replica.?, reply);
         }
 
-        fn on_headers(self: *Self, message: Message.Headers) void {
+        fn on_headers(self: *Self, message: *const Message.Headers) void {
             assert(message.header.command == .headers);
-            if (self.ignore_repair_message(message.base)) return;
+            if (self.ignore_repair_message(message.base_const())) return;
 
             assert(self.status == .normal or self.status == .view_change);
             maybe(message.header.view == self.view);
@@ -2194,7 +2194,7 @@ pub fn ReplicaType(
 
             var op_min: ?u64 = null;
             var op_max: ?u64 = null;
-            for (message_body_as_prepare_headers(message.base)) |*h| {
+            for (message_body_as_prepare_headers(message.base_const())) |*h| {
                 if (op_min == null or h.op < op_min.?) op_min = h.op;
                 if (op_max == null or h.op > op_max.?) op_max = h.op;
                 _ = self.repair_header(h);
@@ -2204,7 +2204,7 @@ pub fn ReplicaType(
             self.repair();
         }
 
-        fn on_request_blocks(self: *Self, message: Message.RequestBlocks) void {
+        fn on_request_blocks(self: *Self, message: *const Message.RequestBlocks) void {
             assert(message.header.command == .request_blocks);
 
             if (message.header.replica == self.replica) {
@@ -2328,7 +2328,7 @@ pub fn ReplicaType(
             self.send_message_to_replica(read.destination, read.message);
         }
 
-        fn on_block(self: *Self, message: Message.Block) void {
+        fn on_block(self: *Self, message: *const Message.Block) void {
             maybe(self.state_machine_opened);
             assert(message.header.command == .block);
             assert(message.header.size <= constants.block_size);
@@ -2417,10 +2417,10 @@ pub fn ReplicaType(
 
         fn on_request_sync_checkpoint(
             self: *Self,
-            message: Message.RequestSyncCheckpoint,
+            message: *Message.RequestSyncCheckpoint,
         ) void {
             assert(message.header.command == .request_sync_checkpoint);
-            if (self.ignore_sync_request_message(message.base)) return;
+            if (self.ignore_sync_request_message(message.base_const())) return;
 
             assert(message.header.checkpoint_op ==
                 self.superblock.staging.vsr_state.checkpoint.commit_min);
@@ -2429,10 +2429,10 @@ pub fn ReplicaType(
             self.send_sync_checkpoint(.{ .replica = message.header.replica });
         }
 
-        fn on_sync_checkpoint(self: *Self, message: Message.SyncCheckpoint) void {
+        fn on_sync_checkpoint(self: *Self, message: *const Message.SyncCheckpoint) void {
             assert(message.header.replica < self.replica_count);
             assert(message.header.command == .sync_checkpoint);
-            if (self.ignore_sync_response_message(message.base)) return;
+            if (self.ignore_sync_response_message(message.base_const())) return;
 
             const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
             assert(stage.target.checkpoint_id == message.header.checkpoint_id);
@@ -2893,7 +2893,7 @@ pub fn ReplicaType(
 
         fn primary_receive_do_view_change(
             self: *Self,
-            message: Message.DoViewChange,
+            message: *Message.DoViewChange,
         ) void {
             assert(!self.solo());
             assert(self.status == .view_change);
@@ -2967,7 +2967,7 @@ pub fn ReplicaType(
         fn count_message_and_receive_quorum_exactly_once(
             self: *Self,
             counter: *QuorumCounter,
-            message: Message.PrepareOk,
+            message: *Message.PrepareOk,
             threshold: u32,
         ) ?usize {
             assert(threshold >= 1);
@@ -3028,7 +3028,7 @@ pub fn ReplicaType(
             return count;
         }
 
-        fn append(self: *Self, message: Message.Prepare) void {
+        fn append(self: *Self, message: *Message.Prepare) void {
             assert(self.status == .normal);
             assert(message.header.command == .prepare);
             assert(message.header.operation != .reserved);
@@ -3275,7 +3275,7 @@ pub fn ReplicaType(
 
         fn commit_journal_next_callback(
             self: *Self,
-            prepare: ?Message.Prepare,
+            prepare: ?*Message.Prepare,
             destination_replica: ?u8,
         ) void {
             assert(self.status == .normal or self.status == .view_change or
@@ -3643,10 +3643,10 @@ pub fn ReplicaType(
             self.commit_dispatch(.next);
         }
 
-        fn commit_op(self: *Self, prepare: Message.Prepare) void {
+        fn commit_op(self: *Self, prepare: *const Message.Prepare) void {
             // TODO Can we add more checks around allowing commit_op() during a view change?
             assert(self.commit_stage == .setup_client_replies);
-            assert(self.commit_prepare.?.base == prepare.base);
+            assert(self.commit_prepare.? == prepare);
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.writes.available() > 0);
@@ -3796,11 +3796,11 @@ pub fn ReplicaType(
         // Here, we just copy over the result.
         fn commit_reconfiguration(
             self: *Self,
-            prepare: Message.Prepare,
+            prepare: *const Message.Prepare,
             output_buffer: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             assert(self.commit_stage == .setup_client_replies);
-            assert(self.commit_prepare.?.base == prepare.base);
+            assert(self.commit_prepare.? == prepare);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation == .reconfigure);
             assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.ReconfigurationRequest));
@@ -3825,7 +3825,7 @@ pub fn ReplicaType(
         /// Creates an entry in the client table when registering a new client session.
         /// Asserts that the new session does not yet exist.
         /// Evicts another entry deterministically, if necessary, to make space for the insert.
-        fn client_table_entry_create(self: *Self, reply: Message.Reply) void {
+        fn client_table_entry_create(self: *Self, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
@@ -3883,7 +3883,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn client_table_entry_update(self: *Self, reply: Message.Reply) void {
+        fn client_table_entry_update(self: *Self, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.operation != .register);
             assert(reply.header.client > 0);
@@ -3927,7 +3927,7 @@ pub fn ReplicaType(
 
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_start_view_message(self: *Self, nonce: u128) Message.StartView {
+        fn create_start_view_message(self: *Self, nonce: u128) *Message.StartView {
             assert(self.status == .normal);
             assert(self.replica == self.primary_index(self.view));
             assert(self.commit_min == self.commit_max);
@@ -4097,7 +4097,7 @@ pub fn ReplicaType(
             assert(self.loopback_queue == null);
         }
 
-        fn ignore_ping_client(self: *const Self, message: Message.PingClient) bool {
+        fn ignore_ping_client(self: *const Self, message: *const Message.PingClient) bool {
             assert(message.header.command == .ping_client);
             assert(message.header.client != 0);
 
@@ -4117,7 +4117,7 @@ pub fn ReplicaType(
             return false;
         }
 
-        fn ignore_prepare_ok(self: *Self, message: Message.PrepareOk) bool {
+        fn ignore_prepare_ok(self: *Self, message: *const Message.PrepareOk) bool {
             assert(message.header.command == .prepare_ok);
             assert(message.header.replica < self.replica_count);
 
@@ -4268,7 +4268,7 @@ pub fn ReplicaType(
             return false;
         }
 
-        fn ignore_request_message(self: *Self, message: Message.Request) bool {
+        fn ignore_request_message(self: *Self, message: *Message.Request) bool {
             if (self.standby()) {
                 log.warn("{}: on_request: misdirected message (standby)", .{self.replica});
                 return true;
@@ -4350,7 +4350,7 @@ pub fn ReplicaType(
 
         /// Returns whether the request is stale, or a duplicate of the latest committed request.
         /// Resends the reply to the latest request if the request has been committed.
-        fn ignore_request_message_duplicate(self: *Self, message: Message.Request) bool {
+        fn ignore_request_message_duplicate(self: *Self, message: *const Message.Request) bool {
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.syncing == .idle);
@@ -4434,7 +4434,7 @@ pub fn ReplicaType(
 
         fn on_request_repeat_reply(
             self: *Self,
-            message: Message.Request,
+            message: *const Message.Request,
             entry: *const ClientSessions.Entry,
         ) void {
             assert(self.status == .normal);
@@ -4483,7 +4483,7 @@ pub fn ReplicaType(
         fn on_request_repeat_reply_callback(
             client_replies: *ClientReplies,
             reply_header: *const Header.Reply,
-            reply_: ?Message.Reply,
+            reply_: ?*Message.Reply,
             destination_replica: ?u8,
         ) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
@@ -4514,7 +4514,7 @@ pub fn ReplicaType(
         /// Returns whether the replica is eligible to process this request as the primary.
         /// Takes the client's perspective into account if the client is aware of a newer view.
         /// Forwards requests to the primary if the client has an older view.
-        fn ignore_request_message_backup(self: *Self, message: Message.Request) bool {
+        fn ignore_request_message_backup(self: *Self, message: *Message.Request) bool {
             assert(self.status == .normal);
             assert(message.header.command == .request);
 
@@ -4556,7 +4556,7 @@ pub fn ReplicaType(
             return true;
         }
 
-        fn ignore_request_message_preparing(self: *Self, message: Message.Request) bool {
+        fn ignore_request_message_preparing(self: *Self, message: *const Message.Request) bool {
             assert(self.status == .normal);
             assert(self.primary());
 
@@ -4603,7 +4603,7 @@ pub fn ReplicaType(
 
         fn ignore_start_view_change_message(
             self: *const Self,
-            message: Message.StartViewChange,
+            message: *const Message.StartViewChange,
         ) bool {
             assert(message.header.command == .start_view_change);
             assert(message.header.replica < self.replica_count);
@@ -4845,7 +4845,7 @@ pub fn ReplicaType(
             return false;
         }
 
-        fn is_repair(self: *const Self, message: Message.Prepare) bool {
+        fn is_repair(self: *const Self, message: *const Message.Prepare) bool {
             assert(message.header.command == .prepare);
 
             if (self.status == .normal) {
@@ -5163,7 +5163,7 @@ pub fn ReplicaType(
             const prepare_timestamp = self.state_machine.prepare_timestamp;
 
             // Reuse the Request message as a Prepare message by replacing the header.
-            const message = request.message.base.build(.prepare);
+            const message = request.message.base().build(.prepare);
 
             // Copy the header to the stack before overwriting it to avoid UB.
             const request_header: Header.Request = request.message.header.*;
@@ -5223,7 +5223,7 @@ pub fn ReplicaType(
 
         fn primary_prepare_reconfiguration(
             self: *const Self,
-            request: Message.Request,
+            request: *Message.Request,
         ) void {
             assert(self.primary());
             assert(request.header.command == .request);
@@ -5264,7 +5264,7 @@ pub fn ReplicaType(
             self: *Self,
             op: u64,
             checksum: u128,
-        ) ?Message.Prepare {
+        ) ?*Message.Prepare {
             return switch (self.pipeline) {
                 .cache => |*cache| cache.prepare_by_op_and_checksum(op, checksum),
                 .queue => |*queue| if (queue.prepare_by_op_and_checksum(op, checksum)) |prepare|
@@ -5724,7 +5724,7 @@ pub fn ReplicaType(
 
         fn repair_pipeline_read_callback(
             self: *Self,
-            prepare: ?Message.Prepare,
+            prepare: ?*Message.Prepare,
             destination_replica: ?u8,
         ) void {
             assert(destination_replica == null);
@@ -6044,7 +6044,7 @@ pub fn ReplicaType(
         /// Does not flood the network with prepares that have already committed.
         /// Replication to standbys works similarly, jumping off the replica just before primary.
         /// TODO Use recent heartbeat data for next replica to leapfrog if faulty (optimization).
-        fn replicate(self: *Self, message: Message.Prepare) void {
+        fn replicate(self: *Self, message: *Message.Prepare) void {
             assert(self.status == .normal);
             assert(message.header.command == .prepare);
             assert(message.header.view == self.view);
@@ -6418,7 +6418,7 @@ pub fn ReplicaType(
             }));
         }
 
-        fn send_reply_message_to_client(self: *Self, reply: Message.Reply) void {
+        fn send_reply_message_to_client(self: *Self, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.view <= self.view);
 
@@ -6432,7 +6432,7 @@ pub fn ReplicaType(
 
             if (reply.header.view == self.view) {
                 // Hot path: no need to clone the message if the view is the same.
-                self.message_bus.send_message_to_client(reply.header.client, reply.base);
+                self.message_bus.send_message_to_client(reply.header.client, reply.base());
                 return;
             }
 
@@ -6452,7 +6452,7 @@ pub fn ReplicaType(
             reply_copy.header.view = self.view;
             reply_copy.header.set_checksum();
 
-            self.message_bus.send_message_to_client(reply.header.client, reply_copy.base);
+            self.message_bus.send_message_to_client(reply.header.client, reply_copy.base());
         }
 
         fn send_header_to_client(self: *Self, client: u128, header: Header) void {
@@ -6496,9 +6496,12 @@ pub fn ReplicaType(
             self.send_message_to_replica_base(replica, message);
         }
 
-        /// `message` is a `MessageType(command)`.
+        /// `message` is a `*MessageType(command)`.
         fn send_message_to_other_replicas(self: *Self, message: anytype) void {
-            self.send_message_to_other_replicas_base(message.base);
+            assert(@typeInfo(@TypeOf(message)) == .Pointer);
+            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+
+            self.send_message_to_other_replicas_base(message.base());
         }
 
         fn send_message_to_other_replicas_base(self: *Self, message: *Message) void {
@@ -6510,9 +6513,12 @@ pub fn ReplicaType(
             }
         }
 
-        /// `message` is a `MessageType(command)`.
+        /// `message` is a `*MessageType(command)`.
         fn send_message_to_replica(self: *Self, replica: u8, message: anytype) void {
-            self.send_message_to_replica_base(replica, message.base);
+            assert(@typeInfo(@TypeOf(message)) == .Pointer);
+            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+
+            self.send_message_to_replica_base(replica, message.base());
         }
 
         fn send_message_to_replica_base(self: *Self, replica: u8, message: *Message) void {
@@ -7087,7 +7093,7 @@ pub fn ReplicaType(
             const dvcs_uncanonical =
                 DVCQuorum.dvcs_uncanonical(self.do_view_change_from_all_replicas);
             for (dvcs_uncanonical.const_slice()) |message| {
-                const message_headers = message_body_as_view_headers(message.base);
+                const message_headers = message_body_as_view_headers(message.base_const());
                 for (message_headers.slice) |*header| {
                     if (vsr.Headers.dvc_header_type(header) != .valid) continue;
 
@@ -7135,7 +7141,7 @@ pub fn ReplicaType(
                 );
 
                 const BitSet = std.bit_set.IntegerBitSet(128);
-                const dvc_headers = message_body_as_view_headers(dvc.base);
+                const dvc_headers = message_body_as_view_headers(dvc.base_const());
                 const dvc_nacks = BitSet{ .mask = dvc.header.nack_bitset };
                 const dvc_present = BitSet{ .mask = dvc.header.present_bitset };
                 for (dvc_headers.slice, 0..) |*header, i| {
@@ -7845,7 +7851,7 @@ pub fn ReplicaType(
 
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |grid_read| {
-                assert(grid_read.message.base.references == 1);
+                assert(grid_read.message.base().references == 1);
 
                 self.message_bus.unref(grid_read.message);
                 self.grid_reads.release(grid_read);
@@ -8475,13 +8481,13 @@ pub fn ReplicaType(
 
         fn write_prepare(
             self: *Self,
-            message: Message.Prepare,
+            message: *Message.Prepare,
             trigger: Journal.Write.Trigger,
         ) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.status == .normal or self.primary_index(self.view) == self.replica);
             assert(self.status == .normal or self.do_view_change_quorum);
-            assert(message.base.references > 0);
+            assert(message.base().references > 0);
             assert(message.header.command == .prepare);
             assert(message.header.operation != .reserved);
             assert(message.header.view <= self.view);
@@ -8523,7 +8529,7 @@ pub fn ReplicaType(
 
         fn write_prepare_callback(
             self: *Self,
-            wrote: ?Message.Prepare,
+            wrote: ?*Message.Prepare,
             trigger: Journal.Write.Trigger,
         ) void {
             // `null` indicates that we did not complete the write for some reason.
@@ -8822,7 +8828,7 @@ pub fn ReplicaType(
 /// - uncommitted — if the header is chosen, but cannot be recovered from any replica, then
 ///   it will be discarded by the nack protocol.
 const DVCQuorum = struct {
-    const DVCArray = stdx.BoundedArray(Message.DoViewChange, constants.replicas_max);
+    const DVCArray = stdx.BoundedArray(*const Message.DoViewChange, constants.replicas_max);
 
     fn verify(dvc_quorum: DVCQuorumMessages) void {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
@@ -8833,8 +8839,8 @@ const DVCQuorum = struct {
             for (dvcs.const_slice()[0..i]) |dvc_b| {
                 if (dvc_a.header.log_view != dvc_b.header.log_view) continue;
 
-                const headers_a = message_body_as_view_headers(dvc_a.base);
-                const headers_b = message_body_as_view_headers(dvc_b.base);
+                const headers_a = message_body_as_view_headers(dvc_a.base_const());
+                const headers_b = message_body_as_view_headers(dvc_b.base_const());
                 // Find the intersection of the ops covered by each DVC.
                 const op_max = @min(dvc_a.header.op, dvc_b.header.op);
                 const op_min = @max(
@@ -8858,7 +8864,7 @@ const DVCQuorum = struct {
         }
     }
 
-    fn verify_message(message: Message.DoViewChange) void {
+    fn verify_message(message: *const Message.DoViewChange) void {
         assert(message.header.command == .do_view_change);
         assert(message.header.commit_min <= message.header.op);
 
@@ -8872,7 +8878,7 @@ const DVCQuorum = struct {
         assert(log_view < message.header.view);
 
         // Ignore the result, init() verifies the headers.
-        const headers = message_body_as_view_headers(message.base);
+        const headers = message_body_as_view_headers(message.base_const());
         assert(headers.slice.len >= 1);
         assert(headers.slice.len <= constants.pipeline_prepare_queue_max + 1);
         assert(headers.slice[0].op == message.header.op);
@@ -8969,7 +8975,7 @@ const DVCQuorum = struct {
 
         var commit_max_: u64 = 0;
         for (dvcs.const_slice()) |dvc| {
-            const dvc_headers = message_body_as_view_headers(dvc.base);
+            const dvc_headers = message_body_as_view_headers(dvc.base_const());
             // DVC generation stops when a header with op ≤ commit_max is appended.
             const dvc_commit_max_tail = dvc_headers.slice[dvc_headers.slice.len - 1].op;
             // An op cannot be uncommitted if it is definitely outside the pipeline.
@@ -8991,7 +8997,7 @@ const DVCQuorum = struct {
         var timestamp_max_: ?u64 = null;
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
         for (dvcs.const_slice()) |dvc| {
-            const dvc_headers = message_body_as_view_headers(dvc.base);
+            const dvc_headers = message_body_as_view_headers(dvc.base_const());
             const dvc_head = &dvc_headers.slice[0];
             if (timestamp_max_ == null or timestamp_max_.? < dvc_head.timestamp) {
                 timestamp_max_ = dvc_head.timestamp;
@@ -9063,7 +9069,7 @@ const DVCQuorum = struct {
                 // This DVC is canonical, but lagging far behind.
                 if (dvc.header.op < op) continue;
 
-                const headers = message_body_as_view_headers(dvc.base);
+                const headers = message_body_as_view_headers(dvc.base_const());
                 const header_index = dvc.header.op - op;
                 assert(header_index <= headers.slice.len);
 
@@ -9081,7 +9087,7 @@ const DVCQuorum = struct {
                     continue;
                 }
 
-                const headers = message_body_as_view_headers(dvc.base);
+                const headers = message_body_as_view_headers(dvc.base_const());
                 const header_index = dvc.header.op - op;
                 if (header_index >= headers.slice.len) {
                     nacks += 1;
@@ -9168,7 +9174,7 @@ const DVCQuorum = struct {
 
                 if (op > dvc.header.op) continue;
 
-                const dvc_headers = message_body_as_view_headers(dvc.base);
+                const dvc_headers = message_body_as_view_headers(dvc.base_const());
                 const dvc_header_index = dvc.header.op - op;
                 if (dvc_header_index >= dvc_headers.slice.len) continue;
 
@@ -9337,7 +9343,7 @@ const PipelineQueue = struct {
 
     /// Searches the pipeline for a prepare matching the given ack.
     /// Asserts that the returned prepare corresponds to the prepare_ok.
-    fn prepare_by_prepare_ok(pipeline: *PipelineQueue, ok: Message.PrepareOk) ?*Prepare {
+    fn prepare_by_prepare_ok(pipeline: *PipelineQueue, ok: *const Message.PrepareOk) ?*Prepare {
         assert(ok.header.command == .prepare_ok);
 
         const prepare = pipeline.prepare_by_op_and_checksum(
@@ -9370,12 +9376,12 @@ const PipelineQueue = struct {
         var message: ?*const Message = null;
         var prepare_iterator = pipeline.prepare_queue.iterator();
         while (prepare_iterator.next_ptr()) |prepare| {
-            if (prepare.message.header.client == client_id) message = prepare.message.base;
+            if (prepare.message.header.client == client_id) message = prepare.message.base();
         }
 
         var request_iterator = pipeline.request_queue.iterator();
         while (request_iterator.next()) |request| {
-            if (request.message.header.client == client_id) message = request.message.base;
+            if (request.message.header.client == client_id) message = request.message.base();
         }
         return message;
     }
@@ -9408,7 +9414,7 @@ const PipelineQueue = struct {
         if (constants.verify) pipeline.verify();
     }
 
-    fn push_prepare(pipeline: *PipelineQueue, message: Message.Prepare) void {
+    fn push_prepare(pipeline: *PipelineQueue, message: *Message.Prepare) void {
         assert(message.header.command == .prepare);
         assert(message.header.operation != .reserved);
         if (pipeline.prepare_queue.tail()) |tail| {
@@ -9434,8 +9440,8 @@ const PipelineCache = struct {
         constants.pipeline_prepare_queue_max +
         constants.pipeline_request_queue_max;
 
-    prepares: [prepares_max]?Message.Prepare =
-        [_]?Message.Prepare{null} ** prepares_max,
+    prepares: [prepares_max]?*Message.Prepare =
+        [_]?*Message.Prepare{null} ** prepares_max,
 
     /// Converting a PipelineQueue to a PipelineCache discards all accumulated acks.
     /// "prepare_ok"s from previous views are not valid, even if the pipeline entry is reused
@@ -9485,7 +9491,7 @@ const PipelineCache = struct {
         pipeline: *PipelineCache,
         op: u64,
         checksum: u128,
-    ) ?Message.Prepare {
+    ) ?*Message.Prepare {
         const slot = op % prepares_max;
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
@@ -9494,7 +9500,7 @@ const PipelineCache = struct {
     }
 
     /// Returns the message evicted from the cache, if any.
-    fn insert(pipeline: *PipelineCache, prepare: Message.Prepare) ?Message.Prepare {
+    fn insert(pipeline: *PipelineCache, prepare: *Message.Prepare) ?*Message.Prepare {
         assert(prepare.header.command == .prepare);
         assert(prepare.header.operation != .reserved);
 

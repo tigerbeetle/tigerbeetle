@@ -63,13 +63,13 @@ pub const AOFEntry = extern struct {
     }
 
     /// Turn an AOFEntry back into a Message.
-    pub fn to_message(self: *AOFEntry, target: Message.Prepare) void {
+    pub fn to_message(self: *AOFEntry, target: *Message.Prepare) void {
         stdx.copy_disjoint(.inexact, u8, target.buffer, self.message[0..self.header().size]);
     }
 
     pub fn from_message(
         self: *AOFEntry,
-        message: Message.Prepare,
+        message: *const Message.Prepare,
         options: struct { replica: u64, primary: u64 },
         last_checksum: *?u128,
     ) void {
@@ -158,7 +158,7 @@ pub const AOF = struct {
     /// We don't bother returning a count of how much we wrote. Not being
     /// able to fully write the entire payload is an error, not an expected
     /// condition.
-    pub fn write(self: *AOF, message: Message.Prepare, options: struct {
+    pub fn write(self: *AOF, message: *const Message.Prepare, options: struct {
         replica: u64,
         primary: u64,
     }) !void {
@@ -290,7 +290,7 @@ pub const AOFReplayClient = struct {
     client: *Client,
     io: *IO,
     message_pool: *MessagePool,
-    inflight_message: ?Message.Request = null,
+    inflight_message: ?*Message.Request = null,
 
     pub fn init(allocator: std.mem.Allocator, raw_addresses: []const u8) !Self {
         var addresses = try vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max);
@@ -349,12 +349,12 @@ pub const AOFReplayClient = struct {
             if (header.operation.vsr_reserved()) continue;
 
             const message = self.client.get_message().build(.request);
-            errdefer self.client.release(message.base);
+            errdefer self.client.release(message.base());
 
             assert(self.inflight_message == null);
             self.inflight_message = message;
 
-            entry.to_message(message.base.build(.prepare));
+            entry.to_message(message.base().build(.prepare));
 
             message.header.* = .{
                 .client = self.client.id,
