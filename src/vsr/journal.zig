@@ -139,9 +139,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         pub const Read = struct {
             journal: *Journal,
             completion: Storage.Read,
-            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (
+                replica: *Replica,
+                prepare: ?*Message.Prepare,
+                destination_replica: ?u8,
+            ) void,
 
-            message: *Message,
+            message: *Message.Prepare,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -151,9 +155,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             pub const Trigger = enum { append, fix, repair, pipeline };
 
             journal: *Journal,
-            callback: *const fn (replica: *Replica, wrote: ?*Message, trigger: Trigger) void,
+            callback: *const fn (
+                replica: *Replica,
+                wrote: ?*Message.Prepare,
+                trigger: Trigger,
+            ) void,
 
-            message: *Message,
+            message: *Message.Prepare,
             trigger: Trigger,
 
             /// True if this Write has acquired a lock on a sector of headers.
@@ -205,7 +213,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// When the slot's header is `reserved`, the header's `op` is the slot index.
         ///
         /// During recovery, store the (unvalidated) headers of the prepare ring.
-        headers: []align(constants.sector_size) Header,
+        headers: []align(constants.sector_size) Header.Prepare,
 
         /// Store headers whose prepares are on disk.
         /// Redundant headers are updated after the corresponding prepare(s) are written,
@@ -222,7 +230,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///    which requires remote repair.
         ///
         /// During recovery, store the redundant (unvalidated) headers.
-        headers_redundant: []align(constants.sector_size) Header,
+        headers_redundant: []align(constants.sector_size) Header.Prepare,
 
         /// We copy-on-write to these buffers, as the in-memory headers may change while writing.
         /// The buffers belong to the IOP at the corresponding index in IOPS.
@@ -280,7 +288,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // assert(write_ahead_log_zone_size <= storage.size);
 
             var headers = try allocator.alignedAlloc(
-                Header,
+                Header.Prepare,
                 constants.sector_size,
                 slot_count,
             );
@@ -288,7 +296,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             for (headers) |*header| header.* = undefined;
 
             var headers_redundant = try allocator.alignedAlloc(
-                Header,
+                Header.Prepare,
                 constants.sector_size,
                 slot_count,
             );
@@ -391,44 +399,51 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        pub fn slot_for_header(journal: *const Journal, header: *const Header) Slot {
+        pub fn slot_for_header(journal: *const Journal, header: *const Header.Prepare) Slot {
             assert(header.command == .prepare);
+            assert(header.operation != .reserved);
             return journal.slot_for_op(header.op);
         }
 
-        pub fn slot_with_header(journal: *const Journal, header: *const Header) ?Slot {
+        pub fn slot_with_header(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+        ) ?Slot {
             assert(header.command == .prepare);
+            assert(header.operation != .reserved);
             return journal.slot_with_op_and_checksum(header.op, header.checksum);
         }
 
         /// Returns any existing header at the location indicated by header.op.
         /// The existing header may have an older or newer op number.
-        pub fn header_for_prepare(journal: *const Journal, header: *const Header) ?*const Header {
+        pub fn header_for_prepare(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+        ) ?*const Header.Prepare {
             assert(header.command == .prepare);
+            assert(header.operation != .reserved);
             return journal.header_for_op(header.op);
         }
 
         /// We use `op` directly to index into the headers array and locate ops without a scan.
         /// The existing header may have an older or newer op number.
-        pub fn header_for_op(journal: *const Journal, op: u64) ?*const Header {
+        pub fn header_for_op(journal: *const Journal, op: u64) ?*const Header.Prepare {
             const slot = journal.slot_for_op(op);
             const existing = &journal.headers[slot.index];
-            switch (existing.command) {
-                .prepare => {
-                    assert(journal.slot_for_op(existing.op).index == slot.index);
-                    return existing;
-                },
-                .reserved => {
-                    assert(existing.op == slot.index);
-                    return null;
-                },
-                else => unreachable,
+            assert(existing.command == .prepare);
+
+            if (existing.operation == .reserved) {
+                assert(existing.op == slot.index);
+                return null;
+            } else {
+                assert(journal.slot_for_op(existing.op).index == slot.index);
+                return existing;
             }
         }
 
         /// Returns the entry at `@mod(op)` location, but only if `entry.op == op`, else `null`.
         /// Be careful of using this without considering that there may still be an existing op.
-        pub fn header_with_op(journal: *const Journal, op: u64) ?*const Header {
+        pub fn header_with_op(journal: *const Journal, op: u64) ?*const Header.Prepare {
             if (journal.header_for_op(op)) |existing| {
                 if (existing.op == op) return existing;
             }
@@ -440,7 +455,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal: *const Journal,
             op: u64,
             checksum: u128,
-        ) ?*const Header {
+        ) ?*const Header.Prepare {
             if (journal.header_with_op(op)) |existing| {
                 assert(existing.op == op);
                 if (existing.checksum == checksum) return existing;
@@ -448,7 +463,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return null;
         }
 
-        pub fn previous_entry(journal: *const Journal, header: *const Header) ?*const Header {
+        pub fn previous_entry(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+        ) ?*const Header.Prepare {
             if (header.op == 0) {
                 return null;
             } else {
@@ -456,7 +474,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        pub fn next_entry(journal: *const Journal, header: *const Header) ?*const Header {
+        pub fn next_entry(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+        ) ?*const Header.Prepare {
             return journal.header_for_op(header.op + 1);
         }
 
@@ -466,38 +487,38 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             var op: u64 = 0;
             for (journal.headers) |*header| {
-                if (header.command == .prepare) {
+                if (header.operation != .reserved) {
                     if (header.op > op) op = header.op;
-                } else {
-                    assert(header.command == .reserved);
                 }
             }
             return op;
         }
 
         /// Returns the highest op number prepared, as per `header_ok()` in the untrusted headers.
-        fn op_maximum_headers_untrusted(cluster: u32, headers_untrusted: []const Header) u64 {
+        fn op_maximum_headers_untrusted(
+            cluster: u32,
+            headers_untrusted: []const Header.Prepare,
+        ) u64 {
             var op: u64 = 0;
             for (headers_untrusted, 0..) |*header_untrusted, slot_index| {
                 const slot = Slot{ .index = slot_index };
                 if (header_ok(cluster, slot, header_untrusted)) |header| {
-                    if (header.command == .prepare) {
+                    if (header.operation != .reserved) {
                         if (header.op > op) op = header.op;
-                    } else {
-                        assert(header.command == .reserved);
                     }
                 }
             }
             return op;
         }
 
-        pub fn has(journal: *const Journal, header: *const Header) bool {
+        pub fn has(journal: *const Journal, header: *const Header.Prepare) bool {
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
+            assert(header.operation != .reserved);
 
             const slot = journal.slot_for_op(header.op);
             const existing = &journal.headers[slot.index];
-            if (existing.command == .reserved) {
+            if (existing.operation == .reserved) {
                 return false;
             } else {
                 if (existing.checksum == header.checksum) {
@@ -510,7 +531,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         }
 
-        pub fn has_clean(journal: *const Journal, header: *const Header) bool {
+        pub fn has_clean(journal: *const Journal, header: *const Header.Prepare) bool {
             if (journal.slot_with_op_and_checksum(header.op, header.checksum)) |slot| {
                 if (!journal.dirty.bit(slot)) {
                     assert(journal.prepare_inhabited[slot.index]);
@@ -521,7 +542,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             return false;
         }
 
-        pub fn has_dirty(journal: *const Journal, header: *const Header) bool {
+        pub fn has_dirty(journal: *const Journal, header: *const Header.Prepare) bool {
             return journal.has(header) and journal.dirty.bit(journal.slot_with_header(header).?);
         }
 
@@ -536,7 +557,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal: *const Journal,
             op_min: u64,
             op_max: u64,
-            dest: []Header,
+            dest: []Header.Prepare,
         ) usize {
             assert(journal.status == .recovered);
             assert(op_min <= op_max);
@@ -602,7 +623,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var range: ?HeaderRange = null;
 
             // We set B, the op after op_max, to null because we only examine breaks < op_max:
-            var B: ?*const Header = null;
+            var B: ?*const Header.Prepare = null;
 
             var op = op_max + 1;
             while (op > op_min) {
@@ -693,7 +714,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             journal: *Journal,
-            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (
+                replica: *Replica,
+                prepare: ?*Message.Prepare,
+                destination_replica: ?u8,
+            ) void,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -730,7 +755,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There may or may not be an in-memory header.
         pub fn read_prepare_with_op_and_checksum(
             journal: *Journal,
-            callback: *const fn (replica: *Replica, prepare: ?*Message, destination_replica: ?u8) void,
+            callback: *const fn (
+                replica: *Replica,
+                prepare: ?*Message.Prepare,
+                destination_replica: ?u8,
+            ) void,
             op: u64,
             checksum: u128,
             destination_replica: ?u8,
@@ -744,7 +773,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(journal.reads.available() > 0);
             }
 
-            const message = replica.message_bus.get_message();
+            const message = replica.message_bus.get_message(.prepare);
             defer replica.message_bus.unref(message);
 
             var message_size: usize = constants.message_size_max;
@@ -957,7 +986,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const chunk_index = journal.header_chunks_requested.findFirstSet() orelse return;
             assert(!journal.header_chunks_recovered.isSet(chunk_index));
 
-            const message = replica.message_bus.get_message();
+            const message = replica.message_bus.get_message(.prepare);
             defer replica.message_bus.unref(message);
 
             const chunk_read = journal.reads.acquire().?;
@@ -1022,10 +1051,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // Directly store all the redundant headers in `journal.headers_redundant` (including any
             // that are invalid or corrupt). As the prepares are recovered, these will be replaced
             // or removed as necessary.
-            const chunk_headers = std.mem.bytesAsSlice(Header, chunk_buffer);
+            const chunk_headers = std.mem.bytesAsSlice(Header.Prepare, chunk_buffer);
             stdx.copy_disjoint(
                 .exact,
-                Header,
+                Header.Prepare,
                 journal.headers_redundant[chunk_index * headers_per_message ..][0..chunk_headers.len],
                 chunk_headers,
             );
@@ -1039,7 +1068,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.recover_headers();
         }
 
-        fn recover_headers_buffer(message: *Message, offset: u64) []align(@alignOf(Header)) u8 {
+        fn recover_headers_buffer(
+            message: *Message.Prepare,
+            offset: u64,
+        ) []align(@alignOf(Header)) u8 {
             const max = @min(constants.message_size_max, headers_size - offset);
             assert(max % constants.sector_size == 0);
             assert(max % @sizeOf(Header) == 0);
@@ -1084,7 +1116,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             const slot_index = journal.dirty.bits.findFirstSet() orelse return;
             const slot = Slot{ .index = slot_index };
-            const message = replica.message_bus.get_message();
+            const message = replica.message_bus.get_message(.prepare);
             defer replica.message_bus.unref(message);
 
             const read = journal.reads.acquire().?;
@@ -1239,7 +1271,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 // `prepare_checksums` improves the availability of `request_prepare` by being more
                 // flexible than `headers` regarding the prepares it references. It may hold a
                 // prepare whose redundant header is broken, as long as the prepare itself is valid.
-                if (prepare != null and prepare.?.command == .prepare) {
+                if (prepare != null and prepare.?.operation != .reserved) {
                     assert(!journal.prepare_inhabited[index]);
                     journal.prepare_inhabited[index] = true;
                     journal.prepare_checksums[index] = prepare.?.checksum;
@@ -1272,7 +1304,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             //
             // (These headers can originate if we join a view, write some prepares from the new
             // view, and then crash before the view_durable_update() finished.)
-            for ([_][]align(constants.sector_size) Header{
+            for ([_][]align(constants.sector_size) Header.Prepare{
                 journal.headers_redundant,
                 journal.headers,
             }) |headers| {
@@ -1282,7 +1314,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         var view_range = view_change_headers.view_for_op(header.op, log_view);
                         assert(view_range.max <= log_view);
 
-                        if (header.command == .prepare and !view_range.contains(header.view)) {
+                        if (header.operation != .reserved and !view_range.contains(header.view)) {
                             cases[index] = &case_cut_view_range;
                         }
                     }
@@ -1292,7 +1324,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             for (cases, 0..) |case, index| journal.recover_slot(Slot{ .index = index }, case);
             assert(cases.len == slot_count);
 
-            stdx.copy_disjoint(.exact, Header, journal.headers_redundant, journal.headers);
+            stdx.copy_disjoint(
+                .exact,
+                Header.Prepare,
+                journal.headers_redundant,
+                journal.headers,
+            );
 
             log.debug("{}: recover_slots: dirty={} faulty={}", .{
                 journal.replica,
@@ -1337,20 +1374,18 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const header = header_ok(replica.cluster, torn_slot, header_untrusted) orelse return null;
             // The redundant header is valid, also for the correct cluster and not misdirected.
 
-            if (header.command == .prepare) {
-                // The redundant header was already written, so the prepare is corrupt, not torn.
-                if (header.op == torn_op) return null;
-
-                assert(header.op < torn_op); // Since torn_op > op_max.
-                // The redundant header is from any previous log cycle.
-            } else {
-                assert(header.command == .reserved);
-
+            if (header.operation == .reserved) {
                 // This is the first log cycle.
 
                 // TODO Can we be more sure about this? What if op_max is clearly many cycles ahead?
                 // Any previous log cycle is then expected to have a prepare, not a reserved header,
                 // unless the prepare header was lost, in which case this slot may also not be torn.
+            } else {
+                // The redundant header was already written, so the prepare is corrupt, not torn.
+                if (header.op == torn_op) return null;
+
+                assert(header.op < torn_op); // Since torn_op > op_max.
+                // The redundant header is from any previous log cycle.
             }
 
             const checkpoint_index = journal.slot_for_op(replica.op_checkpoint()).index;
@@ -1407,6 +1442,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .eql => {
                     assert(header.?.command == .prepare);
                     assert(prepare.?.command == .prepare);
+                    assert(header.?.operation != .reserved);
+                    assert(prepare.?.operation != .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
                     assert(journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == prepare.?.checksum);
@@ -1415,10 +1452,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.faulty.clear(slot);
                 },
                 .nil => {
-                    assert(header.?.command == .reserved);
-                    assert(prepare.?.command == .reserved);
+                    assert(header.?.command == .prepare);
+                    assert(prepare.?.command == .prepare);
+                    assert(header.?.operation == .reserved);
+                    assert(prepare.?.operation == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
-                    assert(header.?.checksum == Header.reserved(cluster, slot.index).checksum);
+                    assert(header.?.checksum == Header.Prepare.reserved(cluster, slot.index).checksum);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
                     journal.headers[slot.index] = header.?.*;
@@ -1426,20 +1465,21 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.faulty.clear(slot);
                 },
                 .fix => {
+                    assert(prepare.?.command == .prepare);
                     journal.headers[slot.index] = prepare.?.*;
                     journal.faulty.clear(slot);
                     assert(journal.dirty.bit(slot));
                     if (replica.solo()) {
                         // @D, @E, @F, @G, @J
                     } else {
-                        assert(prepare.?.command == .prepare);
+                        assert(prepare.?.operation != .reserved);
                         assert(journal.prepare_inhabited[slot.index]);
                         assert(journal.prepare_checksums[slot.index] == prepare.?.checksum);
                         // @F, @G, @J
                     }
                 },
                 .vsr => {
-                    journal.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
                     assert(journal.dirty.bit(slot));
                     assert(journal.faulty.bit(slot));
                 },
@@ -1448,7 +1488,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare == null);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
-                    journal.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
@@ -1456,7 +1496,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     maybe(header == null);
                     maybe(prepare == null);
                     assert(header != null or prepare != null);
-                    journal.headers[slot.index] = Header.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
@@ -1465,23 +1505,23 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             switch (decision) {
                 .eql, .nil => {
                     log.debug("{}: recover_slot: recovered " ++
-                        "slot={:0>4} label={s} decision={s} command={} op={}", .{
+                        "slot={:0>4} label={s} decision={s} operation={} op={}", .{
                         journal.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
-                        journal.headers[slot.index].command,
+                        journal.headers[slot.index].operation,
                         journal.headers[slot.index].op,
                     });
                 },
                 .fix, .vsr, .cut_torn, .cut_view_range => {
                     log.warn("{}: recover_slot: recovered " ++
-                        "slot={:0>4} label={s} decision={s} command={} op={}", .{
+                        "slot={:0>4} label={s} decision={s} operation={} op={}", .{
                         journal.replica,
                         slot.index,
                         case.label,
                         @tagName(decision),
-                        journal.headers[slot.index].command,
+                        journal.headers[slot.index].operation,
                         journal.headers[slot.index].op,
                     });
                 },
@@ -1561,19 +1601,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const callback = journal.status.recovering;
             journal.status = .recovered;
 
-            if (journal.headers[0].op == 0 and journal.headers[0].command == .prepare) {
-                assert(journal.headers[0].checksum == Header.root_prepare(replica.cluster).checksum);
+            if (journal.headers[0].op == 0 and journal.headers[0].operation != .reserved) {
+                assert(journal.headers[0].checksum == Header.Prepare.root(replica.cluster).checksum);
                 assert(!journal.faulty.bit(Slot{ .index = 0 }));
             }
 
             for (journal.headers, 0..) |*header, index| {
                 assert(header.valid_checksum());
                 assert(header.cluster == replica.cluster);
+                assert(header.command == .prepare);
                 assert(std.meta.eql(header.*, journal.headers_redundant[index]));
-                if (header.command == .reserved) {
+                if (header.operation == .reserved) {
                     assert(header.op == index);
                 } else {
-                    assert(header.command == .prepare);
                     assert(header.op % slot_count == index);
                     assert(journal.prepare_inhabited[index]);
                     assert(journal.prepare_checksums[index] == header.checksum);
@@ -1607,7 +1647,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         pub fn remove_entry(journal: *Journal, slot: Slot) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
 
-            const reserved = Header.reserved(replica.cluster, slot.index);
+            const reserved = Header.Prepare.reserved(replica.cluster, slot.index);
             journal.headers[slot.index] = reserved;
             journal.headers_redundant[slot.index] = reserved;
             journal.dirty.clear(slot);
@@ -1629,9 +1669,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // `prepare_inhabited=false`.
         }
 
-        pub fn set_header_as_dirty(journal: *Journal, header: *const Header) void {
+        pub fn set_header_as_dirty(journal: *Journal, header: *const Header.Prepare) void {
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
+            assert(header.operation != .reserved);
 
             log.debug("{}: set_header_as_dirty: op={} checksum={}", .{
                 journal.replica,
@@ -1650,7 +1691,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 // message to be uncommitted.
                 assert(journal.headers[slot.index].op <= header.op);
 
-                if (journal.headers[slot.index].command == .reserved) {
+                if (journal.headers[slot.index].operation == .reserved) {
                     // The WAL might have written/prepared this exact header before crashing —
                     // leave the entry marked faulty because we cannot safely nack it.
                     maybe(journal.faulty.bit(slot));
@@ -1670,14 +1711,19 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         // sectors. (This is mostly a risk for single-replica clusters with small WALs).
         pub fn write_prepare(
             journal: *Journal,
-            callback: *const fn (journal: *Replica, wrote: ?*Message, trigger: Write.Trigger) void,
-            message: *Message,
+            callback: *const fn (
+                journal: *Replica,
+                wrote: ?*Message.Prepare,
+                trigger: Write.Trigger,
+            ) void,
+            message: *Message.Prepare,
             trigger: Journal.Write.Trigger,
         ) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
 
             assert(journal.status == .recovered);
             assert(message.header.command == .prepare);
+            assert(message.header.operation != .reserved);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= message.buffer.len);
             assert(journal.has(message.header));
@@ -1865,7 +1911,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(write.header_sector_next == null);
         }
 
-        fn write_prepare_release(journal: *Journal, write: *Journal.Write, wrote: ?*Message) void {
+        fn write_prepare_release(
+            journal: *Journal,
+            write: *Journal.Write,
+            wrote: ?*Message.Prepare,
+        ) void {
             const replica = @fieldParentPtr(Replica, "journal", journal);
             const write_callback = write.callback;
             const write_trigger = write.trigger;
@@ -1879,9 +1929,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             replica.message_bus.unref(write_message);
         }
 
-        fn write_prepare_debug(journal: *const Journal, header: *const Header, status: []const u8) void {
+        fn write_prepare_debug(
+            journal: *const Journal,
+            header: *const Header.Prepare,
+            status: []const u8,
+        ) void {
             assert(journal.status == .recovered);
             assert(header.command == .prepare);
+            assert(header.operation != .reserved);
 
             log.debug("{}: write: view={} slot={} op={} len={}: {} {s}", .{
                 journal.replica,
@@ -1894,7 +1949,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             });
         }
 
-        fn offset_logical_in_headers_for_message(journal: *const Journal, message: *Message) u64 {
+        fn offset_logical_in_headers_for_message(
+            journal: *const Journal,
+            message: *const Message.Prepare,
+        ) u64 {
             return Ring.headers.offset(journal.slot_for_header(message.header));
         }
 
@@ -2019,7 +2077,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // TODO The compiler should not need this align cast as the type of `headers_iops`
             // ensures that each buffer is properly aligned.
             const sector: Sector = @alignCast(&journal.headers_iops[write_index]);
-            const sector_headers = std.mem.bytesAsSlice(Header, sector);
+            const sector_headers = std.mem.bytesAsSlice(Header.Prepare, sector);
             assert(sector_headers.len == headers_per_sector);
 
             var i: usize = 0;
@@ -2032,11 +2090,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // from disk during recovery. This prevents faulty entries from changing to
                     // reserved (and clean) after a crash and restart (e.g. accidentally converting
                     // a case `@D` to a `@I` after a restart).
-                    sector_headers[i] = .{
-                        .checksum = 0,
-                        .cluster = replica.cluster,
-                        .command = .reserved,
-                    };
+                    sector_headers[i] = Header.Prepare.reserved(replica.cluster, i);
+                    sector_headers[i].checksum = 0; // Invalidate the checksum.
                     assert(!sector_headers[i].valid_checksum());
                 } else {
                     // Write headers from `headers_redundant` instead of `headers` — we need to
@@ -2163,7 +2218,7 @@ const recovery_cases = table: {
         //    R>1  replica_count > 1  or  standby
         //    R=1  replica_count = 1 and !standby
         //     ok  valid checksum ∧ valid cluster ∧ valid slot ∧ valid command
-        //    nil  command == reserved
+        //    nil  operation == reserved
         //     ✓∑  header.checksum == prepare.checksum
         //    op⌈  prepare.op is maximum of all prepare.ops
         //    op=  header.op == prepare.op
@@ -2226,9 +2281,9 @@ const Case = struct {
     /// Decision when replica_count=1.
     decision_single: RecoveryDecision,
     /// 0: header_ok(header)
-    /// 1: header.command == reserved
+    /// 1: header.operation == reserved
     /// 2: header_ok(prepare) ∧ valid_checksum_body
-    /// 3: prepare.command == reserved
+    /// 3: prepare.operation == reserved
     /// 4: prepare.op is maximum of all prepare.ops
     /// 5: header.checksum == prepare.checksum
     /// 6: header.op == prepare.op
@@ -2272,7 +2327,11 @@ const Case = struct {
     }
 };
 
-fn recovery_case(header: ?*const Header, prepare: ?*const Header, prepare_op_max: u64) *const Case {
+fn recovery_case(
+    header: ?*const Header.Prepare,
+    prepare: ?*const Header.Prepare,
+    prepare_op_max: u64,
+) *const Case {
     const h_ok = header != null;
     const p_ok = prepare != null;
 
@@ -2281,9 +2340,9 @@ fn recovery_case(header: ?*const Header, prepare: ?*const Header, prepare_op_max
 
     const parameters = .{
         h_ok,
-        if (h_ok) header.?.command == .reserved else false,
+        if (h_ok) header.?.operation == .reserved else false,
         p_ok,
-        if (p_ok) prepare.?.command == .reserved else false,
+        if (p_ok) prepare.?.operation == .reserved else false,
         if (p_ok) prepare.?.op == prepare_op_max else false,
         if (h_ok and p_ok) header.?.checksum == prepare.?.checksum else false,
         if (h_ok and p_ok) header.?.op == prepare.?.op else false,
@@ -2312,21 +2371,26 @@ fn recovery_case(header: ?*const Header, prepare: ?*const Header, prepare_op_max
 
 /// Returns the header, only if the header:
 /// * has a valid checksum, and
+/// * has command=prepare
 /// * has the expected cluster, and
 /// * has an expected command, and
 /// * resides in the correct slot.
-fn header_ok(cluster: u32, slot: Slot, header: *const Header) ?*const Header {
+fn header_ok(
+    cluster: u32,
+    slot: Slot,
+    header: *const Header.Prepare,
+) ?*const Header.Prepare {
     // We must first validate the header checksum before accessing any fields.
     // Otherwise, we may hit undefined data or an out-of-bounds enum and cause a runtime crash.
     if (!header.valid_checksum()) return null;
+    if (header.command != .prepare) return null;
 
     // A header with the wrong cluster, or in the wrong slot, may indicate a misdirected read/write.
     // All journalled headers should be reserved or else prepares.
     // A misdirected read/write to or from another storage zone may return the wrong message.
-    const valid_cluster_command_and_slot = switch (header.command) {
-        .prepare => header.cluster == cluster and slot.index == header.op % slot_count,
+    const valid_cluster_command_and_slot = switch (header.operation) {
         .reserved => header.cluster == cluster and slot.index == header.op,
-        else => false,
+        else => header.cluster == cluster and slot.index == header.op % slot_count,
     };
 
     // Do not check the checksum here, because that would run only after the other field accesses.
@@ -2415,19 +2479,16 @@ pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize
     assert(target.len % @sizeOf(Header) == 0);
     assert(target.len % constants.sector_size == 0);
 
-    var headers = std.mem.bytesAsSlice(Header, target);
+    var headers = std.mem.bytesAsSlice(Header.Prepare, target);
     const headers_past = @divExact(offset_logical, @sizeOf(Header));
     const headers_count = @min(headers.len, slot_count - headers_past);
 
     for (headers[0..headers_count], 0..) |*header, i| {
         const slot = @divExact(offset_logical, @sizeOf(Header)) + i;
         if (slot == 0 and i == 0) {
-            header.* = Header.root_prepare(cluster);
-            assert(header.op == 0);
-            assert(header.command == .prepare);
-            assert(header.operation == .root);
+            header.* = Header.Prepare.root(cluster);
         } else {
-            header.* = Header.reserved(cluster, slot);
+            header.* = Header.Prepare.reserved(cluster, slot);
         }
     }
     return headers_count * @sizeOf(Header);
@@ -2467,11 +2528,12 @@ pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usiz
             @memset(sector_data, 0);
             if (sector % sectors_per_message == 0) {
                 // The header goes in the first sector of the message.
-                var sector_header = std.mem.bytesAsValue(Header, sector_data[0..@sizeOf(Header)]);
+                var sector_header =
+                    std.mem.bytesAsValue(Header.Prepare, sector_data[0..@sizeOf(Header)]);
                 if (message_slot == 0) {
-                    sector_header.* = Header.root_prepare(cluster);
+                    sector_header.* = Header.Prepare.root(cluster);
                 } else {
-                    sector_header.* = Header.reserved(cluster, message_slot);
+                    sector_header.* = Header.Prepare.reserved(cluster, message_slot);
                 }
             }
         }

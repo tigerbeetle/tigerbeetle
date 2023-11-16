@@ -254,7 +254,7 @@ pub const StorageChecker = struct {
             };
 
             const block_header = schema.header_from_block(block);
-            assert(block_header.op == block_address);
+            assert(block_header.address == block_address);
 
             stream.add(block[0..block_header.size]);
             // Extra guard against identical blocks:

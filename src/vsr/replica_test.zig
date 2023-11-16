@@ -37,7 +37,7 @@ const log_level = std.log.Level.err;
 
 comptime {
     // The tests are written for these configuration values in particular.
-    assert(constants.journal_slot_count == 64);
+    assert(constants.journal_slot_count == 32);
     assert(constants.lsm_batch_multiple == 4);
 }
 
@@ -104,7 +104,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
     t.replica(.R0).stop();
 
-    // Corrupt op_checkpoint (59) and all ops that follow.
+    // Corrupt op_checkpoint (27) and all ops that follow.
     var slot: usize = slot_count - constants.lsm_batch_multiple - 1;
     while (slot < slot_count) : (slot += 1) {
         t.replica(.R0).corrupt(.{ .wal_prepare = slot });
@@ -299,9 +299,9 @@ test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     var c = t.clients(0, t.cluster.clients.len);
     try c.request(20, 20);
     t.replica(.B2).drop_all(.__, .bidirectional);
-    try c.request(40, 40);
-    try expectEqual(t.replica(.A0).commit(), 40);
-    try expectEqual(t.replica(.B1).commit(), 40);
+    try c.request(30, 30);
+    try expectEqual(t.replica(.A0).commit(), 30);
+    try expectEqual(t.replica(.B1).commit(), 30);
     try expectEqual(t.replica(.B2).commit(), 20);
 }
 
@@ -312,9 +312,9 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, send-only)" {
     var c = t.clients(0, t.cluster.clients.len);
     try c.request(20, 20);
     t.replica(.B2).drop_all(.__, .incoming);
-    try c.request(40, 40);
-    try expectEqual(t.replica(.A0).commit(), 40);
-    try expectEqual(t.replica(.B1).commit(), 40);
+    try c.request(30, 30);
+    try expectEqual(t.replica(.A0).commit(), 30);
+    try expectEqual(t.replica(.B1).commit(), 30);
     try expectEqual(t.replica(.B2).commit(), 20);
 }
 
@@ -325,9 +325,9 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)
     var c = t.clients(0, t.cluster.clients.len);
     try c.request(20, 20);
     t.replica(.B2).drop_all(.__, .outgoing);
-    try c.request(40, 40);
-    try expectEqual(t.replica(.A0).commit(), 40);
-    try expectEqual(t.replica(.B1).commit(), 40);
+    try c.request(30, 30);
+    try expectEqual(t.replica(.A0).commit(), 30);
+    try expectEqual(t.replica(.B1).commit(), 30);
     // B2 may commit some ops, but at some point is will likely fall behind.
     // Prepares may be reordered by the network, and if B1 receives X+1 then X,
     // it will not forward X on, as it is a "repair".
@@ -389,8 +389,8 @@ test "Cluster: network: partition client-primary (symmetric)" {
 
     t.replica(.A0).drop_all(.C_, .bidirectional);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(40, 40);
-    try c.request(40, 20);
+    // try c.request(30, 30);
+    try c.request(30, 20);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
@@ -403,8 +403,8 @@ test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
 
     t.replica(.A0).drop_all(.C_, .incoming);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(40, 40);
-    try c.request(40, 20);
+    // try c.request(30, 40);
+    try c.request(30, 20);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
@@ -417,8 +417,8 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
 
     t.replica(.A0).drop_all(.C_, .outgoing);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(40, 40);
-    try c.request(40, 20);
+    // try c.request(30, 30);
+    try c.request(30, 20);
 }
 
 test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
@@ -1160,7 +1160,12 @@ const TestContext = struct {
         return commits_before != t.cluster.state_checker.commits.items.len;
     }
 
-    fn on_client_reply(cluster: *Cluster, client: usize, request: *Message, reply: *Message) void {
+    fn on_client_reply(
+        cluster: *Cluster,
+        client: usize,
+        request: *Message.Request,
+        reply: *Message.Reply,
+    ) void {
         _ = request;
         _ = reply;
         const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));

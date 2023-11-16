@@ -2,6 +2,7 @@ const std = @import("std");
 const math = std.math;
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
 
 // vsr.zig is the root of a zig package, reexport all public APIs.
@@ -51,10 +52,11 @@ pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
+pub const Header = @import("vsr/message_header.zig").Header;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
-pub const Version: u8 = 0;
+pub const Version: u16 = 0;
 
 pub const ProcessType = enum { replica, client };
 
@@ -265,712 +267,6 @@ pub const Operation = enum(u8) {
                 }
             }
         }
-    }
-};
-
-/// Network message and journal entry header:
-/// We reuse the same header for both so that prepare messages from the primary can simply be
-/// journalled as is by the backups without requiring any further modification.
-pub const Header = extern struct {
-    /// Aegis128 (used by checksum) uses hardware accelerated AES via inline asm which isn't
-    /// available at comptime. Use a hard-coded value instead and verify via a test.
-    const checksum_body_empty: u128 = 0x49F174618255402DE6E7E3C40D60CC83;
-    test "empty checksum" {
-        assert(checksum_body_empty == checksum(&.{}));
-    }
-
-    /// A checksum covering only the remainder of this header.
-    /// This allows the header to be trusted without having to recv() or read() the associated body.
-    /// This checksum is enough to uniquely identify a network message or journal entry.
-    checksum: u128 = 0,
-
-    /// A checksum covering only the associated body after this header.
-    checksum_body: u128 = 0,
-
-    /// A backpointer to the previous request or prepare checksum for hash chain verification.
-    /// This provides a cryptographic guarantee for linearizability:
-    /// 1. across our distributed log of prepares, and
-    /// 2. across a client's requests and our replies.
-    /// This may also be used as the initialization vector for AEAD encryption at rest, provided
-    /// that the primary ratchets the encryption key every view change to ensure that prepares
-    /// reordered through a view change never repeat the same IV for the same encryption key.
-    ///
-    /// * A `prepare_ok` sets this to the checkpoint id. (TODO(Big headers): Use a separate field.)
-    /// * A `commit` sets this to the checkpoint id. (Possibly uncanonical.)
-    /// * A `ping` sets this to the checkpoint id. (Possibly uncanonical.)
-    /// * A `request_sync_checkpoint` sets this to the requested checkpoint id.
-    /// * A `request_sync_free_set` sets this to the requested checkpoint id.
-    /// * A `request_sync_client_sessions` sets this to the requested checkpoint id.
-    /// * A `sync_checkpoint` sets this to the checkpoint id.
-    /// * A `sync_free_set` sets this to the checkpoint id.
-    /// * A `sync_client_sessions` sets this to the checkpoint id.
-    parent: u128 = 0,
-
-    /// Each client process generates a unique, random and ephemeral client ID at initialization.
-    /// The client ID identifies connections made by the client to the cluster for the sake of
-    /// routing messages back to the client.
-    ///
-    /// With the client ID in hand, the client then registers a monotonically increasing session
-    /// number (committed through the cluster) to allow the client's session to be evicted safely
-    /// from the client table if too many concurrent clients cause the client table to overflow.
-    /// The monotonically increasing session number prevents duplicate client requests from being
-    /// replayed.
-    ///
-    /// The problem of routing is therefore solved by the 128-bit client ID, and the problem of
-    /// detecting whether a session has been evicted is solved by the session number.
-    ///
-    /// * A `request_reply` sets this to the client of the reply being requested.
-    /// * A `do_view_change` sets this to a bitset of "present" prepares. If a bit is set, then
-    ///   the corresponding header is not "blank", the replica has the prepare, and the prepare
-    ///   is not known to be faulty.
-    client: u128 = 0,
-
-    /// The checksum of the message to which this message refers.
-    ///
-    /// We use this cryptographic context in various ways, for example:
-    ///
-    /// * A `request` sets this to the client's session number.
-    /// * A `reply` sets this to a "stable" checksum.
-    ///   Replies for a specific op may have different views (and checksums),
-    ///   but are guaranteed to have the same context.
-    /// * A `prepare` sets this to the checksum of the client's request.
-    /// * A `prepare_ok` sets this to the checksum of the prepare being acked.
-    /// * A `commit` sets this to the checksum of the latest committed prepare.
-    /// * A `do_view_change` sets this to a bitset, with set bits indicating headers
-    ///   in the message body which it has definitely not prepared (i.e. "nack").
-    ///   The corresponding header may be an actual prepare header, or it may be a "blank" header.
-    /// * A `request_start_view` sets this to a unique nonce, to detect outdated SVs.
-    /// * A `start_view` sets this to zero for a new view, and to a nonce from an RSV when
-    ///   responding to the RSV.
-    /// * A `request_prepare` sets this to the checksum of the prepare being requested.
-    /// * A `request_reply` sets this to the checksum of the reply being requested.
-    /// * A `sync_free_set` sets this to the complete FreeSet's checksum.
-    /// * A `sync_client_sessions` sets this to the complete ClientSessions's checksum.
-    ///
-    /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which have
-    /// low entropy and may otherwise collide in the event of any correctness bugs.
-    context: u128 = 0,
-
-    /// Each request is given a number by the client and later requests must have larger numbers
-    /// than earlier ones. The request number is used by the replicas to avoid running requests more
-    /// than once; it is also used by the client to discard duplicate responses to its requests.
-    /// A client is allowed to have at most one request inflight at a time.
-    ///
-    /// * A `do_view_change` sets this to its latest log_view number.
-    /// * A `request_sync_free_set` sets this to the requested offset within the encoded FreeSet.
-    /// * A `request_sync_client_sessions` sets this to the requested offset within the encoded ClientSessions.
-    /// * A `sync_free_set` sets this to the offset within the encoded FreeSet.
-    /// * A `sync_client_sessions` sets this to the offset within the encoded ClientSessions.
-    request: u32 = 0,
-
-    /// The cluster number binds intention into the header, so that a client or replica can indicate
-    /// the cluster it believes it is speaking to, instead of accidentally talking to the wrong
-    /// cluster (for example, staging vs production).
-    cluster: u32,
-
-    /// The cluster reconfiguration epoch number (for future use).
-    epoch: u32 = 0,
-
-    /// Every message sent from one replica to another contains the sending replica's current view.
-    /// A `u32` allows for a minimum lifetime of 136 years at a rate of one view change per second.
-    view: u32 = 0,
-
-    /// The op number of the latest prepare that may or may not yet be committed. Uncommitted ops
-    /// may be replaced by different ops if they do not survive through a view change.
-    ///
-    /// * A `commit` sets this to its checkpoint op.
-    /// * A `ping` sets this to its checkpoint op.
-    /// * A `request_headers` sets this to the maximum op requested (inclusive).
-    /// * A `request_prepare` sets this to the requested op.
-    /// * A `request_reply` sets this to the requested op.
-    /// * A `request_sync_checkpoint` sets this to the requested checkpoint op.
-    /// * A `request_sync_free_set` sets this to the requested checkpoint op.
-    /// * A `request_sync_client_sessions` sets this to the requested checkpoint op.
-    /// * A `sync_checkpoint` sets this to the checkpoint op.
-    /// * A `sync_free_set` sets this to the checkpoint op.
-    /// * A `sync_client_sessions` sets this to the checkpoint op.
-    op: u64 = 0,
-
-    /// The commit number of the latest committed prepare. Committed ops are immutable.
-    ///
-    /// * A `do_view_change` sets this to `commit_min`, to indicate the sending replica's progress.
-    ///   The sending replica may continue to commit after sending the DVC.
-    /// * A `start_view` sets this to `commit_min`/`commit_max` (they are the same).
-    /// * A `request_headers` sets this to the minimum op requested (inclusive).
-    /// * A `sync_free_set` sets this to the complete FreeSet's size.
-    /// * A `sync_client_sessions` sets this to the complete ClientSessions's size.
-    /// * A `ping` sets this to its monotonic timestamp.
-    /// * A `pong` echoes the ping's monotonic timestamp.
-    commit: u64 = 0,
-
-    /// This field is used in various ways:
-    ///
-    /// * A `prepare` sets this to the primary's state machine `prepare_timestamp`.
-    ///   For `create_accounts` and `create_transfers` this is the batch's highest timestamp.
-    /// * A `reply` sets this to the corresponding `prepare`'s timestamp.
-    ///   This allows the test workload to verify transfer timeouts.
-    /// * A `pong` sets this to the sender's wall clock value.
-    /// * A `commit` message sets this to the replica's monotonic timestamp.
-    /// * A `do_view_change` and `start_view` set this to the replica's `op_checkpoint`.
-    timestamp: u64 = 0,
-
-    /// The size of the Header structure (always), plus any associated body.
-    size: u32 = @sizeOf(Header),
-
-    /// The index of the replica in the cluster configuration array that authored this message.
-    /// This identifies only the ultimate author because messages may be forwarded amongst replicas.
-    replica: u8 = 0,
-
-    /// The Viewstamped Replication protocol command for this message.
-    command: Command,
-
-    /// The state machine operation to apply.
-    operation: Operation = .reserved,
-
-    /// The version of the protocol implementation that originated this message.
-    version: u8 = Version,
-
-    comptime {
-        assert(@sizeOf(Header) == 128);
-        assert(stdx.no_padding(Header));
-    }
-
-    pub fn calculate_checksum(self: *const Header) u128 {
-        const checksum_size = @sizeOf(@TypeOf(self.checksum));
-        assert(checksum_size == 16);
-        const checksum_value = checksum(std.mem.asBytes(self)[checksum_size..]);
-        assert(@TypeOf(checksum_value) == @TypeOf(self.checksum));
-        return checksum_value;
-    }
-
-    pub fn calculate_checksum_body(self: *const Header, body: []const u8) u128 {
-        assert(self.size == @sizeOf(Header) + body.len);
-        const checksum_size = @sizeOf(@TypeOf(self.checksum_body));
-        assert(checksum_size == 16);
-        const checksum_value = checksum(body);
-        assert(@TypeOf(checksum_value) == @TypeOf(self.checksum_body));
-        return checksum_value;
-    }
-
-    /// This must be called only after set_checksum_body() so that checksum_body is also covered:
-    pub fn set_checksum(self: *Header) void {
-        self.checksum = self.calculate_checksum();
-    }
-
-    pub fn set_checksum_body(self: *Header, body: []const u8) void {
-        self.checksum_body = self.calculate_checksum_body(body);
-    }
-
-    pub fn valid_checksum(self: *const Header) bool {
-        return self.checksum == self.calculate_checksum();
-    }
-
-    pub fn valid_checksum_body(self: *const Header, body: []const u8) bool {
-        return self.checksum_body == self.calculate_checksum_body(body);
-    }
-
-    /// Returns null if all fields are set correctly according to the command, or else a warning.
-    /// This does not verify that checksum is valid, and expects that this has already been done.
-    pub fn invalid(self: *const Header) ?[]const u8 {
-        if (self.version != Version) return "version != Version";
-        if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
-        if (self.epoch != 0) return "epoch != 0";
-        return switch (self.command) {
-            .reserved => self.invalid_reserved(),
-            .ping => self.invalid_ping(),
-            .pong => self.invalid_pong(),
-            .ping_client => self.invalid_ping_client(),
-            .pong_client => self.invalid_pong_client(),
-            .request => self.invalid_request(),
-            .prepare => self.invalid_prepare(),
-            .prepare_ok => self.invalid_prepare_ok(),
-            .reply => self.invalid_reply(),
-            .commit => self.invalid_commit(),
-            .start_view_change => self.invalid_start_view_change(),
-            .do_view_change => self.invalid_do_view_change(),
-            .start_view => self.invalid_start_view(),
-            .request_start_view => self.invalid_request_start_view(),
-            .request_headers => self.invalid_request_headers(),
-            .request_prepare => self.invalid_request_prepare(),
-            .request_reply => self.invalid_request_reply(),
-            .request_blocks => self.invalid_request_blocks(),
-            .headers => self.invalid_headers(),
-            .eviction => self.invalid_eviction(),
-            .block => self.invalid_block(),
-            .request_sync_checkpoint => self.invalid_request_sync_checkpoint(),
-            .sync_checkpoint => self.invalid_sync_checkpoint(),
-            .request_sync_free_set => self.invalid_request_sync_free_set(),
-            .request_sync_client_sessions => self.invalid_request_sync_client_sessions(),
-            .sync_free_set => self.invalid_sync_free_set(),
-            .sync_client_sessions => self.invalid_sync_client_sessions(),
-            // The `Command` enum is exhaustive, so we can't write an "else" branch here. An unknown
-            // command is a possibility, but that means that someone has send us a message with
-            // matching cluster, matching version, correct checksum, and a command we don't know
-            // about. Ignoring unknown commands might be unsafe, so the replica intentionally
-            // crashes here, which is guaranteed by Zig's ReleaseSafe semantics.
-            //
-            // _ => unreachable
-        };
-    }
-
-    fn invalid_reserved(self: *const Header) ?[]const u8 {
-        assert(self.command == .reserved);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.replica != 0) return "replica != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_ping(self: *const Header) ?[]const u8 {
-        assert(self.command == .ping);
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_pong(self: *const Header) ?[]const u8 {
-        assert(self.command == .pong);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.timestamp == 0) return "timestamp == 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_ping_client(self: *const Header) ?[]const u8 {
-        assert(self.command == .ping_client);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client == 0) return "client == 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.replica != 0) return "replica != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_pong_client(self: *const Header) ?[]const u8 {
-        assert(self.command == .pong_client);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request(self: *const Header) ?[]const u8 {
-        assert(self.command == .request);
-        if (self.client == 0) return "client == 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
-        if (self.replica != 0) return "replica != 0";
-        switch (self.operation) {
-            .reserved => return "operation == .reserved",
-            .root => return "operation == .root",
-            .register => {
-                // The first request a client makes must be to register with the cluster:
-                if (self.parent != 0) return "register: parent != 0";
-                if (self.context != 0) return "register: context != 0";
-                if (self.request != 0) return "register: request != 0";
-                // The .register operation carries no payload:
-                if (self.checksum_body != checksum_body_empty) return "register: checksum_body != expected";
-                if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            },
-            else => {
-                if (self.operation == .reconfigure) {
-                    if (self.size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)) {
-                        return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
-                    }
-                } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
-                    return "operation is reserved";
-                }
-                // Thereafter, the client must provide the session number in the context:
-                // These requests should set `parent` to the `checksum` of the previous reply.
-                if (self.context == 0) return "context == 0";
-                if (self.request == 0) return "request == 0";
-            },
-        }
-        return null;
-    }
-
-    fn invalid_prepare(self: *const Header) ?[]const u8 {
-        assert(self.command == .prepare);
-        switch (self.operation) {
-            .reserved => return "operation == .reserved",
-            .root => {
-                if (self.parent != 0) return "root: parent != 0";
-                if (self.client != 0) return "root: client != 0";
-                if (self.context != 0) return "root: context != 0";
-                if (self.request != 0) return "root: request != 0";
-                if (self.view != 0) return "root: view != 0";
-                if (self.op != 0) return "root: op != 0";
-                if (self.commit != 0) return "root: commit != 0";
-                if (self.timestamp != 0) return "root: timestamp != 0";
-                if (self.checksum_body != checksum_body_empty) return "root: checksum_body != expected";
-                if (self.size != @sizeOf(Header)) return "root: size != @sizeOf(Header)";
-                if (self.replica != 0) return "root: replica != 0";
-            },
-            else => {
-                if (self.client == 0) return "client == 0";
-                if (self.op == 0) return "op == 0";
-                if (self.op <= self.commit) return "op <= commit";
-                if (self.timestamp == 0) return "timestamp == 0";
-                if (self.operation == .register) {
-                    // Client session numbers are replaced by the reference to the previous prepare.
-                    if (self.request != 0) return "request != 0";
-                } else {
-                    // Client session numbers are replaced by the reference to the previous prepare.
-                    if (self.request == 0) return "request == 0";
-                }
-            },
-        }
-        return null;
-    }
-
-    fn invalid_prepare_ok(self: *const Header) ?[]const u8 {
-        assert(self.command == .prepare_ok);
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        switch (self.operation) {
-            .reserved => return "operation == .reserved",
-            .root => {
-                const root_checksum = Header.root_prepare(self.cluster).checksum;
-                if (self.client != 0) return "root: client != 0";
-                if (self.context != root_checksum) return "root: context != expected";
-                if (self.request != 0) return "root: request != 0";
-                if (self.op != 0) return "root: op != 0";
-                if (self.commit != 0) return "root: commit != 0";
-                if (self.timestamp != 0) return "root: timestamp != 0";
-            },
-            else => {
-                if (self.client == 0) return "client == 0";
-                if (self.op == 0) return "op == 0";
-                if (self.op <= self.commit) return "op <= commit";
-                if (self.timestamp == 0) return "timestamp == 0";
-                if (self.operation == .register) {
-                    if (self.request != 0) return "request != 0";
-                } else {
-                    if (self.request == 0) return "request == 0";
-                }
-            },
-        }
-        return null;
-    }
-
-    fn invalid_reply(self: *const Header) ?[]const u8 {
-        assert(self.command == .reply);
-        // Initialization within `client.zig` asserts that client `id` is greater than zero:
-        if (self.client == 0) return "client == 0";
-        if (self.op != self.commit) return "op != commit";
-        if (self.timestamp == 0) return "timestamp == 0";
-        if (self.operation == .register) {
-            // In this context, the commit number is the newly registered session number.
-            // The `0` commit number is reserved for cluster initialization.
-            if (self.commit == 0) return "commit == 0";
-            if (self.request != 0) return "request != 0";
-        } else {
-            if (self.commit == 0) return "commit == 0";
-            if (self.request == 0) return "request == 0";
-        }
-        return null;
-    }
-
-    fn invalid_commit(self: *const Header) ?[]const u8 {
-        assert(self.command == .commit);
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.timestamp == 0) return "timestamp == 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_start_view_change(self: *const Header) ?[]const u8 {
-        assert(self.command == .start_view_change);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_do_view_change(self: *const Header) ?[]const u8 {
-        assert(self.command == .do_view_change);
-        if (self.parent != 0) return "parent != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_start_view(self: *const Header) ?[]const u8 {
-        assert(self.command == .start_view);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_start_view(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_start_view);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_headers(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_headers);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.commit > self.op) return "op_min > op_max";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_prepare(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_prepare);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_reply(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_reply);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client == 0) return "client == 0";
-        if (self.request != 0) return "request != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_blocks(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_blocks);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
-        if ((self.size - @sizeOf(Header)) % @sizeOf(BlockRequest) != 0) {
-            return "size multiple invalid";
-        }
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_headers(self: *const Header) ?[]const u8 {
-        assert(self.command == .headers);
-        if (self.parent != 0) return "parent != 0";
-        if (self.client != 0) return "client != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_eviction(self: *const Header) ?[]const u8 {
-        assert(self.command == .eviction);
-        if (self.parent != 0) return "parent != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.op != 0) return "op != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_block(self: *const Header) ?[]const u8 {
-        assert(self.command == .block);
-        if (self.size > constants.block_size) return "size > block_size";
-        if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
-        if (self.client != 0) return "client != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.op == 0) return "op == 0"; // address ≠ 0
-        if (self.replica != 0) return "replica != 0";
-        if (self.operation == .reserved) return "operation == .reserved";
-        return null;
-    }
-
-    fn invalid_request_sync_checkpoint(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_sync_checkpoint);
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_sync_checkpoint(self: *const Header) ?[]const u8 {
-        assert(self.command == .sync_checkpoint);
-        if (self.size != @sizeOf(Header) + @sizeOf(CheckpointState)) {
-            return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
-        }
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.request != 0) return "request != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_sync_free_set(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_sync_free_set);
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_request_sync_client_sessions(self: *const Header) ?[]const u8 {
-        assert(self.command == .request_sync_client_sessions);
-        if (self.client != 0) return "client != 0";
-        if (self.context != 0) return "context != 0";
-        if (self.view != 0) return "view != 0";
-        if (self.commit != 0) return "commit != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_sync_free_set(self: *const Header) ?[]const u8 {
-        assert(self.command == .sync_free_set);
-        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
-        if (self.view != 0) return "view != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    fn invalid_sync_client_sessions(self: *const Header) ?[]const u8 {
-        assert(self.command == .sync_client_sessions);
-        if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) return "size > max";
-        if (self.view != 0) return "view != 0";
-        if (self.timestamp != 0) return "timestamp != 0";
-        if (self.operation != .reserved) return "operation != .reserved";
-        return null;
-    }
-
-    /// Returns whether the immediate sender is a replica or client (if this can be determined).
-    /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
-    /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
-    pub fn peer_type(self: *const Header) enum { unknown, replica, client } {
-        switch (self.command) {
-            .reserved => unreachable,
-            // These messages cannot always identify the peer as they may be forwarded:
-            .request => switch (self.operation) {
-                // However, we do not forward the first .register request sent by a client:
-                .register => return .client,
-                else => return .unknown,
-            },
-            .prepare => return .unknown,
-            // These messages identify the peer as either a replica or a client:
-            .ping_client => return .client,
-            // All other messages identify the peer as a replica:
-            else => return .replica,
-        }
-    }
-
-    pub fn reserved(cluster: u32, slot: u64) Header {
-        assert(slot < constants.journal_slot_count);
-
-        var header = Header{
-            .command = .reserved,
-            .cluster = cluster,
-            .op = slot,
-        };
-        header.set_checksum_body(&[0]u8{});
-        header.set_checksum();
-        assert(header.invalid() == null);
-        return header;
-    }
-
-    pub fn root_prepare(cluster: u32) Header {
-        var header = Header{
-            .cluster = cluster,
-            .size = @sizeOf(Header),
-            .command = .prepare,
-            .operation = .root,
-        };
-        header.set_checksum_body(&[0]u8{});
-        header.set_checksum();
-        assert(header.invalid() == null);
-        return header;
     }
 };
 
@@ -1738,7 +1034,7 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
 }
 
 pub const Headers = struct {
-    pub const Array = stdx.BoundedArray(Header, constants.view_change_headers_max);
+    pub const Array = stdx.BoundedArray(Header.Prepare, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
@@ -1747,19 +1043,28 @@ pub const Headers = struct {
     pub const ViewChangeSlice = ViewChangeHeadersSlice;
     pub const ViewChangeArray = ViewChangeHeadersArray;
 
-    fn dvc_blank(op: u64) Header {
-        var header: Header = undefined;
-        @memset(std.mem.asBytes(&header), 0);
-        header.command = .reserved;
-        header.op = op;
-        return header;
+    fn dvc_blank(op: u64) Header.Prepare {
+        return .{
+            .command = .prepare,
+            .operation = .reserved,
+            .op = op,
+            .cluster = 0,
+            .view = 0,
+            .context = 0,
+            .parent = 0,
+            .client = 0,
+            .commit = 0,
+            .timestamp = 0,
+            .request = 0,
+        };
     }
 
-    pub fn dvc_header_type(header: *const Header) enum { blank, valid } {
+    pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
         if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
 
         if (constants.verify) assert(header.valid_checksum());
         assert(header.command == .prepare);
+        assert(header.operation != .reserved);
         assert(header.invalid() == null);
         return .valid;
     }
@@ -1770,9 +1075,12 @@ pub const ViewChangeCommand = enum { do_view_change, start_view };
 const ViewChangeHeadersSlice = struct {
     command: ViewChangeCommand,
     /// Headers are ordered from high-to-low op.
-    slice: []const Header,
+    slice: []const Header.Prepare,
 
-    pub fn init(command: ViewChangeCommand, slice: []const Header) ViewChangeHeadersSlice {
+    pub fn init(
+        command: ViewChangeCommand,
+        slice: []const Header.Prepare,
+    ) ViewChangeHeadersSlice {
         const headers = ViewChangeHeadersSlice{
             .command = command,
             .slice = slice,
@@ -1800,7 +1108,8 @@ const ViewChangeHeadersSlice = struct {
         var child = head;
         for (headers.slice[1..], 0..) |*header, i| {
             const index = i + 1;
-            assert(header.command == .prepare or header.command == .reserved);
+            assert(header.command == .prepare);
+            maybe(header.operation == .reserved);
             assert(header.op < child.op);
 
             // DVC: Ops are consecutive (with explicit blank headers).
@@ -1887,8 +1196,8 @@ const ViewChangeHeadersSlice = struct {
 };
 
 test "Headers.ViewChangeSlice.view_for_op" {
-    var headers_array = [_]Header{
-        std.mem.zeroInit(Header, .{
+    var headers_array = [_]Header.Prepare{
+        std.mem.zeroInit(Header.Prepare, .{
             .checksum = undefined,
             .client = 6,
             .request = 7,
@@ -1900,7 +1209,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
         }),
         Headers.dvc_blank(8),
         Headers.dvc_blank(7),
-        std.mem.zeroInit(Header, .{
+        std.mem.zeroInit(Header.Prepare, .{
             .checksum = undefined,
             .client = 3,
             .request = 4,
@@ -1934,13 +1243,13 @@ const ViewChangeHeadersArray = struct {
 
     pub fn root(cluster: u32) ViewChangeHeadersArray {
         return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
-            Header.root_prepare(cluster),
+            Header.Prepare.root(cluster),
         });
     }
 
     pub fn init_from_slice(
         command: ViewChangeCommand,
-        slice: []const Header,
+        slice: []const Header.Prepare,
     ) ViewChangeHeadersArray {
         const headers = ViewChangeHeadersArray{
             .command = command,
@@ -1980,6 +1289,7 @@ const ViewChangeHeadersArray = struct {
         );
         const commit_max_header = headers.array.get(headers.array.get(0).op - commit_max);
         assert(commit_max_header.command == .prepare);
+        assert(commit_max_header.operation != .reserved);
         assert(commit_max_header.op == commit_max);
 
         // SVs may include more headers than DVC:
@@ -1996,7 +1306,7 @@ const ViewChangeHeadersArray = struct {
     pub fn replace(
         headers: *ViewChangeHeadersArray,
         command: ViewChangeCommand,
-        slice: []const Header,
+        slice: []const Header.Prepare,
     ) void {
         headers.command = command;
         headers.array.clear();
@@ -2004,7 +1314,7 @@ const ViewChangeHeadersArray = struct {
         headers.verify();
     }
 
-    pub fn append(headers: *ViewChangeHeadersArray, header: *const Header) void {
+    pub fn append(headers: *ViewChangeHeadersArray, header: *const Header.Prepare) void {
         // We don't do comprehensive validation here — assume that verify() will be called
         // after any series of appends.
         headers.array.append_assume_capacity(header.*);

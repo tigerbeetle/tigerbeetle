@@ -58,19 +58,18 @@ pub const AOFEntry = extern struct {
         return vsr.sector_ceil(unaligned_size);
     }
 
-    pub fn header(self: *AOFEntry) *Header {
+    pub fn header(self: *AOFEntry) *Header.Prepare {
         return @ptrCast(&self.message);
     }
 
     /// Turn an AOFEntry back into a Message.
-    pub fn to_message(self: *AOFEntry, target: *Message) void {
+    pub fn to_message(self: *AOFEntry, target: *Message.Prepare) void {
         stdx.copy_disjoint(.inexact, u8, target.buffer, self.message[0..self.header().size]);
-        target.header = @ptrCast(target.buffer);
     }
 
     pub fn from_message(
         self: *AOFEntry,
-        message: *const Message,
+        message: *const Message.Prepare,
         options: struct { replica: u64, primary: u64 },
         last_checksum: *?u128,
     ) void {
@@ -159,7 +158,7 @@ pub const AOF = struct {
     /// We don't bother returning a count of how much we wrote. Not being
     /// able to fully write the entire payload is an error, not an expected
     /// condition.
-    pub fn write(self: *AOF, message: *const Message, options: struct {
+    pub fn write(self: *AOF, message: *const Message.Prepare, options: struct {
         replica: u64,
         primary: u64,
     }) !void {
@@ -291,7 +290,7 @@ pub const AOFReplayClient = struct {
     client: *Client,
     io: *IO,
     message_pool: *MessagePool,
-    inflight_message: ?*Message = null,
+    inflight_message: ?*Message.Request = null,
 
     pub fn init(allocator: std.mem.Allocator, raw_addresses: []const u8) !Self {
         var addresses = try vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max);
@@ -349,13 +348,13 @@ pub const AOFReplayClient = struct {
             const header = entry.header();
             if (header.operation.vsr_reserved()) continue;
 
-            const message = self.client.get_message();
-            errdefer self.client.release(message);
+            const message = self.client.get_message().build(.request);
+            errdefer self.client.release(message.base());
 
             assert(self.inflight_message == null);
             self.inflight_message = message;
 
-            entry.to_message(message);
+            entry.to_message(message.base().build(.prepare));
 
             message.header.* = .{
                 .client = self.client.id,
@@ -364,6 +363,10 @@ pub const AOFReplayClient = struct {
                 .operation = header.operation,
                 .size = header.size,
                 .timestamp = header.timestamp,
+                .view = 0,
+                .parent = 0,
+                .session = 0,
+                .request = 0,
             };
 
             self.client.raw_request(@intFromPtr(self), AOFReplayClient.replay_callback, message);
@@ -515,7 +518,7 @@ pub fn aof_merge(
     // Next, start from our root checksum, walk down the hash chain until there's nothing left. We
     // currently take the root checksum as the first entry in the first AOF.
     while (entries_by_parent.count() > 0) {
-        var message = message_pool.get_message();
+        var message = message_pool.get_message(.prepare);
         defer message_pool.unref(message);
 
         assert(current_parent != null);
@@ -589,7 +592,7 @@ test "aof write / read" {
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
 
-    const demo_message = message_pool.get_message();
+    const demo_message = message_pool.get_message(.prepare);
     defer message_pool.unref(demo_message);
 
     var target = try allocator.create(AOFEntry);
@@ -599,16 +602,21 @@ test "aof write / read" {
 
     // The command / operation used here don't matter - we verify things bitwise.
     demo_message.header.* = .{
+        .op = 0,
+        .commit = 0,
+        .view = 0,
         .client = 0,
         .request = 0,
+        .parent = 0,
+        .context = 0,
         .cluster = 0,
+        .timestamp = 0,
         .command = vsr.Command.prepare,
         .operation = @as(vsr.Operation, @enumFromInt(4)),
         .size = @as(u32, @intCast(@sizeOf(Header) + demo_payload.len)),
     };
 
-    const body = demo_message.body();
-    stdx.copy_disjoint(.exact, u8, body, demo_payload);
+    stdx.copy_disjoint(.exact, u8, demo_message.body(), demo_payload);
     demo_message.header.set_checksum_body(demo_payload);
     demo_message.header.set_checksum();
 
@@ -621,7 +629,7 @@ test "aof write / read" {
     const read_entry = (try it.next(target)).?;
 
     // Check that to_message also works as expected
-    const read_message = message_pool.get_message();
+    const read_message = message_pool.get_message(.prepare);
     defer message_pool.unref(read_message);
 
     read_entry.to_message(read_message);
@@ -682,6 +690,7 @@ const usage =
     \\
     \\  -h, --help
     \\        Print this help message and exit.
+    \\
 ;
 
 pub fn main() !void {

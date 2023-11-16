@@ -548,32 +548,44 @@ pub const Storage = struct {
         return @alignCast(mem.bytesAsValue(superblock.SuperBlockHeader, bytes));
     }
 
-    pub fn wal_headers(storage: *const Storage) []const vsr.Header {
+    pub fn wal_headers(storage: *const Storage) []const vsr.Header.Prepare {
         const offset = vsr.Zone.wal_headers.offset(0);
         const size = vsr.Zone.wal_headers.size().?;
-        return @alignCast(mem.bytesAsSlice(vsr.Header, storage.memory[offset..][0..size]));
+        return @alignCast(mem.bytesAsSlice(
+            vsr.Header.Prepare,
+            storage.memory[offset..][0..size],
+        ));
     }
 
-    const MessageRaw = extern struct {
-        header: vsr.Header,
-        body: [constants.message_size_max - @sizeOf(vsr.Header)]u8,
+    fn MessageRawType(comptime command: vsr.Command) type {
+        return extern struct {
+            const MessageRaw = @This();
+            header: vsr.Header.Type(command),
+            body: [constants.message_size_max - @sizeOf(vsr.Header)]u8,
 
-        comptime {
-            assert(@sizeOf(MessageRaw) == constants.message_size_max);
-            assert(stdx.no_padding(MessageRaw));
-        }
-    };
+            comptime {
+                assert(@sizeOf(MessageRaw) == constants.message_size_max);
+                assert(stdx.no_padding(MessageRaw));
+            }
+        };
+    }
 
-    pub fn wal_prepares(storage: *const Storage) []const MessageRaw {
+    pub fn wal_prepares(storage: *const Storage) []const MessageRawType(.prepare) {
         const offset = vsr.Zone.wal_prepares.offset(0);
         const size = vsr.Zone.wal_prepares.size().?;
-        return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
+        return @alignCast(mem.bytesAsSlice(
+            MessageRawType(.prepare),
+            storage.memory[offset..][0..size],
+        ));
     }
 
-    pub fn client_replies(storage: *const Storage) []const MessageRaw {
+    pub fn client_replies(storage: *const Storage) []const MessageRawType(.reply) {
         const offset = vsr.Zone.client_replies.offset(0);
         const size = vsr.Zone.client_replies.size().?;
-        return @alignCast(mem.bytesAsSlice(MessageRaw, storage.memory[offset..][0..size]));
+        return @alignCast(mem.bytesAsSlice(
+            MessageRawType(.reply),
+            storage.memory[offset..][0..size],
+        ));
     }
 
     pub fn grid_block(
@@ -586,7 +598,7 @@ pub const Storage = struct {
         if (storage.memory_written.isSet(@divExact(block_offset, constants.sector_size))) {
             const block_buffer = storage.memory[block_offset..][0..constants.block_size];
             const block_header = schema.header_from_block(@alignCast(block_buffer));
-            assert(block_header.op == address);
+            assert(block_header.address == address);
 
             return @alignCast(block_buffer);
         } else {
@@ -646,9 +658,9 @@ pub const Storage = struct {
         const index_block = storage.grid_block(index_address).?;
         const index_schema = schema.TableIndex.from(index_block);
         const index_block_header = schema.header_from_block(index_block);
-        assert(index_block_header.op == index_address);
+        assert(index_block_header.address == index_address);
         assert(index_block_header.checksum == index_checksum);
-        assert(schema.BlockType.from(index_block_header.operation) == .index);
+        assert(index_block_header.block_type == .index);
 
         for (
             index_schema.data_addresses_used(index_block),
@@ -657,9 +669,9 @@ pub const Storage = struct {
             const data_block = storage.grid_block(address).?;
             const data_block_header = schema.header_from_block(data_block);
 
-            assert(data_block_header.op == address);
+            assert(data_block_header.address == address);
             assert(data_block_header.checksum == checksum);
-            assert(schema.BlockType.from(data_block_header.operation) == .data);
+            assert(data_block_header.block_type == .data);
         }
     }
 };
