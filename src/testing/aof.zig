@@ -105,7 +105,11 @@ pub const AOF = struct {
         }
     }
 
-    pub fn write(self: *AOF, message: *const Message, options: struct { replica: u8, primary: u8 }) !void {
+    pub fn write(
+        self: *AOF,
+        message: *const Message.Prepare,
+        options: struct { replica: u8, primary: u8 },
+    ) !void {
         var entry: AOFEntry align(constants.sector_size) = undefined;
         entry.from_message(message, .{ .replica = options.replica, .primary = options.primary }, &self.last_checksum);
 

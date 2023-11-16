@@ -125,7 +125,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                 .ascending => {
                     if (constants.verify) {
                         const header = schema.header_from_block(block);
-                        assert(header.op == it.context.addresses[0]);
+                        assert(header.address == it.context.addresses[0]);
                         assert(header.checksum == it.context.checksums[0]);
                     }
 
@@ -136,7 +136,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     const index_last = it.context.checksums.len - 1;
                     if (constants.verify) {
                         const header = schema.header_from_block(block);
-                        assert(header.op == it.context.addresses[index_last]);
+                        assert(header.address == it.context.addresses[index_last]);
                         assert(header.checksum == it.context.checksums[index_last]);
                     }
 

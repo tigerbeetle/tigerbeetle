@@ -17,8 +17,8 @@ const PriorityQueue = std.PriorityQueue;
 /// Both messages belong to the ReplySequence's `MessagePool`.
 const PendingReply = struct {
     client_index: usize,
-    request: *Message,
-    reply: *Message,
+    request: *Message.Request,
+    reply: *Message.Reply,
 
     /// `PendingReply`s are ordered by ascending reply op.
     fn compare(context: void, a: PendingReply, b: PendingReply) std.math.Order {
@@ -84,8 +84,8 @@ pub const ReplySequence = struct {
     pub fn insert(
         sequence: *ReplySequence,
         client_index: usize,
-        request_message: *Message,
-        reply_message: *Message,
+        request_message: *Message.Request,
+        reply_message: *Message.Reply,
     ) void {
         assert(request_message.header.invalid() == null);
         assert(request_message.header.command == .request);
@@ -98,8 +98,8 @@ pub const ReplySequence = struct {
 
         sequence.stalled_queue.add(.{
             .client_index = client_index,
-            .request = sequence.clone_message(request_message),
-            .reply = sequence.clone_message(reply_message),
+            .request = sequence.clone_message(request_message.base_const()).into(.request).?,
+            .reply = sequence.clone_message(reply_message.base_const()).into(.reply).?,
         }) catch unreachable;
     }
 
@@ -131,7 +131,7 @@ pub const ReplySequence = struct {
     ///
     /// Returns the ReplySequence's message.
     fn clone_message(sequence: *ReplySequence, message_client: *const Message) *Message {
-        const message_sequence = sequence.message_pool.get_message();
+        const message_sequence = sequence.message_pool.get_message(null);
         stdx.copy_disjoint(.exact, u8, message_sequence.buffer, message_client.buffer);
         return message_sequence;
     }

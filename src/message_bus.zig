@@ -371,11 +371,17 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             bus.process.accept_connection.?.on_accept(bus, fd);
         }
 
-        pub fn get_message(bus: *Self) *Message {
-            return bus.pool.get_message();
+        pub fn get_message(
+            bus: *Self,
+            comptime command: ?vsr.Command,
+        ) MessagePool.GetMessageType(command) {
+            return bus.pool.get_message(command);
         }
 
-        pub fn unref(bus: *Self, message: *Message) void {
+        /// `@TypeOf(message)` is one of:
+        /// - `*Message`
+        /// - `MessageType(command)` for any `command`.
+        pub fn unref(bus: *Self, message: anytype) void {
             bus.pool.unref(message);
         }
 
@@ -777,7 +783,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // `references` and `header` metadata.
                 if (connection.recv_progress == header.size) return connection.recv_message.?.ref();
 
-                const message = bus.get_message();
+                const message = bus.get_message(null);
                 stdx.copy_disjoint(.inexact, u8, message.buffer, data[0..header.size]);
                 return message;
             }
@@ -820,8 +826,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 const header_peer: Connection.Peer = switch (header.peer_type()) {
                     .unknown => return true,
-                    .replica => .{ .replica = header.replica },
-                    .client => .{ .client = header.client },
+                    .replica => |replica| .{ .replica = replica },
+                    .client => |client| .{ .client = client },
                 };
 
                 if (connection.peer != .unknown) {
@@ -871,7 +877,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return;
                 }
 
-                const new_message = bus.get_message();
+                const new_message = bus.get_message(null);
                 defer bus.unref(new_message);
 
                 if (connection.recv_message) |recv_message| {

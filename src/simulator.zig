@@ -509,7 +509,7 @@ pub const Simulator = struct {
     //
     // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
     // if the core gets stuck, we verify that this is indeed due to storage faults.
-    pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header {
+    pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header.Prepare {
         assert(simulator.core.count() > 0);
 
         var missing_op: ?u64 = null;
@@ -666,8 +666,8 @@ pub const Simulator = struct {
     fn on_cluster_reply(
         cluster: *Cluster,
         reply_client: usize,
-        request: *Message,
-        reply: *Message,
+        request: *Message.Request,
+        reply: *Message.Reply,
     ) void {
         // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
@@ -759,9 +759,10 @@ pub const Simulator = struct {
         );
         // Since we already checked the client's request queue for free space, `client.request()`
         // should always queue the request.
-        assert(request_message == client.request_queue.tail_ptr().?.message);
+        assert(request_message == client.request_queue.tail_ptr().?.message.base());
         assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
-        assert(request_message.header.operation.cast(StateMachine) == request_metadata.operation);
+        assert(request_message.header.into(.request).?.operation.cast(StateMachine) ==
+            request_metadata.operation);
 
         simulator.requests_sent += 1;
         assert(simulator.requests_sent <= simulator.options.requests_max);
@@ -828,12 +829,16 @@ pub const Simulator = struct {
             // be disabled by `storage.faulty`, we must manually repair it here to
             // ensure a cluster cannot become stuck in status=recovering_head.
             // See recover_slots() for more detail.
-            const offset = vsr.Zone.wal_headers.offset(0);
-            const size = vsr.Zone.wal_headers.size().?;
-            const headers_bytes = replica_storage.memory[offset..][0..size];
-            const headers = mem.bytesAsSlice(vsr.Header, headers_bytes);
-            for (headers, 0..) |*h, slot| {
-                if (h.checksum == 0) h.* = replica_storage.wal_prepares()[slot].header;
+            const headers_offset = vsr.Zone.wal_headers.offset(0);
+            const headers_size = vsr.Zone.wal_headers.size().?;
+            const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
+            for (
+                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
+                replica_storage.wal_prepares(),
+            ) |*wal_header, *wal_prepare| {
+                if (wal_header.checksum == 0) {
+                    wal_header.* = wal_prepare.header;
+                }
             }
         }
 

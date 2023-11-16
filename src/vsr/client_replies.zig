@@ -54,14 +54,14 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             completion: Storage.Read,
             callback: *const fn (
                 client_replies: *ClientReplies,
-                reply_header: *const vsr.Header,
-                reply: ?*Message,
+                reply_header: *const vsr.Header.Reply,
+                reply: ?*Message.Reply,
                 destination_replica: ?u8,
             ) void,
             slot: Slot,
-            message: *Message,
+            message: *Message.Reply,
             /// The header of the expected reply.
-            header: vsr.Header,
+            header: vsr.Header.Reply,
             destination_replica: ?u8,
         };
 
@@ -69,7 +69,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             completion: Storage.Write,
             slot: Slot,
-            message: *Message,
+            message: *Message.Reply,
         };
 
         const WriteQueue = RingBuffer(*Write, .{
@@ -133,7 +133,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-        ) ?*Message {
+        ) ?*Message.Reply {
             const client = session.header.client;
 
             if (client_replies.writing.isSet(slot.index)) {
@@ -164,7 +164,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *ClientReplies,
             slot: Slot,
             session: *const ClientSessions.Entry,
-            callback: *const fn (*ClientReplies, *const vsr.Header, ?*Message, ?u8) void,
+            callback: *const fn (
+                *ClientReplies,
+                *const vsr.Header.Reply,
+                ?*Message.Reply,
+                ?u8,
+            ) void,
             destination_replica: ?u8,
         ) error{Busy}!void {
             assert(client_replies.read_reply_sync(slot, session) == null);
@@ -185,7 +190,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 session.header.checksum,
             });
 
-            const message = client_replies.message_pool.get_message();
+            const message = client_replies.message_pool.get_message(.reply);
             defer client_replies.message_pool.unref(message);
 
             read.* = .{
@@ -294,7 +299,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         pub fn write_reply(
             client_replies: *ClientReplies,
             slot: Slot,
-            message: *Message,
+            message: *Message.Reply,
             trigger: enum { commit, repair },
         ) void {
             assert(client_replies.ready_sync());

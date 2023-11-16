@@ -405,7 +405,7 @@ pub fn CompactionType(
         fn on_iterator_init_a(read: *Grid.Read, index_block: BlockPtrConst) void {
             const compaction = @fieldParentPtr(Compaction, "read", read);
             assert(compaction.state == .iterator_init_a);
-            assert(compaction.tree_config.id == schema.TableIndex.tree_id(index_block));
+            assert(compaction.tree_config.id == schema.TableIndex.metadata(index_block).tree_id);
 
             // `index_block` is only valid for this callback, so copy its contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.

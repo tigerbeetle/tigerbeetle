@@ -11,7 +11,7 @@ const Message = MessagePool.Message;
 
 const ReplicaSet = std.StaticBitSet(constants.members_max);
 const Commits = std.ArrayList(struct {
-    header: vsr.Header,
+    header: vsr.Header.Prepare,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
 });
 
@@ -46,7 +46,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             replicas: []const Replica,
             clients: []const Client,
         }) !Self {
-            const root_prepare = vsr.Header.root_prepare(options.cluster_id);
+            const root_prepare = vsr.Header.Prepare.root(options.cluster_id);
 
             var commits = Commits.init(allocator);
             errdefer commits.deinit();
@@ -79,13 +79,13 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         pub fn on_message(state_checker: *Self, message: *const Message) void {
-            if (message.header.command == .prepare_ok) {
-                const head = &state_checker.replica_head_max[message.header.replica];
-                if (message.header.view > head.view or
-                    (message.header.view == head.view and message.header.op > head.op))
+            if (message.header.into_const(.prepare_ok)) |header| {
+                const head = &state_checker.replica_head_max[header.replica];
+                if (header.view > head.view or
+                    (header.view == head.view and header.op > head.op))
                 {
-                    head.view = message.header.view;
-                    head.op = message.header.op;
+                    head.view = header.view;
+                    head.op = header.op;
                 }
             }
         }
@@ -204,7 +204,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
-        pub fn header_with_op(state_checker: *Self, op: u64) vsr.Header {
+        pub fn header_with_op(state_checker: *Self, op: u64) vsr.Header.Prepare {
             const commit = &state_checker.commits.items[op];
             assert(commit.header.op == op);
             assert(commit.replicas.count() > 0);

@@ -34,7 +34,7 @@ pub const ClientSessions = struct {
         session: u64,
 
         /// The header of the reply corresponding to the client's latest committed request.
-        header: vsr.Header,
+        header: vsr.Header.Reply,
     };
 
     /// Values are indexes into `entries`.
@@ -130,7 +130,7 @@ pub const ClientSessions = struct {
         assert(client_sessions.entries_free.count() == constants.clients_max);
         for (client_sessions.entries) |*entry| {
             assert(entry.session == 0);
-            assert(std.meta.eql(entry.header, std.mem.zeroes(vsr.Header)));
+            assert(stdx.zeroed(std.mem.asBytes(&entry.header)));
         }
 
         var size: u64 = 0;
@@ -139,8 +139,8 @@ pub const ClientSessions = struct {
 
         assert(@alignOf(vsr.Header) == 16);
         size = std.mem.alignForward(usize, size, 16);
-        const headers: []const vsr.Header = @alignCast(mem.bytesAsSlice(
-            vsr.Header,
+        const headers: []const vsr.Header.Reply = @alignCast(mem.bytesAsSlice(
+            vsr.Header.Reply,
             source[size..][0 .. constants.clients_max * @sizeOf(vsr.Header)],
         ));
         size += mem.sliceAsBytes(headers).len;
@@ -158,7 +158,7 @@ pub const ClientSessions = struct {
         for (headers, 0..) |*header, i| {
             const session = sessions[i];
             if (session == 0) {
-                assert(std.meta.eql(header.*, std.mem.zeroes(vsr.Header)));
+                assert(stdx.zeroed(std.mem.asBytes(header)));
             } else {
                 assert(header.valid_checksum());
                 assert(header.command == .reply);
@@ -202,7 +202,7 @@ pub const ClientSessions = struct {
 
     pub fn get_slot_for_header(
         client_sessions: *const ClientSessions,
-        header: *const vsr.Header,
+        header: *const vsr.Header.Reply,
     ) ?ReplySlot {
         if (client_sessions.entries_by_client.get(header.client)) |entry_index| {
             const entry = &client_sessions.entries[entry_index];
@@ -218,7 +218,7 @@ pub const ClientSessions = struct {
     pub fn put(
         client_sessions: *ClientSessions,
         session: u64,
-        header: *const vsr.Header,
+        header: *const vsr.Header.Reply,
     ) ReplySlot {
         assert(session != 0);
         assert(header.command == .reply);
@@ -266,7 +266,7 @@ pub const ClientSessions = struct {
         assert(client_sessions.entries_free.count() == 0);
         assert(client_sessions.count() == constants.clients_max);
 
-        var evictee_: ?*const vsr.Header = null;
+        var evictee_: ?*const vsr.Header.Reply = null;
         var iterated: usize = 0;
         var entries = client_sessions.iterator();
         while (entries.next()) |entry| : (iterated += 1) {

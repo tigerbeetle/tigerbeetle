@@ -219,7 +219,7 @@ const Environment = struct {
             // VSRState.monotonic() asserts that the previous_checkpoint id changes.
             // In a normal replica this is guaranteed – even if the LSM is idle and no blocks
             // are acquired or released, the client sessions are necessarily mutated.
-            var reply = std.mem.zeroInit(vsr.Header, .{
+            var reply = std.mem.zeroInit(vsr.Header.Reply, .{
                 .cluster = cluster,
                 .command = .reply,
                 .op = op,
