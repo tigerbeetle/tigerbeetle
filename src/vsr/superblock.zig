@@ -586,12 +586,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         storage: *Storage,
 
-        /// The first logical offset that may be written to the superblock storage zone.
-        storage_offset: u64 = 0,
-
-        /// The total size of the superblock storage zone after this physical offset.
-        storage_size: u64 = superblock_zone_size,
-
         /// The superblock that was recovered at startup after a crash or that was last written.
         working: *align(constants.sector_size) SuperBlockHeader,
 
@@ -633,6 +627,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// Whether the superblock has been opened. An open superblock may not be formatted.
         opened: bool = false,
         block_count_limit: usize,
+        /// Runtime limit on the size of the datafile.
         storage_size_limit: u64,
 
         /// There may only be a single caller queued at a time, to ensure that the VSR protocol is
@@ -1046,6 +1041,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 staging.storage_size += address * constants.block_size;
             }
             assert(staging.storage_size >= data_file_size_min);
+            maybe(staging.storage_size_max > superblock.storage_size_limit);
             assert(staging.storage_size <= staging.storage_size_max);
             assert(staging.storage_size <= superblock.storage_size_limit);
 
@@ -1126,7 +1122,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len);
+            SuperBlock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
                 write_trailer_callback(&context.write);
@@ -1187,7 +1183,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len);
+            SuperBlock.assert_bounds(offset, buffer.len);
 
             superblock.storage.write_sectors(
                 write_header_callback,
@@ -1264,7 +1260,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len);
+            SuperBlock.assert_bounds(offset, buffer.len);
 
             superblock.storage.read_sectors(
                 read_header_callback,
@@ -1379,6 +1375,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         header.checksum,
                     });
                 }
+                assert(superblock.working.storage_size <= superblock.storage_size_limit);
+                maybe(superblock.working.storage_size_max > superblock.storage_size_limit);
 
                 if (context.caller == .open) {
                     if (context.repairs) |_| {
@@ -1430,7 +1428,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 offset,
             });
 
-            superblock.assert_bounds(offset, buffer.len);
+            SuperBlock.assert_bounds(offset, buffer.len);
 
             if (buffer.len == 0) {
                 read_trailer_callback(&context.read);
@@ -1622,9 +1620,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             context.callback(context);
         }
 
-        fn assert_bounds(superblock: *SuperBlock, offset: u64, size: u64) void {
-            assert(offset >= superblock.storage_offset);
-            assert(offset + size <= superblock.storage_offset + superblock.storage_size);
+        fn assert_bounds(offset: u64, size: u64) void {
+            assert(offset + size <= superblock_zone_size);
         }
 
         /// We use flexible quorums for even quorums with write quorum > read quorum, for example:
