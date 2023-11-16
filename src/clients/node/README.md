@@ -79,7 +79,7 @@ environment variable and defaults to port `3000`.
 
 ```javascript
 const client = createClient({
-  cluster_id: 0,
+  cluster_id: 0n,
   replica_addresses: [process.env.TB_ADDRESS || '3000']
 });
 ```

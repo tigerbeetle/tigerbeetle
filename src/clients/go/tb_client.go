@@ -58,7 +58,7 @@ type c_client struct {
 }
 
 func NewClient(
-	clusterID uint32,
+	clusterID types.Uint128,
 	addresses []string,
 	concurrencyMax uint,
 ) (Client, error) {
@@ -72,7 +72,7 @@ func NewClient(
 	// Create the tb_client.
 	status := C.tb_client_init(
 		&tb_client,
-		C.uint32_t(clusterID),
+		C.tb_uint128_t(clusterID),
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
 		C.uint32_t(concurrencyMax),

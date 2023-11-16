@@ -6,7 +6,7 @@ import com.tigerbeetle.*;
 public class Benchmark {
 
     public static void main(String[] args) {
-        try (var client = new Client(0, new String[] {"127.0.0.1:3001"})) {
+        try (var client = new Client(UInt128.asBytes(0), new String[] {"127.0.0.1:3001"})) {
 
             var accounts = new AccountBatch(2);
 

@@ -553,7 +553,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         pub fn run(
             arena: *std.heap.ArenaAllocator,
             addresses: []std.net.Address,
-            cluster_id: u32,
+            cluster_id: u128,
             statements: []const u8,
             verbose: bool,
         ) !void {

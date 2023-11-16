@@ -432,7 +432,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern InitializationStatus tb_client_init(
         \\            IntPtr* out_client,
-        \\            uint cluster_id,
+        \\            UInt128 cluster_id,
         \\            byte* address_ptr,
         \\            uint address_len,
         \\            uint num_packets,
@@ -449,7 +449,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\        public static unsafe extern InitializationStatus tb_client_init_echo(
         \\            IntPtr* out_client,
-        \\            uint cluster_id,
+        \\            UInt128 cluster_id,
         \\            byte* address_ptr,
         \\            uint address_len,
         \\            uint num_packets,

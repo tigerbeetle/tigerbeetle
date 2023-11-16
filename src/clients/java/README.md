@@ -133,7 +133,7 @@ environment variable and defaults to port `3000`.
 
 ```java
 var replicaAddress = System.getenv("TB_ADDRESS");
-int clusterID = 0;
+byte[] clusterID = UInt128.asBytes(0);
 String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
 Client client = new Client(
   clusterID,

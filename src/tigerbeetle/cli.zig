@@ -16,7 +16,7 @@ const StateMachine = vsr.state_machine.StateMachineType(
 
 const CliArgs = union(enum) {
     format: struct {
-        cluster: u32,
+        cluster: u128,
         replica: u8,
         replica_count: u8,
 
@@ -45,7 +45,7 @@ const CliArgs = union(enum) {
 
     client: struct {
         addresses: []const u8,
-        cluster: u32,
+        cluster: u128,
         verbose: bool = false,
         command: []const u8 = "",
     },
@@ -82,7 +82,7 @@ const CliArgs = union(enum) {
         \\        Print this help message and exit.
         \\
         \\  --cluster=<integer>
-        \\        Set the cluster ID to the provided 32-bit unsigned integer.
+        \\        Set the cluster ID to the provided 128-bit unsigned decimal integer.
         \\
         \\  --replica=<index>
         \\        Set the zero-based index that will be used for the replica process.
@@ -148,14 +148,14 @@ pub const Command = union(enum) {
 
     pub const Repl = struct {
         addresses: []net.Address,
-        cluster: u32,
+        cluster: u128,
         verbose: bool,
         statements: []const u8,
     };
 
     format: struct {
         args_allocated: std.process.ArgIterator,
-        cluster: u32,
+        cluster: u128,
         replica: u8,
         replica_count: u8,
         path: [:0]const u8,

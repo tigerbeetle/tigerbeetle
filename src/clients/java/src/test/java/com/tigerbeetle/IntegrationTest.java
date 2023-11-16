@@ -27,12 +27,14 @@ public class IntegrationTest {
     private static final AccountBatch accounts;
     private static final IdBatch accountIds;
 
+    private static final byte[] clusterId;
     private static final byte[] account1Id;
     private static final byte[] account2Id;
     private static final byte[] transfer1Id;
     private static final byte[] transfer2Id;
 
     static {
+        clusterId = new byte[] {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
         account1Id = new byte[] {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -71,7 +73,7 @@ public class IntegrationTest {
     @Test(expected = NullPointerException.class)
     public void testConstructorNullReplicaAddresses() throws Throwable {
 
-        try (var client = new Client(0, null)) {
+        try (var client = new Client(clusterId, null)) {
 
         } catch (Throwable any) {
             throw any;
@@ -82,7 +84,7 @@ public class IntegrationTest {
     public void testConstructorNullElementReplicaAddresses() throws Throwable {
 
         var replicaAddresses = new String[] {"3001", null};
-        try (var client = new Client(0, replicaAddresses)) {
+        try (var client = new Client(clusterId, replicaAddresses)) {
 
         } catch (Throwable any) {
             throw any;
@@ -93,7 +95,7 @@ public class IntegrationTest {
     public void testConstructorEmptyReplicaAddresses() throws Throwable {
 
         var replicaAddresses = new String[0];
-        try (var client = new Client(0, replicaAddresses)) {
+        try (var client = new Client(clusterId, replicaAddresses)) {
 
         } catch (Throwable any) {
             throw any;
@@ -106,7 +108,7 @@ public class IntegrationTest {
         for (int i = 0; i < replicaAddresses.length; i++)
             replicaAddresses[i] = "3000";
 
-        try (var client = new Client(0, replicaAddresses)) {
+        try (var client = new Client(clusterId, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
             assertEquals(InitializationStatus.AddressLimitExceeded.value,
@@ -117,7 +119,7 @@ public class IntegrationTest {
     @Test
     public void testConstructorEmptyStringReplicaAddresses() throws Throwable {
         var replicaAddresses = new String[] {"", "", ""};
-        try (var client = new Client(0, replicaAddresses)) {
+        try (var client = new Client(clusterId, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
             assertEquals(InitializationStatus.AddressInvalid.value,
@@ -129,7 +131,7 @@ public class IntegrationTest {
     public void testConstructorInvalidReplicaAddresses() throws Throwable {
 
         var replicaAddresses = new String[] {"127.0.0.1:99999"};
-        try (var client = new Client(0, replicaAddresses)) {
+        try (var client = new Client(clusterId, replicaAddresses)) {
             assert false;
         } catch (InitializationException initializationException) {
             assertEquals(InitializationStatus.AddressInvalid.value,
@@ -138,10 +140,11 @@ public class IntegrationTest {
     }
 
     @Test(expected = IllegalArgumentException.class)
-    public void testConstructorNegativeCluster() throws Throwable {
+    public void testConstructorInvalidCluster() throws Throwable {
 
+        var clusterIdInvalid = new byte[] {0, 0, 0};
         var replicaAddresses = new String[] {"3001"};
-        try (var client = new Client(-1, replicaAddresses)) {
+        try (var client = new Client(clusterIdInvalid, replicaAddresses)) {
 
         } catch (Throwable any) {
             throw any;
@@ -153,7 +156,7 @@ public class IntegrationTest {
 
         var replicaAddresses = new String[] {"3001"};
         var concurrencyMax = -1;
-        try (var client = new Client(0, replicaAddresses, concurrencyMax)) {
+        try (var client = new Client(clusterId, replicaAddresses, concurrencyMax)) {
 
         } catch (Throwable any) {
             throw any;
@@ -164,7 +167,7 @@ public class IntegrationTest {
     public void testCreateAccounts() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 accounts.beforeFirst();
 
@@ -195,7 +198,7 @@ public class IntegrationTest {
     public void testCreateInvalidAccount() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 var zeroedAccounts = new AccountBatch(1);
                 zeroedAccounts.add();
@@ -224,7 +227,7 @@ public class IntegrationTest {
     public void testCreateAccountsAsync() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 accounts.beforeFirst();
 
@@ -261,7 +264,7 @@ public class IntegrationTest {
     public void testCreateTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 var createAccountErrors = client.createAccounts(accounts);
@@ -334,7 +337,7 @@ public class IntegrationTest {
     public void testCreateTransfersAsync() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 CompletableFuture<CreateAccountResultBatch> future =
@@ -416,7 +419,7 @@ public class IntegrationTest {
     public void testCreateInvalidTransfer() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 var zeroedTransfers = new TransferBatch(1);
                 zeroedTransfers.add();
@@ -445,7 +448,7 @@ public class IntegrationTest {
     public void testCreatePendingTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 var errors = client.createAccounts(accounts);
@@ -572,7 +575,7 @@ public class IntegrationTest {
     public void testCreatePendingTransfersAndVoid() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 // Creating the accounts.
                 var errors = client.createAccounts(accounts);
@@ -700,7 +703,7 @@ public class IntegrationTest {
     public void testCreateLinkedTransfers() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -783,7 +786,7 @@ public class IntegrationTest {
     public void testCreateAccountTooMuchData() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var accounts = new AccountBatch(TOO_MUCH_DATA);
@@ -818,7 +821,7 @@ public class IntegrationTest {
     public void testCreateAccountTooMuchDataAsync() throws Throwable {
 
         try (var server = new Server()) {
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var accounts = new AccountBatch(TOO_MUCH_DATA);
@@ -862,7 +865,7 @@ public class IntegrationTest {
 
         try (var server = new Server()) {
 
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var transfers = new TransferBatch(TOO_MUCH_DATA);
@@ -899,7 +902,7 @@ public class IntegrationTest {
 
         try (var server = new Server()) {
 
-            try (var client = new Client(0, new String[] {server.getAddress()})) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
 
                 final int TOO_MUCH_DATA = 10000;
                 var transfers = new TransferBatch(TOO_MUCH_DATA);
@@ -953,7 +956,8 @@ public class IntegrationTest {
             final int tasks_qty = max_concurrency;
             final var barrier = new CountDownLatch(tasks_qty);
 
-            try (var client = new Client(0, new String[] {server.getAddress()}, max_concurrency)) {
+            try (var client =
+                    new Client(clusterId, new String[] {server.getAddress()}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1016,7 +1020,8 @@ public class IntegrationTest {
             final int max_concurrency = 2;
             final var barrier = new CountDownLatch(tasks_qty);
 
-            try (var client = new Client(0, new String[] {server.getAddress()}, max_concurrency)) {
+            try (var client =
+                    new Client(clusterId, new String[] {server.getAddress()}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1101,7 +1106,8 @@ public class IntegrationTest {
             final var enterBarrier = new CountDownLatch(tasks_qty);
             final var exitBarrier = new CountDownLatch(1);
 
-            try (var client = new Client(0, new String[] {server.getAddress()}, max_concurrency)) {
+            try (var client =
+                    new Client(clusterId, new String[] {server.getAddress()}, max_concurrency)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);
@@ -1168,7 +1174,7 @@ public class IntegrationTest {
         try (var server = new Server()) {
             // As we call client.close() explicitly,
             // we don't need to use a try-with-resources block here.
-            var client = new Client(0, new String[] {server.getAddress()});
+            var client = new Client(clusterId, new String[] {server.getAddress()});
 
             // Creating accounts.
             var createAccountErrors = client.createAccounts(accounts);
@@ -1209,7 +1215,8 @@ public class IntegrationTest {
             final int tasks_qty = 100;
             final int concurrency_max = tasks_qty;
 
-            try (var client = new Client(0, new String[] {server.getAddress()}, concurrency_max)) {
+            try (var client =
+                    new Client(clusterId, new String[] {server.getAddress()}, concurrency_max)) {
 
                 var errors = client.createAccounts(accounts);
                 assertTrue(errors.getLength() == 0);

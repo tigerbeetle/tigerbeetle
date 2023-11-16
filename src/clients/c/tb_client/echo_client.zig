@@ -36,7 +36,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         pub fn init(
             allocator: mem.Allocator,
             id: u128,
-            cluster: u32,
+            cluster: u128,
             replica_count: u8,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,

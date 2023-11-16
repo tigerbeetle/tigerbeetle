@@ -561,7 +561,7 @@ fn emit_batch_accessors(
     }
 }
 
-// We offer multiple APIs for dealing with Uint128 in Java:
+// We offer multiple APIs for dealing with UInt128 in Java:
 // - A byte array, heap-allocated, for ids and user_data;
 // - A BigInteger, heap-allocated, for balances and amounts;
 // - Two 64-bit integers (long), stack-allocated, for both cases;

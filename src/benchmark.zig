@@ -105,7 +105,7 @@ pub fn main() !void {
     );
 
     const client_id = std.crypto.random.int(u128);
-    const cluster_id: u32 = 0;
+    const cluster_id: u128 = 0;
 
     var io = try IO.init(32, 0);
 

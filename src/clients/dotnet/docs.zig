@@ -202,7 +202,7 @@ pub const DotnetDocs = Docs{
     .client_object_example =
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
-    \\  clusterID: 0,
+    \\  clusterID: UInt128.Zero,
     \\  addresses: new[] {tbAddress != null ? tbAddress : "3000"}
     \\);
     ,

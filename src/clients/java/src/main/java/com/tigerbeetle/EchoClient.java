@@ -6,7 +6,7 @@ public final class EchoClient implements AutoCloseable {
 
     private final NativeClient nativeClient;
 
-    public EchoClient(final int clusterID, final String replicaAddresses,
+    public EchoClient(final byte[] clusterID, final String replicaAddresses,
             final int concurrencyMax) {
         this.nativeClient = NativeClient.initEcho(clusterID, replicaAddresses, concurrencyMax);
     }

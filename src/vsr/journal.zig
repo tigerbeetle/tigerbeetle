@@ -496,7 +496,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
         /// Returns the highest op number prepared, as per `header_ok()` in the untrusted headers.
         fn op_maximum_headers_untrusted(
-            cluster: u32,
+            cluster: u128,
             headers_untrusted: []const Header.Prepare,
         ) u64 {
             var op: u64 = 0;
@@ -2376,7 +2376,7 @@ fn recovery_case(
 /// * has an expected command, and
 /// * resides in the correct slot.
 fn header_ok(
-    cluster: u32,
+    cluster: u128,
     slot: Slot,
     header: *const Header.Prepare,
 ) ?*const Header.Prepare {
@@ -2472,7 +2472,7 @@ pub const BitSet = struct {
 ///
 /// `offset_logical` is relative to the beginning of the `wal_headers` zone.
 /// Returns the number of bytes written to `target`.
-pub fn format_wal_headers(cluster: u32, offset_logical: u64, target: []u8) usize {
+pub fn format_wal_headers(cluster: u128, offset_logical: u64, target: []u8) usize {
     assert(offset_logical <= constants.journal_size_headers);
     assert(offset_logical % constants.sector_size == 0);
     assert(target.len > 0);
@@ -2503,7 +2503,7 @@ test "format_wal_headers" {
 ///
 /// `offset_logical` is relative to the beginning of the `wal_prepares` zone.
 /// Returns the number of bytes written to `target`.
-pub fn format_wal_prepares(cluster: u32, offset_logical: u64, target: []u8) usize {
+pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usize {
     assert(offset_logical <= constants.journal_size_prepares);
     assert(offset_logical % constants.sector_size == 0);
     assert(target.len > 0);

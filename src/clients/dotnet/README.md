@@ -84,7 +84,7 @@ environment variable and defaults to port `3000`.
 ```cs
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
 var client = new Client(
-  clusterID: 0,
+  clusterID: UInt128.Zero,
   addresses: new[] {tbAddress != null ? tbAddress : "3000"}
 );
 ```
