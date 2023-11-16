@@ -52,7 +52,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         fn format_wal(
             self: *Self,
             allocator: std.mem.Allocator,
-            cluster: u32,
+            cluster: u128,
             storage: *Storage,
         ) !void {
             assert(!self.formatting);

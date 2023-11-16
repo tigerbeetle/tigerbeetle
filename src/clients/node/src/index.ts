@@ -70,7 +70,7 @@ export type Result = CreateAccountsError | CreateTransfersError | Account | Tran
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
 interface BindingInitArgs {
-  cluster_id: number, // u32
+  cluster_id: bigint, // u128
   concurrency: number, // u32
   replica_addresses: Buffer,
 }
@@ -82,7 +82,7 @@ interface Binding {
 }
 
 export interface ClientInitArgs {
-  cluster_id: number, // u32
+  cluster_id: bigint, // u128
   concurrency_max?: number, // u32
   replica_addresses: Array<string | number>,
 }

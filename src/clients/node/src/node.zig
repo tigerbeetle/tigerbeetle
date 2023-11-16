@@ -48,7 +48,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
         .function = "init",
     }) catch return null;
 
-    const cluster = translate.u32_from_object(env, args[0], "cluster_id") catch return null;
+    const cluster = translate.u128_from_object(env, args[0], "cluster_id") catch return null;
     const concurrency = translate.u32_from_object(env, args[0], "concurrency") catch return null;
     const addresses = translate.slice_from_object(
         env,
@@ -108,7 +108,7 @@ fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
 
 // tb_client Logic
 
-fn create(env: c.napi_env, cluster_id: u32, concurrency: u32, addresses: []const u8) !c.napi_value {
+fn create(env: c.napi_env, cluster_id: u128, concurrency: u32, addresses: []const u8) !c.napi_value {
     var tsfn_name: c.napi_value = undefined;
     if (c.napi_create_string_utf8(env, "tb_client", c.NAPI_AUTO_LENGTH, &tsfn_name) != c.napi_ok) {
         return translate.throw(env, "Failed to create resource name for thread-safe function.");

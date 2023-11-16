@@ -91,7 +91,7 @@ tbAddress := os.Getenv("TB_ADDRESS")
 if len(tbAddress) == 0 {
   tbAddress = "3000"
 }
-client, err := NewClient(0, []string{tbAddress}, 32)
+client, err := NewClient(ToUint128(0), []string{tbAddress}, 32)
 if err != nil {
 	log.Printf("Error creating client: %s", err)
 	return

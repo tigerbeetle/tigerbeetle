@@ -46,7 +46,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         id: u128,
 
         /// The identifier for the cluster that this client intends to communicate with.
-        cluster: u32,
+        cluster: u128,
 
         /// The number of replicas in the cluster.
         replica_count: u8,
@@ -105,7 +105,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub fn init(
             allocator: mem.Allocator,
             id: u128,
-            cluster: u32,
+            cluster: u128,
             replica_count: u8,
             message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,

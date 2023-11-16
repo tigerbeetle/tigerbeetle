@@ -20,7 +20,7 @@ pub const MessageBus = struct {
     network: *Network,
     pool: *MessagePool,
 
-    cluster: u32,
+    cluster: u128,
     process: Process,
 
     /// The callback to be called when a message is received.
@@ -32,7 +32,7 @@ pub const MessageBus = struct {
 
     pub fn init(
         _: std.mem.Allocator,
-        cluster: u32,
+        cluster: u128,
         process: Process,
         message_pool: *MessagePool,
         on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,

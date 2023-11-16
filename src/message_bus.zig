@@ -46,7 +46,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         pool: *MessagePool,
         io: *IO,
 
-        cluster: u32,
+        cluster: u128,
         configuration: []const std.net.Address,
 
         process: switch (process_type) {
@@ -99,7 +99,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
         pub fn init(
             allocator: mem.Allocator,
-            cluster: u32,
+            cluster: u128,
             process: Process,
             message_pool: *MessagePool,
             on_message_callback: *const fn (message_bus: *Self, message: *Message) void,

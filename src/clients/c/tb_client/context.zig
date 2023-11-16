@@ -105,7 +105,7 @@ pub fn ContextType(
 
         pub fn init(
             allocator: std.mem.Allocator,
-            cluster_id: u32,
+            cluster_id: u128,
             addresses: []const u8,
             concurrency_max: u32,
             completion_ctx: usize,
@@ -162,7 +162,7 @@ pub fn ContextType(
             context.message_pool = try MessagePool.init(allocator, .client);
             errdefer context.message_pool.deinit(context.allocator);
 
-            log.debug("{}: init: initializing client (cluster_id={}, addresses={any})", .{
+            log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
                 cluster_id,
                 context.addresses,

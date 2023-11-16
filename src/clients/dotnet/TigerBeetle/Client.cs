@@ -11,10 +11,10 @@ namespace TigerBeetle
     {
         private const int DEFAULT_CONCURRENCY_MAX = 32;
 
-        private readonly uint clusterID;
+        private readonly UInt128 clusterID;
         private readonly NativeClient nativeClient;
 
-        public Client(uint clusterID, string[] addresses, int concurrencyMax = DEFAULT_CONCURRENCY_MAX)
+        public Client(UInt128 clusterID, string[] addresses, int concurrencyMax = DEFAULT_CONCURRENCY_MAX)
         {
             this.nativeClient = NativeClient.Init(clusterID, addresses, concurrencyMax);
             this.clusterID = clusterID;
@@ -29,7 +29,7 @@ namespace TigerBeetle
             }
         }
 
-        public uint ClusterID => clusterID;
+        public UInt128 ClusterID => clusterID;
 
         public CreateAccountResult CreateAccount(Account account)
         {

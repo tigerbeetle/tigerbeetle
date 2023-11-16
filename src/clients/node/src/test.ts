@@ -9,7 +9,7 @@ import {
 } from '.'
 
 const client = createClient({
-  cluster_id: 0,
+  cluster_id: 0n,
   replica_addresses: ['3001']
 })
 
@@ -21,7 +21,7 @@ const accountA: Account = {
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,  
+  credits_posted: 0n,
   user_data_128: 0n,
   user_data_64: 0n,
   user_data_32: 0,
@@ -36,7 +36,7 @@ const accountB: Account = {
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,  
+  credits_posted: 0n,
   user_data_128: 0n,
   user_data_64: 0n,
   user_data_32: 0,
@@ -92,7 +92,7 @@ test('can lookup accounts', async (): Promise<void> => {
   assert.strictEqual(account1.credits_posted, 0n)
   assert.strictEqual(account1.credits_pending, 0n)
   assert.strictEqual(account1.debits_posted, 0n)
-  assert.strictEqual(account1.debits_pending, 0n)  
+  assert.strictEqual(account1.debits_pending, 0n)
   assert.strictEqual(account1.user_data_128, 0n)
   assert.strictEqual(account1.user_data_64, 0n)
   assert.strictEqual(account1.user_data_32, 0)
@@ -355,7 +355,7 @@ async function main () {
     console.log('Time taken (s):', (end - start)/1000)
   } finally {
     await client.destroy()
-  }    
+  }
 }
 
 main().catch((error: AssertionError) => {
