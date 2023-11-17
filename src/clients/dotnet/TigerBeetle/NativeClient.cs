@@ -14,7 +14,7 @@ namespace TigerBeetle
 
         private unsafe delegate InitializationStatus InitFunction(
                     IntPtr* out_client,
-                    UInt128 cluster_id,
+                    UInt128Extensions.UnsafeU128 cluster_id,
                     byte* address_ptr,
                     uint address_len,
                     uint num_packets,
@@ -58,7 +58,7 @@ namespace TigerBeetle
             }
         }
 
-        private static NativeClient CallInit(InitFunction initFunction, UInt128 clusterID, string[] addresses, int concurrencyMax)
+        private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses, int concurrencyMax)
         {
             if (concurrencyMax <= 0) throw new ArgumentOutOfRangeException(nameof(concurrencyMax), "Concurrency must be positive");
 

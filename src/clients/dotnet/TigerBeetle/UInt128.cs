@@ -13,6 +13,22 @@ namespace TigerBeetle
     /// </summary>
     public static class UInt128Extensions
     {
+        /// <summary>
+        /// Unsafe representation of a tb_uint128_t used only internally
+        /// for P/Invove in methods marked with the [DllImport] attribute.
+        /// It's necessary only because P/Invoke's marshaller does not support System.UInt128.
+        /// </summary>
+        [StructLayout(LayoutKind.Explicit, Size = SIZE)]
+        internal unsafe struct UnsafeU128 {
+            [FieldOffset(0)]
+            fixed byte raw[SIZE];
+
+            /// <summary>
+            /// Reinterprets memory, casting the managed UInt128 directly to the unsafe representation.
+            /// </summary>
+            public static implicit operator UnsafeU128(UInt128 value) => *(UnsafeU128*)&value;
+        }
+
         internal const int SIZE = 16;
 
         public static Guid ToGuid(this UInt128 value)
