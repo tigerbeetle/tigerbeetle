@@ -39,7 +39,7 @@ public class Benchmark {
                 return;
             }
 
-            final int HEADER_SIZE = 128; // @sizeOf(vsr.Header)
+            final int HEADER_SIZE = 256; // @sizeOf(vsr.Header)
             final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
             final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
 

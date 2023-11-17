@@ -9,7 +9,7 @@ import static org.junit.Assert.assertEquals;
 
 public class EchoTest {
 
-    static final int HEADER_SIZE = 128; // @sizeOf(vsr.Header)
+    static final int HEADER_SIZE = 256; // @sizeOf(vsr.Header)
     static final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
     static final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
     static final int ITEMS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;

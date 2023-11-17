@@ -363,10 +363,10 @@ But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
-is 8191.
+is 8190.
 
 ```java
-var BATCH_SIZE = 8191;
+var BATCH_SIZE = 8190;
 for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
   TransferBatch batch = new TransferBatch(BATCH_SIZE);
 

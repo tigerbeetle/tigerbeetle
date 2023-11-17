@@ -393,7 +393,7 @@ pub const JavaDocs = Docs{
     ,
 
     .batch_example =
-    \\var BATCH_SIZE = 8191;
+    \\var BATCH_SIZE = 8190;
     \\for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
     \\  TransferBatch batch = new TransferBatch(BATCH_SIZE);
     \\

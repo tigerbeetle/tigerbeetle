@@ -297,7 +297,7 @@ pub const GoDocs = Docs{
     ,
 
     .batch_example =
-    \\BATCH_SIZE := 8191
+    \\BATCH_SIZE := 8190
     \\for i := 0; i < len(transfers); i += BATCH_SIZE {
     \\	batch := BATCH_SIZE
     \\	if i + BATCH_SIZE > len(transfers) {

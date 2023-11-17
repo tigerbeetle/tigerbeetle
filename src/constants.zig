@@ -529,7 +529,7 @@ comptime {
 
 /// A multiple of batch inserts that a mutable table can definitely accommodate before flushing.
 /// For example, if a message_size_max batch can contain at most 8181 transfers then a multiple of 4
-/// means that the transfer tree's mutable table will be sized to 8191 * 4 = 32764 transfers.
+/// means that the transfer tree's mutable table will be sized to 8190 * 4 = 32760 transfers.
 pub const lsm_batch_multiple = config.cluster.lsm_batch_multiple;
 
 comptime {

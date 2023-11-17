@@ -325,7 +325,7 @@ pub const DotnetDocs = Docs{
     ,
 
     .batch_example =
-    \\var BATCH_SIZE = 8191;
+    \\var BATCH_SIZE = 8190;
     \\for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
     \\  var batchSize = BATCH_SIZE;
     \\  if (i + BATCH_SIZE > transfers.Length) {
