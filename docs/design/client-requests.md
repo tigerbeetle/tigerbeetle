@@ -24,10 +24,10 @@ In the default configuration, the batch sizes are:
 
 | Operation          | Batch Size |
 | ------------------ | ---------: |
-| `lookup_accounts`  | 8191       |
-| `lookup_transfers` | 8191       |
-| `create_accounts`  | 8191       |
-| `create_transfers` | 8191       |
+| `lookup_accounts`  | 8190       |
+| `lookup_transfers` | 8190       |
+| `create_accounts`  | 8190       |
+| `create_transfers` | 8190       |
 
 Presently the client application is responsible for batching events, but only as a stopgap
 because this has not yet been implemented within the clients themselves.

@@ -35,7 +35,7 @@ pub const Header = extern struct {
     /// The cluster number binds intention into the header, so that a client or replica can indicate
     /// the cluster it believes it is speaking to, instead of accidentally talking to the wrong
     /// cluster (for example, staging vs production).
-    cluster: u32,
+    cluster: u128,
 
     /// The size of the Header structure (always), plus any associated body.
     size: u32,
@@ -58,11 +58,11 @@ pub const Header = extern struct {
     replica: u8,
 
     /// Reserved for future use by the header frame (i.e. to be shared by all message types).
-    reserved_frame: [12]u8,
+    reserved_frame: [16]u8,
 
     /// This data's schema is different depending on the `Header.command`.
     /// (No default value – `Header`s should not be constructed directly.)
-    reserved_command: [176]u8,
+    reserved_command: [160]u8,
 
     comptime {
         assert(@sizeOf(Header) == 256);
@@ -255,16 +255,16 @@ pub const Header = extern struct {
         checksum: u128,
         checksum_body: u128,
         reserved_nonce: u128,
-        cluster: u32,
+        cluster: u128,
         size: u32,
         epoch: u32 = 0,
         view: u32 = 0,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [12]u8,
+        reserved_frame: [16]u8,
 
-        reserved: [176]u8 = [_]u8{0} ** 176,
+        reserved: [160]u8 = [_]u8{0} ** 160,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
@@ -278,14 +278,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// Current checkpoint id (possibly uncanonical).
         checkpoint_id: u128,
@@ -294,7 +294,7 @@ pub const Header = extern struct {
 
         ping_timestamp_monotonic: u64,
 
-        reserved: [144]u8 = [_]u8{0} ** 144,
+        reserved: [128]u8 = [_]u8{0} ** 128,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -314,19 +314,19 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         ping_timestamp_monotonic: u64,
         pong_timestamp_wall: u64,
 
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [144]u8 = [_]u8{0} ** 144,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
@@ -346,17 +346,17 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         client: u128,
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [144]u8 = [_]u8{0} ** 144,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
@@ -376,16 +376,16 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [176]u8 = [_]u8{0} ** 176,
+        reserved: [160]u8 = [_]u8{0} ** 160,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
@@ -402,14 +402,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
@@ -443,7 +443,7 @@ pub const Header = extern struct {
         /// A client is allowed to have at most one request inflight at a time.
         request: u32,
         operation: Operation,
-        reserved: [123]u8 = [_]u8{0} ** 123,
+        reserved: [107]u8 = [_]u8{0} ** 107,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
@@ -491,14 +491,16 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+
+        // TODO client session?
 
         /// A backpointer to the previous prepare checksum for hash chain verification.
         /// This provides a cryptographic guarantee for linearizability across our distributed log
@@ -522,7 +524,7 @@ pub const Header = extern struct {
         request: u32,
         /// The state machine operation to apply.
         operation: Operation,
-        reserved: [99]u8 = [_]u8{0} ** 99,
+        reserved: [83]u8 = [_]u8{0} ** 83,
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
@@ -573,7 +575,7 @@ pub const Header = extern struct {
             return null;
         }
 
-        pub fn reserved(cluster: u32, slot: u64) Prepare {
+        pub fn reserved(cluster: u128, slot: u64) Prepare {
             assert(slot < constants.journal_slot_count);
 
             var header = Prepare{
@@ -595,7 +597,7 @@ pub const Header = extern struct {
             return header;
         }
 
-        pub fn root(cluster: u32) Prepare {
+        pub fn root(cluster: u128) Prepare {
             var header = Prepare{
                 .cluster = cluster,
                 .size = @sizeOf(Header),
@@ -623,14 +625,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
         /// The corresponding request message's checksum.
@@ -642,7 +644,7 @@ pub const Header = extern struct {
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [83]u8 = [_]u8{0} ** 83,
+        reserved: [67]u8 = [_]u8{0} ** 67,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
@@ -685,14 +687,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         parent: u128,
         client: u128,
@@ -707,7 +709,7 @@ pub const Header = extern struct {
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [99]u8 = [_]u8{0} ** 99,
+        reserved: [83]u8 = [_]u8{0} ** 83,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
@@ -735,14 +737,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// Current checkpoint id (possibly uncanonical).
         checkpoint_id: u128,
@@ -758,7 +760,7 @@ pub const Header = extern struct {
 
         timestamp_monotonic: u64,
 
-        reserved: [120]u8 = [_]u8{0} ** 120,
+        reserved: [104]u8 = [_]u8{0} ** 104,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
@@ -777,16 +779,16 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [176]u8 = [_]u8{0} ** 176,
+        reserved: [160]u8 = [_]u8{0} ** 160,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
@@ -803,14 +805,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
         /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
@@ -825,7 +827,7 @@ pub const Header = extern struct {
         commit_min: u64,
         checkpoint_op: u64,
         log_view: u32,
-        reserved: [116]u8 = [_]u8{0} ** 116,
+        reserved: [100]u8 = [_]u8{0} ** 100,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
@@ -845,14 +847,14 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
         nonce: u128,
@@ -861,7 +863,7 @@ pub const Header = extern struct {
         commit: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,
-        reserved: [136]u8 = [_]u8{0} ** 136,
+        reserved: [120]u8 = [_]u8{0} ** 120,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
@@ -878,17 +880,17 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         nonce: u128,
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [144]u8 = [_]u8{0} ** 144,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
@@ -906,20 +908,20 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// The minimum op requested (inclusive).
         op_min: u64,
         /// The maximum op requested (inclusive).
         op_max: u64,
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [144]u8 = [_]u8{0} ** 144,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
@@ -938,18 +940,18 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         prepare_checksum: u128,
         prepare_op: u64,
-        reserved: [152]u8 = [_]u8{0} ** 152,
+        reserved: [136]u8 = [_]u8{0} ** 136,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
@@ -967,19 +969,19 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         reply_client: u128,
         reply_checksum: u128,
         reply_op: u64,
-        reserved: [136]u8 = [_]u8{0} ** 136,
+        reserved: [120]u8 = [_]u8{0} ** 120,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
@@ -998,16 +1000,16 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [176]u8 = [_]u8{0} ** 176,
+        reserved: [160]u8 = [_]u8{0} ** 160,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
@@ -1023,17 +1025,17 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         client: u128,
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [144]u8 = [_]u8{0} ** 144,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
@@ -1051,16 +1053,16 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [176]u8 = [_]u8{0} ** 176,
+        reserved: [160]u8 = [_]u8{0} ** 160,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
@@ -1076,19 +1078,19 @@ pub const Header = extern struct {
 
     pub const Block = extern struct {
         pub usingnamespace HeaderFunctions(@This());
-        pub const metadata_size = 144;
+        pub const metadata_size = 128;
 
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         // Schema is determined by `block_type`.
         metadata_bytes: [metadata_size]u8,
@@ -1119,18 +1121,18 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
         checkpoint_op: u64,
-        reserved: [152]u8 = [_]u8{0} ** 152,
+        reserved: [136]u8 = [_]u8{0} ** 136,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_checkpoint);
@@ -1148,18 +1150,18 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
         checkpoint_op: u64,
-        reserved: [152]u8 = [_]u8{0} ** 152,
+        reserved: [136]u8 = [_]u8{0} ** 136,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_checkpoint);
@@ -1178,19 +1180,19 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
         checkpoint_op: u64,
         trailer_offset: u32,
-        reserved: [148]u8 = [_]u8{0} ** 148,
+        reserved: [132]u8 = [_]u8{0} ** 132,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_free_set);
@@ -1208,19 +1210,19 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
         checkpoint_op: u64,
         trailer_offset: u32 = 0,
-        reserved: [148]u8 = [_]u8{0} ** 148,
+        reserved: [132]u8 = [_]u8{0} ** 132,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_client_sessions);
@@ -1238,21 +1240,21 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         trailer_checksum: u128,
         checkpoint_id: u128,
         checkpoint_op: u64,
         trailer_size: u32,
         trailer_offset: u32,
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_free_set);
@@ -1271,21 +1273,21 @@ pub const Header = extern struct {
         checksum: u128 = 0,
         checksum_body: u128 = 0,
         reserved_nonce: u128 = 0,
-        cluster: u32,
+        cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         trailer_checksum: u128,
         checkpoint_id: u128,
         checkpoint_op: u64,
         trailer_size: u32,
         trailer_offset: u32,
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_client_sessions);

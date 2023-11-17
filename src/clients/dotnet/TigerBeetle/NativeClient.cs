@@ -14,7 +14,7 @@ namespace TigerBeetle
 
         private unsafe delegate InitializationStatus InitFunction(
                     IntPtr* out_client,
-                    uint cluster_id,
+                    UInt128Extensions.UnsafeU128 cluster_id,
                     byte* address_ptr,
                     uint address_len,
                     uint num_packets,
@@ -42,7 +42,7 @@ namespace TigerBeetle
             return Encoding.UTF8.GetBytes(string.Join(',', addresses) + "\0");
         }
 
-        public static NativeClient Init(uint clusterID, string[] addresses, int concurrencyMax)
+        public static NativeClient Init(UInt128 clusterID, string[] addresses, int concurrencyMax)
         {
             unsafe
             {
@@ -50,7 +50,7 @@ namespace TigerBeetle
             }
         }
 
-        public static NativeClient InitEcho(uint clusterID, string[] addresses, int concurrencyMax)
+        public static NativeClient InitEcho(UInt128 clusterID, string[] addresses, int concurrencyMax)
         {
             unsafe
             {
@@ -58,7 +58,7 @@ namespace TigerBeetle
             }
         }
 
-        private static NativeClient CallInit(InitFunction initFunction, uint clusterID, string[] addresses, int concurrencyMax)
+        private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses, int concurrencyMax)
         {
             if (concurrencyMax <= 0) throw new ArgumentOutOfRangeException(nameof(concurrencyMax), "Concurrency must be positive");
 

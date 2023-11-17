@@ -63,10 +63,6 @@ pub fn main() !void {
     }
 }
 
-// Pad the cluster id number and the replica index with 0s
-const filename_fmt = "cluster_{d:0>10}_replica_{d:0>3}.tigerbeetle";
-const filename_len = fmt.count(filename_fmt, .{ 0, 0 });
-
 const Command = struct {
     dir_fd: os.fd_t,
     fd: os.fd_t,

@@ -15,7 +15,7 @@
 #include "../tb_client.h"
 
 // config.message_size_max - @sizeOf(vsr.Header):
-#define MAX_MESSAGE_SIZE (1024 * 1024) - 128
+#define MAX_MESSAGE_SIZE (1024 * 1024) - 256
 
 // Synchronization context between the callback and the main thread.
 typedef struct completion_context {

@@ -189,7 +189,7 @@ pub fn main() !void {
     try buffer.writer().print(
         \\TB_STATUS tb_client_init(
         \\    tb_client_t* out_client,
-        \\    uint32_t cluster_id,
+        \\    tb_uint128_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
         \\    uint32_t packets_count,
@@ -199,7 +199,7 @@ pub fn main() !void {
         \\
         \\TB_STATUS tb_client_init_echo(
         \\    tb_client_t* out_client,
-        \\    uint32_t cluster_id,
+        \\    tb_uint128_t cluster_id,
         \\    const char* address_ptr,
         \\    uint32_t address_len,
         \\    uint32_t packets_count,

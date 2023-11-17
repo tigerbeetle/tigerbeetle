@@ -71,9 +71,10 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
                 \\dotnet add package tigerbeetle --source /host > /dev/null
                 \\cat <<EOF > Program.cs
                 \\using System;
+                \\using TigerBeetle;
                 \\public class Program {
                 \\  public static void Main() {
-                \\    new TigerBeetle.Client(0, new [] {"3001"}).Dispose();
+                \\    new Client(UInt128.Zero, new [] {"3001"}).Dispose();
                 \\    Console.WriteLine("SUCCESS");
                 \\  }
                 \\}

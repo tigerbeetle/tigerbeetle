@@ -48,7 +48,7 @@ const NativeClient = struct {
     fn client_init(
         comptime echo_client: bool,
         env: *jni.JNIEnv,
-        cluster_id: u32,
+        cluster_id: u128,
         addresses_obj: jni.JString,
         max_concurrency: u32,
     ) ?*Context {
@@ -194,15 +194,20 @@ comptime {
         fn client_init(
             env: *jni.JNIEnv,
             class: jni.JClass,
-            cluster_id: jni.JInt,
+            cluster_id: jni.JByteArray,
             addresses: jni.JString,
             max_concurrency: jni.JInt,
         ) callconv(jni.JNICALL) jni.JLong {
             _ = class;
+            assert(env.get_array_length(cluster_id) == 16);
+
+            const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
+            defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
+
             var context = NativeClient.client_init(
                 false,
                 env,
-                @as(u32, @bitCast(cluster_id)),
+                @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
                 @as(u32, @bitCast(max_concurrency)),
             );
@@ -212,15 +217,20 @@ comptime {
         fn client_init_echo(
             env: *jni.JNIEnv,
             class: jni.JClass,
-            cluster_id: jni.JInt,
+            cluster_id: jni.JByteArray,
             addresses: jni.JString,
             max_concurrency: jni.JInt,
         ) callconv(jni.JNICALL) jni.JLong {
             _ = class;
+            assert(env.get_array_length(cluster_id) == 16);
+
+            const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
+            defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
+
             var context = NativeClient.client_init(
                 true,
                 env,
-                @as(u32, @bitCast(cluster_id)),
+                @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
                 @as(u32, @bitCast(max_concurrency)),
             );

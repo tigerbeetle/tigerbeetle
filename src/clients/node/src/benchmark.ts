@@ -15,7 +15,7 @@ const PREVIOUS_BENCHMARK = IS_TWO_PHASE_TRANSFER ? 150000 : 310000
 const TOLERANCE = 10 // percent that the benchmark is allowed to deviate from the previous benchmark
 
 const client = createClient({
-  cluster_id: 0,
+  cluster_id: 0n,
   replica_addresses: ['3001']
 })
 

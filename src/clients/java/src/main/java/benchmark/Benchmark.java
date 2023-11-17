@@ -6,7 +6,7 @@ import com.tigerbeetle.*;
 public class Benchmark {
 
     public static void main(String[] args) {
-        try (var client = new Client(0, new String[] {"127.0.0.1:3001"})) {
+        try (var client = new Client(UInt128.asBytes(0), new String[] {"127.0.0.1:3001"})) {
 
             var accounts = new AccountBatch(2);
 
@@ -39,7 +39,7 @@ public class Benchmark {
                 return;
             }
 
-            final int HEADER_SIZE = 128; // @sizeOf(vsr.Header)
+            final int HEADER_SIZE = 256; // @sizeOf(vsr.Header)
             final int TRANSFER_SIZE = 128; // @sizeOf(Transfer)
             final int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
 

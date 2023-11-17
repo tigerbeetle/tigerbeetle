@@ -118,7 +118,7 @@ pub const NodeDocs = Docs{
 
     .client_object_example =
     \\const client = createClient({
-    \\  cluster_id: 0,
+    \\  cluster_id: 0n,
     \\  replica_addresses: [process.env.TB_ADDRESS || '3000']
     \\});
     ,
@@ -318,7 +318,7 @@ pub const NodeDocs = Docs{
     ,
 
     .batch_example =
-    \\const BATCH_SIZE = 8191;
+    \\const BATCH_SIZE = 8190;
     \\for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
     \\  const transferErrors = await client.createTransfers(transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)));
     \\  // error handling omitted

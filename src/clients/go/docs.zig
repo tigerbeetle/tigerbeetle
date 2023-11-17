@@ -153,7 +153,7 @@ pub const GoDocs = Docs{
     \\if len(tbAddress) == 0 {
     \\  tbAddress = "3000"
     \\}
-    \\client, err := NewClient(0, []string{tbAddress}, 32)
+    \\client, err := NewClient(ToUint128(0), []string{tbAddress}, 32)
     \\if err != nil {
     \\	log.Printf("Error creating client: %s", err)
     \\	return
@@ -297,7 +297,7 @@ pub const GoDocs = Docs{
     ,
 
     .batch_example =
-    \\BATCH_SIZE := 8191
+    \\BATCH_SIZE := 8190
     \\for i := 0; i < len(transfers); i += BATCH_SIZE {
     \\	batch := BATCH_SIZE
     \\	if i + BATCH_SIZE > len(transfers) {

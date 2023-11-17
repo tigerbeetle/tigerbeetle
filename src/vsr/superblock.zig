@@ -65,8 +65,8 @@ pub const SuperBlockHeader = extern struct {
     /// The version of the superblock format in use, reserved for major breaking changes.
     version: u16,
 
-    /// Protects against writing to or reading from the wrong data file.
-    cluster: u32,
+    /// Align the next fields.
+    reserved_start: u32 = 0,
 
     /// The current size of the data file.
     storage_size: u64,
@@ -78,6 +78,9 @@ pub const SuperBlockHeader = extern struct {
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
     sequence: u64,
+
+    /// Protects against writing to or reading from the wrong data file.
+    cluster: u128,
 
     /// The checksum of the previous superblock to hash chain across sequence numbers.
     parent: u128,
@@ -104,7 +107,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3580]u8 = [_]u8{0} ** 3580,
+    reserved: [3564]u8 = [_]u8{0} ** 3564,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -168,7 +171,7 @@ pub const SuperBlockHeader = extern struct {
         }
 
         pub fn root(options: struct {
-            cluster: u32,
+            cluster: u128,
             replica_id: u128,
             members: vsr.Members,
             replica_count: u8,
@@ -342,6 +345,7 @@ pub const SuperBlockHeader = extern struct {
         assert(superblock.version == SuperBlockVersion);
         assert(superblock.flags == 0);
 
+        assert(superblock.reserved_start == 0);
         assert(stdx.zeroed(&superblock.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.checkpoint.reserved));
@@ -364,6 +368,9 @@ pub const SuperBlockHeader = extern struct {
 
     /// Does not consider { checksum, copy } when comparing equality.
     pub fn equal(a: *const SuperBlockHeader, b: *const SuperBlockHeader) bool {
+        assert(a.reserved_start == 0);
+        assert(b.reserved_start == 0);
+
         assert(stdx.zeroed(&a.reserved));
         assert(stdx.zeroed(&b.reserved));
 
@@ -717,7 +724,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         pub const FormatOptions = struct {
-            cluster: u32,
+            cluster: u128,
             replica: u8,
             replica_count: u8,
         };
@@ -1329,7 +1336,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 log.debug(
                     "{[replica]?}: " ++
                         "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
-                        "sequence={[sequence]} cluster={[cluster]} replica_id={[replica_id]} " ++
+                        "sequence={[sequence]} " ++
+                        "cluster={[cluster]x:0>32} replica_id={[replica_id]} " ++
                         "size={[size]} checkpoint_id={[checkpoint_id]x:0>32} " ++
                         "free_set_checksum={[free_set_checksum]x:0>32} " ++
                         "client_sessions_checksum={[client_sessions_checksum]x:0>32} " ++

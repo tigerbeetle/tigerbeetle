@@ -5,7 +5,7 @@ using TigerBeetle;
 
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
 using (var client = new Client(
-       clusterID: 0,
+       clusterID: UInt128.Zero,
        addresses: new[] { tbAddress != null ? tbAddress : "3000" }
        ))
 {
