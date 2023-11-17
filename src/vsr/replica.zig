@@ -63,6 +63,7 @@ const CommitStage = enum {
     checkpoint_state_machine,
     checkpoint_client_replies,
     checkpoint_grid_repair,
+    checkpoint_free_set,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -128,6 +129,7 @@ pub fn ReplicaType(
         const Self = @This();
 
         pub const SuperBlock = vsr.SuperBlockType(Storage);
+        const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
         const Journal = vsr.JournalType(Self, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
@@ -658,9 +660,13 @@ pub fn ReplicaType(
             maybe(self.status == .recovering_head);
             if (self.status == .recovering) assert(self.solo());
 
-            // Asynchronously open the (Forest inside) StateMachine so that we can repair grid
-            // blocks if necessary:
-            self.state_machine.open(state_machine_open_callback);
+            // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
+            // can repair grid blocks if necessary:
+            self.superblock.free_set_encoded.open(
+                &self.grid,
+                self.superblock.working.free_set_reference(),
+                free_set_open_callback,
+            );
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -675,8 +681,20 @@ pub fn ReplicaType(
             self.opened = true;
         }
 
+        fn free_set_open_callback(free_set_encoded: *FreeSetEncoded) void {
+            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", free_set_encoded);
+            const self = @fieldParentPtr(Self, "superblock", superblock);
+            assert(!self.state_machine_opened);
+            assert(self.commit_stage == .idle);
+            assert(self.syncing == .idle);
+            assert(self.sync_tables == null);
+            assert(self.grid_repair_tables.executing() == 0);
+            self.state_machine.open(state_machine_open_callback);
+        }
+
         fn state_machine_open_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.superblock.free_set.opened);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
@@ -1119,9 +1137,7 @@ pub fn ReplicaType(
                 .block => |m| self.on_block(m),
                 .request_sync_checkpoint => |m| self.on_request_sync_checkpoint(m),
                 .sync_checkpoint => |m| self.on_sync_checkpoint(m),
-                .request_sync_free_set => self.on_request_sync_trailer(message),
                 .request_sync_client_sessions => self.on_request_sync_trailer(message),
-                .sync_free_set => self.on_sync_trailer(.free_set, message),
                 .sync_client_sessions => self.on_sync_trailer(.client_sessions, message),
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
@@ -2454,14 +2470,11 @@ pub fn ReplicaType(
         }
 
         fn on_request_sync_trailer(self: *Self, message: *Message) void {
-            assert(message.header.command == .request_sync_free_set or
-                message.header.command == .request_sync_client_sessions);
+            assert(message.header.command == .request_sync_client_sessions);
             if (self.ignore_sync_request_message(message)) return;
 
             switch (message.header.into_any()) {
-                inline .request_sync_client_sessions,
-                .request_sync_free_set,
-                => |message_header, command| {
+                inline .request_sync_client_sessions => |message_header, command| {
                     assert(message_header.checkpoint_op ==
                         self.superblock.staging.vsr_state.checkpoint.commit_min);
                     assert(message_header.checkpoint_id == self.superblock.staging.checkpoint_id());
@@ -2485,9 +2498,7 @@ pub fn ReplicaType(
             if (self.ignore_sync_response_message(message)) return;
 
             switch (message.header.into_any()) {
-                inline .sync_client_sessions,
-                .sync_free_set,
-                => |message_header| {
+                inline .sync_client_sessions => |message_header| {
                     const stage: *SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
                     assert(stage.target.checkpoint_id == message_header.checkpoint_id);
 
@@ -3155,6 +3166,7 @@ pub fn ReplicaType(
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
                 .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
+                .checkpoint_free_set => self.commit_op_checkpoint_free_set(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3547,10 +3559,31 @@ pub fn ReplicaType(
             assert(self.commit_stage == .checkpoint_grid_repair);
             assert(self.commit_prepare.?.header.op == self.op);
 
+            self.commit_dispatch(.checkpoint_free_set);
+        }
+
+        fn commit_op_checkpoint_free_set(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_free_set);
+            assert(self.commit_prepare.?.header.op == self.op);
+            assert(self.superblock.free_set.opened);
+
+            self.superblock.free_set_encoded.checkpoint(commit_op_checkpoint_free_set_callback);
+        }
+
+        fn commit_op_checkpoint_free_set_callback(set: *SuperBlock.FreeSetEncoded) void {
+            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
+            const self = @fieldParentPtr(Self, "superblock", superblock);
+            assert(self.commit_stage == .checkpoint_free_set);
+            assert(self.commit_prepare.?.header.op == self.op);
+            assert(self.superblock.free_set.opened);
+            assert(self.superblock.free_set.count_released() ==
+                self.superblock.free_set_encoded.block_count);
+
             self.commit_dispatch(.checkpoint_superblock);
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
+            assert(self.superblock.free_set.opened);
             assert(self.state_machine_opened);
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
@@ -4739,7 +4772,6 @@ pub fn ReplicaType(
         // (or just be inlined into on_request_sync_checkpoint).
         fn ignore_sync_request_message(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .request_sync_checkpoint or
-                message.header.command == .request_sync_free_set or
                 message.header.command == .request_sync_client_sessions);
 
             const command = @tagName(message.header.command);
@@ -4765,7 +4797,6 @@ pub fn ReplicaType(
             switch (message.header.command) {
                 inline .request_sync_checkpoint,
                 .request_sync_client_sessions,
-                .request_sync_free_set,
                 => |command_comptime| {
                     const message_header = message.header.into_const(command_comptime).?;
 
@@ -4800,7 +4831,6 @@ pub fn ReplicaType(
         // (or just be inlined into on_sync_checkpoint).
         fn ignore_sync_response_message(self: *const Self, message: *const Message) bool {
             assert(message.header.command == .sync_checkpoint or
-                message.header.command == .sync_free_set or
                 message.header.command == .sync_client_sessions);
             assert(message.header.replica < self.replica_count);
 
@@ -4817,7 +4847,7 @@ pub fn ReplicaType(
             const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
 
             switch (message.header.command) {
-                inline .sync_checkpoint, .sync_client_sessions, .sync_free_set => |command| {
+                inline .sync_checkpoint, .sync_client_sessions => |command| {
                     const message_header = message.header.into_const(command).?;
 
                     if (message_header.checkpoint_op != stage.target.checkpoint_op) {
@@ -6675,7 +6705,6 @@ pub fn ReplicaType(
                     assert(!self.standby());
                 },
                 .request_sync_checkpoint,
-                .request_sync_free_set,
                 .request_sync_client_sessions,
                 => {
                     maybe(self.standby());
@@ -6684,7 +6713,6 @@ pub fn ReplicaType(
                     assert(message.header.replica != replica);
                 },
                 .sync_checkpoint,
-                .sync_free_set,
                 .sync_client_sessions,
                 => {
                     assert(!self.standby());
@@ -7673,6 +7701,7 @@ pub fn ReplicaType(
                 .setup_client_replies,
                 .checkpoint_client_replies,
                 .checkpoint_grid_repair,
+                .checkpoint_free_set,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7820,6 +7849,7 @@ pub fn ReplicaType(
                 .setup_client_replies,
                 .checkpoint_client_replies,
                 .checkpoint_grid_repair,
+                .checkpoint_free_set,
                 .checkpoint_superblock,
                 => {},
             }
@@ -7889,7 +7919,6 @@ pub fn ReplicaType(
                 "manifest_oldest_address={[manifest_oldest_address]} " ++
                 "manifest_newest_checksum={[manifest_newest_checksum]} " ++
                 "manifest_newest_address={[manifest_newest_address]} " ++
-                "free_set_checksum={[free_set_checksum]x:0>32} " ++
                 "client_sessions_checksum={[client_sessions_checksum]x:0>32}", .{
                 .replica = self.replica,
                 .checkpoint_op = stage.target.checkpoint_op,
@@ -7898,7 +7927,6 @@ pub fn ReplicaType(
                 .manifest_oldest_address = checkpoint_state.manifest_oldest_address,
                 .manifest_newest_checksum = checkpoint_state.manifest_newest_checksum,
                 .manifest_newest_address = checkpoint_state.manifest_newest_address,
-                .free_set_checksum = stage.trailers.get(.free_set).final.?.checksum,
                 .client_sessions_checksum = stage.trailers.get(.client_sessions).final.?.checksum,
             });
 
@@ -7936,6 +7964,9 @@ pub fn ReplicaType(
 
             self.state_machine_opened = false;
             self.state_machine.reset();
+
+            self.superblock.free_set.reset();
+            self.superblock.free_set_encoded.reset();
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
@@ -8005,7 +8036,11 @@ pub fn ReplicaType(
                 self.transition_to_recovering_head();
             }
 
-            self.state_machine.open(state_machine_open_callback);
+            self.superblock.free_set_encoded.open(
+                &self.grid,
+                self.superblock.working.free_set_reference(),
+                free_set_open_callback,
+            );
             self.sync_dispatch(.idle);
         }
 
@@ -8643,8 +8678,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .requesting_trailers);
             assert(self.sync_message_timeout.ticking);
-            assert(command == .request_sync_free_set or
-                command == .request_sync_client_sessions);
+            assert(command == .request_sync_client_sessions);
             assert(@mod(offset, SyncTrailer.chunk_size_max) == 0);
 
             const stage: *const SyncStage.RequestingTrailers = &self.syncing.requesting_trailers;
@@ -8674,8 +8708,7 @@ pub fn ReplicaType(
             assert(!self.standby());
             assert(self.syncing == .idle);
             assert(self.replica != parameters.replica);
-            assert(command == .request_sync_free_set or
-                command == .request_sync_client_sessions);
+            assert(command == .request_sync_client_sessions);
 
             const trailer = comptime for (std.enums.values(vsr.SuperBlockTrailer)) |trailer| {
                 if (command == SyncTrailer.requests.get(trailer)) break trailer;

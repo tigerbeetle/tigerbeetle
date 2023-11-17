@@ -141,6 +141,7 @@ fn test_quorums_working(
                 .replica_count = 6,
                 .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
                     .commit_min_checksum = 123,
+                    .storage_size = superblock.data_file_size_min,
                 }),
             }),
         });
