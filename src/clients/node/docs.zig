@@ -318,7 +318,7 @@ pub const NodeDocs = Docs{
     ,
 
     .batch_example =
-    \\const BATCH_SIZE = 8191;
+    \\const BATCH_SIZE = 8190;
     \\for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
     \\  const transferErrors = await client.createTransfers(transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)));
     \\  // error handling omitted
