@@ -19,7 +19,8 @@ namespace TigerBeetle
         /// It's necessary only because P/Invoke's marshaller does not support System.UInt128.
         /// </summary>
         [StructLayout(LayoutKind.Explicit, Size = SIZE)]
-        internal unsafe struct UnsafeU128 {
+        internal unsafe struct UnsafeU128
+        {
             [FieldOffset(0)]
             fixed byte raw[SIZE];
 
