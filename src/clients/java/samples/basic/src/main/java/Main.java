@@ -10,7 +10,7 @@ public final class Main {
 			throws RequestException, ConcurrencyExceededException {
 		String replicaAddress = System.getenv("TB_ADDRESS");
 
-		int clusterID = 0;
+		byte[] clusterID = UInt128.asBytes(0);
 		String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
 		try (var client = new Client(clusterID, replicaAddresses)) {
 			// Create two accounts

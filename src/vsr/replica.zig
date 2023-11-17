@@ -155,7 +155,7 @@ pub fn ReplicaType(
         static_allocator: StaticAllocator,
 
         /// The number of the cluster to which this replica belongs:
-        cluster: u32,
+        cluster: u128,
 
         /// The number of replicas in the cluster:
         replica_count: u8,
@@ -719,7 +719,7 @@ pub fn ReplicaType(
         }
 
         const Options = struct {
-            cluster: u32,
+            cluster: u128,
             replica_count: u8,
             standby_count: u8,
             replica_index: u8,

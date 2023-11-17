@@ -202,7 +202,7 @@ pub const DotnetDocs = Docs{
     .client_object_example =
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
-    \\  clusterID: 0,
+    \\  clusterID: UInt128.Zero,
     \\  addresses: new[] {tbAddress != null ? tbAddress : "3000"}
     \\);
     ,
@@ -325,7 +325,7 @@ pub const DotnetDocs = Docs{
     ,
 
     .batch_example =
-    \\var BATCH_SIZE = 8191;
+    \\var BATCH_SIZE = 8190;
     \\for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
     \\  var batchSize = BATCH_SIZE;
     \\  if (i + BATCH_SIZE > transfers.Length) {

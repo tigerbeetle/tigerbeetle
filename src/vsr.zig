@@ -982,13 +982,13 @@ pub const Members = [constants.members_max]u128;
 /// However, that requires unergonomic two-step process for spinning a new cluster up.  To avoid
 /// needlessly compromising the experience until reconfiguration is fully implemented, derive
 /// replica ids for the initial cluster deterministically.
-pub fn root_members(cluster: u32) Members {
+pub fn root_members(cluster: u128) Members {
     const IdSeed = extern struct {
         cluster_config_checksum: u128 align(1),
-        cluster: u32 align(1),
+        cluster: u128 align(1),
         replica: u8 align(1),
     };
-    comptime assert(@sizeOf(IdSeed) == 21);
+    comptime assert(@sizeOf(IdSeed) == 33);
 
     var result = [_]u128{0} ** constants.members_max;
     var replica: u8 = 0;
@@ -1241,7 +1241,7 @@ const ViewChangeHeadersArray = struct {
     command: ViewChangeCommand,
     array: Headers.Array,
 
-    pub fn root(cluster: u32) ViewChangeHeadersArray {
+    pub fn root(cluster: u128) ViewChangeHeadersArray {
         return ViewChangeHeadersArray.init_from_slice(.start_view, &.{
             Header.Prepare.root(cluster),
         });

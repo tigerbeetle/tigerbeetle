@@ -58,7 +58,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
 
         pub const Options = struct {
-            cluster_id: u32,
+            cluster_id: u128,
             replica_count: u8,
             standby_count: u8,
             client_count: u8,

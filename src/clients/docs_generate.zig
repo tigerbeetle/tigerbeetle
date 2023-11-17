@@ -590,7 +590,7 @@ const Generator = struct {
             \\potential. Instead, **always batch what you can**.
             \\
             \\The maximum batch size is set in the TigerBeetle server. The default
-            \\is 8191.
+            \\is 8190.
         );
         mw.code(language.markdown_name, language.batch_example);
 

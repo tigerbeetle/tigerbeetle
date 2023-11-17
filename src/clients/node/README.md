@@ -79,7 +79,7 @@ environment variable and defaults to port `3000`.
 
 ```javascript
 const client = createClient({
-  cluster_id: 0,
+  cluster_id: 0n,
   replica_addresses: [process.env.TB_ADDRESS || '3000']
 });
 ```
@@ -347,10 +347,10 @@ But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
-is 8191.
+is 8190.
 
 ```javascript
-const BATCH_SIZE = 8191;
+const BATCH_SIZE = 8190;
 for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
   const transferErrors = await client.createTransfers(transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)));
   // error handling omitted

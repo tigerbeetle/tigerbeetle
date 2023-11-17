@@ -67,7 +67,7 @@ pub fn init_error_to_status(err: InitError) tb_status_t {
 
 pub fn init(
     allocator: std.mem.Allocator,
-    cluster_id: u32,
+    cluster_id: u128,
     addresses: []const u8,
     packets_count: u32,
     on_completion_ctx: usize,
@@ -87,7 +87,7 @@ pub fn init(
 
 pub fn init_echo(
     allocator: std.mem.Allocator,
-    cluster_id: u32,
+    cluster_id: u128,
     addresses: []const u8,
     packets_count: u32,
     on_completion_ctx: usize,

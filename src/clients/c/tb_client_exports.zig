@@ -18,7 +18,7 @@ comptime {
 
 fn init(
     out_client: *tb.tb_client_t,
-    cluster_id: u32,
+    cluster_id: u128,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
     packets_count: u32,
@@ -41,7 +41,7 @@ fn init(
 
 fn init_echo(
     out_client: *tb.tb_client_t,
-    cluster_id: u32,
+    cluster_id: u128,
     addresses_ptr: [*:0]const u8,
     addresses_len: u32,
     packets_count: u32,

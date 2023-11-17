@@ -221,7 +221,7 @@ pub const JavaDocs = Docs{
 
     .client_object_example =
     \\var replicaAddress = System.getenv("TB_ADDRESS");
-    \\int clusterID = 0;
+    \\byte[] clusterID = UInt128.asBytes(0);
     \\String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
     \\Client client = new Client(
     \\  clusterID,
@@ -393,7 +393,7 @@ pub const JavaDocs = Docs{
     ,
 
     .batch_example =
-    \\var BATCH_SIZE = 8191;
+    \\var BATCH_SIZE = 8190;
     \\for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
     \\  TransferBatch batch = new TransferBatch(BATCH_SIZE);
     \\

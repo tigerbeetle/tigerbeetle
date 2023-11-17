@@ -11,7 +11,7 @@ namespace TigerBeetle.Tests
     [TestClass]
     public class EchoTests
     {
-        private const int HEADER_SIZE = 128; // @sizeOf(vsr.Header)
+        private const int HEADER_SIZE = 256; // @sizeOf(vsr.Header)
         private const int MESSAGE_SIZE_MAX = 1024 * 1024; // config.message_size_max
         private static readonly int TRANSFER_SIZE = Marshal.SizeOf(typeof(Transfer));
         private static readonly int ITEMS_PER_BATCH = (MESSAGE_SIZE_MAX - HEADER_SIZE) / TRANSFER_SIZE;

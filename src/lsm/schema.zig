@@ -79,7 +79,7 @@ pub const TableIndex = struct {
         data_block_count_max: u32,
         key_size: u32,
         tree_id: u16,
-        reserved: [130]u8 = [_]u8{0} ** 130,
+        reserved: [114]u8 = [_]u8{0} ** 114,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -223,7 +223,7 @@ pub const TableData = struct {
         value_count: u32,
         value_size: u32,
         tree_id: u16,
-        reserved: [130]u8 = [_]u8{0} ** 130,
+        reserved: [114]u8 = [_]u8{0} ** 114,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -364,7 +364,7 @@ pub const ManifestNode = struct {
         previous_manifest_block_checksum: u128,
         previous_manifest_block_address: u64,
         entry_count: u32,
-        reserved: [116]u8 = .{0} ** 116,
+        reserved: [100]u8 = .{0} ** 100,
 
         comptime {
             assert(stdx.no_padding(Metadata));

@@ -779,7 +779,7 @@ namespace TigerBeetle
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         public static unsafe extern InitializationStatus tb_client_init(
             IntPtr* out_client,
-            uint cluster_id,
+            UInt128Extensions.UnsafeU128 cluster_id,
             byte* address_ptr,
             uint address_len,
             uint num_packets,
@@ -796,7 +796,7 @@ namespace TigerBeetle
         [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         public static unsafe extern InitializationStatus tb_client_init_echo(
             IntPtr* out_client,
-            uint cluster_id,
+            UInt128Extensions.UnsafeU128 cluster_id,
             byte* address_ptr,
             uint address_len,
             uint num_packets,
