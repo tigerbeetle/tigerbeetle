@@ -53,6 +53,7 @@ pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
+pub const FreeSetEncodedType = @import("vsr/superblock_free_set_encoded.zig").FreeSetEncodedType;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -181,11 +182,9 @@ pub const Command = enum(u8) {
     request_sync_checkpoint = 21,
     sync_checkpoint = 22,
 
-    request_sync_free_set = 23,
-    request_sync_client_sessions = 24,
+    request_sync_client_sessions = 23,
 
-    sync_free_set = 25,
-    sync_client_sessions = 26,
+    sync_client_sessions = 24,
 
     comptime {
         for (std.enums.values(Command), 0..) |result, index| {

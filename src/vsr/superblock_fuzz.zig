@@ -84,11 +84,15 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     });
     defer superblock.deinit(allocator);
 
+    superblock.free_set.opened = true;
+
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
         .storage_size_limit = constants.storage_size_max,
     });
     defer superblock_verify.deinit(allocator);
+
+    superblock_verify.free_set.opened = true;
 
     var sequence_states = Environment.SequenceStates.init(allocator);
     defer sequence_states.deinit();
@@ -149,14 +153,6 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         assert(env.pending.count() > 0);
         assert(env.pending.count() <= 2);
         try env.tick();
-
-        // Trailers are only updated on-disk by checkpoint(), never view_change().
-        // Trailers must not be mutated while a checkpoint() is in progress.
-        if (!env.pending.contains(.checkpoint) and random.boolean()) {
-            const range = env.superblock.free_set.reserve(1).?;
-            _ = env.superblock.free_set.acquire(range).?;
-            env.superblock.free_set.forfeit(range);
-        }
     }
 }
 
@@ -166,10 +162,6 @@ const Environment = struct {
     const SequenceStates = std.ArrayList(struct {
         vsr_state: VSRState,
         vsr_headers: vsr.Headers.Array,
-        /// Track the expected `checksum(free_set)`.
-        /// Note that this is a checksum of the decoded free set; it is not the same as
-        /// `SuperBlockHeader.free_set_checksum`.
-        free_set: u128,
     });
 
     sequence_states: SequenceStates,
@@ -218,17 +210,8 @@ const Environment = struct {
     fn verify(env: *Environment) !void {
         assert(!env.pending_verify);
 
-        {
-            // Reset `superblock_verify` so that it can be reused.
-            env.superblock_verify.opened = false;
-            var free_set_iterator = env.superblock_verify.free_set.blocks.iterator(.{});
-            while (free_set_iterator.next()) |block_bit| {
-                const block_address = block_bit + 1;
-                env.superblock_verify.free_set.release(block_address);
-            }
-            env.superblock_verify.free_set.checkpoint();
-        }
-
+        // Reset `superblock_verify` so that it can be reused.
+        env.superblock_verify.opened = false;
         // Duplicate the `superblock`'s storage so it is not modified by `superblock_verify`'s
         // repairs. Immediately reset() it to simulate a crash (potentially injecting additional
         // faults for pending writes) and clear the read/write queues.
@@ -258,8 +241,10 @@ const Environment = struct {
             assert(env.latest_vsr_state.monotonic(env.superblock_verify.working.vsr_state));
 
             const expect = env.sequence_states.items[env.superblock_verify.working.sequence];
-            assert(std.meta.eql(expect.vsr_state, env.superblock_verify.working.vsr_state));
-            assert(expect.free_set == checksum_free_set(env.superblock_verify));
+            try std.testing.expectEqualDeep(
+                expect.vsr_state,
+                env.superblock_verify.working.vsr_state,
+            );
 
             env.latest_sequence = env.superblock_verify.working.sequence;
             env.latest_checksum = env.superblock_verify.working.checksum;
@@ -300,7 +285,6 @@ const Environment = struct {
                 .replica_count = replica_count,
             }),
             .vsr_headers = vsr_headers,
-            .free_set = checksum_free_set(env.superblock),
         });
     }
 
@@ -361,7 +345,6 @@ const Environment = struct {
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
             .vsr_headers = vsr_headers,
-            .free_set = env.sequence_states.items[env.sequence_states.items.len - 1].free_set,
         });
 
         env.pending.insert(.view_change);
@@ -394,9 +377,13 @@ const Environment = struct {
                 .commit_min = vsr_state_old.checkpoint.commit_min + 1,
                 .manifest_oldest_checksum = 0,
                 .manifest_newest_checksum = 0,
+                .free_set_head_checksum = 0,
                 .manifest_oldest_address = 0,
                 .manifest_newest_address = 0,
+                .free_set_head_address = 0,
+                .storage_size = data_file_size_min,
                 .manifest_block_count = 0,
+                .free_set_size = 0,
                 .snapshots_block_checksum = 0,
                 .snapshots_block_address = 0,
             },
@@ -431,7 +418,6 @@ const Environment = struct {
             .vsr_headers = vsr.Headers.Array.from_slice(
                 env.superblock.staging.vsr_headers().slice,
             ) catch unreachable,
-            .free_set = checksum_free_set(env.superblock),
         });
 
         env.pending.insert(.checkpoint);
@@ -457,10 +443,3 @@ const Environment = struct {
         env.pending.remove(.checkpoint);
     }
 };
-
-fn checksum_free_set(superblock: *const SuperBlock) u128 {
-    const mask_bits = @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt);
-    const count_bits = superblock.free_set.blocks.bit_length;
-    const count_words = stdx.div_ceil(count_bits, mask_bits);
-    return vsr.checksum(std.mem.sliceAsBytes(superblock.free_set.blocks.masks[0..count_words]));
-}

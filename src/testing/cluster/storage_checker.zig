@@ -47,7 +47,6 @@ const Checkpoints = std.AutoHashMap(u64, Checkpoint);
 
 const CheckpointArea = enum {
     superblock_checkpoint,
-    superblock_free_set,
     superblock_client_sessions,
     client_replies,
     grid,
@@ -62,6 +61,7 @@ pub const StorageChecker = struct {
     checkpoints: Checkpoints,
 
     free_set: SuperBlock.FreeSet,
+    free_set_buffer: []align(@alignOf(u64)) u8,
 
     pub fn init(allocator: std.mem.Allocator) !StorageChecker {
         var compactions = Compactions.init(allocator);
@@ -73,14 +73,23 @@ pub const StorageChecker = struct {
         var free_set = try SuperBlock.FreeSet.init(allocator, vsr.superblock.grid_blocks_max);
         errdefer free_set.deinit(allocator);
 
+        var free_set_buffer = try allocator.alignedAlloc(
+            u8,
+            @alignOf(u64),
+            SuperBlock.FreeSet.encode_size_max(vsr.superblock.grid_blocks_max),
+        );
+        errdefer allocator.free(free_set);
+
         return StorageChecker{
             .compactions = compactions,
             .checkpoints = checkpoints,
             .free_set = free_set,
+            .free_set_buffer = free_set_buffer,
         };
     }
 
     pub fn deinit(checker: *StorageChecker, allocator: std.mem.Allocator) void {
+        allocator.free(checker.free_set_buffer);
         checker.free_set.deinit(allocator);
         checker.checkpoints.deinit();
         checker.compactions.deinit();
@@ -94,7 +103,6 @@ pub const StorageChecker = struct {
             superblock,
             std.enums.EnumSet(CheckpointArea).init(.{
                 .superblock_checkpoint = true,
-                .superblock_free_set = true,
                 .superblock_client_sessions = true,
                 .client_replies = !syncing,
                 .grid = !syncing,
@@ -111,7 +119,6 @@ pub const StorageChecker = struct {
             superblock,
             std.enums.EnumSet(CheckpointArea).init(.{
                 .superblock_checkpoint = true,
-                .superblock_free_set = true,
                 .superblock_client_sessions = true,
                 // The replica may have have already committed some addition prepares atop the
                 // checkpoint, so its client-replies zone will have mutated.
@@ -134,9 +141,6 @@ pub const StorageChecker = struct {
                     .superblock_checkpoint,
                     vsr.checksum(std.mem.asBytes(&superblock.working.vsr_state.checkpoint)),
                 );
-            }
-            if (areas.contains(.superblock_free_set)) {
-                checkpoint.put(.superblock_free_set, checksum_trailer(superblock, .free_set));
             }
             if (areas.contains(.superblock_client_sessions)) {
                 checkpoint.put(
@@ -229,13 +233,37 @@ pub const StorageChecker = struct {
     }
 
     fn checksum_grid(checker: *StorageChecker, superblock: *const SuperBlock) u128 {
-        const free_set_zone = vsr.SuperBlockTrailer.free_set.zone();
-        const free_set_offset = vsr.Zone.superblock.offset(free_set_zone.start_for_copy(0));
-        const free_set_size = superblock.working.free_set_size;
-        const free_set_buffer = superblock.storage.memory[free_set_offset..][0..free_set_size];
-        assert(vsr.checksum(free_set_buffer) == superblock.working.free_set_checksum);
+        const free_set_size = superblock.working.vsr_state.checkpoint.free_set_size;
 
-        checker.free_set.decode(@alignCast(free_set_buffer));
+        if (free_set_size > 0) {
+            // Read free set from the grid by manually following the linked list of blocks.
+            // Note that free set is written in direct order, and must be read backwards.
+            var free_set_block_address =
+                superblock.working.vsr_state.checkpoint.free_set_head_address;
+            var free_set_block_checksum =
+                superblock.working.vsr_state.checkpoint.free_set_head_checksum;
+            var free_set_cursor: usize = free_set_size;
+            while (true) {
+                const block = superblock.storage.grid_block(free_set_block_address).?;
+                assert(schema.header_from_block(block).checksum == free_set_block_checksum);
+
+                const encoded_words = schema.FreeSetNode.encoded_words(block);
+                free_set_cursor -= encoded_words.len;
+                stdx.copy_disjoint(
+                    .inexact,
+                    u8,
+                    checker.free_set_buffer[free_set_cursor..],
+                    encoded_words,
+                );
+
+                const next = schema.FreeSetNode.next(block) orelse break;
+                free_set_block_address = next.address;
+                free_set_block_checksum = next.checksum;
+            }
+            assert(free_set_cursor == 0);
+        }
+
+        checker.free_set.decode(checker.free_set_buffer[0..free_set_size]);
         defer checker.free_set.reset();
 
         var stream = vsr.ChecksumStream.init();

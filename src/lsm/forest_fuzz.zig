@@ -15,12 +15,15 @@ const Transfer = @import("../tigerbeetle.zig").Transfer;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
+const Reservation = @import("../vsr/superblock_free_set.zig").Reservation;
 const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
 const Forest = StateMachine.Forest;
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
+const FreeSet = vsr.FreeSet;
+const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
@@ -64,6 +67,9 @@ const Environment = struct {
         .cache_entries_posted = cache_entries_max,
     });
 
+    const free_set_fragments_max = 2048;
+    const free_set_fragment_size = 67;
+
     // We must call compact after every 'batch'.
     // Every `lsm_batch_multiple` batches may put/remove `value_count_max` values per index.
     // Every `FuzzOp.put_account` issues one remove and one put per index.
@@ -82,11 +88,13 @@ const Environment = struct {
         init,
         superblock_format,
         superblock_open,
+        free_set_open,
         forest_init,
         forest_open,
         fuzzing,
         forest_compact,
         forest_checkpoint,
+        free_set_checkpoint,
         superblock_checkpoint,
     };
 
@@ -161,13 +169,37 @@ const Environment = struct {
 
     fn open(env: *Environment) !void {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
-        try env.tick_until_state_change(.superblock_open, .forest_init);
+        try env.tick_until_state_change(.superblock_open, .free_set_open);
+
+        env.superblock.free_set_encoded.open(
+            &env.grid,
+            env.superblock.working.free_set_reference(),
+            free_set_open_callback,
+        );
+        try env.tick_until_state_change(.free_set_open, .forest_init);
 
         env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
         env.change_state(.forest_init, .forest_open);
         env.forest.open(forest_open_callback);
 
         try env.tick_until_state_change(.forest_open, .fuzzing);
+
+        env.fragmentate_free_set();
+    }
+
+    /// Allocate a sparse subset of grid blocks to make sure that encoded free set needs more than
+    /// block to exercise block linked list logic from FreeSetEncoded.
+    fn fragmentate_free_set(env: *Environment) void {
+        var reservations: [free_set_fragments_max]Reservation = undefined;
+        for (&reservations) |*reservation| {
+            reservation.* = env.superblock.free_set.reserve(free_set_fragment_size).?;
+        }
+        for (reservations) |reservation| {
+            _ = env.superblock.free_set.acquire(reservation).?;
+        }
+        for (reservations) |reservation| {
+            env.superblock.free_set.forfeit(reservation);
+        }
     }
 
     fn close(env: *Environment) void {
@@ -181,7 +213,13 @@ const Environment = struct {
 
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-        env.change_state(.superblock_open, .forest_init);
+        env.change_state(.superblock_open, .free_set_open);
+    }
+
+    fn free_set_open_callback(set: *FreeSetEncoded) void {
+        const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
+        const env = @fieldParentPtr(@This(), "superblock", superblock);
+        env.change_state(.free_set_open, .forest_init);
     }
 
     fn forest_open_callback(forest: *Forest) void {
@@ -206,14 +244,10 @@ const Environment = struct {
 
         env.change_state(.fuzzing, .forest_checkpoint);
         env.forest.checkpoint(forest_checkpoint_callback);
-        try env.tick_until_state_change(.forest_checkpoint, .superblock_checkpoint);
-        try env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
-    }
+        try env.tick_until_state_change(.forest_checkpoint, .free_set_checkpoint);
 
-    fn forest_checkpoint_callback(forest: *Forest) void {
-        const env = @fieldParentPtr(@This(), "forest", forest);
-        const op = env.checkpoint_op.?;
-        env.checkpoint_op = null;
+        env.superblock.free_set_encoded.checkpoint(free_set_checkpoint_callback);
+        try env.tick_until_state_change(.free_set_checkpoint, .superblock_checkpoint);
 
         {
             // VSRState.monotonic() asserts that the previous_checkpoint id changes.
@@ -222,24 +256,38 @@ const Environment = struct {
             var reply = std.mem.zeroInit(vsr.Header.Reply, .{
                 .cluster = cluster,
                 .command = .reply,
-                .op = op,
-                .commit = op,
+                .op = env.checkpoint_op.?,
+                .commit = env.checkpoint_op.?,
             });
             reply.set_checksum_body(&.{});
             reply.set_checksum();
 
             _ = env.superblock.client_sessions.put(1, &reply);
         }
-
-        env.change_state(.forest_checkpoint, .superblock_checkpoint);
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
-            .manifest_references = forest.manifest_log.checkpoint_references(),
+            .manifest_references = env.forest.manifest_log.checkpoint_references(),
             .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
-            .commit_min = op,
-            .commit_max = op + 1,
+            .commit_min = env.checkpoint_op.?,
+            .commit_max = env.checkpoint_op.? + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,
         });
+        try env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
+
+        env.checkpoint_op = null;
+    }
+
+    fn forest_checkpoint_callback(forest: *Forest) void {
+        const env = @fieldParentPtr(@This(), "forest", forest);
+        assert(env.checkpoint_op != null);
+        env.change_state(.forest_checkpoint, .free_set_checkpoint);
+    }
+
+    fn free_set_checkpoint_callback(set: *FreeSetEncoded) void {
+        const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
+        const env = @fieldParentPtr(@This(), "superblock", superblock);
+        assert(env.checkpoint_op != null);
+        env.change_state(.free_set_checkpoint, .superblock_checkpoint);
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {

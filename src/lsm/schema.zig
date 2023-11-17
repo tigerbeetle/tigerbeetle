@@ -56,9 +56,10 @@ pub const BlockType = enum(u8) {
     /// Unused; verifies that no block is written with a default 0 block type.
     reserved = 0,
 
-    manifest = 1,
-    index = 2,
-    data = 3,
+    free_set = 1,
+    manifest = 2,
+    index = 3,
+    data = 4,
 
     pub fn valid(block_type: BlockType) bool {
         _ = std.meta.intToEnum(BlockType, @intFromEnum(block_type)) catch return false;
@@ -340,6 +341,67 @@ pub const TableData = struct {
     }
 };
 
+pub const FreeSetNode = struct {
+    pub const Word = u64;
+
+    pub const Metadata = extern struct {
+        next_free_set_block_checksum: u128,
+        next_free_set_block_checksum_padding: u128 = 0,
+        next_free_set_block_address: u64,
+        reserved: [56]u8 = .{0} ** 56,
+
+        comptime {
+            assert(stdx.no_padding(Metadata));
+            assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
+        }
+    };
+
+    fn metadata(free_set_block: BlockPtrConst) *const Metadata {
+        const header = header_from_block(free_set_block);
+        assert(header.command == .block);
+        assert(header.block_type == .free_set);
+        assert(header.address > 0);
+        assert(header.snapshot == 0);
+
+        const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
+        assert(header_metadata.next_free_set_block_checksum_padding == 0);
+        assert(stdx.zeroed(&header_metadata.reserved));
+
+        if (header_metadata.next_free_set_block_address == 0) {
+            assert(header_metadata.next_free_set_block_checksum == 0);
+        }
+
+        assert((header.size - @sizeOf(vsr.Header)) % @sizeOf(Word) == 0);
+
+        return header_metadata;
+    }
+
+    pub fn assert_valid_header(free_set_block: BlockPtrConst) void {
+        _ = metadata(free_set_block);
+    }
+
+    pub fn next(free_set_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
+        const header_metadata = metadata(free_set_block);
+
+        if (header_metadata.next_free_set_block_address == 0) {
+            assert(header_metadata.next_free_set_block_checksum == 0);
+            return null;
+        } else {
+            return .{
+                .checksum = header_metadata.next_free_set_block_checksum,
+                .address = header_metadata.next_free_set_block_address,
+            };
+        }
+    }
+
+    pub fn encoded_words(block: BlockPtrConst) []align(@alignOf(Word)) const u8 {
+        assert_valid_header(block);
+
+        const header = header_from_block(block);
+        return block[@sizeOf(vsr.Header)..header.size];
+    }
+};
+
 /// A Manifest block's body is an array of TableInfo entries.
 // TODO Store snapshot in header.
 pub const ManifestNode = struct {
@@ -429,6 +491,7 @@ pub const ManifestNode = struct {
         assert(header.command == .block);
         assert(header.block_type == .manifest);
         assert(header.address > 0);
+        assert(header.snapshot == 0);
 
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
         assert(header_metadata.entry_count > 0);

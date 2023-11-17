@@ -101,9 +101,7 @@ pub const Header = extern struct {
             .block => Block,
             .request_sync_checkpoint => RequestSyncCheckpoint,
             .sync_checkpoint => SyncCheckpoint,
-            .request_sync_free_set => RequestSyncFreeSet,
             .request_sync_client_sessions => RequestSyncClientSessions,
-            .sync_free_set => SyncFreeSet,
             .sync_client_sessions => SyncClientSessions,
         };
     }
@@ -1258,40 +1256,6 @@ pub const Header = extern struct {
         }
     };
 
-    pub const RequestSyncFreeSet = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_padding: u128 = 0,
-        checksum_body: u128 = 0,
-        checksum_body_padding: u128 = 0,
-        reserved_nonce: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
-
-        checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
-        checkpoint_op: u64,
-        trailer_offset: u32,
-        reserved: [84]u8 = [_]u8{0} ** 84,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_sync_free_set);
-            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
-        }
-    };
-
     pub const RequestSyncClientSessions = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
@@ -1319,44 +1283,6 @@ pub const Header = extern struct {
             assert(self.command == .request_sync_client_sessions);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
-        }
-    };
-
-    pub const SyncFreeSet = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_padding: u128 = 0,
-        checksum_body: u128 = 0,
-        checksum_body_padding: u128 = 0,
-        reserved_nonce: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
-
-        trailer_checksum: u128,
-        trailer_checksum_padding: u128 = 0,
-        checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
-        checkpoint_op: u64,
-        trailer_size: u32,
-        trailer_offset: u32,
-        reserved: [48]u8 = [_]u8{0} ** 48,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .sync_free_set);
-            if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
-                return "size > max";
-            }
             if (self.view != 0) return "view != 0";
             if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
