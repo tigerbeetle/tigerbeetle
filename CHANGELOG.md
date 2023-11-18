@@ -34,6 +34,9 @@
 
   With larger headers (see #1295) we have enough room to make the cluster ID a 128-bit integer, allowing operators to generate random cluster IDs without the cost of having a centralized ID coordinator. Also updates the documentation and sample programs to reflect the new maximum batch size, which was reduced from 8191 to 8190 items after we doubled the header.
 
+### TigerTracks 🎧
+
+- [She smiled sweetly](https://www.youtube.com/watch?v=fB1EpEFz6Lg)
 
 ## 2023-11-13
 
