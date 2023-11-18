@@ -20,7 +20,7 @@
 
 - [#1302](https://github.com/tigerbeetle/tigerbeetle/pull/1302)
 
-  Fix a [bug](https://github.com/tigerbeetle/tigerbeetle/issues/1290) discovered and reported during the [Hackathon 2023](https://github.com/tigerbeetle/hackathon-2023), where the Node.js client's error messages were truncated due to an incorrect string concatenatenation adding a null byte `0x00` in the middle of the string.
+  Fix a [bug](https://github.com/tigerbeetle/tigerbeetle/issues/1290) discovered and reported during the [Hackathon 2023](https://github.com/tigerbeetle/hackathon-2023), where the Node.js client's error messages were truncated due to an incorrect string concatenation adding a null byte `0x00` in the middle of the string.
 
 - [#1291](https://github.com/tigerbeetle/tigerbeetle/pull/1291)
 
