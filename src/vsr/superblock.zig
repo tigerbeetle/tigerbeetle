@@ -54,6 +54,7 @@ const vsr_headers_reserved_size = constants.sector_size -
 // Fields are aligned to work as an extern or packed struct.
 pub const SuperBlockHeader = extern struct {
     checksum: u128 = undefined,
+    checksum_padding: u128 = 0,
 
     /// Protects against misdirected reads at startup.
     /// For example, if multiple reads are all misdirected to a single copy of the superblock.
@@ -79,17 +80,20 @@ pub const SuperBlockHeader = extern struct {
     /// A monotonically increasing counter to locate the latest superblock at startup.
     sequence: u64,
 
-    /// Protects against writing to or reading from the wrong data file.
-    cluster: u128,
-
     /// The checksum of the previous superblock to hash chain across sequence numbers.
     parent: u128,
+    parent_padding: u128 = 0,
 
     /// The checksum over the actual encoded block free set in the superblock trailer.
     free_set_checksum: u128,
+    free_set_checksum_padding: u128 = 0,
 
     /// The checksum over the client table entries in the superblock trailer.
     client_sessions_checksum: u128,
+    client_sessions_checksum_padding: u128 = 0,
+
+    /// Protects against writing to or reading from the wrong data file.
+    cluster: u128,
 
     /// State stored on stable storage for the Viewstamped Replication consensus protocol.
     vsr_state: VSRState,
@@ -107,7 +111,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3564]u8 = [_]u8{0} ** 3564,
+    reserved: [3404]u8 = [_]u8{0} ** 3404,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -121,6 +125,7 @@ pub const SuperBlockHeader = extern struct {
     comptime {
         assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
         assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
+        assert(@offsetOf(SuperBlockHeader, "parent") % @sizeOf(u256) == 0);
         assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
         assert(stdx.no_padding(SuperBlockHeader));
@@ -165,7 +170,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [23]u8 = [_]u8{0} ** 23,
 
         comptime {
-            assert(@sizeOf(VSRState) == 400);
+            assert(@sizeOf(VSRState) == 496);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -213,6 +218,12 @@ pub const SuperBlockHeader = extern struct {
             // These fields are unused at the moment:
             assert(state.checkpoint.snapshots_block_checksum == 0);
             assert(state.checkpoint.snapshots_block_address == 0);
+
+            assert(state.checkpoint.previous_checkpoint_id_padding == 0);
+            assert(state.checkpoint.commit_min_checksum_padding == 0);
+            assert(state.checkpoint.manifest_oldest_checksum_padding == 0);
+            assert(state.checkpoint.manifest_newest_checksum_padding == 0);
+            assert(state.checkpoint.snapshots_block_checksum_padding == 0);
 
             if (state.checkpoint.manifest_block_count == 0) {
                 assert(state.checkpoint.manifest_oldest_address == 0);
@@ -297,13 +308,18 @@ pub const SuperBlockHeader = extern struct {
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
         previous_checkpoint_id: u128,
+        previous_checkpoint_id_padding: u128 = 0,
 
         /// The vsr.Header.checksum of commit_min's message.
         commit_min_checksum: u128,
+        commit_min_checksum_padding: u128 = 0,
 
         manifest_oldest_checksum: u128,
+        manifest_oldest_checksum_padding: u128 = 0,
         manifest_newest_checksum: u128,
+        manifest_newest_checksum_padding: u128 = 0,
         snapshots_block_checksum: u128,
+        snapshots_block_checksum_padding: u128 = 0,
 
         manifest_oldest_address: u64,
         manifest_newest_address: u64,
@@ -316,26 +332,30 @@ pub const SuperBlockHeader = extern struct {
         manifest_block_count: u32,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [12]u8 = [_]u8{0} ** 12,
+        reserved: [28]u8 = [_]u8{0} ** 28,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 128);
-            assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
+            assert(@sizeOf(CheckpointState) == 224);
+            assert(@sizeOf(CheckpointState) % @sizeOf(u256) == 0);
             assert(stdx.no_padding(CheckpointState));
         }
     };
 
     pub fn calculate_checksum(superblock: *const SuperBlockHeader) u128 {
         comptime assert(meta.fieldIndex(SuperBlockHeader, "checksum") == 0);
-        comptime assert(meta.fieldIndex(SuperBlockHeader, "copy") == 1);
+        comptime assert(meta.fieldIndex(SuperBlockHeader, "checksum_padding") == 1);
+        comptime assert(meta.fieldIndex(SuperBlockHeader, "copy") == 2);
 
         const checksum_size = @sizeOf(@TypeOf(superblock.checksum));
         comptime assert(checksum_size == @sizeOf(u128));
 
+        const checksum_padding_size = @sizeOf(@TypeOf(superblock.checksum_padding));
+        comptime assert(checksum_padding_size == @sizeOf(u128));
+
         const copy_size = @sizeOf(@TypeOf(superblock.copy));
         comptime assert(copy_size == 2);
 
-        const ignore_size = checksum_size + copy_size;
+        const ignore_size = checksum_size + checksum_padding_size + copy_size;
 
         return vsr.checksum(std.mem.asBytes(superblock)[ignore_size..]);
     }
@@ -350,6 +370,11 @@ pub const SuperBlockHeader = extern struct {
         assert(stdx.zeroed(&superblock.vsr_state.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.checkpoint.reserved));
         assert(stdx.zeroed(&superblock.vsr_headers_reserved));
+
+        assert(superblock.checksum_padding == 0);
+        assert(superblock.parent_padding == 0);
+        assert(superblock.free_set_checksum_padding == 0);
+        assert(superblock.client_sessions_checksum_padding == 0);
 
         superblock.checksum = superblock.calculate_checksum();
     }
@@ -379,6 +404,15 @@ pub const SuperBlockHeader = extern struct {
 
         assert(stdx.zeroed(&a.vsr_headers_reserved));
         assert(stdx.zeroed(&b.vsr_headers_reserved));
+
+        assert(a.checksum_padding == 0);
+        assert(b.checksum_padding == 0);
+        assert(a.parent_padding == 0);
+        assert(b.parent_padding == 0);
+        assert(a.free_set_checksum_padding == 0);
+        assert(b.free_set_checksum_padding == 0);
+        assert(a.client_sessions_checksum_padding == 0);
+        assert(b.client_sessions_checksum_padding == 0);
 
         if (a.version != b.version) return false;
         if (a.cluster != b.cluster) return false;
