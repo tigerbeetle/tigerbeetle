@@ -401,7 +401,7 @@ pub const GridBlocksMissing = struct {
         ) |address, checksum, index| {
             const enqueue = queue.enqueue_faulty_block(
                 address,
-                checksum,
+                checksum.value,
                 .{ .table_data = .{ .table = table, .index = @intCast(index) } },
             );
 
