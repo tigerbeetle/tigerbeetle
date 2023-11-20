@@ -6,13 +6,16 @@
 
 - [#1300](https://github.com/tigerbeetle/tigerbeetle/pull/1300)
 
-  Recursively check for padding in structs used for data serialization, ensuring that no uninitialized bytes can be stored or transmitted over the network. Previously, we checked only if the struct had no padding, but not its fields.
+  Recursively check for padding in structs used for data serialization, ensuring that no
+  uninitialized bytes can be stored or transmitted over the network. Previously, we checked only
+  if the struct had no padding, but not its fields.
 
 ### Internals  
 
 - [#1299](https://github.com/tigerbeetle/tigerbeetle/pull/1299)
 
-  Minor adjustments in the release process, making it easier to track updates in the documentation website when a new version is released, even if there are no changes in the documentation itself.
+  Minor adjustments in the release process, making it easier to track updates in the documentation
+  website when a new version is released, even if there are no changes in the documentation itself.
 
 - [#1301](https://github.com/tigerbeetle/tigerbeetle/pull/1301)
 
@@ -20,19 +23,32 @@
 
 - [#1302](https://github.com/tigerbeetle/tigerbeetle/pull/1302)
 
-  Fix a [bug](https://github.com/tigerbeetle/tigerbeetle/issues/1290) discovered and reported during the [Hackathon 2023](https://github.com/tigerbeetle/hackathon-2023), where the Node.js client's error messages were truncated due to an incorrect string concatenation adding a null byte `0x00` in the middle of the string.
+  Fix a [bug](https://github.com/tigerbeetle/tigerbeetle/issues/1290) discovered and reported
+  during the [Hackathon 2023](https://github.com/tigerbeetle/hackathon-2023), where the Node.js
+  client's error messages were truncated due to an incorrect string concatenation adding a null
+  byte `0x00` in the middle of the string.
 
 - [#1291](https://github.com/tigerbeetle/tigerbeetle/pull/1291)
 
-  Update the Node.js samples instructions, guiding the user to install all dependencies before the sample project.
+  Update the Node.js samples instructions, guiding the user to install all dependencies before
+  the sample project.
 
 - [#1295](https://github.com/tigerbeetle/tigerbeetle/pull/1295)
 
-  We've doubled the `Header`s size to 256 bytes, paving the way for future improvements that will require extra space. Concurrently, this change also refactors a great deal of code. Some of the `Header`'s fields are shared by all messages, however, each `Command` also requires specific pieces of information that are only used by its kind of message, and it was necessary to repurpose and reinterpret fields so that the same header could hold different data depending on the context. Now, commands have their own specialized data type containing the fields that are only pertinent to the context, making the API much safer and intent-clear.
+  We've doubled the `Header`s size to 256 bytes, paving the way for future improvements that will
+  require extra space. Concurrently, this change also refactors a great deal of code.
+  Some of the `Header`'s fields are shared by all messages, however, each `Command` also requires
+  specific pieces of information that are only used by its kind of message, and it was necessary to
+  repurpose and reinterpret fields so that the same header could hold different data depending on
+  the context. Now, commands have their own specialized data type containing the fields that are
+  only pertinent to the context, making the API much safer and intent-clear.
   
 - [#1304](https://github.com/tigerbeetle/tigerbeetle/pull/1304)
 
-  With larger headers (see #1295) we have enough room to make the cluster ID a 128-bit integer, allowing operators to generate random cluster IDs without the cost of having a centralized ID coordinator. Also updates the documentation and sample programs to reflect the new maximum batch size, which was reduced from 8191 to 8190 items after we doubled the header.
+  With larger headers (see #1295) we have enough room to make the cluster ID a 128-bit integer,
+  allowing operators to generate random cluster IDs without the cost of having a centralized ID
+  coordinator. Also updates the documentation and sample programs to reflect the new maximum batch
+  size, which was reduced from 8191 to 8190 items after we doubled the header.
 
 ### TigerTracks 🎧
 
