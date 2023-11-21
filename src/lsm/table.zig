@@ -27,7 +27,7 @@ pub const TableUsage = enum {
 };
 
 const address_size = @sizeOf(u64);
-const checksum_size = @sizeOf(u128);
+const checksum_size = @sizeOf(u256);
 
 const block_size = constants.block_size;
 const block_body_size = block_size - @sizeOf(vsr.Header);
@@ -210,7 +210,7 @@ pub fn TableType(
             assert(index.keys_size > 0);
             assert(index.keys_size % key_size == 0);
             assert(@divExact(index.data_addresses_size, @sizeOf(u64)) == data_block_count_max);
-            assert(@divExact(index.data_checksums_size, @sizeOf(u128)) == data_block_count_max);
+            assert(@divExact(index.data_checksums_size, @sizeOf(u256)) == data_block_count_max);
             assert(block_size == index.padding_offset + index.padding_size);
             assert(block_size == index.size + index.padding_size);
 
@@ -355,7 +355,8 @@ pub fn TableType(
                     index_data_keys(builder.index_block, .key_min)[current] = key_min;
                     index_data_keys(builder.index_block, .key_max)[current] = key_max;
                     index.data_addresses(builder.index_block)[current] = options.address;
-                    index.data_checksums(builder.index_block)[current] = header.checksum;
+                    index.data_checksums(builder.index_block)[current] =
+                        .{ .value = header.checksum };
                 }
 
                 if (current == 0) builder.key_min = key_min;
@@ -499,9 +500,9 @@ pub fn TableType(
         /// or null if the key is not contained in the index block's keys range.
         /// May be called on an index block only when the key is in range of the table.
         pub inline fn index_blocks_for_key(index_block: BlockPtrConst, key: Key) ?IndexBlocks {
-            return if (Table.index_data_block_for_key(index_block, key)) |data_block_index| .{
-                .data_block_address = index.data_addresses_used(index_block)[data_block_index],
-                .data_block_checksum = index.data_checksums_used(index_block)[data_block_index],
+            return if (Table.index_data_block_for_key(index_block, key)) |i| .{
+                .data_block_address = index.data_addresses_used(index_block)[i],
+                .data_block_checksum = index.data_checksums_used(index_block)[i].value,
             } else null;
         }
 
@@ -570,7 +571,7 @@ pub fn TableType(
                 const data_block = storage.grid_block(data_block_address).?;
                 const data_block_header = schema.header_from_block(data_block);
                 assert(data_block_header.address == data_block_address);
-                assert(data_block_header.checksum == data_block_checksum);
+                assert(data_block_header.checksum == data_block_checksum.value);
 
                 const values = data_block_values_used(data_block);
                 if (values.len > 0) {
