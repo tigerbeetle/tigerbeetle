@@ -37,11 +37,11 @@ test "tidy" {
             }
 
             const long_line = try find_long_line(source_file_text);
-            if (long_line) |line_number| {
+            if (long_line) |line_index| {
                 if (!is_naughty(entry.path)) {
                     std.debug.print(
                         "{s}:{d} error: line exceeds 100 columns\n",
-                        .{ entry.path, line_number + 1 },
+                        .{ entry.path, line_index + 1 },
                     );
                     return error.LineTooLong;
                 }
@@ -55,6 +55,28 @@ test "tidy" {
                     return error.OutdatedNaughtyList;
                 }
             }
+        }
+    }
+}
+
+test "tidy changelog" {
+    const allocator = std.testing.allocator;
+
+    const changelog_size_max = 1024 * 1024;
+    const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
+    defer allocator.free(changelog);
+
+    var line_iterator = mem.split(u8, changelog, "\n");
+    var line_index: usize = 0;
+    while (line_iterator.next()) |line| : (line_index += 1) {
+        if (std.mem.endsWith(u8, line, " ")) {
+            std.debug.print("CHANGELOG.md:{d} trailing whitespace", .{line_index + 1});
+            return error.TrailingWhitespace;
+        }
+        const line_length = try std.unicode.utf8CountCodepoints(line);
+        if (line_length > 100) {
+            std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
+            return error.LineTooLong;
         }
     }
 }
@@ -89,8 +111,8 @@ fn is_naughty(path: []const u8) bool {
 
 fn find_long_line(file_text: []const u8) !?usize {
     var line_iterator = mem.split(u8, file_text, "\n");
-    var line_number: usize = 0;
-    while (line_iterator.next()) |line| : (line_number += 1) {
+    var line_index: usize = 0;
+    while (line_iterator.next()) |line| : (line_index += 1) {
         const line_length = try std.unicode.utf8CountCodepoints(line);
         if (line_length > 100) {
             if (is_url(line)) continue;
@@ -100,7 +122,7 @@ fn find_long_line(file_text: []const u8) !?usize {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
             }
-            return line_number;
+            return line_index;
         }
     }
     return null;
