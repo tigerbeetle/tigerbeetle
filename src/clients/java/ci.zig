@@ -98,6 +98,48 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         "src/main/java/Main.java",
     );
 
-    try shell.exec("mvn package", .{});
+    // According to the docs, java package might not be immediately available:
+    //
+    //  > Upon release, your component will be published to Central: this typically occurs within 30
+    //  > minutes, though updates to search can take up to four hours.
+    //
+    // <https://central.sonatype.org/publish/publish-guide/#releasing-to-central>
+    //
+    // Retry the download for 45 minutes, passing `--update-snapshots` to thwart local negative
+    // caching.
+    var delay_minutes: u64 = 0;
+    var delay_minutes_max: u64 = 45;
+    var delay_minutes_increment: u64 = 5;
+    while (true) {
+        if (shell.exec("mvn package --update-snapshots", .{})) {
+            break;
+        } else |err| {
+            // Re-run immediately to capture stdout (sic) to check if the failure is indeed due to
+            // the package missing from the registry.
+            const exec_result = try shell.exec_raw("mvn package --update-snapshots", .{});
+
+            switch (exec_result.term) {
+                .Exited => |code| if (code == 0) break,
+                else => {},
+            }
+
+            const package_missing = std.mem.indexOf(
+                u8,
+                exec_result.stdout,
+                "Could not resolve dependencies",
+            ) != null;
+
+            if (package_missing and delay_minutes < delay_minutes_max) {
+                log.warn("waiting for 5 minutes for the {s} version to appear in maven cental", .{
+                    options.version,
+                });
+                std.time.sleep(delay_minutes_increment * std.time.ns_per_min);
+                continue;
+            } else {
+                return err;
+            }
+        }
+    }
+
     try shell.exec("mvn exec:java", .{});
 }
