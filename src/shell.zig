@@ -424,6 +424,29 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     return child.stdout[0 .. child.stdout.len - if (trailing_newline) @as(usize, 1) else 0];
 }
 
+/// Run the command and return its status, stderr and stdout. The caller is responsible for checking
+/// the status.
+pub fn exec_raw(
+    shell: *Shell,
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) !std.ChildProcess.ExecResult {
+    var argv = Argv.init(shell.gpa);
+    defer argv.deinit();
+
+    try expand_argv(&argv, cmd, cmd_args);
+
+    // TODO(Zig): use cwd_dir once that is available https://github.com/ziglang/zig/issues/5190
+    var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    const cwd_path = try shell.cwd.realpath(".", &buffer);
+
+    return try std.ChildProcess.exec(.{
+        .allocator = shell.arena.allocator(),
+        .argv = argv.slice(),
+        .cwd = cwd_path,
+    });
+}
+
 /// Spawns the process, piping its stdout and stderr.
 ///
 /// The caller must `.kill()` and `.wait()` the child, to minimize the chance of process leak (
