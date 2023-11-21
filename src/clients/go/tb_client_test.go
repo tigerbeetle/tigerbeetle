@@ -15,7 +15,7 @@ import (
 
 const (
 	TIGERBEETLE_PORT                 = "3000"
-	TIGERBEETLE_CLUSTER_ID    uint32 = 0
+	TIGERBEETLE_CLUSTER_ID    uint64 = 0
 	TIGERBEETLE_REPLICA_ID    uint32 = 0
 	TIGERBEETLE_REPLICA_COUNT uint32 = 1
 )
@@ -71,7 +71,7 @@ func WithClient(s testing.TB, withClient func(Client)) {
 
 	addresses := []string{"127.0.0.1:" + TIGERBEETLE_PORT}
 	concurrencyMax := uint(32)
-	client, err := NewClient(ToUint128(TIGERBEETLE_CLUSTER_ID), addresses, concurrencyMax)
+	client, err := NewClient(types.ToUint128(TIGERBEETLE_CLUSTER_ID), addresses, concurrencyMax)
 	if err != nil {
 		s.Fatal(err)
 	}
