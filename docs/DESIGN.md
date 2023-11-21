@@ -14,7 +14,7 @@ TigerBeetle is designed to a higher safety standard than a general-purpose relat
 
 * Strict consistency, CRCs and crash safety are not enough.
 
-* TigerBeetle **detects and repairs disk corruption** ([3.45% per 32 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), **detects and repairs misdirected writes** where the disk firmware writes to the wrong sector ([0.042% per 17 months, per disk](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)), and **prevents data tampering** with hash-chained cryptographic checksums.
+* TigerBeetle **recovers correctly from Latent Sector Errors** (e.g. [1.4% of Enterprise HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)) **detects and repairs disk corruption or misdirected I/O where firmware reads/writes the wrong sector** (e.g. [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)), and **detects data tampering** with hash-chained cryptographic checksums.
 
 * TigerBeetle **uses Direct I/O by design** to sidestep cache coherency bugs in the kernel page cache after an EIO fsync error.
 
@@ -339,6 +339,8 @@ of Hours of Disk and SSD Deployments](https://www.usenix.org/system/files/confer
 * [ZFS: The Last Word in File Systems (Jeff Bonwick and Bill Moore)](https://www.youtube.com/watch?v=NRoUC9P1PmA) - On disk failure and corruption, the need for checksums... and checksums to check the checksums, and the power of copy-on-write for crash-safety.
 
 * [An Analysis of Latent Sector Errors in Disk Drives](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)
+
+* [An Analysis of Data Corruption in the Storage Stack](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)
 
 * [SDC 2018 - Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs) - Why replicated state machines need to distinguish between a crash and corruption, and why it would be disastrous to truncate the journal when encountering a checksum mismatch.
 
