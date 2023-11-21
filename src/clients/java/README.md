@@ -137,7 +137,7 @@ byte[] clusterID = UInt128.asBytes(0);
 String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
 Client client = new Client(
   clusterID,
-  replicaAddresses,
+  replicaAddresses
 );
 ```
 

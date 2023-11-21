@@ -225,7 +225,7 @@ pub const JavaDocs = Docs{
     \\String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
     \\Client client = new Client(
     \\  clusterID,
-    \\  replicaAddresses,
+    \\  replicaAddresses
     \\);
     ,
 
