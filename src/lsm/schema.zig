@@ -5,7 +5,7 @@
 //! generic. This is convenient for compaction, but critical for the scrubber and repair queue.
 //!
 //! Index block body schema:
-//! │ [data_block_count_max]u128   │ checksums of data blocks
+//! │ [data_block_count_max]u256   │ checksums of data blocks
 //! │ [data_block_count_max]Key    │ the minimum/first key in the respective data block
 //! │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
 //! │ [data_block_count_max]u64    │ addresses of data blocks
@@ -28,7 +28,7 @@ const vsr = @import("../vsr.zig");
 const stdx = @import("../stdx.zig");
 
 const address_size = @sizeOf(u64);
-const checksum_size = @sizeOf(u128);
+const checksum_size = @sizeOf(u256);
 
 const block_size = constants.block_size;
 const block_body_size = block_size - @sizeOf(vsr.Header);
@@ -67,6 +67,12 @@ pub const BlockType = enum(u8) {
     }
 };
 
+// TODO(extern u256): Once "extern struct" supports u256, change all checksums to (padded) u256.
+pub const Checksum = extern struct {
+    value: u128,
+    padding: u128 = 0,
+};
+
 pub const TableIndex = struct {
     /// Stored in every index block's header's `metadata_bytes` field.
     ///
@@ -79,7 +85,7 @@ pub const TableIndex = struct {
         data_block_count_max: u32,
         key_size: u32,
         tree_id: u16,
-        reserved: [114]u8 = [_]u8{0} ** 114,
+        reserved: [82]u8 = [_]u8{0} ** 82,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -190,9 +196,9 @@ pub const TableIndex = struct {
         return @alignCast(slice[0..index.data_blocks_used(index_block)]);
     }
 
-    pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
+    pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []Checksum {
         return @alignCast(mem.bytesAsSlice(
-            u128,
+            Checksum,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
         ));
     }
@@ -200,9 +206,9 @@ pub const TableIndex = struct {
     pub inline fn data_checksums_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
-    ) []const u128 {
+    ) []const Checksum {
         const slice = mem.bytesAsSlice(
-            u128,
+            Checksum,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
         );
         return @alignCast(slice[0..index.data_blocks_used(index_block)]);
@@ -223,7 +229,7 @@ pub const TableData = struct {
         value_count: u32,
         value_size: u32,
         tree_id: u16,
-        reserved: [114]u8 = [_]u8{0} ** 114,
+        reserved: [82]u8 = [_]u8{0} ** 82,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -362,9 +368,10 @@ pub const ManifestNode = struct {
     /// Stored in every manifest block's header's `metadata_bytes` field.
     pub const Metadata = extern struct {
         previous_manifest_block_checksum: u128,
+        previous_manifest_block_checksum_padding: u128 = 0,
         previous_manifest_block_address: u64,
         entry_count: u32,
-        reserved: [100]u8 = .{0} ** 100,
+        reserved: [52]u8 = .{0} ** 52,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -380,6 +387,7 @@ pub const ManifestNode = struct {
         key_min: KeyPadded,
         key_max: KeyPadded,
         checksum: u128,
+        checksum_padding: u128 = 0,
         address: u64,
         snapshot_min: u64,
         snapshot_max: u64,
@@ -427,6 +435,7 @@ pub const ManifestNode = struct {
         assert(header_metadata.entry_count <= entry_count_max);
         assert(header_metadata.entry_count ==
             @divExact(header.size - @sizeOf(vsr.Header), entry_size));
+        assert(header_metadata.previous_manifest_block_checksum_padding == 0);
         assert(stdx.zeroed(&header_metadata.reserved));
 
         if (header_metadata.previous_manifest_block_address == 0) {

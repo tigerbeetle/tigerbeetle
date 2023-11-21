@@ -25,7 +25,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
             /// Table data block addresses.
             addresses: []const u64,
             /// Table data block checksums.
-            checksums: []const u128,
+            checksums: []const schema.Checksum,
             direction: Direction,
         };
 
@@ -99,12 +99,14 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     .descending => it.context.addresses.len - 1,
                 };
 
+                assert(it.context.checksums[index].padding == 0);
+
                 it.callback = .{ .read = callback };
                 it.context.grid.read_block(
                     .{ .from_local_or_global_storage = on_read },
                     &it.read,
                     it.context.addresses[index],
-                    it.context.checksums[index],
+                    it.context.checksums[index].value,
                     .{ .cache_read = true, .cache_write = true },
                 );
             } else {
@@ -126,7 +128,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     if (constants.verify) {
                         const header = schema.header_from_block(block);
                         assert(header.address == it.context.addresses[0]);
-                        assert(header.checksum == it.context.checksums[0]);
+                        assert(header.checksum == it.context.checksums[0].value);
                     }
 
                     it.context.addresses = it.context.addresses[1..];
@@ -137,7 +139,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
                     if (constants.verify) {
                         const header = schema.header_from_block(block);
                         assert(header.address == it.context.addresses[index_last]);
-                        assert(header.checksum == it.context.checksums[index_last]);
+                        assert(header.checksum == it.context.checksums[index_last].value);
                     }
 
                     it.context.addresses = it.context.addresses[0..index_last];

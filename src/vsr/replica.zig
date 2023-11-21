@@ -6216,7 +6216,7 @@ pub fn ReplicaType(
                     @bitCast(Header.PrepareOk{
                         .command = .prepare_ok,
                         .checkpoint_id = checkpoint_id,
-                        .parent = header.parent,
+                        // .parent = header.parent,
                         .client = header.client,
                         .prepare_checksum = header.checksum,
                         .request = header.request,
@@ -9351,7 +9351,7 @@ const PipelineQueue = struct {
             ok.header.prepare_checksum,
         ) orelse return null;
         assert(prepare.message.header.command == .prepare);
-        assert(prepare.message.header.parent == ok.header.parent);
+        // assert(prepare.message.header.parent == ok.header.parent);
         assert(prepare.message.header.client == ok.header.client);
         assert(prepare.message.header.request == ok.header.request);
         assert(prepare.message.header.cluster == ok.header.cluster);
