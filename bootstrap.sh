@@ -7,7 +7,7 @@
 {
     from_source=""
     if [ "$1" = "-build" ]; then
-	from_source="t"
+        from_source="t"
     fi
 
     set -e
@@ -20,28 +20,28 @@
     os="$(uname)"
     arch="$(uname -m)"
     if [ "$from_source" = "" ]; then
-	echo "Downloading pre-built TigerBeetle binary for your machine."
-	echo ""
-	
-	if [ "$os" = "Darwin" ]; then
-	    arch="universal"
-	    os="macos"
-	elif [ "$os" = "Linux" ]; then
-	    os="linux"
-	else
-	    echo "Unsupported OS."
-	    exit 1
-	fi
+        echo "Downloading pre-built TigerBeetle binary for your machine."
+        echo ""
 
-	curl -sLO "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-$arch-$os.zip"
-	unzip -qo "tigerbeetle-$arch-$os.zip"
-	chmod +x tigerbeetle
+        if [ "$os" = "Darwin" ]; then
+            arch="universal"
+            os="macos"
+        elif [ "$os" = "Linux" ]; then
+            os="linux"
+        else
+            echo "Unsupported OS."
+            exit 1
+        fi
+
+        curl -sLO "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-$arch-$os.zip"
+        unzip -qo "tigerbeetle-$arch-$os.zip"
+        chmod +x tigerbeetle
     else
-	echo "Building TigerBeetle binary from source for your machine."
-	echo ""
-	
-	git checkout "$version"
-	./scripts/install.sh
+        echo "Building TigerBeetle binary from source for your machine."
+        echo ""
+
+        git checkout "$version"
+        ./scripts/install.sh
     fi
 
     echo "Successfully set up $(./tigerbeetle version) at $(pwd)/tigerbeetle.
