@@ -14,15 +14,15 @@ TigerBeetle is designed to a higher safety standard than a general-purpose relat
 
 * Strict consistency, CRCs and crash safety are not enough.
 
-* TigerBeetle **recovers correctly from Latent Sector Errors** (e.g. [1.4% of Enterprise HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)) **detects and repairs disk corruption or misdirected I/O where firmware reads/writes the wrong sector** (e.g. [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)), and **detects data tampering** with hash-chained cryptographic checksums.
+* TigerBeetle **handles and recovers from Latent Sector Errors** (e.g. at least [0.031% of SSD disks per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf), and [1.4% of Enterprise HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)) **detects and repairs disk corruption or misdirected I/O where firmware reads/writes the wrong sector** (e.g. at least [0.023% of SSD disks per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf), and [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)), and **detects and repairs data tampering** (on a minority of the cluster, as if it were non-Byzantine corruption) with hash-chained cryptographic checksums.
 
-* TigerBeetle **uses Direct I/O by design** to sidestep cache coherency bugs in the kernel page cache after an EIO fsync error.
+* TigerBeetle **uses Direct I/O by design** to sidestep [cache coherency bugs in the kernel page cache](https://www.usenix.org/system/files/atc20-rebello.pdf) after an EIO fsync error.
 
 * TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server because disk firmware can contain bugs and because single server systems fail.
 
 * TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated state machine, and as a cluster of TigerBeetle servers (called replicas), for optimal high availability and distributed fault-tolerance.
 
-* TigerBeetle **performs synchronous replication** to a quorum of TigerBeetle servers using the pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus protocol for low-latency automated leader election and to eliminate the risk of split-brain associated with manual failover.
+* TigerBeetle **performs synchronous replication** to a quorum of backup TigerBeetle servers using the pioneering [Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus protocol for low-latency automated leader election and to eliminate the risk of split-brain associated with ad hoc manual failover systems.
 
 * TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the global consensus protocol**, providing [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs). For example, TigerBeetle can disentangle corruption in the middle of the committed journal (caused by bitrot) from torn writes at the end of the journal (caused by a power failure) to uphold durability guarantees given for committed data and maximize availability.
 
@@ -341,6 +341,8 @@ of Hours of Disk and SSD Deployments](https://www.usenix.org/system/files/confer
 * [An Analysis of Latent Sector Errors in Disk Drives](https://research.cs.wisc.edu/wind/Publications/latent-sigmetrics07.pdf)
 
 * [An Analysis of Data Corruption in the Storage Stack](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)
+
+* [A Study of SSD Reliability in Large Scale Enterprise Storage Deployments](https://www.usenix.org/system/files/fast20-maneas.pdf)
 
 * [SDC 2018 - Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs) - Why replicated state machines need to distinguish between a crash and corruption, and why it would be disastrous to truncate the journal when encountering a checksum mismatch.
 
