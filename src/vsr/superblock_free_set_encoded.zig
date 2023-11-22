@@ -14,12 +14,12 @@ const FreeSet = @import("./superblock_free_set.zig").FreeSet;
 const BlockType = schema.BlockType;
 const FreeSetReference = superblock.FreeSetReference;
 
-/// FreeSetEncoded is the persistent component of the free set. It defines defines the layout of
-/// the free set as stored in the grid between checkpoints.
+/// FreeSetEncoded is the persistent component of the free set. It defines the layout of the free
+/// set as stored in the grid between checkpoints.
 ///
 /// Free set is stored as a linked list of blocks containing EWAH-encoding of a bitset of acquired
 /// blocks. The length of the linked list is proportional to the degree of fragmentation, rather
-/// that to  size of the data file. The common case is a single block.
+/// that to the size of the data file. The common case is a single block.
 ///
 /// The blocks holding free set itself are marked as free in the on-disk encoding, because the
 /// number of blocks required to store the compressed bitset becomes known only after encoding.
@@ -64,6 +64,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
                 const chunk_start = chunk_size_max * options.block_index;
                 const chunk_end = chunk_start + chunk_size;
                 assert(chunk_end <= options.free_set_size);
+                assert(chunk_size > 0);
                 assert(chunk_size % @sizeOf(FreeSet.Word) == 0);
 
                 return .{ .start = chunk_start, .end = chunk_end, .size = chunk_size };
@@ -164,9 +165,11 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         pub fn checkpoint_reference(set: *const Self) FreeSetReference {
             assert(set.size == set.size_transferred);
             assert(set.callback == .none);
+            assert(set.grid.?.superblock.free_set.count_released() == set.block_count);
 
             if (set.block_count == 0) {
                 assert(set.size == 0);
+                assert(set.grid.?.superblock.free_set.count_acquired() == 0);
                 return .{
                     .head_address = 0,
                     .head_checksum = 0,
@@ -227,6 +230,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         fn open_read_next(set: *Self, address: u64, checksum: u128) void {
             assert(set.callback == .open);
             assert(set.block_index < set.block_count);
+            assert(set.size > 0);
             assert(address != 0);
             assert((set.size_transferred == 0) == (set.block_index == set.block_count - 1));
 
@@ -245,6 +249,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         fn open_read_next_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
             const set = @fieldParentPtr(Self, "read", read);
             assert(set.callback == .open);
+            assert(set.size > 0);
             assert(set.block_index < set.block_count);
 
             const encoded_words = schema.FreeSetNode.encoded_words(block);
@@ -299,11 +304,13 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             defer assert(set.callback == .checkpoint);
 
             // Checkpoint process is delicate:
-            //   - encode free set,
-            //   - derive the number of blocks required to store the encoding,
-            //   - allocate blocks for the encoding (in the old checkpoint),
-            //   - checkpoint the free set,
-            //   - release the freshly acquired blocks in the new checkpoint.
+            //   1. Encode free set.
+            //   2. Derive the number of blocks required to store the encoding.
+            //   3. Allocate blocks for the encoding (in the old checkpoint).
+            //   4. Checkpoint the free set.
+            //   5. Release the freshly acquired blocks in the new checkpoint.
+            defer assert(set.grid.?.superblock.free_set.count_released() == set.block_count);
+
             {
                 set.grid.?.superblock.free_set.include_staging();
                 defer set.grid.?.superblock.free_set.exclude_staging();
@@ -313,16 +320,24 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
                 set.block_count = stdx.div_ceil(set.size, chunk_size_max);
             }
 
-            assert(set.grid.?.superblock.free_set.count_reservations() == 0);
-            const reservation = set.grid.?.superblock.free_set.reserve(set.block_count).?;
-            for (0..set.block_count) |index| {
-                const address = set.grid.?.superblock.free_set.acquire(reservation).?;
-                set.block_addresses[index] = address;
-                set.block_checksums[index] = undefined;
+            {
+                assert(set.grid.?.superblock.free_set.count_reservations() == 0);
+                const reservation = set.grid.?.superblock.free_set.reserve(set.block_count).?;
+                defer set.grid.?.superblock.free_set.forfeit(reservation);
+
+                for (
+                    set.block_addresses[0..set.block_count],
+                    set.block_checksums[0..set.block_count],
+                ) |*address, *checksum| {
+                    address.* = set.grid.?.superblock.free_set.acquire(reservation).?;
+                    checksum.* = undefined;
+                }
+                // Reservation should be fully used up.
+                assert(set.grid.?.superblock.free_set.acquire(reservation) == null);
             }
-            set.grid.?.superblock.free_set.forfeit(reservation);
 
             set.grid.?.superblock.free_set.checkpoint();
+
             for (0..set.block_count) |index| {
                 const address = set.block_addresses[index];
                 set.grid.?.superblock.free_set.release(address);
@@ -330,7 +345,6 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
 
             set.block_index = 0;
             set.callback = .{ .checkpoint = callback };
-
             if (set.size == 0) {
                 assert(set.block_count == 0);
                 set.grid.?.on_next_tick(checkpoint_next_tick, &set.next_tick);

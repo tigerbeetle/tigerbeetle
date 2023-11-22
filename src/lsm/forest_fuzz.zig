@@ -187,8 +187,8 @@ const Environment = struct {
         env.fragmentate_free_set();
     }
 
-    /// Allocate a sparse subset of grid blocks to make sure that encoded free set needs more than
-    /// block to exercise block linked list logic from FreeSetEncoded.
+    /// Allocate a sparse subset of grid blocks to make sure that the encoded free set needs more
+    /// than one block to exercise the block linked list logic from FreeSetEncoded.
     fn fragmentate_free_set(env: *Environment) void {
         var reservations: [free_set_fragments_max]Reservation = undefined;
         for (&reservations) |*reservation| {

@@ -898,9 +898,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.free_set.highest_address_acquired()) |address| {
                 storage_size += address * constants.block_size;
                 assert(free_set_reference.head_address != 0);
-                assert(!superblock.free_set.is_free(free_set_reference.head_address));
+                assert(superblock.free_set.is_released(free_set_reference.head_address));
             } else {
                 assert(free_set_reference.head_address == 0);
+                assert(superblock.free_set.count_released() == 0);
             }
 
             maybe(superblock.working.storage_size_max > superblock.storage_size_limit);
