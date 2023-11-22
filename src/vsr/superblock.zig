@@ -211,7 +211,6 @@ pub const SuperBlockHeader = extern struct {
             assert(state.checkpoint.snapshots_block_checksum == 0);
             assert(state.checkpoint.snapshots_block_address == 0);
 
-            assert(state.checkpoint.previous_checkpoint_id_padding == 0);
             assert(state.checkpoint.commit_min_checksum_padding == 0);
             assert(state.checkpoint.manifest_oldest_checksum_padding == 0);
             assert(state.checkpoint.manifest_newest_checksum_padding == 0);
@@ -310,7 +309,6 @@ pub const SuperBlockHeader = extern struct {
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
         previous_checkpoint_id: u128,
-        previous_checkpoint_id_padding: u128 = 0,
 
         /// The vsr.Header.checksum of commit_min's message.
         commit_min_checksum: u128,
@@ -354,7 +352,7 @@ pub const SuperBlockHeader = extern struct {
         manifest_block_count: u32,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [8]u8 = [_]u8{0} ** 8,
+        reserved: [24]u8 = [_]u8{0} ** 24,
 
         comptime {
             assert(@sizeOf(CheckpointState) == 272);
