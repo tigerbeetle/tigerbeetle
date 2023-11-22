@@ -459,10 +459,9 @@ pub const GridBlocksMissing = struct {
         var faulty_blocks = queue.faulty_blocks.iterator();
         while (faulty_blocks.next()) |fault_entry| {
             const fault_address = fault_entry.key_ptr.*;
-            assert(!free_set.is_free(fault_address));
             assert(fault_entry.value_ptr.state != .aborting);
 
-            if (free_set.is_released(fault_address)) {
+            if (free_set.is_free(fault_address)) {
                 switch (fault_entry.value_ptr.state) {
                     .waiting => {
                         faulty_blocks.index -= 1;
@@ -480,9 +479,7 @@ pub const GridBlocksMissing = struct {
 
         var tables: FIFO(RepairTable) = .{ .name = queue.faulty_tables.name };
         while (queue.faulty_tables.pop()) |table| {
-            assert(!free_set.is_free(table.index_address));
-
-            if (free_set.is_released(table.index_address)) {
+            if (free_set.is_free(table.index_address)) {
                 queue.faulty_tables_free.push(table);
             } else {
                 tables.push(table);

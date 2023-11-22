@@ -62,8 +62,10 @@ const CommitStage = enum {
     compact_state_machine,
     checkpoint_state_machine,
     checkpoint_client_replies,
-    checkpoint_grid_repair,
     checkpoint_free_set,
+    /// Just wait for certain grid repair writes to complete. Do it right before the checkpoint
+    /// proper to minimize unproductive waiting.
+    checkpoint_grid_repair,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -3165,8 +3167,8 @@ pub fn ReplicaType(
                 .checkpoint_client_replies => {
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
-                .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
                 .checkpoint_free_set => self.commit_op_checkpoint_free_set(),
+                .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3544,21 +3546,6 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_stage == .checkpoint_client_replies);
 
-            self.commit_dispatch(.checkpoint_grid_repair);
-        }
-
-        fn commit_op_checkpoint_grid_repair(self: *Self) void {
-            assert(self.commit_stage == .checkpoint_grid_repair);
-            assert(self.commit_prepare.?.header.op == self.op);
-
-            self.grid.checkpoint(commit_op_checkpoint_grid_repair_callback);
-        }
-
-        fn commit_op_checkpoint_grid_repair_callback(grid: *Grid) void {
-            const self = @fieldParentPtr(Self, "grid", grid);
-            assert(self.commit_stage == .checkpoint_grid_repair);
-            assert(self.commit_prepare.?.header.op == self.op);
-
             self.commit_dispatch(.checkpoint_free_set);
         }
 
@@ -3578,6 +3565,21 @@ pub fn ReplicaType(
             assert(self.superblock.free_set.opened);
             assert(self.superblock.free_set.count_released() ==
                 self.superblock.free_set_encoded.block_count);
+
+            self.commit_dispatch(.checkpoint_grid_repair);
+        }
+
+        fn commit_op_checkpoint_grid_repair(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
+
+            self.grid.checkpoint(commit_op_checkpoint_grid_repair_callback);
+        }
+
+        fn commit_op_checkpoint_grid_repair_callback(grid: *Grid) void {
+            const self = @fieldParentPtr(Self, "grid", grid);
+            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_prepare.?.header.op == self.op);
 
             self.commit_dispatch(.checkpoint_superblock);
         }
@@ -7700,8 +7702,8 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
-                .checkpoint_grid_repair,
                 .checkpoint_free_set,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7848,8 +7850,8 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
-                .checkpoint_grid_repair,
                 .checkpoint_free_set,
+                .checkpoint_grid_repair,
                 .checkpoint_superblock,
                 => {},
             }
