@@ -17,7 +17,7 @@ const FreeSetReference = superblock.FreeSetReference;
 /// FreeSetEncoded is the persistent component of the free set. It defines defines the layout of
 /// the free set as stored in the grid between checkpoints.
 ///
-/// Free set is stored as a linked list of blocks containing EWAH-encoding of a bitset of allocated
+/// Free set is stored as a linked list of blocks containing EWAH-encoding of a bitset of acquired
 /// blocks. The length of the linked list is proportional to the degree of fragmentation, rather
 /// that to  size of the data file. The common case is a single block.
 ///
@@ -75,18 +75,18 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         read: Grid.Read = undefined,
         write: Grid.Write = undefined,
         // As the free set is expected to fit in one block, it is written sequentialy, one block at
-        // a time. This is the memory used for writting.
+        // a time. This is the memory used for writing.
         write_block: Grid.BlockPtr,
 
         // SoA representation of block references holding the free set itself.
         //
         // After the set is read from disk and decoded, these blocks are manually marked as
-        // allocated.
+        // acquired.
         block_addresses: []u64,
         block_checksums: []u128,
         block_count: u32 = 0,
-        // The current block that is being read or written It goes from 0 to block_count - 1 during
-        // checkpoint, and from block_count - 1 to zero during open.
+        // The current block that is being read or written. It counts from 0 to block_count - 1
+        // during checkpoint, and from block_count - 1 to zero during open.
         block_index: u32 = 0,
 
         // Size of the encoded set in bytes.
@@ -196,7 +196,6 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             assert(set.block_index == 0);
 
             set.size = reference.size;
-            set.size_transferred = 0;
             set.callback = .{ .open = callback };
 
             set.block_count = stdx.div_ceil(set.size, chunk_size_max);

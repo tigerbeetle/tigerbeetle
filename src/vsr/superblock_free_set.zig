@@ -322,6 +322,8 @@ pub const FreeSet = struct {
         ) orelse return null;
         assert(block >= reservation.block_base);
         assert(block <= reservation.block_base + reservation.block_count);
+        assert(!set.blocks.isSet(block));
+        assert(!set.staging.isSet(block));
 
         set.blocks.set(block);
         // Update the index when every block in the shard is allocated.
@@ -397,8 +399,9 @@ pub const FreeSet = struct {
             assert(!set.staging.isSet(block));
 
             const shard = @divFloor(block, shard_bits);
-            if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
             set.blocks.set(block);
+            // Update the index when every block in the shard is allocated.
+            if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
             set.staging.set(block);
         }
     }

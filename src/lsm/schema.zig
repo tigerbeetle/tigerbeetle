@@ -371,6 +371,7 @@ pub const FreeSetNode = struct {
             assert(header_metadata.next_free_set_block_checksum == 0);
         }
 
+        assert(header.size > @sizeOf(vsr.Header));
         assert((header.size - @sizeOf(vsr.Header)) % @sizeOf(Word) == 0);
 
         return header_metadata;

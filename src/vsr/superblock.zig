@@ -327,7 +327,13 @@ pub const SuperBlockHeader = extern struct {
         /// The last operation committed to the state machine. At startup, replay the log hereafter.
         commit_min: u64,
 
-        // Storage size in bytes.
+        // Logical storage size in bytes.
+        //
+        // If storage_size is less than the data file size, then the grid blocks beyond storage_size
+        // were used previously, but have since been freed.
+        //
+        // If storage_size is more than the data file size, then the data file might have been
+        // truncated/corrupted.
         storage_size: u64,
 
         /// The number of manifest blocks in the manifest log.
@@ -1193,9 +1199,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const storage_size = superblock.staging.vsr_state.checkpoint.storage_size;
             assert(storage_size >= data_file_size_min);
-            assert(
-                storage_size <= superblock.staging.storage_size_max,
-            );
+            assert(storage_size <= superblock.staging.storage_size_max);
 
             assert(context.copy.? < constants.superblock_copies);
             superblock.staging.copy = context.copy.?;
