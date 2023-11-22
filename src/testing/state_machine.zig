@@ -4,12 +4,13 @@ const log = std.log.scoped(.state_machine);
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
+const global_constants = @import("../constants.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
 const ForestType = @import("../lsm/forest.zig").ForestType;
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: @import("../constants.zig").StateMachineConfig,
+    comptime config: global_constants.StateMachineConfig,
 ) type {
     return struct {
         const StateMachine = @This();
