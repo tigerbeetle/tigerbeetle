@@ -116,11 +116,11 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             assert(chunk_size_max % @sizeOf(FreeSet.Word) == 0);
         }
 
-        pub fn init(allocator: mem.Allocator, block_count_limit: usize) !Self {
+        pub fn init(allocator: mem.Allocator, grid_block_count_limit: usize) !Self {
             const write_block = try allocate_block(allocator);
             errdefer allocator.free(write_block);
 
-            const buffer_size = FreeSet.encode_size_max(block_count_limit);
+            const buffer_size = FreeSet.encode_size_max(grid_block_count_limit);
             const buffer = try allocator.alignedAlloc(u8, @alignOf(FreeSet.Word), buffer_size);
             errdefer allocator.free(buffer);
 
