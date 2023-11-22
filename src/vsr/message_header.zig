@@ -293,13 +293,12 @@ pub const Header = extern struct {
 
         /// Current checkpoint id (possibly uncanonical).
         checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
         /// Current checkpoint op (possibly uncanonical).
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
 
-        reserved: [80]u8 = [_]u8{0} ** 80,
+        reserved: [96]u8 = [_]u8{0} ** 96,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -307,7 +306,6 @@ pub const Header = extern struct {
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -658,34 +656,30 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
         /// The corresponding request message's checksum.
-        /// TODO: Add this back and remove checkpoint_id instead, once checkpoint_id is added to
-        /// the Prepare header.
-        // parent: u128,
-        // parent_padding: u128 = 0,
+        parent: u128,
+        parent_padding: u128 = 0,
         prepare_checksum: u128,
         prepare_checksum_padding: u128 = 0,
+        checkpoint_id: u128,
         client: u128,
         op: u64,
         commit: u64,
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [19]u8 = [_]u8{0} ** 19,
+        reserved: [3]u8 = [_]u8{0} ** 3,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
                 .root => {
                     const root_checksum = Header.Prepare.root(self.cluster).checksum;
-                    // if (self.parent != 0) return "root: parent != 0";
+                    if (self.parent != 0) return "root: parent != 0";
                     if (self.client != 0) return "root: client != 0";
                     if (self.prepare_checksum != root_checksum) {
                         return "root: prepare_checksum != expected";
@@ -785,13 +779,12 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        /// Current checkpoint id (possibly uncanonical).
-        checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
-
         /// The latest committed prepare's checksum.
         commit_checksum: u128,
         commit_checksum_padding: u128 = 0,
+
+        /// Current checkpoint id (possibly uncanonical).
+        checkpoint_id: u128,
 
         /// Current checkpoint op (possibly uncanonical).
         checkpoint_op: u64,
@@ -801,13 +794,12 @@ pub const Header = extern struct {
 
         timestamp_monotonic: u64,
 
-        reserved: [40]u8 = [_]u8{0} ** 40,
+        reserved: [56]u8 = [_]u8{0} ** 56,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (self.commit < self.checkpoint_op) return "commit < checkpoint_op";
             if (self.timestamp_monotonic == 0) return "timestamp_monotonic == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -1201,16 +1193,14 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
-        reserved: [88]u8 = [_]u8{0} ** 88,
+        reserved: [104]u8 = [_]u8{0} ** 104,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_checkpoint);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1234,9 +1224,8 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
-        reserved: [88]u8 = [_]u8{0} ** 88,
+        reserved: [104]u8 = [_]u8{0} ** 104,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_checkpoint);
@@ -1244,7 +1233,6 @@ pub const Header = extern struct {
                 return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
             }
             if (self.view != 0) return "view != 0";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1268,17 +1256,15 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
         trailer_offset: u32 = 0,
-        reserved: [84]u8 = [_]u8{0} ** 84,
+        reserved: [100]u8 = [_]u8{0} ** 100,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_client_sessions);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1304,11 +1290,10 @@ pub const Header = extern struct {
         trailer_checksum: u128,
         trailer_checksum_padding: u128 = 0,
         checkpoint_id: u128,
-        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
         trailer_size: u32,
         trailer_offset: u32,
-        reserved: [48]u8 = [_]u8{0} ** 48,
+        reserved: [64]u8 = [_]u8{0} ** 64,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_client_sessions);
@@ -1316,7 +1301,6 @@ pub const Header = extern struct {
                 return "size > max";
             }
             if (self.view != 0) return "view != 0";
-            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
