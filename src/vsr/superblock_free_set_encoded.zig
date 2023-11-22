@@ -37,6 +37,10 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         // All chunks except for possibly the last one are full.
         const chunk_size_max = constants.block_size - @sizeOf(vsr.Header);
 
+        // Chunk describes a slice of encoded free set that goes into nth block on disk.
+        //
+        // Chunk redundantly stores all of the start index, one-past-the-end index, and length, so
+        // that the call site can avoid indexing arithmetic and associated bugs.
         const Chunk = struct {
             start: u32,
             end: u32,
