@@ -148,6 +148,19 @@ pub const Zone = enum {
     }
 };
 
+/// Reference to a single block in the grid.
+///
+/// Blocks are always referred to by a pair of an address and a checksum to protect from misdirected
+/// reads and writes: checksum inside the block itself doesn't help if the disk accidentally reads a
+/// wrong block.
+///
+/// Block addresses start from one, such that zeroed-out memory can not be confused with a valid
+/// address.
+pub const BlockReference = struct {
+    checksum: u128,
+    address: u64,
+};
+
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
     reserved = 0,
