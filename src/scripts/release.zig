@@ -390,7 +390,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         });
 
         try shell.exec(
-            \\gh release create --draft --prerelease
+            \\gh release create --draft
             \\  --notes {notes}
             \\  {tag}
         , .{
@@ -428,7 +428,7 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
     if (languages.contains(.zig)) {
         try shell.exec(
-            \\gh release edit --draft=false
+            \\gh release edit --draft=false --latest=true
             \\  {tag}
         , .{ .tag = info.version });
     }

@@ -25,13 +25,15 @@ for client in $clients; do
 
     cp ../../src/clients/$client/README.md pages/clients/$client.md
 done
-echo '{ "label": "Client Libraries", "position": 6 }' >> pages/clients/_category_.json
+echo '{ "label": "Client Libraries", "position": 7 }' >> pages/clients/_category_.json
 
 # Everything else will be rewritten as a link into GitHub.
 find pages -type f | xargs -I {} sed -i "s@/src/clients/@$repo/blob/main/src/clients/@g" {}
 
 for page in $(ls pages/*.md); do
-    if ! [[ "$page" == "pages/intro.md" ]] && ! [[ "$page" == "pages/FAQ.md" ]]; then
+    if ! [[ "$page" == "pages/intro.md" ]] && \
+       ! [[ "$page" == "pages/FAQ.md" ]] && \
+       ! [[ "$page" == "pages/installation.md" ]]; then
         rm "$page"
     fi
 done
