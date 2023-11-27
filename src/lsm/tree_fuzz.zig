@@ -110,12 +110,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             init,
             superblock_format,
             superblock_open,
+            free_set_open,
             tree_init,
             manifest_log_open,
             fuzzing,
             tree_compact,
             manifest_log_compact,
-            manifest_log_checkpoint,
+            free_set_checkpoint,
             superblock_checkpoint,
             tree_lookup,
         };
@@ -187,7 +188,14 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tick_until_state_change(.superblock_format, .superblock_open);
             env.superblock.open(superblock_open_callback, &env.superblock_context);
 
-            env.tick_until_state_change(.superblock_open, .tree_init);
+            env.tick_until_state_change(.superblock_open, .free_set_open);
+            env.superblock.free_set_encoded.open(
+                &env.grid,
+                env.superblock.working.free_set_reference(),
+                free_set_open_callback,
+            );
+
+            env.tick_until_state_change(.free_set_open, .tree_init);
             env.tree = try Tree.init(allocator, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
@@ -212,7 +220,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
             const env = @fieldParentPtr(@This(), "superblock_context", superblock_context);
-            env.change_state(.superblock_open, .tree_init);
+            env.change_state(.superblock_open, .free_set_open);
+        }
+
+        fn free_set_open_callback(set: *SuperBlock.FreeSetEncoded) void {
+            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
+            const env = @fieldParentPtr(Environment, "superblock", superblock);
+            env.change_state(.free_set_open, .tree_init);
         }
 
         fn manifest_log_open_event(
@@ -282,6 +296,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 _ = env.superblock.client_sessions.put(1, &reply);
             }
 
+            env.superblock.free_set_encoded.checkpoint(free_set_checkpoint_callback);
+            env.change_state(.fuzzing, .free_set_checkpoint);
+            env.tick_until_state_change(.free_set_checkpoint, .fuzzing);
+
             const checkpoint_op = op - constants.lsm_batch_multiple;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .manifest_references = std.mem.zeroes(vsr.SuperBlockManifestReferences),
@@ -294,6 +312,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             env.change_state(.fuzzing, .superblock_checkpoint);
             env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
+        }
+
+        fn free_set_checkpoint_callback(set: *SuperBlock.FreeSetEncoded) void {
+            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
+            const env = @fieldParentPtr(Environment, "superblock", superblock);
+            env.change_state(.free_set_checkpoint, .fuzzing);
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
