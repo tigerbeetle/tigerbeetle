@@ -892,7 +892,6 @@ pub const ClusterFaultAtlas = struct {
         const offset_in_copy = offset_in_zone % superblock.superblock_copy_size;
         const area: superblock.SuperBlockZone = switch (offset_in_copy) {
             superblock.SuperBlockZone.header.start() => .header,
-            superblock.SuperBlockZone.free_set.start() => .free_set,
             superblock.SuperBlockZone.client_sessions.start() => .client_sessions,
             else => unreachable,
         };
