@@ -296,6 +296,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// This function is intended to never be called by regular code. It only
         /// exists for fuzzing, due to the performance overhead it carries. Real
         /// code must rely on the Groove cache for lookups.
+        /// The returned Value pointer is only valid synchronously.
         pub fn lookup_from_memory(tree: *Tree, key: Key) ?*const Value {
             assert(constants.verify);
 
@@ -312,6 +313,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
         /// the existence of the key in the data block. If any of the blocks needed to
         /// ascertain the existence of the key are not in the Grid cache, it bails out.
+        /// The returned `.positive` Value pointer is only valid synchronously.
         pub fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
             var iterator = tree.manifest.lookup(snapshot, key, 0);
             while (iterator.next()) |table| {
@@ -369,6 +371,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         }
 
         /// Call this function only after checking `lookup_from_memory()`.
+        /// The returned Value pointer is only valid synchronously.
         pub fn lookup_from_levels_storage(tree: *Tree, parameters: struct {
             callback: *const fn (*LookupContext, ?*const Value) void,
             context: *LookupContext,
