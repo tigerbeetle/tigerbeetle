@@ -78,7 +78,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             if (self.messages_available == 0) return error.TooManyOutstanding;
             const message = self.get_message();
             errdefer self.release(message);
-            
+
             const message_request = message.build(.request);
             message_request.header.* = .{
                 .client = self.id,
