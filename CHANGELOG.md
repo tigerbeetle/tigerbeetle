@@ -1,5 +1,54 @@
 # TigerBeetle Changelog
 
+## 2023-11-27
+
+### Internals
+
+- [#1306](https://github.com/tigerbeetle/tigerbeetle/pull/1306),
+  [#1308](https://github.com/tigerbeetle/tigerbeetle/pull/1308)
+
+  When validating our releases, use the `release` branch instead of `main` to ensure everything is
+  in sync, and give the Java validation some retry logic to allow for delays in publishing to
+  Central.
+
+- [#1310](https://github.com/tigerbeetle/tigerbeetle/pull/1310)
+
+  Pad storage checksums from 128-bit to 256-bit. These are currently unused, but we're reserving
+  the space for AEAD tags in future.
+
+- [#1312](https://github.com/tigerbeetle/tigerbeetle/pull/1312)
+
+  Remove a trailing comma in our Java client sample code.
+
+- [#1313](https://github.com/tigerbeetle/tigerbeetle/pull/1313)
+
+  Switch `bootstrap.sh` to use spaces only for indentation and ensure it's checked by our
+  shellcheck lint.
+
+- [#1314](https://github.com/tigerbeetle/tigerbeetle/pull/1314)
+
+  Update our `DESIGN.md` to better reflect storage fault probabilities and add in a reference.
+
+- [#1316](https://github.com/tigerbeetle/tigerbeetle/pull/1316)
+
+  Add `CHANGELOG.md` validation to our tidy lint script. We now check line length limits and
+  trailing whitespace.
+
+- [#1317](https://github.com/tigerbeetle/tigerbeetle/pull/1317)
+
+  In keeping with
+  [TigerStyle]
+  (https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#naming-things),
+  rename `reserved_nonce` to `nonce_reserved`.
+
+- [#1318](https://github.com/tigerbeetle/tigerbeetle/pull/1318)
+
+  Note in TigerStyle that callbacks go last in the list of parameters.
+
+### TigerTracks 🎧
+
+- [Space Trash](https://www.youtube.com/watch?v=tmcVAJd87Wk)
+
 ## 2023-11-20
 
 ### Safety And Performance
