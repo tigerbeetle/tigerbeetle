@@ -37,13 +37,16 @@
 - [#1317](https://github.com/tigerbeetle/tigerbeetle/pull/1317)
 
   In keeping with
-  [TigerStyle]
-  (https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#naming-things),
+  [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#naming-things),
   rename `reserved_nonce` to `nonce_reserved`.
 
 - [#1318](https://github.com/tigerbeetle/tigerbeetle/pull/1318)
 
   Note in TigerStyle that callbacks go last in the list of parameters.
+
+- [#1325](https://github.com/tigerbeetle/tigerbeetle/pull/1325)
+
+  Add an exception for line length limits if there's a link in said line.
 
 ### TigerTracks 🎧
 
