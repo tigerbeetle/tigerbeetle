@@ -120,9 +120,8 @@ accounted for!
 
 For further reading:
 
-* [Running a 3-node cluster locally with docker-compose](https://docs.tigerbeetle.com/quick-start/with-docker-compose)
-* [Run a single-node cluster with Docker](https://docs.tigerbeetle.com/quick-start/with-docker)
 * [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary)
+* [Run a three-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary-three)
 
 ## Next Steps
 
