@@ -170,8 +170,8 @@ const Command = struct {
             });
         }
 
-        const nonce = std.crypto.random.int(u128) +| 1;
-        assert(nonce != 0);
+        const nonce = std.crypto.random.int(u128);
+        assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
