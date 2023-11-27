@@ -74,7 +74,9 @@ test "tidy changelog" {
             return error.TrailingWhitespace;
         }
         const line_length = try std.unicode.utf8CountCodepoints(line);
-        if (line_length > 100) {
+        const has_link = std.mem.indexOf(u8, line, "http://") orelse
+            std.mem.indexOf(u8, line, "https://");
+        if (line_length > 100 and has_link == null) {
             std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
             return error.LineTooLong;
         }
