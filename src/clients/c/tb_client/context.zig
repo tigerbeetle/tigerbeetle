@@ -115,8 +115,8 @@ pub fn ContextType(
             errdefer allocator.destroy(context);
 
             context.allocator = allocator;
-            context.client_id = std.crypto.random.int(u128) +| 1;
-            assert(context.client_id != 0);
+            context.client_id = std.crypto.random.int(u128);
+            assert(context.client_id != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
             log.debug("{}: init: initializing", .{context.client_id});
 
