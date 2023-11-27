@@ -242,6 +242,10 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
 
             set.block_addresses[set.block_index] = address;
             set.block_checksums[set.block_index] = checksum;
+            for (set.block_index + 1..set.block_count) |index| {
+                assert(set.block_addresses[index] != address);
+                assert(set.block_checksums[index] != checksum);
+            }
 
             set.grid.?.read_block(
                 .{ .from_local_or_global_storage = open_read_next_callback },
