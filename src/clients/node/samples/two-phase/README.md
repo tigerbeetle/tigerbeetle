@@ -18,8 +18,7 @@ First, clone this repo and `cd` into `tigerbeetle/src/clients/node/samples/two-p
 Then, install the TigerBeetle client:
 
 ```console
-npm install --prefix ../../
-npm install
+npm install tigerbeetle-node
 ```
 
 ## Start the TigerBeetle server
