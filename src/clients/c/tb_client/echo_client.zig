@@ -31,7 +31,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         });
 
         id: u128,
-        cluster: u32,
+        cluster: u128,
         messages_available: u32 = constants.client_request_queue_max,
         request_queue: RequestQueue = RequestQueue.init(),
         message_pool: *MessagePool,
@@ -78,8 +78,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             if (self.messages_available == 0) return error.TooManyOutstanding;
             const message = self.get_message();
             errdefer self.release(message);
-
-            message.header.* = .{
+            
+            const message_request = message.build(.request);
+            message_request.header.* = .{
                 .client = self.id,
                 .request = 0,
                 .cluster = self.cluster,
@@ -88,11 +89,11 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
 
-            return Batch{ .message = message };
+            return Batch{ .message = message_request };
         }
 
         pub const Batch = struct {
-            message: *Message,
+            message: *Message.Request,
 
             pub fn slice(batch: Batch) []u8 {
                 return batch.message.body();
