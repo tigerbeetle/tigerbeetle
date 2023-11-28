@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_superblock_quorums);
 
 const constants = @import("../constants.zig");
+const vsr = @import("../vsr.zig");
 
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
@@ -141,6 +142,7 @@ fn test_quorums_working(
                 .replica_count = 6,
                 .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
                     .commit_min_checksum = 123,
+                    .free_set_checksum = vsr.checksum(&.{}),
                     .storage_size = superblock.data_file_size_min,
                 }),
             }),

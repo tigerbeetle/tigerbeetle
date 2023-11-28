@@ -100,6 +100,9 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         // haven't lost any bytes along the way.
         size_transferred: u32 = 0,
 
+        // Checksum covering the entire encoded free set.
+        checksum: u128,
+
         // In-memory buffer for storing encoded free set in contagious manner.
         // TODO: instead of copying the data, store a list of grid blocks and implement chunked
         // decoding. That way, the blocks can be shared with grid cache, increasing the usable cache
@@ -134,6 +137,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
 
             return .{
                 .write_block = write_block,
+                .checksum = vsr.checksum(&.{}),
                 .buffer = buffer,
                 .block_addresses = block_addresses,
                 .block_checksums = block_checksums,
@@ -155,6 +159,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             }
             set.* = .{
                 .write_block = set.write_block,
+                .checksum = vsr.checksum(&.{}),
                 .buffer = set.buffer,
                 .block_addresses = set.block_addresses,
                 .block_checksums = set.block_checksums,
@@ -174,6 +179,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
                 assert(set.size == 0);
                 // assert(set.grid.?.superblock.free_set.count_acquired() == 0);
                 return .{
+                    .checksum = set.checksum,
                     .last_block_address = 0,
                     .last_block_checksum = 0,
                     .size = 0,
@@ -181,6 +187,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             } else {
                 assert(set.size > 0);
                 return .{
+                    .checksum = set.checksum,
                     .last_block_address = set.block_addresses[set.block_count - 1],
                     .last_block_checksum = set.block_checksums[set.block_count - 1],
                     .size = set.size,
@@ -207,6 +214,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             assert(set.block_index == 0);
 
             set.size = reference.size;
+            set.checksum = reference.checksum;
             set.callback = .{ .open = callback };
 
             set.block_count = stdx.div_ceil(set.size, chunk_size_max);
@@ -294,6 +302,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             assert(!set.grid.?.superblock.free_set.opened);
             assert(set.size_transferred == set.size);
             assert((set.size > 0) == (set.block_count > 0));
+            assert(set.checksum == vsr.checksum(set.buffer[0..set.size]));
 
             set.grid.?.superblock.free_set.open(.{
                 .encoded = set.buffer[0..set.size],
@@ -328,6 +337,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
                 assert(set.size % @sizeOf(FreeSet.Word) == 0);
                 set.size_transferred = 0;
                 set.block_count = stdx.div_ceil(set.size, chunk_size_max);
+                set.checksum = vsr.checksum(set.buffer[0..set.size]);
             }
 
             {
