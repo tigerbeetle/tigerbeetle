@@ -77,6 +77,7 @@ const ConfigProcess = struct {
     verify: bool,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
+    storage_size_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
     memory_size_max_default: u64 = 1024 * 1024 * 1024,
     cache_accounts_size_default: usize,
     cache_transfers_size_default: usize,
@@ -136,7 +137,6 @@ const ConfigCluster = struct {
     journal_slot_count: usize = 1024,
     message_size_max: usize = 1 * 1024 * 1024,
     superblock_copies: comptime_int = 4,
-    storage_size_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
     block_size: comptime_int = 1024 * 1024,
     lsm_levels: u6 = 7,
     lsm_growth_factor: u32 = 8,
@@ -237,6 +237,7 @@ pub const configs = struct {
     /// Not suitable for production, but good for testing code that would be otherwise hard to reach.
     pub const test_min = Config{
         .process = .{
+            .storage_size_max = 200 * 1024 * 1024,
             .direct_io = false,
             .direct_io_required = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 2048,
@@ -256,7 +257,6 @@ pub const configs = struct {
             .view_change_headers_suffix_max = 4 + 1,
             .journal_slot_count = Config.Cluster.journal_slot_count_min,
             .message_size_max = Config.Cluster.message_size_max_min(4),
-            .storage_size_max = 200 * 1024 * 1024,
 
             .block_size = sector_size,
             .lsm_batch_multiple = 4,
@@ -270,7 +270,7 @@ pub const configs = struct {
     /// able to max out the LSM levels.
     pub const fuzz_min = config: {
         var base = test_min;
-        base.cluster.storage_size_max = 1 * 1024 * 1024 * 1024;
+        base.process.storage_size_max = 1 * 1024 * 1024 * 1024;
         break :config base;
     };
 

@@ -33,6 +33,7 @@ const FIFO = @import("../fifo.zig").FIFO;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const superblock = @import("../vsr/superblock.zig");
+const FreeSet = @import("../vsr/superblock_free_set.zig").FreeSet;
 const schema = @import("../lsm/schema.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
@@ -87,6 +88,18 @@ pub const Storage = struct {
 
         /// Accessed by the Grid for extra verification of grid coherence.
         grid_checker: ?*GridChecker = null,
+    };
+
+    /// Compile-time upper bound on the size of a testing Storage.
+    ///
+    /// For convenience, it is rounded to an even number of free set shards so that it is possible
+    /// to create a `FreeSet` covering exactly this amount of blocks.
+    pub const grid_blocks_max = grid_blocks_max: {
+        const free_set_shard_count = @divFloor(
+            constants.storage_size_max - superblock.data_file_size_min,
+            constants.block_size * FreeSet.shard_bits,
+        );
+        break :grid_blocks_max free_set_shard_count * FreeSet.shard_bits;
     };
 
     /// See usage in Journal.write_sectors() for details.
@@ -161,6 +174,7 @@ pub const Storage = struct {
     next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
+        assert(size <= constants.storage_size_max);
         assert(options.write_latency_mean >= options.write_latency_min);
         assert(options.read_latency_mean >= options.read_latency_min);
         assert(options.fault_atlas == null or options.replica_index != null);
@@ -799,7 +813,7 @@ pub const ClusterFaultAtlas = struct {
         constants.sector_size,
     ));
     const FaultyClientReplies = std.StaticBitSet(constants.clients_max);
-    const FaultyGridBlocks = std.StaticBitSet(superblock.grid_blocks_max);
+    const FaultyGridBlocks = std.StaticBitSet(Storage.grid_blocks_max);
 
     options: Options,
     faulty_superblock_areas: FaultySuperBlockAreas =
@@ -863,7 +877,7 @@ pub const ClusterFaultAtlas = struct {
         }
 
         var block: usize = 0;
-        while (block < superblock.grid_blocks_max) : (block += 1) {
+        while (block < Storage.grid_blocks_max) : (block += 1) {
             var replicas = std.StaticBitSet(constants.members_max).initEmpty();
             while (replicas.count() < faults_max) {
                 replicas.set(random.uintLessThan(usize, replica_count));
@@ -964,7 +978,7 @@ pub const ClusterFaultAtlas = struct {
     ) ?SectorRange {
         if (!atlas.options.faulty_grid) return null;
         return faulty_sectors(
-            superblock.grid_blocks_max,
+            Storage.grid_blocks_max,
             constants.block_size,
             .grid,
             &atlas.faulty_grid_blocks[replica_index],
