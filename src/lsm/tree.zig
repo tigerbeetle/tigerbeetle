@@ -371,7 +371,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         }
 
         /// Call this function only after checking `lookup_from_memory()`.
-        /// The returned Value pointer is only valid synchronously.
+        /// The callback's Value pointer is only valid synchronously within the callback.
         pub fn lookup_from_levels_storage(tree: *Tree, parameters: struct {
             callback: *const fn (*LookupContext, ?*const Value) void,
             context: *LookupContext,
