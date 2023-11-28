@@ -9135,9 +9135,10 @@ const DVCQuorum = struct {
                 } else {
                     return .complete_invalid;
                 }
-            } else {
-                // This op is eligible to be the view's head.
             }
+
+            // This op is eligible to be the view's head.
+            assert(header_canonical != null and copies > 0);
         } else op_head_max;
         assert(op_head >= op_head_min);
         assert(op_head <= op_head_max);
