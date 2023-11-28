@@ -238,14 +238,15 @@ pub const StorageChecker = struct {
         if (free_set_size > 0) {
             // Read free set from the grid by manually following the linked list of blocks.
             // Note that free set is written in direct order, and must be read backwards.
-            var free_set_block_address =
-                superblock.working.vsr_state.checkpoint.free_set_last_block_address;
-            var free_set_block_checksum =
-                superblock.working.vsr_state.checkpoint.free_set_last_block_checksum;
+            var free_set_block: vsr.BlockReference = .{
+                .address = superblock.working.vsr_state.checkpoint.free_set_last_block_address,
+                .checksum = superblock.working.vsr_state.checkpoint.free_set_last_block_checksum,
+            };
+
             var free_set_cursor: usize = free_set_size;
             while (true) {
-                const block = superblock.storage.grid_block(free_set_block_address).?;
-                assert(schema.header_from_block(block).checksum == free_set_block_checksum);
+                const block = superblock.storage.grid_block(free_set_block.address).?;
+                assert(schema.header_from_block(block).checksum == free_set_block.checksum);
 
                 const encoded_words = schema.FreeSetNode.encoded_words(block);
                 free_set_cursor -= encoded_words.len;
@@ -256,9 +257,7 @@ pub const StorageChecker = struct {
                     encoded_words,
                 );
 
-                const previous = schema.FreeSetNode.previous(block) orelse break;
-                free_set_block_address = previous.address;
-                free_set_block_checksum = previous.checksum;
+                free_set_block = schema.FreeSetNode.previous(block) orelse break;
             }
             assert(free_set_cursor == 0);
         }
