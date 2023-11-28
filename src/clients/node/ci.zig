@@ -17,7 +17,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     // We need to build the tigerbeetle-node library manually for samples to be able to pick it up.
     try shell.exec("npm install", .{});
-    try shell.exec("npm pack --quiet", .{});
 
     inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
         try shell.pushd("./samples/" ++ sample);
@@ -33,6 +32,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     // Container smoke tests.
     if (builtin.target.os.tag == .linux) {
+        try shell.exec("npm pack --quiet", .{});
 
         // Installing node through <https://github.com/nodesource/distributions>.
 

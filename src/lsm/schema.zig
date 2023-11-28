@@ -5,7 +5,7 @@
 //! generic. This is convenient for compaction, but critical for the scrubber and repair queue.
 //!
 //! Index block body schema:
-//! │ [data_block_count_max]u128   │ checksums of data blocks
+//! │ [data_block_count_max]u256   │ checksums of data blocks
 //! │ [data_block_count_max]Key    │ the minimum/first key in the respective data block
 //! │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
 //! │ [data_block_count_max]u64    │ addresses of data blocks
@@ -27,8 +27,10 @@ const vsr = @import("../vsr.zig");
 
 const stdx = @import("../stdx.zig");
 
+const BlockReference = vsr.BlockReference;
+
 const address_size = @sizeOf(u64);
-const checksum_size = @sizeOf(u128);
+const checksum_size = @sizeOf(u256);
 
 const block_size = constants.block_size;
 const block_body_size = block_size - @sizeOf(vsr.Header);
@@ -56,15 +58,22 @@ pub const BlockType = enum(u8) {
     /// Unused; verifies that no block is written with a default 0 block type.
     reserved = 0,
 
-    manifest = 1,
-    index = 2,
-    data = 3,
+    free_set = 1,
+    manifest = 2,
+    index = 3,
+    data = 4,
 
     pub fn valid(block_type: BlockType) bool {
         _ = std.meta.intToEnum(BlockType, @intFromEnum(block_type)) catch return false;
 
         return true;
     }
+};
+
+// TODO(extern u256): Once "extern struct" supports u256, change all checksums to (padded) u256.
+pub const Checksum = extern struct {
+    value: u128,
+    padding: u128 = 0,
 };
 
 pub const TableIndex = struct {
@@ -79,7 +88,7 @@ pub const TableIndex = struct {
         data_block_count_max: u32,
         key_size: u32,
         tree_id: u16,
-        reserved: [114]u8 = [_]u8{0} ** 114,
+        reserved: [82]u8 = [_]u8{0} ** 82,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -190,9 +199,9 @@ pub const TableIndex = struct {
         return @alignCast(slice[0..index.data_blocks_used(index_block)]);
     }
 
-    pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []u128 {
+    pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []Checksum {
         return @alignCast(mem.bytesAsSlice(
-            u128,
+            Checksum,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
         ));
     }
@@ -200,9 +209,9 @@ pub const TableIndex = struct {
     pub inline fn data_checksums_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
-    ) []const u128 {
+    ) []const Checksum {
         const slice = mem.bytesAsSlice(
-            u128,
+            Checksum,
             index_block[index.data_checksums_offset..][0..index.data_checksums_size],
         );
         return @alignCast(slice[0..index.data_blocks_used(index_block)]);
@@ -223,7 +232,7 @@ pub const TableData = struct {
         value_count: u32,
         value_size: u32,
         tree_id: u16,
-        reserved: [114]u8 = [_]u8{0} ** 114,
+        reserved: [82]u8 = [_]u8{0} ** 82,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -334,6 +343,68 @@ pub const TableData = struct {
     }
 };
 
+pub const FreeSetNode = struct {
+    pub const Word = u64;
+
+    pub const Metadata = extern struct {
+        previous_free_set_block_checksum: u128,
+        previous_free_set_block_checksum_padding: u128 = 0,
+        previous_free_set_block_address: u64,
+        reserved: [56]u8 = .{0} ** 56,
+
+        comptime {
+            assert(stdx.no_padding(Metadata));
+            assert(@sizeOf(Metadata) == vsr.Header.Block.metadata_size);
+        }
+    };
+
+    fn metadata(free_set_block: BlockPtrConst) *const Metadata {
+        const header = header_from_block(free_set_block);
+        assert(header.command == .block);
+        assert(header.block_type == .free_set);
+        assert(header.address > 0);
+        assert(header.snapshot == 0);
+
+        const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
+        assert(header_metadata.previous_free_set_block_checksum_padding == 0);
+        assert(stdx.zeroed(&header_metadata.reserved));
+
+        if (header_metadata.previous_free_set_block_address == 0) {
+            assert(header_metadata.previous_free_set_block_checksum == 0);
+        }
+
+        assert(header.size > @sizeOf(vsr.Header));
+        assert((header.size - @sizeOf(vsr.Header)) % @sizeOf(Word) == 0);
+
+        return header_metadata;
+    }
+
+    pub fn assert_valid_header(free_set_block: BlockPtrConst) void {
+        _ = metadata(free_set_block);
+    }
+
+    pub fn previous(free_set_block: BlockPtrConst) ?BlockReference {
+        const header_metadata = metadata(free_set_block);
+
+        if (header_metadata.previous_free_set_block_address == 0) {
+            assert(header_metadata.previous_free_set_block_checksum == 0);
+            return null;
+        } else {
+            return .{
+                .checksum = header_metadata.previous_free_set_block_checksum,
+                .address = header_metadata.previous_free_set_block_address,
+            };
+        }
+    }
+
+    pub fn encoded_words(block: BlockPtrConst) []align(@alignOf(Word)) const u8 {
+        assert_valid_header(block);
+
+        const header = header_from_block(block);
+        return block[@sizeOf(vsr.Header)..header.size];
+    }
+};
+
 /// A Manifest block's body is an array of TableInfo entries.
 // TODO Store snapshot in header.
 pub const ManifestNode = struct {
@@ -362,9 +433,10 @@ pub const ManifestNode = struct {
     /// Stored in every manifest block's header's `metadata_bytes` field.
     pub const Metadata = extern struct {
         previous_manifest_block_checksum: u128,
+        previous_manifest_block_checksum_padding: u128 = 0,
         previous_manifest_block_address: u64,
         entry_count: u32,
-        reserved: [100]u8 = .{0} ** 100,
+        reserved: [52]u8 = .{0} ** 52,
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -380,6 +452,7 @@ pub const ManifestNode = struct {
         key_min: KeyPadded,
         key_max: KeyPadded,
         checksum: u128,
+        checksum_padding: u128 = 0,
         address: u64,
         snapshot_min: u64,
         snapshot_max: u64,
@@ -421,12 +494,14 @@ pub const ManifestNode = struct {
         assert(header.command == .block);
         assert(header.block_type == .manifest);
         assert(header.address > 0);
+        assert(header.snapshot == 0);
 
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
         assert(header_metadata.entry_count > 0);
         assert(header_metadata.entry_count <= entry_count_max);
         assert(header_metadata.entry_count ==
             @divExact(header.size - @sizeOf(vsr.Header), entry_size));
+        assert(header_metadata.previous_manifest_block_checksum_padding == 0);
         assert(stdx.zeroed(&header_metadata.reserved));
 
         if (header_metadata.previous_manifest_block_address == 0) {
@@ -438,7 +513,7 @@ pub const ManifestNode = struct {
 
     /// Note that the returned block reference is no longer be part of the manifest if
     /// `manifest_block` is the oldest block in the superblock's CheckpointState.
-    pub fn previous(manifest_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
+    pub fn previous(manifest_block: BlockPtrConst) ?BlockReference {
         _ = from(manifest_block); // Validation only.
 
         const header_metadata = metadata(manifest_block);

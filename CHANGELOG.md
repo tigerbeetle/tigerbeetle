@@ -1,5 +1,57 @@
 # TigerBeetle Changelog
 
+## 2023-11-27
+
+### Internals
+
+- [#1306](https://github.com/tigerbeetle/tigerbeetle/pull/1306),
+  [#1308](https://github.com/tigerbeetle/tigerbeetle/pull/1308)
+
+  When validating our releases, use the `release` branch instead of `main` to ensure everything is
+  in sync, and give the Java validation some retry logic to allow for delays in publishing to
+  Central.
+
+- [#1310](https://github.com/tigerbeetle/tigerbeetle/pull/1310)
+
+  Pad storage checksums from 128-bit to 256-bit. These are currently unused, but we're reserving
+  the space for AEAD tags in future.
+
+- [#1312](https://github.com/tigerbeetle/tigerbeetle/pull/1312)
+
+  Remove a trailing comma in our Java client sample code.
+
+- [#1313](https://github.com/tigerbeetle/tigerbeetle/pull/1313)
+
+  Switch `bootstrap.sh` to use spaces only for indentation and ensure it's checked by our
+  shellcheck lint.
+
+- [#1314](https://github.com/tigerbeetle/tigerbeetle/pull/1314)
+
+  Update our `DESIGN.md` to better reflect storage fault probabilities and add in a reference.
+
+- [#1316](https://github.com/tigerbeetle/tigerbeetle/pull/1316)
+
+  Add `CHANGELOG.md` validation to our tidy lint script. We now check line length limits and
+  trailing whitespace.
+
+- [#1317](https://github.com/tigerbeetle/tigerbeetle/pull/1317)
+
+  In keeping with
+  [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#naming-things),
+  rename `reserved_nonce` to `nonce_reserved`.
+
+- [#1318](https://github.com/tigerbeetle/tigerbeetle/pull/1318)
+
+  Note in TigerStyle that callbacks go last in the list of parameters.
+
+- [#1325](https://github.com/tigerbeetle/tigerbeetle/pull/1325)
+
+  Add an exception for line length limits if there's a link in said line.
+
+### TigerTracks 🎧
+
+- [Space Trash](https://www.youtube.com/watch?v=tmcVAJd87Wk)
+
 ## 2023-11-20
 
 ### Safety And Performance
@@ -10,7 +62,7 @@
   uninitialized bytes can be stored or transmitted over the network. Previously, we checked only
   if the struct had no padding, but not its fields.
 
-### Internals  
+### Internals
 
 - [#1299](https://github.com/tigerbeetle/tigerbeetle/pull/1299)
 
@@ -42,7 +94,7 @@
   repurpose and reinterpret fields so that the same header could hold different data depending on
   the context. Now, commands have their own specialized data type containing the fields that are
   only pertinent to the context, making the API much safer and intent-clear.
-  
+
 - [#1304](https://github.com/tigerbeetle/tigerbeetle/pull/1304)
 
   With larger headers (see #1295) we have enough room to make the cluster ID a 128-bit integer,
@@ -105,7 +157,8 @@
 
   Revive the TigerBeetle [VOPRHub](https://github.com/tigerbeetle-vopr)! Some previous changes left
   it on it's [Last Stand](https://open.spotify.com/track/1ibHApXtb0pgplmNDRLHrJ), but the bot is
-  back in business finding liveness bugs: [#1266](https://github.com/tigerbeetle/tigerbeetle/issues/1266)
+  back in business finding liveness bugs:
+  [#1266](https://github.com/tigerbeetle/tigerbeetle/issues/1266)
 
 ### Features
 
@@ -137,8 +190,8 @@
 
 - [#1198](https://github.com/tigerbeetle/tigerbeetle/pull/1198)
 
-  Recommend using [ULID](https://github.com/ulid/spec) for event IDs. ULIDs are approximately sorted,
-  which significantly improves common-case performance.
+  Recommend using [ULID](https://github.com/ulid/spec) for event IDs. ULIDs are approximately
+  sorted, which significantly improves common-case performance.
 
 ### Internals
 
@@ -221,4 +274,5 @@ history, but any notable change from this point on shall be captured by this doc
 For archeological inquiries, check out the state of the repository at the time of the first
 changelog:
 
-[https://github.com/tigerbeetle/tigerbeetle/](https://github.com/tigerbeetle/tigerbeetle/tree/d2d6484188ecc57680e8bde446b5d09b6f2d83ca)
+[https://github.com/tigerbeetle/tigerbeetle/](
+https://github.com/tigerbeetle/tigerbeetle/tree/d2d6484188ecc57680e8bde446b5d09b6f2d83ca)

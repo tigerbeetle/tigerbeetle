@@ -26,11 +26,17 @@ pub const Header = extern struct {
     /// This checksum is enough to uniquely identify a network message or journal entry.
     checksum: u128,
 
+    // TODO(extern u256): When Zig supports u256 in extern-structs, merge this into `checksum`.
+    checksum_padding: u128,
+
     /// A checksum covering only the associated body after this header.
     checksum_body: u128,
 
+    // TODO(extern u256): When Zig supports u256 in extern-structs, merge this into `checksum_body`.
+    checksum_body_padding: u128,
+
     /// Reserved for future use by AEAD.
-    reserved_nonce: u128,
+    nonce_reserved: u128,
 
     /// The cluster number binds intention into the header, so that a client or replica can indicate
     /// the cluster it believes it is speaking to, instead of accidentally talking to the wrong
@@ -62,12 +68,12 @@ pub const Header = extern struct {
 
     /// This data's schema is different depending on the `Header.command`.
     /// (No default value – `Header`s should not be constructed directly.)
-    reserved_command: [160]u8,
+    reserved_command: [128]u8,
 
     comptime {
         assert(@sizeOf(Header) == 256);
         assert(stdx.no_padding(Header));
-        assert(@offsetOf(Header, "reserved_command") % 16 == 0);
+        assert(@offsetOf(Header, "reserved_command") % @sizeOf(u256) == 0);
     }
 
     pub fn Type(comptime command: Command) type {
@@ -95,9 +101,7 @@ pub const Header = extern struct {
             .block => Block,
             .request_sync_checkpoint => RequestSyncCheckpoint,
             .sync_checkpoint => SyncCheckpoint,
-            .request_sync_free_set => RequestSyncFreeSet,
             .request_sync_client_sessions => RequestSyncClientSessions,
-            .sync_free_set => SyncFreeSet,
             .sync_client_sessions => SyncClientSessions,
         };
     }
@@ -163,7 +167,9 @@ pub const Header = extern struct {
     /// Returns null if all fields are set correctly according to the command, or else a warning.
     /// This does not verify that checksum is valid, and expects that this has already been done.
     pub fn invalid(self: *const Header) ?[]const u8 {
-        if (self.reserved_nonce != 0) return "reserved_nonce != 0";
+        if (self.checksum_padding != 0) return "checksum_padding != 0";
+        if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
+        if (self.nonce_reserved != 0) return "nonce_reserved != 0";
         if (self.version != vsr.Version) return "version != Version";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
@@ -253,8 +259,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128,
+        checksum_padding: u128 = 0,
         checksum_body: u128,
-        reserved_nonce: u128,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128,
         cluster: u128,
         size: u32,
         epoch: u32 = 0,
@@ -264,7 +272,7 @@ pub const Header = extern struct {
         replica: u8 = 0,
         reserved_frame: [16]u8,
 
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [128]u8 = [_]u8{0} ** 128,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
@@ -276,8 +284,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -289,12 +299,13 @@ pub const Header = extern struct {
 
         /// Current checkpoint id (possibly uncanonical).
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
         /// Current checkpoint op (possibly uncanonical).
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
 
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [80]u8 = [_]u8{0} ** 80,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -302,6 +313,7 @@ pub const Header = extern struct {
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -312,8 +324,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -326,7 +340,7 @@ pub const Header = extern struct {
         ping_timestamp_monotonic: u64,
         pong_timestamp_wall: u64,
 
-        reserved: [144]u8 = [_]u8{0} ** 144,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
@@ -344,8 +358,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -356,7 +372,7 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         client: u128,
-        reserved: [144]u8 = [_]u8{0} ** 144,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
@@ -374,8 +390,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -385,7 +403,7 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [128]u8 = [_]u8{0} ** 128,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
@@ -400,8 +418,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -416,6 +436,7 @@ pub const Header = extern struct {
         /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of
         ///   the preceding request.
         parent: u128 = 0,
+        parent_padding: u128 = 0,
         /// Each client process generates a unique, random and ephemeral client ID at
         /// initialization. The client ID identifies connections made by the client to the cluster
         /// for the sake of routing messages back to the client.
@@ -443,11 +464,12 @@ pub const Header = extern struct {
         /// A client is allowed to have at most one request inflight at a time.
         request: u32,
         operation: Operation,
-        reserved: [107]u8 = [_]u8{0} ** 107,
+        reserved: [59]u8 = [_]u8{0} ** 59,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
             if (self.replica != 0) return "replica != 0";
+            if (self.parent_padding != 0) return "parent_padding != 0";
             if (self.client == 0) return "client == 0";
             if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
             switch (self.operation) {
@@ -489,8 +511,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -510,9 +534,11 @@ pub const Header = extern struct {
         /// that the primary ratchets the encryption key every view change to ensure that prepares
         /// reordered through a view change never repeat the same IV for the same encryption key.
         parent: u128,
-        client: u128,
+        parent_padding: u128 = 0,
         /// The checksum of the client's request.
         context: u128,
+        context_padding: u128 = 0,
+        client: u128,
         /// The op number of the latest prepare that may or may not yet be committed. Uncommitted
         /// ops may be replaced by different ops if they do not survive through a view change.
         op: u64,
@@ -524,10 +550,12 @@ pub const Header = extern struct {
         request: u32,
         /// The state machine operation to apply.
         operation: Operation,
-        reserved: [83]u8 = [_]u8{0} ** 83,
+        reserved: [19]u8 = [_]u8{0} ** 19,
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
+            if (self.parent_padding != 0) return "parent_padding != 0";
+            if (self.context_padding != 0) return "context_padding != 0";
             switch (self.operation) {
                 .reserved => {
                     if (self.size != @sizeOf(Header)) return "reserved: size != @sizeOf(Header)";
@@ -623,8 +651,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -635,26 +665,33 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
         /// The corresponding request message's checksum.
-        parent: u128,
-        client: u128,
+        /// TODO: Add this back and remove checkpoint_id instead, once checkpoint_id is added to
+        /// the Prepare header.
+        // parent: u128,
+        // parent_padding: u128 = 0,
         prepare_checksum: u128,
+        prepare_checksum_padding: u128 = 0,
+        client: u128,
         op: u64,
         commit: u64,
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [67]u8 = [_]u8{0} ** 67,
+        reserved: [19]u8 = [_]u8{0} ** 19,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
+            if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
                 .root => {
                     const root_checksum = Header.Prepare.root(self.cluster).checksum;
-                    if (self.parent != 0) return "root: parent != 0";
+                    // if (self.parent != 0) return "root: parent != 0";
                     if (self.client != 0) return "root: client != 0";
                     if (self.prepare_checksum != root_checksum) {
                         return "root: prepare_checksum != expected";
@@ -685,8 +722,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -697,11 +736,13 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         parent: u128,
-        client: u128,
+        parent_padding: u128 = 0,
         /// The checksum of the prepare message to which this message refers.
         /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which
         /// have low entropy and may otherwise collide in the event of any correctness bugs.
         context: u128 = 0,
+        context_padding: u128 = 0,
+        client: u128,
         op: u64,
         commit: u64,
         /// The corresponding `prepare`'s timestamp.
@@ -709,12 +750,14 @@ pub const Header = extern struct {
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [83]u8 = [_]u8{0} ** 83,
+        reserved: [19]u8 = [_]u8{0} ** 19,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
             // Initialization within `client.zig` asserts that client `id` is greater than zero:
             if (self.client == 0) return "client == 0";
+            if (self.parent_padding != 0) return "parent_padding != 0";
+            if (self.context_padding != 0) return "context_padding != 0";
             if (self.op != self.commit) return "op != commit";
             if (self.timestamp == 0) return "timestamp == 0";
             if (self.operation == .register) {
@@ -735,8 +778,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -748,9 +793,11 @@ pub const Header = extern struct {
 
         /// Current checkpoint id (possibly uncanonical).
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
 
         /// The latest committed prepare's checksum.
         commit_checksum: u128,
+        commit_checksum_padding: u128 = 0,
 
         /// Current checkpoint op (possibly uncanonical).
         checkpoint_op: u64,
@@ -760,12 +807,13 @@ pub const Header = extern struct {
 
         timestamp_monotonic: u64,
 
-        reserved: [104]u8 = [_]u8{0} ** 104,
+        reserved: [40]u8 = [_]u8{0} ** 40,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (self.commit < self.checkpoint_op) return "commit < checkpoint_op";
             if (self.timestamp_monotonic == 0) return "timestamp_monotonic == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -777,8 +825,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -788,7 +838,7 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [128]u8 = [_]u8{0} ** 128,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
@@ -803,8 +853,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -827,7 +879,7 @@ pub const Header = extern struct {
         commit_min: u64,
         checkpoint_op: u64,
         log_view: u32,
-        reserved: [100]u8 = [_]u8{0} ** 100,
+        reserved: [68]u8 = [_]u8{0} ** 68,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
@@ -845,8 +897,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -863,7 +917,7 @@ pub const Header = extern struct {
         commit: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,
-        reserved: [120]u8 = [_]u8{0} ** 120,
+        reserved: [88]u8 = [_]u8{0} ** 88,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
@@ -878,8 +932,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -890,7 +946,7 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         nonce: u128,
-        reserved: [144]u8 = [_]u8{0} ** 144,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
@@ -906,8 +962,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -921,7 +979,7 @@ pub const Header = extern struct {
         op_min: u64,
         /// The maximum op requested (inclusive).
         op_max: u64,
-        reserved: [144]u8 = [_]u8{0} ** 144,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
@@ -938,8 +996,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -950,13 +1010,15 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         prepare_checksum: u128,
+        prepare_checksum_padding: u128 = 0,
         prepare_op: u64,
-        reserved: [136]u8 = [_]u8{0} ** 136,
+        reserved: [88]u8 = [_]u8{0} ** 88,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
             if (self.view != 0) return "view == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -967,8 +1029,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -978,15 +1042,17 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reply_client: u128,
         reply_checksum: u128,
+        reply_checksum_padding: u128 = 0,
+        reply_client: u128,
         reply_op: u64,
-        reserved: [120]u8 = [_]u8{0} ** 120,
+        reserved: [72]u8 = [_]u8{0} ** 72,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.reply_checksum_padding != 0) return "reply_checksum_padding != 0";
             if (self.view != 0) return "view == 0";
             if (self.reply_client == 0) return "reply_client == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -998,8 +1064,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1009,7 +1077,7 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [128]u8 = [_]u8{0} ** 128,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
@@ -1023,8 +1091,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1035,7 +1105,7 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         client: u128,
-        reserved: [144]u8 = [_]u8{0} ** 144,
+        reserved: [112]u8 = [_]u8{0} ** 112,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
@@ -1051,8 +1121,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1062,7 +1134,7 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        reserved: [160]u8 = [_]u8{0} ** 160,
+        reserved: [128]u8 = [_]u8{0} ** 128,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
@@ -1078,11 +1150,13 @@ pub const Header = extern struct {
 
     pub const Block = extern struct {
         pub usingnamespace HeaderFunctions(@This());
-        pub const metadata_size = 128;
+        pub const metadata_size = 96;
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1119,8 +1193,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1131,14 +1207,16 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
-        reserved: [136]u8 = [_]u8{0} ** 136,
+        reserved: [88]u8 = [_]u8{0} ** 88,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_checkpoint);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1148,8 +1226,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1160,8 +1240,9 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
-        reserved: [136]u8 = [_]u8{0} ** 136,
+        reserved: [88]u8 = [_]u8{0} ** 88,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_checkpoint);
@@ -1169,36 +1250,7 @@ pub const Header = extern struct {
                 return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
             }
             if (self.view != 0) return "view != 0";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
-        }
-    };
-
-    pub const RequestSyncFreeSet = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
-
-        checkpoint_id: u128,
-        checkpoint_op: u64,
-        trailer_offset: u32,
-        reserved: [132]u8 = [_]u8{0} ** 132,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .request_sync_free_set);
-            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1208,8 +1260,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1220,48 +1274,17 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
         trailer_offset: u32 = 0,
-        reserved: [132]u8 = [_]u8{0} ** 132,
+        reserved: [84]u8 = [_]u8{0} ** 84,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_sync_client_sessions);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
-            if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
-            return null;
-        }
-    };
-
-    pub const SyncFreeSet = extern struct {
-        pub usingnamespace HeaderFunctions(@This());
-
-        checksum: u128 = 0,
-        checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
-        cluster: u128,
-        size: u32 = @sizeOf(Header),
-        epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
-        command: Command,
-        replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
-
-        trailer_checksum: u128,
-        checkpoint_id: u128,
-        checkpoint_op: u64,
-        trailer_size: u32,
-        trailer_offset: u32,
-        reserved: [112]u8 = [_]u8{0} ** 112,
-
-        fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .sync_free_set);
-            if (self.size - @sizeOf(Header) > constants.sync_trailer_message_body_size_max) {
-                return "size > max";
-            }
-            if (self.view != 0) return "view != 0";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1271,8 +1294,10 @@ pub const Header = extern struct {
         pub usingnamespace HeaderFunctions(@This());
 
         checksum: u128 = 0,
+        checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
-        reserved_nonce: u128 = 0,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128 = 0,
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
@@ -1283,11 +1308,13 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         trailer_checksum: u128,
+        trailer_checksum_padding: u128 = 0,
         checkpoint_id: u128,
+        checkpoint_id_padding: u128 = 0,
         checkpoint_op: u64,
         trailer_size: u32,
         trailer_offset: u32,
-        reserved: [112]u8 = [_]u8{0} ** 112,
+        reserved: [48]u8 = [_]u8{0} ** 48,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .sync_client_sessions);
@@ -1295,6 +1322,7 @@ pub const Header = extern struct {
                 return "size > max";
             }
             if (self.view != 0) return "view != 0";
+            if (self.checkpoint_id_padding != 0) return "checkpoint_id_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }

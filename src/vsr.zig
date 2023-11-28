@@ -53,6 +53,7 @@ pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
+pub const FreeSetEncodedType = @import("vsr/superblock_free_set_encoded.zig").FreeSetEncodedType;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
@@ -147,6 +148,19 @@ pub const Zone = enum {
     }
 };
 
+/// Reference to a single block in the grid.
+///
+/// Blocks are always referred to by a pair of an address and a checksum to protect from misdirected
+/// reads and writes: checksum inside the block itself doesn't help if the disk accidentally reads a
+/// wrong block.
+///
+/// Block addresses start from one, such that zeroed-out memory can not be confused with a valid
+/// address.
+pub const BlockReference = struct {
+    checksum: u128,
+    address: u64,
+};
+
 /// Viewstamped Replication protocol commands:
 pub const Command = enum(u8) {
     reserved = 0,
@@ -181,11 +195,9 @@ pub const Command = enum(u8) {
     request_sync_checkpoint = 21,
     sync_checkpoint = 22,
 
-    request_sync_free_set = 23,
-    request_sync_client_sessions = 24,
+    request_sync_client_sessions = 23,
 
-    sync_free_set = 25,
-    sync_client_sessions = 26,
+    sync_client_sessions = 24,
 
     comptime {
         for (std.enums.values(Command), 0..) |result, index| {

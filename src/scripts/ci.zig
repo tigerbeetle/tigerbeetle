@@ -113,6 +113,23 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         log.warn("skip release verification for platforms other than Linux", .{});
     }
 
+    // Note: when updating the list of artifacts, don't forget to check for any external links.
+    //
+    // At minimum, `installation.md` requires an update.
+    const artifacts = [_][]const u8{
+        "tigerbeetle-aarch64-linux-debug.zip",
+        "tigerbeetle-aarch64-linux.zip",
+        "tigerbeetle-universal-macos-debug.zip",
+        "tigerbeetle-universal-macos.zip",
+        "tigerbeetle-x86_64-linux-debug.zip",
+        "tigerbeetle-x86_64-linux.zip",
+        "tigerbeetle-x86_64-windows-debug.zip",
+        "tigerbeetle-x86_64-windows.zip",
+    };
+    for (artifacts) |artifact| {
+        assert(shell.file_exists(artifact));
+    }
+
     try shell.exec("unzip tigerbeetle-x86_64-linux.zip", .{});
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);
