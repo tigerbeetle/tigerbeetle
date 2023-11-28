@@ -102,7 +102,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3416]u8 = [_]u8{0} ** 3416,
+    reserved: [3400]u8 = [_]u8{0} ** 3400,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -161,7 +161,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [23]u8 = [_]u8{0} ** 23,
 
         comptime {
-            assert(@sizeOf(VSRState) == 528);
+            assert(@sizeOf(VSRState) == 544);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -177,6 +177,7 @@ pub const SuperBlockHeader = extern struct {
                     .previous_checkpoint_id = 0,
                     .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
                     .commit_min = 0,
+                    .free_set_checksum = vsr.checksum(&.{}),
                     .free_set_last_block_checksum = 0,
                     .free_set_last_block_address = 0,
                     .free_set_size = 0,
@@ -225,6 +226,7 @@ pub const SuperBlockHeader = extern struct {
             if (state.checkpoint.free_set_last_block_address == 0) {
                 assert(state.checkpoint.free_set_last_block_checksum == 0);
                 assert(state.checkpoint.free_set_size == 0);
+                assert(state.checkpoint.free_set_checksum == vsr.checksum(&.{}));
             } else {
                 assert(state.checkpoint.free_set_size > 0);
             }
@@ -318,6 +320,10 @@ pub const SuperBlockHeader = extern struct {
         commit_min_checksum: u128,
         commit_min_checksum_padding: u128 = 0,
 
+        /// Checksum covering the entire encoded free set. Strictly speaking it is redundant:
+        /// free_set_last_block_checksum indirectly covers the same data. It is still useful
+        /// to protect from encoding-decoding bugs as a defense in depth.
+        free_set_checksum: u128,
         free_set_last_block_checksum: u128,
         free_set_last_block_checksum_padding: u128 = 0,
         manifest_oldest_checksum: u128,
@@ -355,7 +361,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [8]u8 = [_]u8{0} ** 8,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 256);
+            assert(@sizeOf(CheckpointState) == 272);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(stdx.no_padding(CheckpointState));
         }
@@ -482,6 +488,7 @@ pub const SuperBlockHeader = extern struct {
 
     pub fn free_set_reference(superblock: *const SuperBlockHeader) FreeSetReference {
         return .{
+            .checksum = superblock.vsr_state.checkpoint.free_set_checksum,
             .last_block_address = superblock.vsr_state.checkpoint.free_set_last_block_address,
             .last_block_checksum = superblock.vsr_state.checkpoint.free_set_last_block_checksum,
             .size = superblock.vsr_state.checkpoint.free_set_size,
@@ -515,12 +522,15 @@ pub const ManifestReferences = struct {
 };
 
 pub const FreeSetReference = struct {
+    /// Checksum over the entire encoded free set.
+    checksum: u128,
     last_block_address: u64,
     last_block_checksum: u128,
     size: u32,
 
     pub fn empty(reference: *const FreeSetReference) bool {
         if (reference.size == 0) {
+            assert(reference.checksum == 0);
             assert(reference.last_block_address == 0);
             assert(reference.last_block_checksum == 0);
             return true;
@@ -816,6 +826,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .manifest_newest_checksum = 0,
                         .manifest_newest_address = 0,
                         .manifest_block_count = 0,
+                        .free_set_checksum = 0,
                         .free_set_last_block_checksum = 0,
                         .free_set_last_block_address = 0,
                         .free_set_size = 0,
@@ -923,6 +934,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .previous_checkpoint_id = superblock.staging.checkpoint_id(),
                 .commit_min = update.commit_min,
                 .commit_min_checksum = update.commit_min_checksum,
+                .free_set_checksum = free_set_reference.checksum,
                 .free_set_last_block_checksum = free_set_reference.last_block_checksum,
                 .free_set_last_block_address = free_set_reference.last_block_address,
                 .free_set_size = free_set_reference.size,
