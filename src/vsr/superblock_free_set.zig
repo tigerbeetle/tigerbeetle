@@ -175,6 +175,12 @@ pub const FreeSet = struct {
         return set;
     }
 
+    fn verify_index(set: *const FreeSet) void {
+        for (0..set.index.bit_length) |shard| {
+            assert((set.find_free_block_in_shard(shard) == null) == set.index.isSet(shard));
+        }
+    }
+
     /// Returns the number of active reservations.
     pub fn count_reservations(set: FreeSet) usize {
         assert(set.opened);
@@ -433,6 +439,9 @@ pub const FreeSet = struct {
             set.release_now(address);
         }
         assert(set.staging.count() == 0);
+        // Index verification is O(blocks.bit_length) so do it only at checkpoint, which is
+        // also linear.
+        set.verify_index();
     }
 
     /// Temporarily marks staged blocks as free.
@@ -472,8 +481,7 @@ pub const FreeSet = struct {
         const words_decoded = ewah.decode(source, bit_set_masks(set.blocks));
         assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks.bit_length);
 
-        var shard: usize = 0;
-        while (shard < set.index.bit_length) : (shard += 1) {
+        for (0..set.index.bit_length) |shard| {
             if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);
         }
     }
