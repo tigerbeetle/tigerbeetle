@@ -545,7 +545,7 @@ pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 ///   tree configuration. (To prevent Grid from depending on StateMachine).
 /// - This counts data blocks, but does not count the index block itself.
 pub const lsm_table_data_blocks_max = table_blocks_max: {
-    const checksum_size = @sizeOf(u128);
+    const checksum_size = @sizeOf(u256);
     const address_size = @sizeOf(u64);
     break :table_blocks_max @divFloor(
         block_size - @sizeOf(vsr.Header),

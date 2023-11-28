@@ -670,7 +670,7 @@ pub const Storage = struct {
             const data_block_header = schema.header_from_block(data_block);
 
             assert(data_block_header.address == address);
-            assert(data_block_header.checksum == checksum);
+            assert(data_block_header.checksum == checksum.value);
             assert(data_block_header.block_type == .data);
         }
     }
@@ -892,7 +892,6 @@ pub const ClusterFaultAtlas = struct {
         const offset_in_copy = offset_in_zone % superblock.superblock_copy_size;
         const area: superblock.SuperBlockZone = switch (offset_in_copy) {
             superblock.SuperBlockZone.header.start() => .header,
-            superblock.SuperBlockZone.free_set.start() => .free_set,
             superblock.SuperBlockZone.client_sessions.start() => .client_sessions,
             else => unreachable,
         };

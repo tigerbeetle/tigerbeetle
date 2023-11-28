@@ -30,7 +30,7 @@ fn run_fuzz(
     blocks_count: usize,
     events: []const FreeSetEvent,
 ) !void {
-    var free_set = try FreeSet.init(allocator, blocks_count);
+    var free_set = try FreeSet.open_empty(allocator, blocks_count);
     defer free_set.deinit(allocator);
 
     var free_set_model = try FreeSetModel.init(allocator, blocks_count);

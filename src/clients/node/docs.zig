@@ -87,10 +87,7 @@ pub const NodeDocs = Docs{
     \\console.log("Import ok!");
     ,
 
-    .install_commands =
-    \\npm install --prefix ../../
-    \\npm install
-    ,
+    .install_commands = "npm install tigerbeetle-node",
     .build_commands =
     \\npm install typescript @types/node
     \\npx tsc --allowJs --noEmit main.js

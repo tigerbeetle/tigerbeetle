@@ -249,8 +249,11 @@ test "format" {
 
         try std.testing.expectEqual(superblock_header.copy, copy);
         try std.testing.expectEqual(superblock_header.cluster, cluster);
-        try std.testing.expectEqual(superblock_header.storage_size, storage.size);
         try std.testing.expectEqual(superblock_header.sequence, 1);
+        try std.testing.expectEqual(
+            superblock_header.vsr_state.checkpoint.storage_size,
+            storage.size,
+        );
         try std.testing.expectEqual(superblock_header.vsr_state.checkpoint.commit_min, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.commit_max, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.view, 0);

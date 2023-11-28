@@ -13,6 +13,7 @@ for mission critical safety and performance.
 First, get TigerBeetle running:
 
 * [Run a single-node cluster with a single binary](./quick-start/single-binary.md)
+* Or [run a three-node cluster with a single binary](./quick-start/single-binary-three.md)
 * Or [run a single-node cluster with Docker](./quick-start/with-docker.md)
 * Or [run a three-node cluster with docker-compose](./quick-start/with-docker-compose.md)
 

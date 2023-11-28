@@ -265,6 +265,9 @@ Beyond these rules:
   function with the name of the calling function to show the call history. For example,
   `read_sector()` and `read_sector_callback()`.
 
+* Callbacks go last in the list of parameters. This mirrors control flow: callbacks are also
+  _invoked_ last.
+
 * Don't overload names with multiple meanings that are context-dependent. For example, TigerBeetle
   has a feature called *pending transfers* where a pending transfer can be subsequently *posted* or
   *voided*. At first, we called them *two-phase commit transfers*, but this overloaded the
