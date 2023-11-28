@@ -38,6 +38,7 @@ const tree = @import("tree.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const schema = @import("schema.zig");
 const TableInfo = schema.ManifestNode.TableInfo;
+const BlockReference = vsr.BlockReference;
 
 const block_builder_schema = schema.ManifestNode{
     .entry_count = schema.ManifestNode.entry_count_max,
@@ -69,11 +70,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
         pub const TableExtent = struct {
             block: u64, // Manifest block address.
             entry: u32, // Index within the manifest block Label/TableInfo arrays.
-        };
-
-        const BlockReference = struct {
-            checksum: u128,
-            address: u64,
         };
 
         superblock: *SuperBlock,

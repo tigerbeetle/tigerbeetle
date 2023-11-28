@@ -39,6 +39,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
+const BlockReference = vsr.BlockReference;
 
 pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
 pub const SuperBlockClientSessions = @import("superblock_client_sessions.zig").ClientSessions;

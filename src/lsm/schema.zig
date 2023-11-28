@@ -27,6 +27,8 @@ const vsr = @import("../vsr.zig");
 
 const stdx = @import("../stdx.zig");
 
+const BlockReference = vsr.BlockReference;
+
 const address_size = @sizeOf(u64);
 const checksum_size = @sizeOf(u256);
 
@@ -381,7 +383,7 @@ pub const FreeSetNode = struct {
         _ = metadata(free_set_block);
     }
 
-    pub fn previous(free_set_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
+    pub fn previous(free_set_block: BlockPtrConst) ?BlockReference {
         const header_metadata = metadata(free_set_block);
 
         if (header_metadata.previous_free_set_block_address == 0) {
@@ -511,7 +513,7 @@ pub const ManifestNode = struct {
 
     /// Note that the returned block reference is no longer be part of the manifest if
     /// `manifest_block` is the oldest block in the superblock's CheckpointState.
-    pub fn previous(manifest_block: BlockPtrConst) ?struct { checksum: u128, address: u64 } {
+    pub fn previous(manifest_block: BlockPtrConst) ?BlockReference {
         _ = from(manifest_block); // Validation only.
 
         const header_metadata = metadata(manifest_block);
