@@ -307,16 +307,16 @@ pub const FreeSet = struct {
         assert(reservation.block_base + reservation.block_count <= set.reservation_blocks);
         assert(reservation.session == set.reservation_session);
 
-        const shard = find_bit(
+        const shard_start = find_bit(
             set.index,
             @divFloor(reservation.block_base, shard_bits),
             div_ceil(reservation.block_base + reservation.block_count, shard_bits),
             .unset,
         ) orelse return null;
-        assert(!set.index.isSet(shard));
+        assert(!set.index.isSet(shard_start));
 
         const reservation_start = @max(
-            shard * shard_bits,
+            shard_start * shard_bits,
             reservation.block_base,
         );
         const reservation_end = reservation.block_base + reservation.block_count;
@@ -330,6 +330,12 @@ pub const FreeSet = struct {
         assert(block <= reservation.block_base + reservation.block_count);
         assert(!set.blocks.isSet(block));
         assert(!set.staging.isSet(block));
+
+        // Even if "shard_start" has free blocks, we might acquire our block from a later shard.
+        // (This is possible because our reservation begins part-way through the shard.)
+        const shard = @divFloor(block, shard_bits);
+        maybe(shard == shard_start);
+        assert(shard >= shard_start);
 
         set.blocks.set(block);
         // Update the index when every block in the shard is allocated.
@@ -1043,4 +1049,24 @@ fn test_find_bit(
     } else {
         try std.testing.expectEqual(bit_actual, null);
     }
+}
+
+test "FreeSet.acquire part-way through a shard" {
+    var set = try FreeSet.open_empty(std.testing.allocator, FreeSet.shard_bits * 3);
+    defer set.deinit(std.testing.allocator);
+
+    var reservation_a = set.reserve(1).?;
+    defer set.forfeit(reservation_a);
+
+    var reservation_b = set.reserve(2 * FreeSet.shard_bits).?;
+    defer set.forfeit(reservation_b);
+
+    // Acquire all of reservation B.
+    // At the end, the first shard still has a bit free (reserved by A).
+    for (0..reservation_b.block_count) |i| {
+        const address = set.acquire(reservation_b).?;
+        try std.testing.expectEqual(address - 1, reservation_a.block_count + i);
+        set.verify_index();
+    }
+    try std.testing.expectEqual(set.acquire(reservation_b), null);
 }
