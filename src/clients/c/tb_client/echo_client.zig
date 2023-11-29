@@ -89,11 +89,15 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
 
-            return Batch{ .message = message_request };
+            return Batch{
+                .message = message_request,
+                .event_count = @intCast(event_count),
+            };
         }
 
         pub const Batch = struct {
             message: *Message.Request,
+            event_count: u16,
 
             pub fn slice(batch: Batch) []u8 {
                 return batch.message.body();
@@ -110,10 +114,12 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
             assert(!self.request_queue.full());
 
-            self.request_queue.push_assume_capacity(.{
-                .info = .{ .user_data = user_data, .callback = callback },
-                .message = message,
-            });
+            self.request_queue.push_assume_capacity(.{ .message = message, .demux = .{
+                .user_data = user_data,
+                .callback = callback,
+                .event_count = batch.event_count,
+                .event_offset = 0,
+            } });
         }
 
         pub fn get_message(self: *Self) *Message {
@@ -144,8 +150,9 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 // callback. This necessitates a `copy_disjoint` above.
                 self.release(inflight.message.base());
 
-                inflight.info.callback.?(
-                    inflight.info.user_data,
+                assert(inflight.demux_queue.empty());
+                inflight.demux.callback.?(
+                    inflight.demux.user_data,
                     reply_message.header.operation.cast(Self.StateMachine),
                     reply_message.body(),
                 );

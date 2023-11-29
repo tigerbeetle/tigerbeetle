@@ -111,31 +111,41 @@ pub fn StateMachineType(
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
-            comptime assert(batch_logical_allowed.get(operation));
             return struct {
                 const Demuxer = @This();
-                const CreateResult = Result(operation);
+                const DemuxerResult = Result(operation);
 
-                results: []CreateResult,
+                results: []DemuxerResult,
 
                 /// Create a Demuxer which can extract Results out of the reply bytes in-place.
-                pub fn init(reply: []CreateResult) Demuxer {
+                pub fn init(reply: []DemuxerResult) Demuxer {
                     return Demuxer{ .results = reply };
                 }
 
                 /// Returns a slice into the the original reply bytes with Results matching the
                 /// Event range (offset and size). Each subsequent call to demux() must have ranges
                 /// that are disjoint and increase monotonically.
-                pub fn decode(self: *Demuxer, event_offset: u32, event_size: u32) []CreateResult {
-                    // Count all results from the start of our slice which match the Event range,
-                    // Updating the result.indexes to be relative to the Event range in the process.
-                    const demuxed = for (self.results, 0..) |*result, i| {
-                        if (result.index < event_offset) break i;
-                        if (result.index >= event_offset + event_size) break i;
-                        result.index -= event_offset;
-                    } else self.results.len;
+                pub fn decode(self: *Demuxer, event_offset: u32, event_size: u32) []DemuxerResult {
+                    const demuxed = blk: {
+                        if (comptime batch_logical_allowed.get(operation)) {
+                            // Count all results from out slice which match the Event range,
+                            // updating the result.indexes to be related to the EVent in the process.
+                            for (self.results, 0..) |*result, i| {
+                                if (result.index < event_offset) break :blk i;
+                                if (result.index >= event_offset + event_size) break :blk i;
+                                result.index -= event_offset;
+                            }
+                        } else {
+                            // Operations which aren't batched have the first Event consume the
+                            // entire Result down below.
+                            assert(event_offset == 0);
+                            assert(event_size == @sizeOf(Event(operation)));
+                        }
+                        break :blk self.results.len;
+                    };
 
-                    // Consume the demuxed Results out of our local slice and return them as bytes.
+                    // Return all results demuxed from the given Event, re-slicing them out of
+                    // self.results to "consume" them from subsequent decode() calls.
                     defer self.results = self.results[demuxed..];
                     return self.results[0..demuxed];
                 }

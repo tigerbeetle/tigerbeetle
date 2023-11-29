@@ -31,8 +31,30 @@ pub fn StateMachineType(
             .echo = false,
         });
 
-        pub fn DemuxerType(comptime _: Operation) type {
-            @compileError("Batching not supported by test StateMachine");
+        pub fn Event(comptime _: Operation) type {
+            return u8; // Must be non-zero-sized for sliceAsBytes().
+        }
+
+        pub fn Result(comptime _: Operation) type {
+            return u8; // Must be non-zero-sized for sliceAsBytes().
+        }
+
+        /// Empty demuxer to be compatible with vsr.Client batching.
+        pub fn DemuxerType(comptime operation: Operation) type {
+            return struct {
+                const Demuxer = @This();
+
+                pub fn init(reply: []Result(operation)) Demuxer {
+                    assert(reply.len == 0);
+                    return .{};
+                }
+
+                pub fn decode(_: *Demuxer, event_offset: u32, event_size: u32) []Result(operation) {
+                    assert(event_offset == 0);
+                    assert(event_size == 0);
+                    return &.{};
+                }
+            };
         }
 
         pub const Options = struct {
