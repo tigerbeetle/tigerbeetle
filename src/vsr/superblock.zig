@@ -88,11 +88,6 @@ pub const SuperBlockHeader = extern struct {
     /// State stored on stable storage for the Viewstamped Replication consensus protocol.
     vsr_state: VSRState,
 
-    /// The maximum possible size of the data file.
-    /// The maximum allowed runtime storage_size_limit.
-    /// The FreeSet's on-disk size is a function of storage_size_max.
-    storage_size_max: u64,
-
     /// Reserved for future minor features (e.g. changing the compression algorithm of the trailer).
     flags: u64 = 0,
 
@@ -103,7 +98,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3400]u8 = [_]u8{0} ** 3400,
+    reserved: [3408]u8 = [_]u8{0} ** 3408,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -439,7 +434,6 @@ pub const SuperBlockHeader = extern struct {
 
         if (a.version != b.version) return false;
         if (a.cluster != b.cluster) return false;
-        if (a.storage_size_max != b.storage_size_max) return false;
         if (a.sequence != b.sequence) return false;
         if (a.parent != b.parent) return false;
         if (a.client_sessions_checksum != b.client_sessions_checksum) return false;
@@ -583,27 +577,6 @@ pub const data_file_size_min =
     constants.client_replies_size +
     vsr.Zone.size(.grid_padding).?;
 
-/// The maximum number of blocks in the grid.
-pub const grid_blocks_max = blk: {
-    var size = constants.storage_size_max;
-    size -= constants.superblock_copies * @sizeOf(SuperBlockHeader);
-    size -= constants.superblock_copies * superblock_trailer_client_sessions_size_max;
-    size -= constants.journal_size; // Zone.wal_headers + Zone.wal_prepares
-    size -= constants.client_replies_size; // Zone.client_replies
-    // At this point, the remainder of size is split between the grid and the freeset copies.
-    // The size of a freeset is related to the number of blocks it must store.
-    // Maximize the number of grid blocks.
-
-    const shard_count = @divFloor(size, constants.block_size * SuperBlockFreeSet.shard_bits);
-    const block_count = shard_count * SuperBlockFreeSet.shard_bits;
-    break :blk block_count;
-};
-
-comptime {
-    assert(grid_blocks_max > 0);
-    assert(grid_blocks_max * constants.block_size + data_file_size_min <= constants.storage_size_max);
-}
-
 /// This table shows the sequence number progression of the SuperBlock's headers.
 ///
 /// action        working  staging  disk
@@ -726,7 +699,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 constants.block_size * FreeSet.shard_bits,
             )));
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
-            assert(block_count_limit <= grid_blocks_max);
 
             const a = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
             errdefer allocator.free(a);
@@ -814,7 +786,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .version = SuperBlockVersion,
                 .sequence = 0,
                 .cluster = options.cluster,
-                .storage_size_max = constants.storage_size_max,
                 .parent = 0,
                 .client_sessions_checksum = 0,
                 .vsr_state = .{
@@ -925,9 +896,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 assert(superblock.free_set.count_released() == 0);
             }
 
-            maybe(superblock.working.storage_size_max > superblock.storage_size_limit);
             assert(storage_size >= data_file_size_min);
-            assert(storage_size <= superblock.working.storage_size_max);
             assert(storage_size <= superblock.storage_size_limit);
 
             var vsr_state = superblock.staging.vsr_state;
@@ -1222,7 +1191,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const storage_size = superblock.staging.vsr_state.checkpoint.storage_size;
             assert(storage_size >= data_file_size_min);
-            assert(storage_size <= superblock.staging.storage_size_max);
+            assert(storage_size <= constants.storage_size_max);
 
             assert(context.copy.? < constants.superblock_copies);
             superblock.staging.copy = context.copy.?;
@@ -1351,7 +1320,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             if (superblock.quorums.working(superblock.reading, threshold)) |quorum| {
                 assert(quorum.valid);
                 assert(quorum.copies.count() >= threshold.count());
-                assert(quorum.header.storage_size_max == constants.storage_size_max);
 
                 const working = quorum.header;
                 if (threshold == .verify) {
