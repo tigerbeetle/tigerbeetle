@@ -62,8 +62,7 @@ const CommitStage = enum {
     compact_state_machine,
     checkpoint_state_machine,
     checkpoint_client_replies,
-    checkpoint_grid_repair,
-    checkpoint_free_set,
+    checkpoint_grid,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -662,7 +661,7 @@ pub fn ReplicaType(
 
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
             // can repair grid blocks if necessary:
-            self.superblock.free_set_encoded.open(
+            self.grid.free_set_encoded.open(
                 &self.grid,
                 self.superblock.working.free_set_reference(),
                 free_set_open_callback,
@@ -682,19 +681,24 @@ pub fn ReplicaType(
         }
 
         fn free_set_open_callback(free_set_encoded: *FreeSetEncoded) void {
-            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", free_set_encoded);
-            const self = @fieldParentPtr(Self, "superblock", superblock);
+            const grid = @fieldParentPtr(Grid, "free_set_encoded", free_set_encoded);
+            const self = @fieldParentPtr(Self, "grid", grid);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
+            assert(self.grid.free_set.count_released() == self.grid.free_set_encoded.block_count());
+            assert(std.meta.eql(
+                free_set_encoded.checkpoint_reference(),
+                self.superblock.working.free_set_reference(),
+            ));
             self.state_machine.open(state_machine_open_callback);
         }
 
         fn state_machine_open_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
-            assert(self.superblock.free_set.opened);
+            assert(self.grid.free_set.opened);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
@@ -2365,7 +2369,7 @@ pub fn ReplicaType(
 
             const grid_fulfill = self.grid.fulfill_block(block);
             if (grid_fulfill) {
-                assert(!self.superblock.free_set.is_free(message.header.address));
+                assert(!self.grid.free_set.is_free(message.header.address));
 
                 log.debug("{}: on_block: fulfilled address={} checksum={}", .{
                     self.replica,
@@ -2377,7 +2381,7 @@ pub fn ReplicaType(
             const grid_repair =
                 self.grid.repair_block_waiting(message.header.address, message.header.checksum);
             if (grid_repair) {
-                assert(!self.superblock.free_set.is_free(message.header.address));
+                assert(!self.grid.free_set.is_free(message.header.address));
 
                 if (self.grid_repair_writes.acquire()) |write| {
                     const write_index = self.grid_repair_writes.index(write);
@@ -2804,7 +2808,7 @@ pub fn ReplicaType(
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
             if (self.commit_stage == .checkpoint_superblock) return;
-            if (self.commit_stage == .checkpoint_grid_repair) return;
+            if (self.commit_stage == .checkpoint_grid) return;
 
             // TODO Test connectivity to cluster to rule out a network partition.
 
@@ -3165,8 +3169,7 @@ pub fn ReplicaType(
                 .checkpoint_client_replies => {
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
-                .checkpoint_grid_repair => self.commit_op_checkpoint_grid_repair(),
-                .checkpoint_free_set => self.commit_op_checkpoint_free_set(),
+                .checkpoint_grid => self.commit_op_checkpoint_grid(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3544,46 +3547,28 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_stage == .checkpoint_client_replies);
 
-            self.commit_dispatch(.checkpoint_grid_repair);
+            self.commit_dispatch(.checkpoint_grid);
         }
 
-        fn commit_op_checkpoint_grid_repair(self: *Self) void {
-            assert(self.commit_stage == .checkpoint_grid_repair);
+        fn commit_op_checkpoint_grid(self: *Self) void {
+            assert(self.commit_stage == .checkpoint_grid);
             assert(self.commit_prepare.?.header.op == self.op);
 
-            self.grid.checkpoint(commit_op_checkpoint_grid_repair_callback);
+            self.grid.checkpoint(commit_op_checkpoint_grid_callback);
         }
 
-        fn commit_op_checkpoint_grid_repair_callback(grid: *Grid) void {
+        fn commit_op_checkpoint_grid_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
-            assert(self.commit_stage == .checkpoint_grid_repair);
+            assert(self.commit_stage == .checkpoint_grid);
             assert(self.commit_prepare.?.header.op == self.op);
-
-            self.commit_dispatch(.checkpoint_free_set);
-        }
-
-        fn commit_op_checkpoint_free_set(self: *Self) void {
-            assert(self.commit_stage == .checkpoint_free_set);
-            assert(self.commit_prepare.?.header.op == self.op);
-            assert(self.superblock.free_set.opened);
-
-            self.superblock.free_set_encoded.checkpoint(commit_op_checkpoint_free_set_callback);
-        }
-
-        fn commit_op_checkpoint_free_set_callback(set: *SuperBlock.FreeSetEncoded) void {
-            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
-            const self = @fieldParentPtr(Self, "superblock", superblock);
-            assert(self.commit_stage == .checkpoint_free_set);
-            assert(self.commit_prepare.?.header.op == self.op);
-            assert(self.superblock.free_set.opened);
-            assert(self.superblock.free_set.count_released() ==
-                self.superblock.free_set_encoded.block_count);
+            assert(self.grid.free_set.opened);
+            assert(self.grid.free_set.count_released() == self.grid.free_set_encoded.block_count());
 
             self.commit_dispatch(.checkpoint_superblock);
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
-            assert(self.superblock.free_set.opened);
+            assert(self.grid.free_set.opened);
             assert(self.state_machine_opened);
             assert(self.commit_stage == .checkpoint_superblock);
             assert(self.commit_prepare.?.header.op == self.op);
@@ -3629,6 +3614,7 @@ pub fn ReplicaType(
                     .sync_op_min = vsr_state_sync_op.min,
                     .sync_op_max = vsr_state_sync_op.max,
                     .manifest_references = self.state_machine.forest.manifest_log.checkpoint_references(),
+                    .free_set_reference = self.grid.free_set_encoded.checkpoint_reference(),
                 },
             );
         }
@@ -7700,8 +7686,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
-                .checkpoint_grid_repair,
-                .checkpoint_free_set,
+                .checkpoint_grid,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7848,8 +7833,7 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_client_replies,
-                .checkpoint_grid_repair,
-                .checkpoint_free_set,
+                .checkpoint_grid,
                 .checkpoint_superblock,
                 => {},
             }
@@ -7965,8 +7949,8 @@ pub fn ReplicaType(
             self.state_machine_opened = false;
             self.state_machine.reset();
 
-            self.superblock.free_set.reset();
-            self.superblock.free_set_encoded.reset();
+            self.grid.free_set.reset();
+            self.grid.free_set_encoded.reset();
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
@@ -8036,7 +8020,7 @@ pub fn ReplicaType(
                 self.transition_to_recovering_head();
             }
 
-            self.superblock.free_set_encoded.open(
+            self.grid.free_set_encoded.open(
                 &self.grid,
                 self.superblock.working.free_set_reference(),
                 free_set_open_callback,
@@ -8601,7 +8585,7 @@ pub fn ReplicaType(
             if (requests_count == 0) return;
 
             for (requests[0..requests_count]) |*request| {
-                assert(!self.superblock.free_set.is_free(request.block_address));
+                assert(!self.grid.free_set.is_free(request.block_address));
 
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
                     self.replica,

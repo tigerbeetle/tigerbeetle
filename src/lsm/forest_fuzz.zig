@@ -171,7 +171,7 @@ const Environment = struct {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
         try env.tick_until_state_change(.superblock_open, .free_set_open);
 
-        env.superblock.free_set_encoded.open(
+        env.grid.free_set_encoded.open(
             &env.grid,
             env.superblock.working.free_set_reference(),
             free_set_open_callback,
@@ -192,13 +192,13 @@ const Environment = struct {
     fn fragmentate_free_set(env: *Environment) void {
         var reservations: [free_set_fragments_max]Reservation = undefined;
         for (&reservations) |*reservation| {
-            reservation.* = env.superblock.free_set.reserve(free_set_fragment_size).?;
+            reservation.* = env.grid.reserve(free_set_fragment_size).?;
         }
         for (reservations) |reservation| {
-            _ = env.superblock.free_set.acquire(reservation).?;
+            _ = env.grid.free_set.acquire(reservation).?;
         }
         for (reservations) |reservation| {
-            env.superblock.free_set.forfeit(reservation);
+            env.grid.free_set.forfeit(reservation);
         }
     }
 
@@ -217,8 +217,8 @@ const Environment = struct {
     }
 
     fn free_set_open_callback(set: *FreeSetEncoded) void {
-        const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
-        const env = @fieldParentPtr(@This(), "superblock", superblock);
+        const grid = @fieldParentPtr(Grid, "free_set_encoded", set);
+        const env = @fieldParentPtr(@This(), "grid", grid);
         env.change_state(.free_set_open, .forest_init);
     }
 
@@ -246,7 +246,7 @@ const Environment = struct {
         env.forest.checkpoint(forest_checkpoint_callback);
         try env.tick_until_state_change(.forest_checkpoint, .free_set_checkpoint);
 
-        env.superblock.free_set_encoded.checkpoint(free_set_checkpoint_callback);
+        env.grid.free_set_encoded.checkpoint(free_set_checkpoint_callback);
         try env.tick_until_state_change(.free_set_checkpoint, .superblock_checkpoint);
 
         {
@@ -266,6 +266,7 @@ const Environment = struct {
         }
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .manifest_references = env.forest.manifest_log.checkpoint_references(),
+            .free_set_reference = env.grid.free_set_encoded.checkpoint_reference(),
             .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
             .commit_min = env.checkpoint_op.?,
             .commit_max = env.checkpoint_op.? + 1,
@@ -284,9 +285,10 @@ const Environment = struct {
     }
 
     fn free_set_checkpoint_callback(set: *FreeSetEncoded) void {
-        const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
-        const env = @fieldParentPtr(@This(), "superblock", superblock);
+        const grid = @fieldParentPtr(Grid, "free_set_encoded", set);
+        const env = @fieldParentPtr(@This(), "grid", grid);
         assert(env.checkpoint_op != null);
+        env.grid.free_set.checkpoint(set.block_addresses[0..set.block_count()]);
         env.change_state(.free_set_checkpoint, .superblock_checkpoint);
     }
 

@@ -48,11 +48,13 @@ pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
 pub const SuperBlockTrailer = superblock.Trailer;
 pub const SuperBlockManifestReferences = superblock.ManifestReferences;
+pub const SuperBlockFreeSetReference = superblock.FreeSetReference;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
+pub const FreeSet = @import("vsr/superblock_free_set.zig").FreeSet;
 pub const FreeSetEncodedType = @import("vsr/superblock_free_set_encoded.zig").FreeSetEncodedType;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.

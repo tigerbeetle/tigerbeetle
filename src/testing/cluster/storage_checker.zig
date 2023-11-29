@@ -60,7 +60,7 @@ pub const StorageChecker = struct {
     compactions: Compactions,
     checkpoints: Checkpoints,
 
-    free_set: SuperBlock.FreeSet,
+    free_set: vsr.FreeSet,
     free_set_buffer: []align(@alignOf(u64)) u8,
 
     pub fn init(allocator: std.mem.Allocator) !StorageChecker {
@@ -70,13 +70,13 @@ pub const StorageChecker = struct {
         var checkpoints = Checkpoints.init(allocator);
         errdefer checkpoints.deinit();
 
-        var free_set = try SuperBlock.FreeSet.init(allocator, Storage.grid_blocks_max);
+        var free_set = try vsr.FreeSet.init(allocator, Storage.grid_blocks_max);
         errdefer free_set.deinit(allocator);
 
         var free_set_buffer = try allocator.alignedAlloc(
             u8,
             @alignOf(u64),
-            SuperBlock.FreeSet.encode_size_max(Storage.grid_blocks_max),
+            vsr.FreeSet.encode_size_max(Storage.grid_blocks_max),
         );
         errdefer allocator.free(free_set);
 

@@ -377,14 +377,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const replica = &cluster.replicas[replica_index];
             assert(replica.commit_stage == .idle);
 
-            const reservation = replica.superblock.free_set.reserve(1).?;
-            defer replica.superblock.free_set.forfeit(reservation);
+            const reservation = replica.grid.free_set.reserve(1).?;
+            defer replica.grid.free_set.forfeit(reservation);
 
             cluster.storages[replica_index].options.grid_checker = null;
 
             // We don't need to actually use the block for the storage to diverge —
             // it is marked as acquired in the superblock free set.
-            _ = replica.superblock.free_set.acquire(reservation).?;
+            _ = replica.grid.free_set.acquire(reservation).?;
         }
 
         /// Returns an error when the replica was unable to recover (open).
@@ -661,8 +661,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .wal_op_max = wal_op_max,
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
-                    .grid_blocks_free = if (replica.superblock.free_set.opened)
-                        replica.superblock.free_set.count_free()
+                    .grid_blocks_free = if (replica.grid.free_set.opened)
+                        replica.grid.free_set.count_free()
                     else
                         null,
                     .grid_blocks_global = replica.grid.read_global_queue.count,
