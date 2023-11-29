@@ -133,7 +133,6 @@ fn test_quorums_working(
         header.* = std.mem.zeroInit(SuperBlockHeader, .{
             .copy = @as(u8, @intCast(i)),
             .version = SuperBlockVersion,
-            .storage_size_max = superblock.data_file_size_min,
             .sequence = copies[i].sequence,
             .parent = checksums[copies[i].sequence - 1],
             .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
@@ -162,7 +161,8 @@ fn test_quorums_working(
                     checksum = random.int(u128);
                 }
             },
-            .invalid_fork => header.storage_size_max += 1, // Ensure we have a different checksum.
+            // Ensure we have a different checksum.
+            .invalid_fork => header.vsr_state.checkpoint.free_set_size += 1,
             .invalid_parent => header.parent += 1,
             .invalid_misdirect => {
                 if (misdirect) {
@@ -280,7 +280,6 @@ pub fn fuzz_quorum_repairs(
             header.* = std.mem.zeroInit(SuperBlockHeader, .{
                 .copy = @as(u8, @intCast(i)),
                 .version = SuperBlockVersion,
-                .storage_size_max = superblock.data_file_size_min,
                 .sequence = 123,
                 .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
                     .replica_id = members[1],

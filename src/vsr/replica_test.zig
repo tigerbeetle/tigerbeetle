@@ -194,7 +194,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         t.replica(.R2),
     }, 0..) |replica, i| {
         var address: u64 = 1 + i; // Addresses start at 1.
-        while (address <= vsr.superblock.grid_blocks_max) : (address += 3) {
+        while (address <= Storage.grid_blocks_max) : (address += 3) {
             // Leave every third address un-corrupt.
             // Each block exists intact on exactly one replica.
             replica.corrupt(.{ .grid_block = address + 1 });

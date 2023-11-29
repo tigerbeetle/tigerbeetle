@@ -468,10 +468,12 @@ comptime {
 /// The maximum size of a local data file.
 /// This should not be much larger than several TiB to limit:
 /// * blast radius and recovery time when a whole replica is lost,
-/// * replicated storage overhead, since all data files are mirrored,
-/// * the size of the superblock storage zone, and
+/// * replicated storage overhead, since all data files are mirrored, and
 /// * the static memory allocation required for tracking LSM forest metadata in memory.
-pub const storage_size_max = config.cluster.storage_size_max;
+///
+/// This is a "firm" limit --- while it is a compile-time constant, it does not affect data file
+/// layout and can be safely changed for an existing cluster.
+pub const storage_size_max = config.process.storage_size_max;
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///
