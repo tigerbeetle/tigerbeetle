@@ -84,15 +84,11 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     });
     defer superblock.deinit(allocator);
 
-    superblock.free_set.opened = true;
-
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
         .storage_size_limit = constants.storage_size_max,
     });
     defer superblock_verify.deinit(allocator);
-
-    superblock_verify.free_set.opened = true;
 
     var sequence_states = Environment.SequenceStates.init(allocator);
     defer sequence_states.deinit();
@@ -445,6 +441,13 @@ const Environment = struct {
                 .oldest_address = 0,
                 .newest_address = 0,
                 .block_count = 0,
+            },
+            .free_set_reference = .{
+                .last_block_checksum = 0,
+                .last_block_address = 0,
+                .free_set_size = 0,
+                .storage_size = data_file_size_min,
+                .checksum = vsr.checksum(&.{}),
             },
             .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum,
             .commit_min = vsr_state.checkpoint.commit_min,
