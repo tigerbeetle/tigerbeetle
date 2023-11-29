@@ -1012,42 +1012,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.manifest.assert_no_invisible_tables(&.{});
             }
         }
-
-        pub const RangeQuery = union(enum) {
-            bounded: struct {
-                start: Key,
-                end: Key,
-            },
-            open: struct {
-                start: Key,
-                order: enum {
-                    ascending,
-                    descending,
-                },
-            },
-        };
-
-        pub const RangeQueryIterator = struct {
-            tree: *Tree,
-            snapshot: u64,
-            query: RangeQuery,
-
-            pub fn next(callback: *const fn (result: ?Value) void) void {
-                _ = callback;
-            }
-        };
-
-        pub fn range_query(
-            tree: *Tree,
-            /// The snapshot timestamp, if any
-            snapshot: ?u64,
-            query: RangeQuery,
-        ) RangeQueryIterator {
-            _ = tree;
-            _ = snapshot;
-            _ = query;
-            @panic("unimplemented");
-        }
     };
 }
 
