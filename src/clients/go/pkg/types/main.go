@@ -78,7 +78,7 @@ func BigIntToUint128(value big.Int) Uint128 {
 }
 
 // ToUint128 converts a integer to a Uint128.
-func ToUint128(value int) Uint128 {
-	values := [2]uint64{uint64(value), 0}
+func ToUint128(value uint64) Uint128 {
+	values := [2]uint64{value, 0}
 	return *(*Uint128)(unsafe.Pointer(&values[0]))
 }
