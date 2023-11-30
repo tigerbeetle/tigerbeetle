@@ -659,6 +659,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         std.mem.bytesAsSlice(StateMachine.Result(operation), reply.body()),
                     );
 
+                    if (!StateMachine.batch_logical_allowed.get(operation)) {
+                        assert(inflight.demux_queue.empty());
+                    }
+
                     // Push the inflight's demux to the front of the demux_queue to simplify handling.
                     inflight.demux.next = inflight.demux_queue.out;
                     inflight.demux_queue.out = &inflight.demux;
@@ -671,11 +675,17 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                         if (demux_node != &inflight.demux) self.demux_pool.release(demux_node);
 
                         // Extract/use the Demux node info to slice the results from the reply.
-                        const results = demuxer.decode(demux.event_offset, demux.event_count);
+                        const decoded = demuxer.decode(demux.event_offset, demux.event_count);
+                        const response = std.mem.sliceAsBytes(decoded);
+
+                        if (!StateMachine.batch_logical_allowed.get(operation)) {
+                            assert(response.len == reply.body().len);
+                        }
+
                         (demux.callback.?)(
                             demux.user_data,
                             operation,
-                            std.mem.sliceAsBytes(results),
+                            response,
                         );
                     }
                 },
@@ -899,18 +909,18 @@ const TestStateMachine = struct {
                 return .{ .results = reply };
             }
 
-            pub fn decode(self: *Demuxer, offset: u32, size: u32) []Result(operation) {
-                assert(self.offset == offset);
-                assert(self.results[self.offset..].len >= size);
+            pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
+                assert(self.offset == event_offset);
+                assert(self.results[event_offset..].len >= event_count);
 
-                // .batched uses consumes via the demux size passed in while .serial consumes all.
+                // .batched uses consumes via the demux count passed in while .serial consumes all.
                 const demuxed: u32 = if (batch_logical_allowed.get(operation))
-                    size
+                    event_count
                 else
                     @intCast(self.results.len);
 
                 defer self.offset += @intCast(demuxed);
-                return self.results[offset..][0..demuxed];
+                return self.results[event_offset..][0..demuxed];
             }
         };
     }

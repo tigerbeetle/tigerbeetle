@@ -49,9 +49,9 @@ pub fn StateMachineType(
                     return .{};
                 }
 
-                pub fn decode(_: *Demuxer, event_offset: u32, event_size: u32) []Result(operation) {
+                pub fn decode(_: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
                     assert(event_offset == 0);
-                    assert(event_size == 0);
+                    assert(event_count == 0);
                     return &.{};
                 }
             };
