@@ -14,8 +14,8 @@ const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetA
 const stdx = @import("../stdx.zig");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 
-const FreeSet = @import("./superblock_free_set.zig").FreeSet;
-const FreeSetEncodedType = @import("./superblock_free_set_encoded.zig").FreeSetEncodedType;
+const FreeSet = @import("./free_set.zig").FreeSet;
+const FreeSetEncodedType = @import("./free_set_encoded.zig").FreeSetEncodedType;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -48,7 +48,7 @@ pub fn GridType(comptime Storage: type) type {
         pub const RepairTableResult = GridBlocksMissing.RepairTableResult;
         pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
         pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
-        pub const Reservation = @import("./superblock_free_set.zig").Reservation;
+        pub const Reservation = @import("./free_set.zig").Reservation;
 
         // Grid just reuses the Storage's NextTick abstraction for simplicity.
         pub const NextTick = Storage.NextTick;

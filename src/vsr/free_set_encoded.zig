@@ -9,7 +9,7 @@ const schema = @import("../lsm/schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const constants = @import("../constants.zig");
-const FreeSet = @import("./superblock_free_set.zig").FreeSet;
+const FreeSet = @import("./free_set.zig").FreeSet;
 const BlockType = schema.BlockType;
 
 /// FreeSetEncoded is the persistent component of the free set. It defines the layout of the free

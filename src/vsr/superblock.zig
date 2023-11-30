@@ -41,12 +41,12 @@ const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 const BlockReference = vsr.BlockReference;
 
-pub const SuperBlockFreeSet = @import("superblock_free_set.zig").FreeSet;
+pub const SuperBlockFreeSet = @import("free_set.zig").FreeSet;
 pub const SuperBlockClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
 pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
 });
-const FreeSetEncodedType = @import("superblock_free_set_encoded.zig").FreeSetEncodedType;
+const FreeSetEncodedType = @import("free_set_encoded.zig").FreeSetEncodedType;
 
 pub const SuperBlockVersion: u16 = 0;
 
