@@ -139,7 +139,6 @@ pub fn StateMachineType(
                             // Operations which aren't batched have the first Event consume the
                             // entire Result down below.
                             assert(event_offset == 0);
-                            assert(event_count == 1);
                         }
                         break :blk self.results.len;
                     };
