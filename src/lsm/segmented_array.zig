@@ -1027,7 +1027,10 @@ fn TestContext(
                 }
             }
 
-            try context.remove_all();
+            // Rarely, the code above won't generate an insert at all.
+            if (context.inserts > 0) {
+                try context.remove_all();
+            }
 
             if (element_order == .unsorted) {
                 // Insert at the beginning of the array until the array is full.
