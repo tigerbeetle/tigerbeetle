@@ -597,9 +597,9 @@ pub fn build(b: *std.Build) !void {
             .description = "Fuzz the SuperBlock. Args: [--seed <seed>] [--events-max <count>]",
         },
         .{
-            .name = "fuzz_vsr_superblock_free_set",
-            .file = "src/vsr/superblock_free_set_fuzz.zig",
-            .description = "Fuzz the SuperBlock FreeSet. Args: [--seed <seed>]",
+            .name = "fuzz_vsr_free_set",
+            .file = "src/vsr/free_set_fuzz.zig",
+            .description = "Fuzz the FreeSet. Args: [--seed <seed>]",
         },
         .{
             .name = "fuzz_vsr_superblock_quorums",
