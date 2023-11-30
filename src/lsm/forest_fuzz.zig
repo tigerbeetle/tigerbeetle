@@ -184,12 +184,18 @@ const Environment = struct {
 
         try env.tick_until_state_change(.forest_open, .fuzzing);
 
-        env.fragmentate_free_set();
+        if (env.superblock.free_set.count_acquired() == 0) {
+            // Only run this once, to avoid acquiring an ever-increasing number of (never
+            // to-be-released) blocks on every restart.
+            env.fragmentate_free_set();
+        }
     }
 
     /// Allocate a sparse subset of grid blocks to make sure that the encoded free set needs more
     /// than one block to exercise the block linked list logic from FreeSetEncoded.
     fn fragmentate_free_set(env: *Environment) void {
+        assert(env.superblock.free_set.count_acquired() == 0);
+
         var reservations: [free_set_fragments_max]Reservation = undefined;
         for (&reservations) |*reservation| {
             reservation.* = env.superblock.free_set.reserve(free_set_fragment_size).?;
