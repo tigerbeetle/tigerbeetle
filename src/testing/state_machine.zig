@@ -44,15 +44,18 @@ pub fn StateMachineType(
             return struct {
                 const Demuxer = @This();
 
+                reply: []Result(operation),
+                offset: u32 = 0,
+
                 pub fn init(reply: []Result(operation)) Demuxer {
-                    assert(reply.len == 0);
-                    return .{};
+                    return .{ .reply = reply };
                 }
 
-                pub fn decode(_: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
-                    assert(event_offset == 0);
-                    assert(event_count == 0);
-                    return &.{};
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
+                    assert(self.offset == event_offset);
+                    assert(event_offset + event_count <= self.reply.len);
+                    defer self.offset += event_count;
+                    return self.reply[self.offset..][0..event_count];
                 }
             };
         }
