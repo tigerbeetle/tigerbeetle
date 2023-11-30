@@ -125,21 +125,21 @@ pub fn StateMachineType(
                 /// Returns a slice into the the original reply bytes with Results matching the
                 /// Event range (offset and size). Each subsequent call to demux() must have ranges
                 /// that are disjoint and increase monotonically.
-                pub fn decode(self: *Demuxer, event_offset: u32, event_size: u32) []DemuxerResult {
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []DemuxerResult {
                     const demuxed = blk: {
                         if (comptime batch_logical_allowed.get(operation)) {
                             // Count all results from out slice which match the Event range,
                             // updating the result.indexes to be related to the EVent in the process.
                             for (self.results, 0..) |*result, i| {
                                 if (result.index < event_offset) break :blk i;
-                                if (result.index >= event_offset + event_size) break :blk i;
+                                if (result.index >= event_offset + event_count) break :blk i;
                                 result.index -= event_offset;
                             }
                         } else {
                             // Operations which aren't batched have the first Event consume the
                             // entire Result down below.
                             assert(event_offset == 0);
-                            assert(event_size == @sizeOf(Event(operation)));
+                            assert(event_count == 1);
                         }
                         break :blk self.results.len;
                     };
