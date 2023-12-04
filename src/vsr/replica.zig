@@ -1341,6 +1341,34 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (message.header.checkpoint_id != self.superblock.working.checkpoint_id()) {
+                // Reject prepares which do not match our own checkpoint id.
+                // This ensures that no replica can diverge from the canonical history by more than
+                // one checkpoint.
+                //
+                // If this branch is hit, there is a storage determinism problem. At this point in
+                // the code it is not possible to distinguish whether the problem is with this
+                // replica, the prepare's replica, or both independently. One of these replicas will
+                // need to state sync.
+                log.warn("{}: on_prepare: ignoring op={}; checkpoint_id mismatch " ++
+                    "(expect={x:0>32} received={x:0>32} from={})", .{
+                    self.replica,
+                    message.header.op,
+                    self.superblock.working.checkpoint_id(),
+                    message.header.checkpoint_id,
+                    message.header.replica,
+                });
+
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .checkpoint_divergence_detected = .{
+                        .replica = message.header.replica,
+                    } });
+                }
+
+                assert(self.backup());
+                return;
+            }
+
             if (message.header.op > self.op + 1) {
                 log.debug("{}: on_prepare: newer op", .{self.replica});
                 self.jump_to_newer_op_in_normal_status(message.header);
@@ -1397,26 +1425,10 @@ pub fn ReplicaType(
                 self.pipeline.queue.prepare_queue.count);
             assert(prepare.message.header.op <= self.op);
 
-            const checkpoint_id = message.header.checkpoint_id;
-            if (checkpoint_id != self.checkpoint_id_for_op(prepare.message.header.op).?) {
-                // If this is hit, there is a storage determinism problem.
-                // One of these replicas will need to state sync.
-                log.warn("{}: on_prepare_ok: checkpoint_id mismatch " ++
-                    "(expect={x:0>32} received={x:0>32} from={} op={})", .{
-                    self.replica,
-                    self.checkpoint_id_for_op(prepare.message.header.op).?,
-                    checkpoint_id,
-                    message.header.replica,
-                    message.header.op,
-                });
-
-                if (self.event_callback) |hook| {
-                    hook(self, .{ .checkpoint_divergence_detected = .{
-                        .replica = message.header.replica,
-                    } });
-                }
-                return;
-            }
+            assert(prepare.message.header.checkpoint_id == message.header.checkpoint_id);
+            assert(prepare.message.header.checkpoint_id == self.superblock.working.checkpoint_id());
+            assert(prepare.message.header.checkpoint_id ==
+                self.checkpoint_id_for_op(prepare.message.header.op).?);
 
             // Wait until we have a quorum of prepare_ok messages (including ourself):
             const threshold = self.quorum_replication;
@@ -5036,6 +5048,8 @@ pub fn ReplicaType(
         }
 
         fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
+            if (op == 0) return Header.Prepare.root(self.cluster).checkpoint_id;
+
             if (self.op_checkpoint() > 0) {
                 if (op < self.op_repair_min()) return null;
 
@@ -5194,6 +5208,7 @@ pub fn ReplicaType(
                 .parent = latest_entry.checksum,
                 .client = request_header.client,
                 .context = request_header.checksum,
+                .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .op = self.op + 1,
                 .commit = self.commit_max,
                 .timestamp = timestamp: {
@@ -5591,6 +5606,7 @@ pub fn ReplicaType(
                 });
                 return false;
             }
+            assert(header.checkpoint_id == self.checkpoint_id_for_op(header.op).?);
 
             // If we already committed this op, the repair must be the identical message.
             if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
@@ -8360,9 +8376,6 @@ pub fn ReplicaType(
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
             if (header.replica == self.replica) return; // Ignore messages from self (misdirected).
 
-            // TODO(256-byte headers) Prepares also need to include a checkpoint id,
-            // so that backups cannot diverge by >1 checkpoint when they are (somehow)
-            // partitioned from command=commit and command=ping messages.
             const candidate: SyncTargetCandidate = switch (header.into_any()) {
                 inline .commit,
                 .ping,
@@ -9380,7 +9393,7 @@ const PipelineQueue = struct {
         assert(prepare.message.header.commit == ok.header.commit);
         assert(prepare.message.header.timestamp == ok.header.timestamp);
         assert(prepare.message.header.operation == ok.header.operation);
-        // TODO compare checkpoint id with prepare's
+        assert(prepare.message.header.checkpoint_id == ok.header.checkpoint_id);
 
         return prepare;
     }

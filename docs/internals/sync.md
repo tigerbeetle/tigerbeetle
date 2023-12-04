@@ -158,6 +158,7 @@ A _checkpoint id_ is a hash of the superblock trailers.
 A checkpoint identifier is attached to the following message types:
 - `command=commit`: Current checkpoint identifier of sender.
 - `command=ping`: Current checkpoint identifier of sender.
+- `command=prepare`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
 - `command=prepare_ok`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
 - `command=request_sync_checkpoint`: Requested checkpoint identifier.
 - `command=request_sync_free_set`: Requested checkpoint identifier.
@@ -166,9 +167,6 @@ A checkpoint identifier is attached to the following message types:
 - `command=sync_free_set`: Current checkpoint identifier of sender.
 - `command=sync_client_sessions`: Current checkpoint identifier of sender.
 
-TODO(Big headers): Add checkpoint identifier to `command=prepare` too, so that a backup cannot diverge by >1 checkpoint if it is partitioned from only `command=commit` and `commit=ping` messages.
-(And once `prepare` holds the checkpoint identifier, can it be omitted on `prepare_ok`A? Just don't ack if different?)
-
 ### Canonical Checkpoint
 
 A _canonical_ checkpoint is a checkpoint:
@@ -176,11 +174,12 @@ A _canonical_ checkpoint is a checkpoint:
 2. that a majority quorum of replicas have reached (discovery via `command=ping`), or
 3. (when `R=2`: that a single replica has reached).
 
-The primary ignores `command=prepare_ok`s which have a different checkpoint id attached than they expect.
+The primary ignores `command=prepare`s which have a different checkpoint id attached than they expect.
 This means that if a replica's history diverges (due to nondeterminism), the diverging replica is effectively excluded from participating in consensus until it has performed superblock-sync.
 See [Storage Determinism](#storage-determinism).
 
 This bounds the "distance" that a history can diverge by.
+No replica can diverge from the canonical history by more than one checkpoint.
 Every checkpoint's previous (i.e. parent) checkpoint is canonical.
 
 ### Sync Target
