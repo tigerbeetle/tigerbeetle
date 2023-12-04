@@ -431,9 +431,9 @@ pub const FreeSet = struct {
         set.blocks.unset(block);
     }
 
-    /// Free all staged blocks.
+    /// Free all released blocks and release the blocks holding the free set itself.
     /// Checkpoint must not be called while there are outstanding reservations.
-    pub fn checkpoint(set: *FreeSet) void {
+    pub fn checkpoint(set: *FreeSet, free_set_encoded_blocks: []const u64) void {
         assert(set.opened);
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
@@ -448,6 +448,14 @@ pub const FreeSet = struct {
         // Index verification is O(blocks.bit_length) so do it only at checkpoint, which is
         // also linear.
         set.verify_index();
+
+        var address_previous: u64 = 0;
+        for (free_set_encoded_blocks) |address| {
+            assert(address > 0);
+            assert(address > address_previous);
+            address_previous = address;
+            set.release(address);
+        }
     }
 
     /// Temporarily marks staged blocks as free.
@@ -588,7 +596,7 @@ test "FreeSet highest_address_acquired" {
         set.exclude_staging();
 
         try expectEqual(@as(?u64, 3), set.highest_address_acquired());
-        set.checkpoint();
+        set.checkpoint(&.{});
         try expectEqual(@as(?u64, 2), set.highest_address_acquired());
     }
 }
@@ -728,12 +736,12 @@ test "FreeSet checkpoint" {
     }
 
     // Free all the blocks.
-    set.checkpoint();
+    set.checkpoint(&.{});
     try expect_free_set_equal(empty, set);
     try expectEqual(@as(usize, 0), set.staging.count());
 
     // Redundant checkpointing is a noop (but safe).
-    set.checkpoint();
+    set.checkpoint(&.{});
 
     {
         // Allocate & stage-release all blocks again.

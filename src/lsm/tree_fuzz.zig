@@ -26,6 +26,7 @@ const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
+const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
@@ -116,7 +117,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             fuzzing,
             tree_compact,
             manifest_log_compact,
-            free_set_checkpoint,
+            grid_checkpoint,
             superblock_checkpoint,
             tree_lookup,
         };
@@ -189,7 +190,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.superblock.open(superblock_open_callback, &env.superblock_context);
 
             env.tick_until_state_change(.superblock_open, .free_set_open);
-            env.superblock.free_set_encoded.open(
+            env.grid.free_set_encoded.open(
                 &env.grid,
                 env.superblock.working.free_set_reference(),
                 free_set_open_callback,
@@ -223,9 +224,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.superblock_open, .free_set_open);
         }
 
-        fn free_set_open_callback(set: *SuperBlock.FreeSetEncoded) void {
-            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
-            const env = @fieldParentPtr(Environment, "superblock", superblock);
+        fn free_set_open_callback(set: *FreeSetEncoded) void {
+            const grid = @fieldParentPtr(Grid, "free_set_encoded", set);
+            const env = @fieldParentPtr(Environment, "grid", grid);
             env.change_state(.free_set_open, .tree_init);
         }
 
@@ -296,13 +297,14 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 _ = env.superblock.client_sessions.put(1, &reply);
             }
 
-            env.superblock.free_set_encoded.checkpoint(free_set_checkpoint_callback);
-            env.change_state(.fuzzing, .free_set_checkpoint);
-            env.tick_until_state_change(.free_set_checkpoint, .fuzzing);
+            env.grid.checkpoint(grid_checkpoint_callback);
+            env.change_state(.fuzzing, .grid_checkpoint);
+            env.tick_until_state_change(.grid_checkpoint, .fuzzing);
 
             const checkpoint_op = op - constants.lsm_batch_multiple;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .manifest_references = std.mem.zeroes(vsr.SuperBlockManifestReferences),
+                .free_set_reference = env.grid.free_set_encoded.checkpoint_reference(),
                 .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
                 .commit_min = checkpoint_op,
                 .commit_max = checkpoint_op + 1,
@@ -314,10 +316,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
         }
 
-        fn free_set_checkpoint_callback(set: *SuperBlock.FreeSetEncoded) void {
-            const superblock = @fieldParentPtr(SuperBlock, "free_set_encoded", set);
-            const env = @fieldParentPtr(Environment, "superblock", superblock);
-            env.change_state(.free_set_checkpoint, .fuzzing);
+        fn grid_checkpoint_callback(grid: *Grid) void {
+            const env = @fieldParentPtr(Environment, "grid", grid);
+            env.change_state(.grid_checkpoint, .fuzzing);
         }
 
         fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {

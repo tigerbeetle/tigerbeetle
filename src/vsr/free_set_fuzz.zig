@@ -3,10 +3,10 @@
 //! This fuzzer does *not* cover FreeSet encoding/decoding.
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.fuzz_vsr_superblock_free_set);
+const log = std.log.scoped(.fuzz_vsr_free_set);
 
-const FreeSet = @import("./superblock_free_set.zig").FreeSet;
-const Reservation = @import("./superblock_free_set.zig").Reservation;
+const FreeSet = @import("./free_set.zig").FreeSet;
+const Reservation = @import("./free_set.zig").Reservation;
 const fuzz = @import("../testing/fuzz.zig");
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
@@ -90,7 +90,8 @@ fn run_fuzz(
                 }
                 active_reservations.clearRetainingCapacity();
 
-                free_set.checkpoint();
+                const free_set_blocks = .{};
+                free_set.checkpoint(&free_set_blocks);
                 free_set_model.checkpoint();
             },
         }
