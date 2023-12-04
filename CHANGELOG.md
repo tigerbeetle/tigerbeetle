@@ -1,5 +1,58 @@
 # TigerBeetle Changelog
 
+## 2023-12-04
+
+### Safety And Performance
+
+- [#1330](https://github.com/tigerbeetle/tigerbeetle/pull/1330),
+  [#1319](https://github.com/tigerbeetle/tigerbeetle/pull/1319)
+
+  Fix free set index. The free set is a bitset of free blocks in the grid. To speed up block
+  allocation, the free set also maintains an index --- a coarser-grained bitset where a single bit
+  corresponds to 1024 blocks. Maintaining consistency between a data structure and its index is
+  hard, and thorough assertions are crucial. When moving free set to the grid, we discovered that,
+  in fact, we don't have enough assertions in this area and, as a result, even have a bug!
+  Assertions added, bug removed!
+
+- [#1323](https://github.com/tigerbeetle/tigerbeetle/pull/1323),
+  [#1336](https://github.com/tigerbeetle/tigerbeetle/pull/1336),
+  [#1324](https://github.com/tigerbeetle/tigerbeetle/pull/1324)
+
+  LSM tree fuzzer found a couple of bugs in its own code.
+
+### Features
+
+- [#1331](https://github.com/tigerbeetle/tigerbeetle/pull/1331),
+  [#1322](https://github.com/tigerbeetle/tigerbeetle/pull/1322),
+  [#1328](https://github.com/tigerbeetle/tigerbeetle/pull/1328)
+
+  Remove format-time limit on the size of the data file. Before, the maximum size of the data file
+  affected the layout of the superblock, and there wasn't any good way to increase this limit, short
+  of recreating the cluster from scratch. Now, this limit only applies to the in-memory data
+  structures: when a data files grows large, it is sufficient to just restart its replica with a
+  larger amount of RAM.
+
+- [#1321](https://github.com/tigerbeetle/tigerbeetle/pull/1321).
+
+  We finally have the "installation" page in our docs!
+
+### Internals
+
+- [#1334](https://github.com/tigerbeetle/tigerbeetle/pull/1334)
+
+  Use Zig's new `if (@inComptime())` builtin to compute checksum of an empty byte slice at compile
+  time.
+
+- [#1315](https://github.com/tigerbeetle/tigerbeetle/pull/1315)
+
+  Fix unit tests for the Go client and add them to
+  [not rocket science](https://graydon2.dreamwidth.org/1597.html)
+  set of checks.
+
+### TigerTracks 🎧
+
+- [Times Like These](https://www.youtube.com/watch?v=cvCUXXsP5WE)
+
 ## 2023-11-27
 
 ### Internals
