@@ -516,8 +516,6 @@ pub const Header = extern struct {
         replica: u8 = 0,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        // TODO client session?
-
         /// A backpointer to the previous prepare checksum for hash chain verification.
         /// This provides a cryptographic guarantee for linearizability across our distributed log
         /// of prepares.
@@ -530,6 +528,7 @@ pub const Header = extern struct {
         /// The checksum of the client's request.
         context: u128,
         context_padding: u128 = 0,
+        checkpoint_id: u128,
         client: u128,
         /// The op number of the latest prepare that may or may not yet be committed. Uncommitted
         /// ops may be replaced by different ops if they do not survive through a view change.
@@ -542,7 +541,7 @@ pub const Header = extern struct {
         request: u32,
         /// The state machine operation to apply.
         operation: Operation,
-        reserved: [19]u8 = [_]u8{0} ** 19,
+        reserved: [3]u8 = [_]u8{0} ** 3,
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
@@ -559,6 +558,7 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "reserved: parent != 0";
                     if (self.client != 0) return "reserved: client != 0";
                     if (self.context != 0) return "reserved: context != 0";
+                    if (self.checkpoint_id != 0) return "reserved: checkpoint_id != 0";
                     maybe(self.op == 0);
                     if (self.commit != 0) return "reserved: commit != 0";
                     if (self.request != 0) return "reserved: request != 0";
@@ -574,6 +574,7 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "root: parent != 0";
                     if (self.client != 0) return "root: client != 0";
                     if (self.context != 0) return "root: context != 0";
+                    if (self.checkpoint_id != 0) return "root: checkpoint_id != 0";
                     if (self.op != 0) return "root: op != 0";
                     if (self.commit != 0) return "root: commit != 0";
                     if (self.timestamp != 0) return "root: timestamp != 0";
@@ -605,6 +606,7 @@ pub const Header = extern struct {
                 .operation = .reserved,
                 .view = 0,
                 .context = 0,
+                .checkpoint_id = 0,
                 .parent = 0,
                 .client = 0,
                 .commit = 0,
@@ -626,6 +628,7 @@ pub const Header = extern struct {
                 .op = 0,
                 .view = 0,
                 .context = 0,
+                .checkpoint_id = 0,
                 .parent = 0,
                 .client = 0,
                 .commit = 0,
