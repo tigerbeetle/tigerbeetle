@@ -113,6 +113,7 @@ pub const SuperBlockHeader = extern struct {
         assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
         assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
         assert(@offsetOf(SuperBlockHeader, "parent") % @sizeOf(u256) == 0);
+        assert(@offsetOf(SuperBlockHeader, "vsr_state") % @sizeOf(u256) == 0);
         assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
         assert(stdx.no_padding(SuperBlockHeader));
@@ -306,18 +307,10 @@ pub const SuperBlockHeader = extern struct {
     /// This struct is sent in a `sync_checkpoint` message from a healthy replica to a syncing
     /// replica.
     pub const CheckpointState = extern struct {
-        /// The checkpoint_id() of the checkpoint which last updated our commit_min.
-        /// Following state sync, this is set to the last checkpoint that we skipped.
-        previous_checkpoint_id: u128,
-
         /// The vsr.Header.checksum of commit_min's message.
         commit_min_checksum: u128,
         commit_min_checksum_padding: u128 = 0,
 
-        /// Checksum covering the entire encoded free set. Strictly speaking it is redundant:
-        /// free_set_last_block_checksum indirectly covers the same data. It is still useful
-        /// to protect from encoding-decoding bugs as a defense in depth.
-        free_set_checksum: u128,
         free_set_last_block_checksum: u128,
         free_set_last_block_checksum_padding: u128 = 0,
         manifest_oldest_checksum: u128,
@@ -326,6 +319,15 @@ pub const SuperBlockHeader = extern struct {
         manifest_newest_checksum_padding: u128 = 0,
         snapshots_block_checksum: u128,
         snapshots_block_checksum_padding: u128 = 0,
+
+        /// Checksum covering the entire encoded free set. Strictly speaking it is redundant:
+        /// free_set_last_block_checksum indirectly covers the same data. It is still useful
+        /// to protect from encoding-decoding bugs as a defense in depth.
+        free_set_checksum: u128,
+
+        /// The checkpoint_id() of the checkpoint which last updated our commit_min.
+        /// Following state sync, this is set to the last checkpoint that we skipped.
+        previous_checkpoint_id: u128,
 
         free_set_last_block_address: u64,
         manifest_oldest_address: u64,
