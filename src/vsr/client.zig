@@ -352,7 +352,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     request.message.header.size += @intCast(body_size);
                     assert(request.message.header.size <= constants.message_size_max);
 
-                    assert(request.demux_queue.count > 1);
+                    assert(request.demux_queue.count >= 1);
                     request.demux_queue.push(demux);
                     return Batch{
                         .request = request,
