@@ -1397,6 +1397,10 @@ pub const Checkpoint = struct {
     }
 
     pub fn valid(op: u64) bool {
+        // Divide by `lsm_batch_multiple` instead of `journal_slot_count - lsm_batch_multiple`:
+        // although today in practice checkpoints are evenly spaced, the LSM layer doesn't assume
+        // that. LSM allows any bar boundary to become a checkpoint which happens, e.g., in the tree
+        // fuzzer.
         return op == 0 or (op + 1) % constants.lsm_batch_multiple == 0;
     }
 };
