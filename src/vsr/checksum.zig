@@ -48,9 +48,20 @@ fn seed_init() void {
 // Lazily initialize the Aegis State instead of recomputing it on each call to checksum().
 // Then, make a copy of the state and use that to hash the source input bytes.
 pub fn checksum(source: []const u8) u128 {
+    if (@inComptime()) {
+        // Aegis128 uses hardware accelerated AES via inline asm which isn't available at comptime.
+        // Use a hard-coded value instead and verify via a test.
+        if (source.len == 0) return 0x49F174618255402DE6E7E3C40D60CC83;
+    }
     var stream = ChecksumStream.init();
     stream.add(source);
     return stream.checksum();
+}
+
+test "checksum empty" {
+    var stream = ChecksumStream.init();
+    stream.add(&.{});
+    try std.testing.expectEqual(stream.checksum(), comptime checksum(&.{}));
 }
 
 pub const ChecksumStream = struct {

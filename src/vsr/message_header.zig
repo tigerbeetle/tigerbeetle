@@ -9,13 +9,7 @@ const Command = vsr.Command;
 const Operation = vsr.Operation;
 const schema = @import("../lsm/schema.zig");
 
-/// Aegis128 (used by checksum) uses hardware accelerated AES via inline asm which isn't
-/// available at comptime. Use a hard-coded value instead and verify via a test.
-const checksum_body_empty: u128 = 0x49F174618255402DE6E7E3C40D60CC83;
-
-test "empty checksum" {
-    assert(checksum_body_empty == vsr.checksum(&.{}));
-}
+const checksum_body_empty = vsr.checksum(&.{});
 
 /// Network message and journal entry header:
 /// We reuse the same header for both so that prepare messages from the primary can simply be
