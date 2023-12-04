@@ -130,7 +130,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         node_pool: NodePool,
         tree: Tree,
         lookup_context: Tree.LookupContext,
-        lookup_value: ?*const Value,
+        lookup_value: ?Value,
 
         pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
@@ -325,7 +325,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.superblock_checkpoint, .fuzzing);
         }
 
-        pub fn get(env: *Environment, key: u64) ?*const Value {
+        pub fn get(env: *Environment, key: u64) ?Value {
             env.change_state(.fuzzing, .tree_lookup);
             env.lookup_value = null;
 
@@ -348,7 +348,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         fn get_callback(lookup_context: *Tree.LookupContext, value: ?*const Value) void {
             const env = @fieldParentPtr(Environment, "lookup_context", lookup_context);
             assert(env.lookup_value == null);
-            env.lookup_value = value;
+            env.lookup_value = if (value) |val| val.* else null;
             env.change_state(.tree_lookup, .fuzzing);
         }
 
@@ -408,7 +408,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                                     assert(std.mem.eql(
                                         u8,
                                         std.mem.asBytes(&model_value.?),
-                                        std.mem.asBytes(tree_value.?),
+                                        std.mem.asBytes(&tree_value.?),
                                     ));
                                 },
                                 .secondary_index => {
@@ -416,7 +416,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                                     assert(std.mem.eql(
                                         u8,
                                         std.mem.asBytes(&Value.key_from_value(&model_value.?)),
-                                        std.mem.asBytes(&Value.key_from_value(tree_value.?)),
+                                        std.mem.asBytes(&Value.key_from_value(&tree_value.?)),
                                     ));
                                 },
                             }
