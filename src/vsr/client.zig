@@ -3,10 +3,7 @@ const stdx = @import("../stdx.zig");
 const testing = std.testing;
 const maybe = stdx.maybe;
 const mem = std.mem;
-
-noinline fn assert(cond: bool) void {
-    if (!cond) @panic("assert failed");
-}
+const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
@@ -355,6 +352,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     request.message.header.size += @intCast(body_size);
                     assert(request.message.header.size <= constants.message_size_max);
 
+                    assert(request.demux_queue.count > 1);
                     request.demux_queue.push(demux);
                     return Batch{
                         .request = request,
@@ -392,6 +390,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             });
 
             const request = self.request_queue.tail_ptr().?;
+            assert(request.demux_queue.empty());
             request.demux_queue.push(demux);
             return Batch{
                 .request = request,
@@ -418,7 +417,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // Newly made Requests are populated and potentially pushed through VSR if there exists
             // no currently inflight request.
             // A Batch is newly made if its Request only contains its Demux.
-            // NOTE: This sets the `batch.request.message.request` number.
             if (batch.request.demux_queue.count == 1) {
                 assert(batch.request.demux_queue.peek() == batch.demux);
                 self.request_submit(batch.request);
