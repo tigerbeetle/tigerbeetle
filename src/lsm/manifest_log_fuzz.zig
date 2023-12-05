@@ -75,49 +75,18 @@ fn run_fuzz(
         .write_latency_mean = 1 + random.uintLessThan(u64, 40),
     };
 
-    var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
-    defer storage.deinit(allocator);
-
-    var storage_verify = try Storage.init(allocator, constants.storage_size_max, storage_options);
-    defer storage_verify.deinit(allocator);
-
-    var superblock = try SuperBlock.init(allocator, .{
-        .storage = &storage,
-        .storage_size_limit = constants.storage_size_max,
-    });
-    defer superblock.deinit(allocator);
-
-    var superblock_verify = try SuperBlock.init(allocator, .{
-        .storage = &storage_verify,
-        .storage_size_limit = constants.storage_size_max,
-    });
-    defer superblock_verify.deinit(allocator);
-
-    var grid = try Grid.init(allocator, .{
-        .superblock = &superblock,
-        .missing_blocks_max = 0,
-        .missing_tables_max = 0,
-    });
-    defer grid.deinit(allocator);
-
-    var grid_verify = try Grid.init(allocator, .{
-        .superblock = &superblock_verify,
-        .missing_blocks_max = 0,
-        .missing_tables_max = 0,
-    });
-    defer grid_verify.deinit(allocator);
-
-    var env = try Environment.init(allocator, .{
-        .grid = &grid,
-        .grid_verify = &grid_verify,
-    });
-    defer env.deinit(allocator);
+    var env: Environment = undefined;
+    try env.init(allocator, storage_options);
+    defer env.deinit();
 
     {
         env.format_superblock();
         env.wait(&env.manifest_log);
 
         env.open_superblock();
+        env.wait(&env.manifest_log);
+
+        env.open_free_set();
         env.wait(&env.manifest_log);
 
         env.open();
@@ -288,44 +257,110 @@ fn generate_events(
 }
 
 const Environment = struct {
+    const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
+
     allocator: std.mem.Allocator,
-    superblock_context: SuperBlock.Context = undefined,
+    storage: Storage,
+    storage_verify: Storage,
+    superblock: SuperBlock,
+    superblock_verify: SuperBlock,
+    superblock_context: SuperBlock.Context,
+
+    grid: Grid,
+    grid_verify: Grid,
+
     manifest_log: ManifestLog,
     manifest_log_verify: ManifestLog,
     manifest_log_model: ManifestLogModel,
-    manifest_log_opening: ?ManifestLogModel.TableMap = null,
-    pending: usize = 0,
+    manifest_log_opening: ?ManifestLogModel.TableMap,
+    pending: u32,
 
     fn init(
+        env: *Environment, // In-place construction for stable addresses.
         allocator: std.mem.Allocator,
-        options: struct {
-            grid: *Grid,
-            grid_verify: *Grid,
-        },
-    ) !Environment {
-        var manifest_log_model = try ManifestLogModel.init(allocator);
-        errdefer manifest_log_model.deinit();
+        storage_options: Storage.Options,
+    ) !void {
+        comptime var fields_initialized = 0;
 
-        var manifest_log = try ManifestLog.init(allocator, options.grid, manifest_log_options);
-        errdefer manifest_log.deinit(allocator);
+        fields_initialized += 1;
+        env.allocator = allocator;
 
-        var manifest_log_verify =
-            try ManifestLog.init(allocator, options.grid_verify, manifest_log_options);
-        errdefer manifest_log_verify.deinit(allocator);
+        fields_initialized += 1;
+        env.storage =
+            try Storage.init(allocator, constants.storage_size_max, storage_options);
+        errdefer env.storage.deinit(allocator);
 
-        return Environment{
-            .allocator = allocator,
-            .manifest_log = manifest_log,
-            .manifest_log_verify = manifest_log_verify,
-            .manifest_log_model = manifest_log_model,
-        };
+        fields_initialized += 1;
+        env.storage_verify =
+            try Storage.init(allocator, constants.storage_size_max, storage_options);
+        errdefer env.storage_verify.deinit(allocator);
+
+        fields_initialized += 1;
+        env.superblock = try SuperBlock.init(allocator, .{
+            .storage = &env.storage,
+            .storage_size_limit = constants.storage_size_max,
+        });
+        errdefer env.superblock.deinit(allocator);
+
+        fields_initialized += 1;
+        env.superblock_verify = try SuperBlock.init(allocator, .{
+            .storage = &env.storage_verify,
+            .storage_size_limit = constants.storage_size_max,
+        });
+        errdefer env.superblock_verify.deinit(allocator);
+
+        fields_initialized += 1;
+        env.superblock_context = undefined;
+
+        fields_initialized += 1;
+        env.grid = try Grid.init(allocator, .{
+            .superblock = &env.superblock,
+            .missing_blocks_max = 0,
+            .missing_tables_max = 0,
+        });
+        errdefer env.grid.deinit(allocator);
+
+        fields_initialized += 1;
+        env.grid_verify = try Grid.init(allocator, .{
+            .superblock = &env.superblock_verify,
+            .missing_blocks_max = 0,
+            .missing_tables_max = 0,
+        });
+        errdefer env.grid_verify.deinit(allocator);
+
+        fields_initialized += 1;
+        env.manifest_log = try ManifestLog.init(allocator, &env.grid, manifest_log_options);
+        errdefer env.manifest_log.deinit(allocator);
+
+        fields_initialized += 1;
+        env.manifest_log_verify =
+            try ManifestLog.init(allocator, &env.grid_verify, manifest_log_options);
+        errdefer env.manifest_log_verify.deinit(allocator);
+
+        fields_initialized += 1;
+        env.manifest_log_model = try ManifestLogModel.init(allocator);
+        errdefer env.manifest_log_model.deinit();
+
+        fields_initialized += 1;
+        env.manifest_log_opening = null;
+        fields_initialized += 1;
+        env.pending = 0;
+
+        comptime assert(fields_initialized == std.meta.fields(@This()).len);
     }
 
-    fn deinit(env: *Environment, allocator: std.mem.Allocator) void {
-        env.manifest_log.deinit(allocator);
-        env.manifest_log_verify.deinit(env.allocator);
-        env.manifest_log_model.deinit();
+    fn deinit(env: *Environment) void {
         assert(env.manifest_log_opening == null);
+        env.manifest_log_model.deinit();
+        env.manifest_log_verify.deinit(env.allocator);
+        env.manifest_log.deinit(env.allocator);
+        env.grid_verify.deinit(env.allocator);
+        env.grid.deinit(env.allocator);
+        env.superblock_verify.deinit(env.allocator);
+        env.superblock.deinit(env.allocator);
+        env.storage_verify.deinit(env.allocator);
+        env.storage.deinit(env.allocator);
+        env.* = undefined;
     }
 
     fn wait(env: *Environment, manifest_log: *ManifestLog) void {
@@ -357,6 +392,22 @@ const Environment = struct {
 
     fn open_superblock_callback(context: *SuperBlock.Context) void {
         const env = @fieldParentPtr(Environment, "superblock_context", context);
+        env.pending -= 1;
+    }
+
+    fn open_free_set(env: *Environment) void {
+        assert(env.pending == 0);
+        env.pending += 1;
+        env.grid.free_set_encoded.open(
+            &env.grid,
+            env.superblock.working.free_set_reference(),
+            open_free_set_callback,
+        );
+    }
+
+    fn open_free_set_callback(free_set_encoded: *FreeSetEncoded) void {
+        const grid = @fieldParentPtr(Grid, "free_set_encoded", free_set_encoded);
+        const env = @fieldParentPtr(Environment, "grid", grid);
         env.pending -= 1;
     }
 
@@ -411,7 +462,11 @@ const Environment = struct {
         try env.manifest_log_model.checkpoint();
 
         env.pending += 1;
-        env.manifest_log.checkpoint(checkpoint_callback);
+        env.manifest_log.checkpoint(checkpoint_manifest_log_callback);
+        env.wait(&env.manifest_log);
+
+        env.pending += 1;
+        env.grid.checkpoint(checkpoint_grid_callback);
         env.wait(&env.manifest_log);
 
         const vsr_state = &env.manifest_log.superblock.working.vsr_state;
@@ -420,7 +475,7 @@ const Environment = struct {
             // VSRState.monotonic() asserts that the previous_checkpoint id changes.
             // In a normal replica this is guaranteed – even if the LSM is idle and no blocks
             // are acquired or released, the client sessions are necessarily mutated.
-            var reply = std.mem.zeroInit(vsr.Header, .{
+            var reply = std.mem.zeroInit(vsr.Header.Reply, .{
                 .cluster = 0,
                 .command = .reply,
                 .op = vsr_state.checkpoint.commit_min + 1,
@@ -438,6 +493,7 @@ const Environment = struct {
             &env.superblock_context,
             .{
                 .manifest_references = env.manifest_log.checkpoint_references(),
+                .free_set_reference = env.grid.free_set_encoded.checkpoint_reference(),
                 .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum + 1,
                 .commit_min = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.commit_min),
                 .commit_max = vsr.Checkpoint.checkpoint_after(vsr_state.commit_max),
@@ -450,8 +506,13 @@ const Environment = struct {
         try env.verify();
     }
 
-    fn checkpoint_callback(manifest_log: *ManifestLog) void {
+    fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
         const env = @fieldParentPtr(Environment, "manifest_log", manifest_log);
+        env.pending -= 1;
+    }
+
+    fn checkpoint_grid_callback(grid: *Grid) void {
+        const env = @fieldParentPtr(Environment, "grid", grid);
         env.pending -= 1;
     }
 
@@ -590,6 +651,7 @@ const ManifestLogModel = struct {
                     const removed = model.tables.fetchRemove(table_info.address).?;
                     assert(std.meta.eql(removed.value, table_info));
                 },
+                .reserved => unreachable,
             }
         }
         model.appends.clearRetainingCapacity();
