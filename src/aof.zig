@@ -608,7 +608,7 @@ test "aof write / read" {
         .client = 0,
         .request = 0,
         .parent = 0,
-        .context = 0,
+        .request_checksum = 0,
         .cluster = 0,
         .timestamp = 0,
         .checkpoint_id = 0,

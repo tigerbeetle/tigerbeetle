@@ -3773,7 +3773,7 @@ pub fn ReplicaType(
             reply.header.* = .{
                 .command = .reply,
                 .operation = prepare.header.operation,
-                .parent = prepare.header.context, // The prepare's context has `request.checksum`.
+                .parent = prepare.header.request_checksum,
                 .client = prepare.header.client,
                 .request = prepare.header.request,
                 .cluster = prepare.header.cluster,
@@ -4611,7 +4611,7 @@ pub fn ReplicaType(
                     .prepare => |pipeline_message_header| {
                         assert(pipeline_message_header.client == message.header.client);
 
-                        if (pipeline_message_header.context == message.header.checksum) {
+                        if (pipeline_message_header.request_checksum == message.header.checksum) {
                             assert(pipeline_message_header.op > self.commit_max);
                             log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
                             return true;
@@ -5207,7 +5207,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .parent = latest_entry.checksum,
                 .client = request_header.client,
-                .context = request_header.checksum,
+                .request_checksum = request_header.checksum,
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .op = self.op + 1,
                 .commit = self.commit_max,
