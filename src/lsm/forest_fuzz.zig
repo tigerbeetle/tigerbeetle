@@ -93,8 +93,8 @@ const Environment = struct {
         forest_open,
         fuzzing,
         forest_compact,
+        grid_checkpoint,
         forest_checkpoint,
-        free_set_checkpoint,
         superblock_checkpoint,
     };
 
@@ -184,7 +184,7 @@ const Environment = struct {
 
         try env.tick_until_state_change(.forest_open, .fuzzing);
 
-        if (env.superblock.free_set.count_acquired() == 0) {
+        if (env.grid.free_set.count_acquired() == 0) {
             // Only run this once, to avoid acquiring an ever-increasing number of (never
             // to-be-released) blocks on every restart.
             env.fragmentate_free_set();
@@ -194,7 +194,7 @@ const Environment = struct {
     /// Allocate a sparse subset of grid blocks to make sure that the encoded free set needs more
     /// than one block to exercise the block linked list logic from FreeSetEncoded.
     fn fragmentate_free_set(env: *Environment) void {
-        assert(env.superblock.free_set.count_acquired() == 0);
+        assert(env.grid.free_set.count_acquired() == 0);
 
         var reservations: [free_set_fragments_max]Reservation = undefined;
         for (&reservations) |*reservation| {
@@ -250,10 +250,10 @@ const Environment = struct {
 
         env.change_state(.fuzzing, .forest_checkpoint);
         env.forest.checkpoint(forest_checkpoint_callback);
-        try env.tick_until_state_change(.forest_checkpoint, .free_set_checkpoint);
+        try env.tick_until_state_change(.forest_checkpoint, .grid_checkpoint);
 
-        env.grid.free_set_encoded.checkpoint(free_set_checkpoint_callback);
-        try env.tick_until_state_change(.free_set_checkpoint, .superblock_checkpoint);
+        env.grid.checkpoint(grid_checkpoint_callback);
+        try env.tick_until_state_change(.grid_checkpoint, .superblock_checkpoint);
 
         {
             // VSRState.monotonic() asserts that the previous_checkpoint id changes.
@@ -284,18 +284,16 @@ const Environment = struct {
         env.checkpoint_op = null;
     }
 
+    fn grid_checkpoint_callback(grid: *Grid) void {
+        const env = @fieldParentPtr(Environment, "grid", grid);
+        assert(env.checkpoint_op != null);
+        env.change_state(.grid_checkpoint, .superblock_checkpoint);
+    }
+
     fn forest_checkpoint_callback(forest: *Forest) void {
         const env = @fieldParentPtr(@This(), "forest", forest);
         assert(env.checkpoint_op != null);
-        env.change_state(.forest_checkpoint, .free_set_checkpoint);
-    }
-
-    fn free_set_checkpoint_callback(set: *FreeSetEncoded) void {
-        const grid = @fieldParentPtr(Grid, "free_set_encoded", set);
-        const env = @fieldParentPtr(@This(), "grid", grid);
-        assert(env.checkpoint_op != null);
-        env.grid.free_set.checkpoint(set.block_addresses[0..set.block_count()]);
-        env.change_state(.free_set_checkpoint, .superblock_checkpoint);
+        env.change_state(.forest_checkpoint, .grid_checkpoint);
     }
 
     fn superblock_checkpoint_callback(superblock_context: *SuperBlock.Context) void {
