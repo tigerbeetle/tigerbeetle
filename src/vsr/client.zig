@@ -174,9 +174,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// We therefore queue any further concurrent requests made by the application layer.
         request_queue: RequestQueue = RequestQueue.init(),
 
-        /// Tracks which Request in the request_queue is currently inflight in VSR.
-        request_inflight: ?*Request = null,
-
         /// The number of ticks without a reply before the client resends the inflight request.
         /// Dynamically adjusted as a function of recent request round-trip time.
         request_timeout: vsr.Timeout,
@@ -335,11 +332,14 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Check-in with the StateMachine to see if this operation can even be batched.
             // If so, find an existing Request with the same Op that has room in its Message.
-            // The request must not be the one currently inflight in VSR as its Message is sealed.
             if (StateMachine.batch_logical_allowed.get(operation)) {
                 var it = self.request_queue.iterator_mutable();
+
+                // The request must not be the one currently inflight in VSR as its Message is
+                // being sent over the MessageBus and waiting for a reasponse.
+                _ = it.next_ptr();
+
                 while (it.next_ptr()) |request| {
-                    if (request == self.request_inflight) continue;
                     if (request.message.header.operation.cast(StateMachine) != operation) continue;
                     if (request.message.header.size + body_size > constants.message_size_max) continue;
 
@@ -492,9 +492,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 message.header.operation.tag_name(StateMachine),
             });
 
-            if (self.request_inflight == null) {
-                self.request_inflight = self.request_queue.head_ptr().?;
-                self.send_request_for_the_first_time();
+            // Send the Request's message through VSR if there are no other Requests pending.
+            if (self.request_queue.head_ptr().? == request) {
+                self.send_request_for_the_first_time(message);
             }
         }
 
@@ -578,8 +578,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 return;
             }
 
-            assert(self.request_inflight == self.request_queue.head_ptr());
-            if (self.request_inflight) |inflight| {
+            if (self.request_queue.head_ptr()) |inflight| {
                 if (reply.header.request < inflight.message.header.request) {
                     log.debug("{}: on_reply: ignoring (request {} < {})", .{
                         self.id,
@@ -648,9 +647,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // We must start the next request before releasing control back to the callback(s).
             // Otherwise, requests may never run through send_request_for_the_first_time().
-            self.request_inflight = self.request_queue.head_ptr();
-            if (self.request_inflight != null) {
-                self.send_request_for_the_first_time();
+            if (self.request_queue.head_ptr()) |request| {
+                self.send_request_for_the_first_time(request.message);
             }
 
             // Ignore callback processing if the Request was from register().
@@ -706,8 +704,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         fn on_request_timeout(self: *Self) void {
             self.request_timeout.backoff(self.prng.random());
 
-            const inflight = self.request_inflight.?;
-            assert(inflight == self.request_queue.head_ptr().?);
+            const inflight = self.request_queue.head_ptr().?;
 
             const message = inflight.message;
             assert(message.header.command == .request);
@@ -783,9 +780,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(self.request_queue.tail_ptr() == request);
             request.demux_queue.push(demux);
 
-            assert(self.request_inflight == null);
-            self.request_inflight = request;
-            self.send_request_for_the_first_time();
+            self.send_request_for_the_first_time(message);
         }
 
         fn send_header_to_replica(self: *Self, replica: u8, header: Header) void {
@@ -827,11 +822,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             self.message_bus.send_message_to_replica(replica, message);
         }
 
-        fn send_request_for_the_first_time(self: *Self) void {
-            const inflight = self.request_inflight.?;
-            assert(inflight == self.request_queue.head_ptr().?);
+        fn send_request_for_the_first_time(self: *Self, message: *Message.Request) void {
+            assert(self.request_queue.head_ptr().?.message == message);
 
-            const message = inflight.message;
             assert(message.header.command == .request);
             assert(message.header.parent == 0);
             assert(message.header.session == 0);
