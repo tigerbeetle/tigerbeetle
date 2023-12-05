@@ -1065,6 +1065,7 @@ pub const Headers = struct {
             .cluster = 0,
             .view = 0,
             .context = 0,
+            .checkpoint_id = 0,
             .parent = 0,
             .client = 0,
             .commit = 0,
