@@ -172,11 +172,13 @@ jobs:
       - run: zig/zig build fuzz_vsr_superblock -- --seed 123 --events-max 3
       - run: zig/zig build fuzz_vsr_superblock_quorums -- --seed 123
 
-      # Disabled for now, since they're slow.
+      # Build the fuzzers, but don't run them, since they're slow.
+      - run: zig/zig build build_fuzz_lsm_manifest_log
+      - run: zig/zig build build_fuzz_vsr_free_set
+      - run: zig/zig build build_fuzz_lsm_forest
+
       # # This both checks that the hash_log builds and acts as a regression test for
       # # https://github.com/tigerbeetle/tigerbeetle/issues/404
-      # - run: zig/zig build fuzz_lsm_manifest_log -- --seed 123 --events-max 400
-      # - run: zig/zig build fuzz_vsr_free_set -- --seed 123
       # - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=create -Doptimize=ReleaseSafe -- --seed 16319736705930193193 --events-max 10000 && zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000
 
   # Check some build steps that would otherwise not get checked.
