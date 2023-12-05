@@ -297,6 +297,23 @@ pub fn no_padding(comptime T: type) bool {
                         if (!no_padding(field.type)) return false;
                     }
 
+                    // Check offsets of u128 and pseudo-u256 fields.
+                    for (info.fields) |field| {
+                        if (field.type == u128) {
+                            const offset = @offsetOf(T, field.name);
+                            if (offset % @sizeOf(u128) != 0) return false;
+
+                            if (@hasField(T, field.name ++ "_padding")) {
+                                if (offset % @sizeOf(u256) != 0) return false;
+                                if (offset + @sizeOf(u128) !=
+                                    @offsetOf(T, field.name ++ "_padding"))
+                                {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+
                     var offset = 0;
                     for (info.fields) |field| {
                         const field_offset = @offsetOf(T, field.name);
