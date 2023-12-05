@@ -27,8 +27,13 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             };
         };
 
-        const DemuxIOPS = IOPS(Self.Request.Demux, constants.client_request_queue_max);
-        const RequestQueue = RingBuffer(Self.Request, .{
+        const EchoRequest = struct {
+            message: *Message.Request,
+            user_data: u128,
+            callback: Self.Request.Callback,
+        };
+
+        const RequestQueue = RingBuffer(EchoRequest, .{
             .array = constants.client_request_queue_max,
         });
 
@@ -36,7 +41,6 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         cluster: u128,
         messages_available: u32 = constants.client_request_queue_max,
         request_queue: RequestQueue = RequestQueue.init(),
-        demux_iops: DemuxIOPS = .{},
         message_pool: *MessagePool,
 
         pub fn init(
@@ -74,12 +78,11 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             event_count: usize,
         ) Self.BatchError!Batch {
             const body_size = switch (operation) {
-                inline else => |op| @sizeOf(Self.StateMachine.Event(op)) * event_count,
+                inline else => |batch_operation| blk: {
+                    break :blk @sizeOf(Self.StateMachine.Event(batch_operation)) * event_count;
+                },
             };
             assert(body_size <= constants.message_body_size_max);
-
-            const demux = self.demux_iops.acquire() orelse return error.TooManyOutstanding;
-            errdefer self.demux_iops.release(demux);
 
             if (self.messages_available == 0) return error.TooManyOutstanding;
             const message = self.get_message();
@@ -95,17 +98,11 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
 
-            return Batch{
-                .message = message_request,
-                .event_count = @intCast(event_count),
-                .demux = demux,
-            };
+            return Batch{ .message = message_request };
         }
 
         pub const Batch = struct {
             message: *Message.Request,
-            event_count: u16,
-            demux: *Self.Request.Demux,
 
             pub fn slice(batch: Batch) []u8 {
                 return batch.message.body();
@@ -118,20 +115,12 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             callback: Self.Request.Callback,
             batch: Batch,
         ) void {
-            const message = batch.message;
-
-            batch.demux.* = .{
+            assert(!self.request_queue.full());
+            self.request_queue.push_assume_capacity(.{
+                .message = batch.message,
                 .user_data = user_data,
                 .callback = callback,
-                .event_count = batch.event_count,
-                .event_offset = 0,
-            };
-
-            assert(!self.request_queue.full());
-            self.request_queue.push_assume_capacity(.{ .message = message });
-
-            const request = self.request_queue.tail_ptr().?;
-            request.demux_queue.push(batch.demux);
+            });
         }
 
         pub fn get_message(self: *Self) *Message {
@@ -147,31 +136,25 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         fn reply(self: *Self) void {
-            while (self.request_queue.pop()) |inflight| {
+            while (self.request_queue.pop()) |request| {
                 const reply_message = self.message_pool.get_message(.request);
                 defer self.message_pool.unref(reply_message.base());
 
+                const operation = request.message.header.operation.cast(Self.StateMachine);
                 stdx.copy_disjoint(
                     .exact,
                     u8,
                     reply_message.buffer,
-                    inflight.message.buffer,
+                    request.message.buffer,
                 );
 
                 // Similarly to the real client, release the request message before invoking the
                 // callback. This necessitates a `copy_disjoint` above.
-                self.release(inflight.message.base());
+                self.release(request.message.base());
 
-                const demux = inflight.demux_queue.peek().?;
-                assert(inflight.demux_queue.count == 1);
-
-                const user_data = demux.user_data;
-                const callback = demux.callback.?;
-                self.demux_iops.release(demux);
-
-                callback(
-                    user_data,
-                    reply_message.header.operation.cast(Self.StateMachine),
+                request.callback(
+                    request.user_data,
+                    operation,
                     reply_message.body(),
                 );
             }
