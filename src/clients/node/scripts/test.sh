@@ -7,6 +7,8 @@ COLOR_END='\033[0m'
 
 cd ../../..
 ./zig/zig build install -Doptimize=ReleaseSafe
+TIGERBEETLE_EXE=$(readlink -f ./tigerbeetle)
+cd "$CWD"
 
 REPLICAS="0"
 
@@ -39,12 +41,12 @@ FILE="./test/cluster_${CLUSTER_ID}_replica_0.tigerbeetle"
 if [ -f $FILE ]; then
     rm $FILE
 fi
-./tigerbeetle format --cluster=$CLUSTER_ID --replica=0 --replica-count=1 $FILE
+$TIGERBEETLE_EXE format --cluster=$CLUSTER_ID --replica=0 --replica-count=1 $FILE
 
 for I in $REPLICAS
 do
     echo "Starting replica $I..."
-    ./tigerbeetle start $REPLICA_ADDRESSES $FILE > tigerbeetle_test.log 2>&1 &
+    $TIGERBEETLE_EXE start $REPLICA_ADDRESSES $FILE > tigerbeetle_test.log 2>&1 &
 done
 
 # Wait for replicas to start, listen and connect:
