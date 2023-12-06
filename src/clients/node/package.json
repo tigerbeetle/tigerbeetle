@@ -25,7 +25,7 @@
   },
   "scripts": {
     "benchmark": "./scripts/benchmark.sh",
-    "test": "node dist/test",
+    "test": "./scripts/test.sh",
     "prepare": "node ./scripts/prepare.js",
     "clean": "node ./scripts/clean.js"
   },
