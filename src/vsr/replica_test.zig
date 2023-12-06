@@ -866,8 +866,8 @@ test "Cluster: sync: sync, bump target, sync" {
     defer t.deinit();
 
     var c = t.clients(0, t.cluster.clients.len);
-    try c.request(20, 20);
-    try expectEqual(t.replica(.R_).commit(), 20);
+    try c.request(16, 16);
+    try expectEqual(t.replica(.R_).commit(), 16);
 
     t.replica(.R2).drop_all(.R_, .bidirectional);
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
