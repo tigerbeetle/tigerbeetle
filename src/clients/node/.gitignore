@@ -9,8 +9,8 @@ zig-cache/
 *.tigerbeetle
 benchmark.log
 tigerbeetle_test.log
-/benchmark
-/test
+benchmark/
+test/
 tigerbeetle-node-*.tgz
 node.def
 node.lib
