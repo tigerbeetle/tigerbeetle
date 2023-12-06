@@ -169,7 +169,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             const request = client.request_queue.head_ptr_const().?;
             assert(request.message.header.client == header_b.?.client);
-            assert(request.message.header.checksum == header_b.?.context);
+            assert(request.message.header.checksum == header_b.?.request_checksum);
             assert(request.message.header.request == header_b.?.request);
             assert(request.message.header.command == .request);
             assert(request.message.header.operation == header_b.?.operation);
