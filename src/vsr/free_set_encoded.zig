@@ -77,7 +77,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
         write: Grid.Write = undefined,
-        // As the free set is expected to fit in one block, it is written sequentialy, one block at
+        // As the free set is expected to fit in one block, it is written sequentially, one block at
         // a time. This is the memory used for writing.
         write_block: Grid.BlockPtr,
 
@@ -150,7 +150,7 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         pub fn reset(set: *Self) void {
             switch (set.callback) {
                 .none, .open => {},
-                // Checkpointing doesn't need to read blocks, so it's not cancelable.
+                // Checkpointing doesn't need to read blocks, so it's not cancellable.
                 .checkpoint => unreachable,
             }
             set.* = .{
