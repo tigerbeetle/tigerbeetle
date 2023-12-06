@@ -526,8 +526,8 @@ pub const Header = extern struct {
         parent: u128,
         parent_padding: u128 = 0,
         /// The checksum of the client's request.
-        context: u128,
-        context_padding: u128 = 0,
+        request_checksum: u128,
+        request_checksum_padding: u128 = 0,
         checkpoint_id: u128,
         client: u128,
         /// The op number of the latest prepare that may or may not yet be committed. Uncommitted
@@ -546,7 +546,7 @@ pub const Header = extern struct {
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
             if (self.parent_padding != 0) return "parent_padding != 0";
-            if (self.context_padding != 0) return "context_padding != 0";
+            if (self.request_checksum_padding != 0) return "request_checksum_padding != 0";
             switch (self.operation) {
                 .reserved => {
                     if (self.size != @sizeOf(Header)) return "reserved: size != @sizeOf(Header)";
@@ -557,7 +557,7 @@ pub const Header = extern struct {
                     if (self.replica != 0) return "reserved: replica != 0";
                     if (self.parent != 0) return "reserved: parent != 0";
                     if (self.client != 0) return "reserved: client != 0";
-                    if (self.context != 0) return "reserved: context != 0";
+                    if (self.request_checksum != 0) return "reserved: request_checksum != 0";
                     if (self.checkpoint_id != 0) return "reserved: checkpoint_id != 0";
                     maybe(self.op == 0);
                     if (self.commit != 0) return "reserved: commit != 0";
@@ -573,7 +573,7 @@ pub const Header = extern struct {
                     if (self.replica != 0) return "root: replica != 0";
                     if (self.parent != 0) return "root: parent != 0";
                     if (self.client != 0) return "root: client != 0";
-                    if (self.context != 0) return "root: context != 0";
+                    if (self.request_checksum != 0) return "root: request_checksum != 0";
                     if (self.checkpoint_id != 0) return "root: checkpoint_id != 0";
                     if (self.op != 0) return "root: op != 0";
                     if (self.commit != 0) return "root: commit != 0";
@@ -605,7 +605,7 @@ pub const Header = extern struct {
                 .op = slot,
                 .operation = .reserved,
                 .view = 0,
-                .context = 0,
+                .request_checksum = 0,
                 .checkpoint_id = 0,
                 .parent = 0,
                 .client = 0,
@@ -627,7 +627,7 @@ pub const Header = extern struct {
                 .operation = .root,
                 .op = 0,
                 .view = 0,
-                .context = 0,
+                .request_checksum = 0,
                 .checkpoint_id = 0,
                 .parent = 0,
                 .client = 0,
@@ -659,9 +659,11 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        /// The corresponding request message's checksum.
+        /// The previous prepare's checksum.
+        /// (Same as the corresponding Prepare's `parent`.)
         parent: u128,
         parent_padding: u128 = 0,
+        /// The corresponding prepare's checksum.
         prepare_checksum: u128,
         prepare_checksum_padding: u128 = 0,
         checkpoint_id: u128,
