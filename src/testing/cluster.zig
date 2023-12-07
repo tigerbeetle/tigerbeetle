@@ -642,7 +642,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
                 info = std.fmt.bufPrint(&info_buffer, "" ++
                     "{[view]:>4}V " ++
-                    "{[commit_min]:>3}/{[commit_max]:_>3}C " ++
+                    "{[op_checkpoint]:>3}/{[commit_min]:_>3}/{[commit_max]:_>3}C " ++
                     "{[journal_op_min]:>3}:{[journal_op_max]:_>3}Jo " ++
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
@@ -651,6 +651,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[grid_blocks_global]:>2}G! " ++
                     "{[grid_blocks_repair]:>3}G?", .{
                     .view = replica.view,
+                    .op_checkpoint = replica.op_checkpoint(),
                     .commit_min = replica.commit_min,
                     .commit_max = replica.commit_max,
                     .journal_op_min = journal_op_min,
