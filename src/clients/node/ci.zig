@@ -13,12 +13,16 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     // Integration tests.
 
-    // We need to build the tigerbeetle-node library manually for samples to be able to pick it up.
+    // We need to build the tigerbeetle-node library manually for samples/testers to work.
     try shell.exec("npm install", .{});
 
-    // Run node client unit tests and benchmark after installing tigerbeetle-node
-    try shell.exec("npm run test", .{});
-    try shell.exec("npm run benchmark", .{});
+    inline for (.{ "test", "benchmark" }) |tester| {
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+        defer tmp_beetle.deinit(gpa);
+
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+        try shell.exec("node ./dist/" ++ tester, .{});
+    }
 
     inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
         try shell.pushd("./samples/" ++ sample);

@@ -8,9 +8,14 @@ import {
   CreateTransferError
 } from '.'
 
+const getEnvVar = (name: string): string => {
+  if (!process.env[name]) throw new Error(`environment variable ${name} required`)
+  return process.env[name] as string
+}
+
 const client = createClient({
   cluster_id: 0n,
-  replica_addresses: ['3001']
+  replica_addresses: [getEnvVar('TB_ADDRESS')]
 })
 
 // Test data
