@@ -128,7 +128,7 @@ pub fn ReplicaType(
         const Self = @This();
 
         pub const SuperBlock = vsr.SuperBlockType(Storage);
-        const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
+        const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
         const Journal = vsr.JournalType(Self, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
@@ -661,11 +661,7 @@ pub fn ReplicaType(
 
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
             // can repair grid blocks if necessary:
-            self.grid.free_set_encoded.open(
-                &self.grid,
-                self.superblock.working.free_set_reference(),
-                free_set_open_callback,
-            );
+            self.grid.open(grid_open_callback);
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -680,19 +676,19 @@ pub fn ReplicaType(
             self.opened = true;
         }
 
-        fn free_set_open_callback(free_set_encoded: *FreeSetEncoded) void {
-            const grid = @fieldParentPtr(Grid, "free_set_encoded", free_set_encoded);
+        fn grid_open_callback(grid: *Grid) void {
             const self = @fieldParentPtr(Self, "grid", grid);
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
-            assert(self.grid.free_set.count_released() == self.grid.free_set_encoded.block_count());
+            assert(self.grid.free_set.count_released() == self.grid.free_set_checkpoint.block_count());
             assert(std.meta.eql(
-                free_set_encoded.checkpoint_reference(),
+                grid.free_set_checkpoint.checkpoint_reference(),
                 self.superblock.working.free_set_reference(),
             ));
+
             self.state_machine.open(state_machine_open_callback);
         }
 
@@ -2249,7 +2245,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.grid.canceling) |_| {
+            if (self.grid.callback == .cancel) {
                 log.debug("{}: on_request_blocks: ignoring; canceling grid", .{self.replica});
                 return;
             }
@@ -2366,7 +2362,7 @@ pub fn ReplicaType(
             assert(message.header.size <= constants.block_size);
             assert(message.header.address > 0);
 
-            if (self.grid.canceling) |_| {
+            if (self.grid.callback == .cancel) {
                 assert(self.grid.read_global_queue.count == 0);
 
                 log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={})", .{
@@ -2883,7 +2879,7 @@ pub fn ReplicaType(
             maybe(self.state_machine_opened);
 
             self.grid_repair_message_timeout.reset();
-            if (self.grid.canceling == null) {
+            if (self.grid.callback != .cancel) {
                 self.send_request_blocks();
             }
         }
@@ -3574,7 +3570,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .checkpoint_grid);
             assert(self.commit_prepare.?.header.op == self.op);
             assert(self.grid.free_set.opened);
-            assert(self.grid.free_set.count_released() == self.grid.free_set_encoded.block_count());
+            assert(self.grid.free_set.count_released() == self.grid.free_set_checkpoint.block_count());
 
             self.commit_dispatch(.checkpoint_superblock);
         }
@@ -3616,6 +3612,19 @@ pub fn ReplicaType(
                 }
             };
 
+            const storage_size: u64 = storage_size: {
+                var storage_size = vsr.superblock.data_file_size_min;
+                if (self.grid.free_set.highest_address_acquired()) |address| {
+                    assert(address > 0);
+                    assert(self.grid.free_set_checkpoint.size > 0);
+                    storage_size += address * constants.block_size;
+                } else {
+                    assert(self.grid.free_set_checkpoint.size == 0);
+                    assert(self.grid.free_set.count_released() == 0);
+                }
+                break :storage_size storage_size;
+            };
+
             self.superblock.checkpoint(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
@@ -3626,7 +3635,8 @@ pub fn ReplicaType(
                     .sync_op_min = vsr_state_sync_op.min,
                     .sync_op_max = vsr_state_sync_op.max,
                     .manifest_references = self.state_machine.forest.manifest_log.checkpoint_references(),
-                    .free_set_reference = self.grid.free_set_encoded.checkpoint_reference(),
+                    .free_set_reference = self.grid.free_set_checkpoint.checkpoint_reference(),
+                    .storage_size = storage_size,
                 },
             );
         }
@@ -7966,7 +7976,7 @@ pub fn ReplicaType(
             self.state_machine.reset();
 
             self.grid.free_set.reset();
-            self.grid.free_set_encoded.reset();
+            self.grid.free_set_checkpoint.reset();
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
@@ -8036,11 +8046,7 @@ pub fn ReplicaType(
                 self.transition_to_recovering_head();
             }
 
-            self.grid.free_set_encoded.open(
-                &self.grid,
-                self.superblock.working.free_set_reference(),
-                free_set_open_callback,
-            );
+            self.grid.open(grid_open_callback);
             self.sync_dispatch(.idle);
         }
 
@@ -8178,7 +8184,7 @@ pub fn ReplicaType(
 
             if (self.sync_tables) |_| {
                 assert(self.syncing == .idle);
-                assert(self.grid.canceling == null);
+                assert(self.grid.callback != .cancel);
 
                 if (self.grid_repair_tables.available() > 0) {
                     self.sync_enqueue_tables();
@@ -8582,7 +8588,7 @@ pub fn ReplicaType(
 
         fn send_request_blocks(self: *Self) void {
             assert(self.grid_repair_message_timeout.ticking);
-            assert(self.grid.canceling == null);
+            assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
 
             var message = self.message_bus.get_message(.request_blocks);

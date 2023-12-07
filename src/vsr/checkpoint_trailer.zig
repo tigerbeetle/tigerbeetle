@@ -12,30 +12,34 @@ const constants = @import("../constants.zig");
 const FreeSet = @import("./free_set.zig").FreeSet;
 const BlockType = schema.BlockType;
 
-/// FreeSetEncoded is the persistent component of the free set. It defines the layout of the free
-/// set as stored in the grid between checkpoints.
+/// CheckpointTrailer is the persistent representation of the free set and client sessions.
+/// It defines the layout of the free set and client sessions as stored in the grid between
+/// checkpoints.
 ///
-/// Free set is stored as a linked list of blocks containing EWAH-encoding of a bitset of acquired
-/// blocks. The length of the linked list is proportional to the degree of fragmentation, rather
-/// that to the size of the data file. The common case is a single block.
+/// - Free set is stored as a linked list of blocks containing EWAH-encoding of a bitset of acquired
+///   blocks. The length of the linked list is proportional to the degree of fragmentation, rather
+///   that to the size of the data file. The common case is a single block.
 ///
-/// The blocks holding free set itself are marked as free in the on-disk encoding, because the
-/// number of blocks required to store the compressed bitset becomes known only after encoding.
-/// This might or might not be related to Russel's paradox.
+///   The blocks holding free set itself are marked as free in the on-disk encoding, because the
+///   number of blocks required to store the compressed bitset becomes known only after encoding.
+///   This might or might not be related to Russel's paradox.
+///
+/// - Client sessions is stored as a linked list of blocks containing reply headers and session
+///   numbers.
 ///
 /// Linked list is a FIFO. While the blocks are written in the direct order, they have to be read in
 /// the reverse order.
-pub fn FreeSetEncodedType(comptime Storage: type) type {
+pub fn CheckpointTrailerType(comptime Storage: type) type {
     const Grid = GridType(Storage);
 
     return struct {
         const Self = @This();
 
-        // Body of the block which holds encoded free set words.
+        // Body of the block which holds encoded trailer data.
         // All chunks except for possibly the last one are full.
         const chunk_size_max = constants.block_size - @sizeOf(vsr.Header);
 
-        // Chunk describes a slice of encoded free set that goes into nth block on disk.
+        // Chunk describes a slice of encoded trailer that goes into nth block on disk.
         //
         // Chunk redundantly stores all of the start index, one-past-the-end index, and length, so
         // that the call site can avoid indexing arithmetic and associated bugs.
@@ -47,21 +51,21 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             fn for_block(options: struct {
                 block_index: u32,
                 block_count: u32,
-                free_set_size: u32,
+                trailer_size: u32,
             }) Chunk {
                 assert(options.block_count > 0);
-                assert(options.block_count == stdx.div_ceil(options.free_set_size, chunk_size_max));
+                assert(options.block_count == stdx.div_ceil(options.trailer_size, chunk_size_max));
                 assert(options.block_index < options.block_count);
 
                 const last_block = options.block_index == options.block_count - 1;
                 const chunk_size = if (last_block)
-                    options.free_set_size - (options.block_count - 1) * chunk_size_max
+                    options.trailer_size - (options.block_count - 1) * chunk_size_max
                 else
                     chunk_size_max;
 
                 const chunk_start = chunk_size_max * options.block_index;
                 const chunk_end = chunk_start + chunk_size;
-                assert(chunk_end <= options.free_set_size);
+                assert(chunk_end <= options.trailer_size);
                 assert(chunk_size > 0);
                 assert(chunk_size % @sizeOf(FreeSet.Word) == 0);
 
@@ -70,18 +74,18 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         };
 
         // Reference to the grid is late-initialized in the open, because the free set is part of
-        // the superblock, which doesn't have access to grid. It is set to null by reset, to verify
-        // that the free set is not used before it is opened during sync.
+        // the grid, which doesn't have access to a stable grid pointer. It is set to null by
+        // `reset`, to verify that the free set is not used before it is opened during sync.
         grid: ?*Grid = null,
 
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
         write: Grid.Write = undefined,
-        // As the free set is expected to fit in one block, it is written sequentially, one block at
-        // a time. This is the memory used for writing.
+        // As the trailers are each expected to fit in one block, they are written sequentially,
+        // one block at a time. This is the memory used for writing.
         write_block: Grid.BlockPtr,
 
-        // SoA representation of block references holding the free set itself.
+        // SoA representation of block references holding the trailer itself.
         //
         // After the set is read from disk and decoded, these blocks are manually marked as
         // acquired.
@@ -93,23 +97,23 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
 
         // Size of the encoded set in bytes.
         size: u32 = 0,
-        // The number of free set bytes read or written during disk IO. Used to cross-check that we
+        // The number of trailer bytes read or written during disk IO. Used to cross-check that we
         // haven't lost any bytes along the way.
         size_transferred: u32 = 0,
 
-        // Checksum covering the entire encoded free set.
+        // Checksum covering the entire encoded trailer.
         checksum: u128 = 0,
 
-        // In-memory buffer for storing encoded free set in contagious manner.
+        // In-memory buffer for storing encoded trailer in contagious manner.
         // TODO: instead of copying the data, store a list of grid blocks and implement chunked
         // decoding. That way, the blocks can be shared with grid cache, increasing the usable cache
         // size in the common case of a small free set.
-        buffer: []align(@alignOf(FreeSet.Word)) u8,
+        buffer: []align(@sizeOf(u256)) u8,
 
         callback: union(enum) {
             none,
-            open: *const fn (set: *Self) void,
-            checkpoint: *const fn (set: *Self) void,
+            open: *const fn (trailer: *Self) void,
+            checkpoint: *const fn (trailer: *Self) void,
         } = .none,
 
         comptime {
@@ -117,12 +121,11 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             assert(chunk_size_max % @sizeOf(FreeSet.Word) == 0);
         }
 
-        pub fn init(allocator: mem.Allocator, grid_block_count_limit: usize) !Self {
+        pub fn init(allocator: mem.Allocator, buffer_size: usize) !Self {
             const write_block = try allocate_block(allocator);
             errdefer allocator.free(write_block);
 
-            const buffer_size = FreeSet.encode_size_max(grid_block_count_limit);
-            const buffer = try allocator.alignedAlloc(u8, @alignOf(FreeSet.Word), buffer_size);
+            const buffer = try allocator.alignedAlloc(u8, @sizeOf(u256), buffer_size);
             errdefer allocator.free(buffer);
 
             const block_count_max = stdx.div_ceil(buffer_size, chunk_size_max);
@@ -140,125 +143,112 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(set: *Self, allocator: mem.Allocator) void {
-            allocator.free(set.block_checksums);
-            allocator.free(set.block_addresses);
-            allocator.free(set.buffer);
-            allocator.free(set.write_block);
+        pub fn deinit(trailer: *Self, allocator: mem.Allocator) void {
+            allocator.free(trailer.block_checksums);
+            allocator.free(trailer.block_addresses);
+            allocator.free(trailer.buffer);
+            allocator.free(trailer.write_block);
         }
 
-        pub fn reset(set: *Self) void {
-            switch (set.callback) {
+        pub fn reset(trailer: *Self) void {
+            switch (trailer.callback) {
                 .none, .open => {},
                 // Checkpointing doesn't need to read blocks, so it's not cancellable.
                 .checkpoint => unreachable,
             }
-            set.* = .{
-                .write_block = set.write_block,
-                .buffer = set.buffer,
-                .block_addresses = set.block_addresses,
-                .block_checksums = set.block_checksums,
+            trailer.* = .{
+                .write_block = trailer.write_block,
+                .buffer = trailer.buffer,
+                .block_addresses = trailer.block_addresses,
+                .block_checksums = trailer.block_checksums,
             };
         }
 
-        pub fn block_count(set: *const Self) u32 {
-            return stdx.div_ceil(set.size, chunk_size_max);
+        pub fn block_count(trailer: *const Self) u32 {
+            return stdx.div_ceil(trailer.size, chunk_size_max);
         }
 
         // These data are stored in the superblock header.
-        pub fn checkpoint_reference(set: *const Self) vsr.SuperBlockFreeSetReference {
-            assert(set.size == set.size_transferred);
-            assert(set.callback == .none);
-            assert(set.grid.?.free_set.count_released() == set.block_count());
+        pub fn checkpoint_reference(trailer: *const Self) vsr.SuperBlockTrailerReference {
+            assert(trailer.size == trailer.size_transferred);
+            assert(trailer.callback == .none);
 
-            var storage_size = vsr.superblock.data_file_size_min;
-            if (set.grid.?.free_set.highest_address_acquired()) |address| {
-                assert(address > 0);
-                assert(set.size > 0);
-                storage_size += address * constants.block_size;
-            } else {
-                assert(set.size == 0);
-                assert(set.grid.?.free_set.count_released() == 0);
-            }
-
-            const reference: vsr.SuperBlockFreeSetReference = if (set.size == 0) .{
+            const reference: vsr.SuperBlockTrailerReference = if (trailer.size == 0) .{
                 .checksum = vsr.checksum(&.{}),
                 .last_block_address = 0,
                 .last_block_checksum = 0,
-                .free_set_size = 0,
-                .storage_size = storage_size,
+                .trailer_size = 0,
             } else .{
-                .checksum = set.checksum,
-                .last_block_address = set.block_addresses[set.block_count() - 1],
-                .last_block_checksum = set.block_checksums[set.block_count() - 1],
-                .free_set_size = set.size,
-                .storage_size = storage_size,
+                .checksum = trailer.checksum,
+                .last_block_address = trailer.block_addresses[trailer.block_count() - 1],
+                .last_block_checksum = trailer.block_checksums[trailer.block_count() - 1],
+                .trailer_size = trailer.size,
             };
-            assert(reference.empty() == (set.size == 0));
+            assert(reference.empty() == (trailer.size == 0));
 
             return reference;
         }
 
         pub fn open(
-            set: *Self,
+            trailer: *Self,
             grid: *Grid,
-            reference: vsr.SuperBlockFreeSetReference,
-            callback: *const fn (set: *Self) void,
+            reference: vsr.SuperBlockTrailerReference,
+            callback: *const fn (trailer: *Self) void,
         ) void {
-            set.grid = grid;
-            assert(!set.grid.?.free_set.opened);
+            trailer.grid = grid;
 
-            assert(set.callback == .none);
-            defer assert(set.callback == .open);
+            assert(trailer.callback == .none);
+            defer assert(trailer.callback == .open);
 
-            assert(reference.free_set_size % @sizeOf(FreeSet.Word) == 0);
-            assert(set.size == 0);
-            assert(set.size_transferred == 0);
-            assert(set.block_index == 0);
+            assert(reference.trailer_size % @sizeOf(FreeSet.Word) == 0);
+            assert(trailer.size == 0);
+            assert(trailer.size_transferred == 0);
+            assert(trailer.block_index == 0);
 
-            set.size = reference.free_set_size;
-            set.checksum = reference.checksum;
-            set.callback = .{ .open = callback };
+            trailer.size = reference.trailer_size;
+            trailer.checksum = reference.checksum;
+            trailer.callback = .{ .open = callback };
 
             // Start from the last block, as the linked list arranges data in the reverse order.
-            set.block_index = set.block_count();
+            trailer.block_index = trailer.block_count();
 
-            if (set.size == 0) {
+            if (trailer.size == 0) {
                 assert(reference.last_block_address == 0);
-                set.grid.?.on_next_tick(open_next_tick, &set.next_tick);
+                trailer.grid.?.on_next_tick(open_next_tick, &trailer.next_tick);
             } else {
                 assert(reference.last_block_address != 0);
-                set.open_read_next(reference.last_block_address, reference.last_block_checksum);
+                trailer.open_read_next(reference.last_block_address, reference.last_block_checksum);
             }
         }
 
         fn open_next_tick(next_tick: *Grid.NextTick) void {
-            const set = @fieldParentPtr(Self, "next_tick", next_tick);
-            assert(set.callback == .open);
-            assert(set.size == 0);
-            set.open_done();
+            const trailer = @fieldParentPtr(Self, "next_tick", next_tick);
+            assert(trailer.callback == .open);
+            assert(trailer.size == 0);
+            trailer.open_done();
         }
 
-        fn open_read_next(set: *Self, address: u64, checksum: u128) void {
-            assert(set.callback == .open);
-            assert(set.size > 0);
+        fn open_read_next(trailer: *Self, address: u64, checksum: u128) void {
+            assert(trailer.callback == .open);
+            assert(trailer.size > 0);
+            assert((trailer.size_transferred == 0) ==
+                (trailer.block_index == trailer.block_count()));
             assert(address != 0);
-            assert((set.size_transferred == 0) == (set.block_index == set.block_count()));
 
-            assert(set.block_index <= set.block_count());
-            assert(set.block_index > 0);
-            set.block_index -= 1;
+            assert(trailer.block_index <= trailer.block_count());
+            assert(trailer.block_index > 0);
+            trailer.block_index -= 1;
 
-            set.block_addresses[set.block_index] = address;
-            set.block_checksums[set.block_index] = checksum;
-            for (set.block_index + 1..set.block_count()) |index| {
-                assert(set.block_addresses[index] != address);
-                assert(set.block_checksums[index] != checksum);
+            trailer.block_addresses[trailer.block_index] = address;
+            trailer.block_checksums[trailer.block_index] = checksum;
+            for (trailer.block_index + 1..trailer.block_count()) |index| {
+                assert(trailer.block_addresses[index] != address);
+                assert(trailer.block_checksums[index] != checksum);
             }
 
-            set.grid.?.read_block(
+            trailer.grid.?.read_block(
                 .{ .from_local_or_global_storage = open_read_next_callback },
-                &set.read,
+                &trailer.read,
                 address,
                 checksum,
                 .{ .cache_read = true, .cache_write = false },
@@ -266,143 +256,117 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
         }
 
         fn open_read_next_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
-            const set = @fieldParentPtr(Self, "read", read);
-            assert(set.callback == .open);
-            assert(set.size > 0);
-            assert(set.block_index < set.block_count());
+            const trailer = @fieldParentPtr(Self, "read", read);
+            assert(trailer.callback == .open);
+            assert(trailer.size > 0);
+            assert(trailer.block_index < trailer.block_count());
 
             const encoded_words = schema.FreeSetNode.encoded_words(block);
             const chunk = Chunk.for_block(.{
-                .block_index = set.block_index,
-                .block_count = set.block_count(),
-                .free_set_size = set.size,
+                .block_index = trailer.block_index,
+                .block_count = trailer.block_count(),
+                .trailer_size = trailer.size,
             });
 
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                set.buffer[chunk.start..chunk.end],
+                trailer.buffer[chunk.start..chunk.end],
                 encoded_words,
             );
-            set.size_transferred += chunk.size;
+            trailer.size_transferred += chunk.size;
 
             if (schema.FreeSetNode.previous(block)) |previous| {
-                assert(set.block_index > 0);
-                set.open_read_next(previous.address, previous.checksum);
+                assert(trailer.block_index > 0);
+                trailer.open_read_next(previous.address, previous.checksum);
             } else {
-                assert(set.block_index == 0);
-                set.open_done();
+                assert(trailer.block_index == 0);
+                trailer.open_done();
             }
         }
 
-        fn open_done(set: *Self) void {
-            assert(set.callback == .open);
-            defer assert(set.callback == .none);
+        fn open_done(trailer: *Self) void {
+            assert(trailer.callback == .open);
+            defer assert(trailer.callback == .none);
 
-            assert(set.block_index == 0);
-            assert(!set.grid.?.free_set.opened);
-            assert(set.size_transferred == set.size);
-            assert(set.checksum == vsr.checksum(set.buffer[0..set.size]));
+            assert(trailer.block_index == 0);
+            assert(trailer.size_transferred == trailer.size);
+            assert(trailer.checksum == vsr.checksum(trailer.buffer[0..trailer.size]));
 
-            set.grid.?.free_set.open(.{
-                .encoded = set.buffer[0..set.size],
-                .block_addresses = set.block_addresses[0..set.block_count()],
-            });
-
-            set.grid.?.free_set.opened = true;
-            assert((set.size > 0) == (set.grid.?.free_set.count_acquired() > 0));
-
-            const callback = set.callback.open;
-            set.callback = .none;
-            callback(set);
+            const callback = trailer.callback.open;
+            trailer.callback = .none;
+            callback(trailer);
         }
 
-        /// Checkpoint process is delicate:
-        ///   1. Encode free set.
-        ///   2. Derive the number of blocks required to store the encoding.
-        ///   3. Allocate blocks for the encoding (in the old checkpoint).
-        ///   4. Write the blocks to disk.
-        ///   --------------------------------------------------------------
-        ///   5. Mark currently released blocks as free.
-        ///   6. Release the freshly acquired blocks in the new checkpoint.
-        ///
-        /// This function handles steps 1-4. The caller is responsible for calling
-        /// FreeSet.checkpoint which handles 5 and 6.
-        pub fn checkpoint(set: *Self, callback: *const fn (set: *Self) void) void {
-            assert(set.callback == .none);
-            defer assert(set.callback == .checkpoint);
+        pub fn checkpoint(trailer: *Self, callback: *const fn (trailer: *Self) void) void {
+            assert(trailer.callback == .none);
+            defer assert(trailer.callback == .checkpoint);
+
+            trailer.size_transferred = 0;
+            trailer.checksum = vsr.checksum(trailer.buffer[0..trailer.size]);
 
             {
-                set.grid.?.free_set.include_staging();
-                defer set.grid.?.free_set.exclude_staging();
-
-                set.size = @as(u32, @intCast(set.grid.?.free_set.encode(set.buffer)));
-                assert(set.size % @sizeOf(FreeSet.Word) == 0);
-                set.size_transferred = 0;
-                set.checksum = vsr.checksum(set.buffer[0..set.size]);
-            }
-
-            {
-                assert(set.grid.?.free_set.count_reservations() == 0);
-                const reservation = set.grid.?.free_set.reserve(set.block_count()).?;
-                defer set.grid.?.free_set.forfeit(reservation);
+                assert(trailer.grid.?.free_set.count_reservations() == 0);
+                const reservation = trailer.grid.?.free_set.reserve(trailer.block_count()).?;
+                defer trailer.grid.?.free_set.forfeit(reservation);
 
                 for (
-                    set.block_addresses[0..set.block_count()],
-                    set.block_checksums[0..set.block_count()],
+                    trailer.block_addresses[0..trailer.block_count()],
+                    trailer.block_checksums[0..trailer.block_count()],
                 ) |*address, *checksum| {
-                    address.* = set.grid.?.free_set.acquire(reservation).?;
+                    address.* = trailer.grid.?.free_set.acquire(reservation).?;
                     checksum.* = undefined;
                 }
                 // Reservation should be fully used up.
-                assert(set.grid.?.free_set.acquire(reservation) == null);
+                assert(trailer.grid.?.free_set.acquire(reservation) == null);
             }
 
-            set.block_index = 0;
-            set.callback = .{ .checkpoint = callback };
-            if (set.size == 0) {
-                set.grid.?.on_next_tick(checkpoint_next_tick, &set.next_tick);
+            trailer.block_index = 0;
+            trailer.callback = .{ .checkpoint = callback };
+            if (trailer.size == 0) {
+                trailer.grid.?.on_next_tick(checkpoint_next_tick, &trailer.next_tick);
             } else {
-                set.checkpoint_write_next();
+                trailer.checkpoint_write_next();
             }
         }
 
         fn checkpoint_next_tick(next_tick: *Grid.NextTick) void {
-            const set = @fieldParentPtr(Self, "next_tick", next_tick);
-            assert(set.callback == .checkpoint);
-            assert(set.size == 0);
-            assert(set.block_index == 0);
-            set.checkpoint_done();
+            const trailer = @fieldParentPtr(Self, "next_tick", next_tick);
+            assert(trailer.callback == .checkpoint);
+            assert(trailer.size == 0);
+            assert(trailer.block_index == 0);
+            trailer.checkpoint_done();
         }
 
-        fn checkpoint_write_next(set: *Self) void {
-            assert(set.callback == .checkpoint);
-            assert(set.size > 0);
-            assert(set.block_index < set.block_count());
-            assert((set.size_transferred == 0) == (set.block_index == 0));
+        fn checkpoint_write_next(trailer: *Self) void {
+            assert(trailer.callback == .checkpoint);
+            assert(trailer.size > 0);
+            assert(trailer.block_index < trailer.block_count());
+            assert((trailer.size_transferred == 0) == (trailer.block_index == 0));
 
             const chunk = Chunk.for_block(.{
-                .block_index = set.block_index,
-                .block_count = set.block_count(),
-                .free_set_size = set.size,
+                .block_index = trailer.block_index,
+                .block_count = trailer.block_count(),
+                .trailer_size = trailer.size,
             });
 
-            const metadata: schema.FreeSetNode.Metadata = if (set.block_index == 0) .{
+            const block_index = trailer.block_index;
+            const metadata: schema.FreeSetNode.Metadata = if (block_index == 0) .{
                 .previous_free_set_block_checksum = 0,
                 .previous_free_set_block_address = 0,
             } else .{
-                .previous_free_set_block_checksum = set.block_checksums[set.block_index - 1],
-                .previous_free_set_block_address = set.block_addresses[set.block_index - 1],
+                .previous_free_set_block_checksum = trailer.block_checksums[block_index - 1],
+                .previous_free_set_block_address = trailer.block_addresses[block_index - 1],
             };
 
             const header = mem.bytesAsValue(
                 vsr.Header.Block,
-                set.write_block[0..@sizeOf(vsr.Header)],
+                trailer.write_block[0..@sizeOf(vsr.Header)],
             );
             header.* = .{
-                .cluster = set.grid.?.superblock.working.cluster,
+                .cluster = trailer.grid.?.superblock.working.cluster,
                 .metadata_bytes = @bitCast(metadata),
-                .address = set.block_addresses[set.block_index],
+                .address = trailer.block_addresses[trailer.block_index],
                 .snapshot = 0, // TODO(snapshots): Set this properly; it is useful for debugging.
                 .size = @sizeOf(vsr.Header) + chunk.size,
                 .command = .block,
@@ -411,44 +375,44 @@ pub fn FreeSetEncodedType(comptime Storage: type) type {
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                set.write_block[@sizeOf(vsr.Header)..][0..chunk.size],
-                set.buffer[chunk.start..chunk.end],
+                trailer.write_block[@sizeOf(vsr.Header)..][0..chunk.size],
+                trailer.buffer[chunk.start..chunk.end],
             );
-            set.size_transferred += chunk.size;
-            header.set_checksum_body(set.write_block[@sizeOf(vsr.Header)..][0..chunk.size]);
+            trailer.size_transferred += chunk.size;
+            header.set_checksum_body(trailer.write_block[@sizeOf(vsr.Header)..][0..chunk.size]);
             header.set_checksum();
-            schema.FreeSetNode.assert_valid_header(set.write_block);
+            schema.FreeSetNode.assert_valid_header(trailer.write_block);
 
-            set.block_checksums[set.block_index] = header.checksum;
-            set.grid.?.create_block(
+            trailer.block_checksums[trailer.block_index] = header.checksum;
+            trailer.grid.?.create_block(
                 checkpoint_write_next_callback,
-                &set.write,
-                &set.write_block,
+                &trailer.write,
+                &trailer.write_block,
             );
         }
 
         fn checkpoint_write_next_callback(write: *Grid.Write) void {
-            const set = @fieldParentPtr(Self, "write", write);
-            assert(set.callback == .checkpoint);
+            const trailer = @fieldParentPtr(Self, "write", write);
+            assert(trailer.callback == .checkpoint);
 
-            set.block_index += 1;
-            if (set.block_index == set.block_count()) {
-                set.checkpoint_done();
+            trailer.block_index += 1;
+            if (trailer.block_index == trailer.block_count()) {
+                trailer.checkpoint_done();
             } else {
-                set.checkpoint_write_next();
+                trailer.checkpoint_write_next();
             }
         }
 
-        fn checkpoint_done(set: *Self) void {
-            assert(set.callback == .checkpoint);
-            defer assert(set.callback == .none);
+        fn checkpoint_done(trailer: *Self) void {
+            assert(trailer.callback == .checkpoint);
+            defer assert(trailer.callback == .none);
 
-            assert(set.block_index == set.block_count());
-            assert(set.size_transferred == set.size);
+            assert(trailer.block_index == trailer.block_count());
+            assert(trailer.size_transferred == trailer.size);
 
-            const callback = set.callback.checkpoint;
-            set.callback = .none;
-            callback(set);
+            const callback = trailer.callback.checkpoint;
+            trailer.callback = .none;
+            callback(trailer);
         }
     };
 }
