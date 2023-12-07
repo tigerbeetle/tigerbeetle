@@ -52,14 +52,15 @@ of a couple of block references. These blocks, taken together, specify the manif
 
 Superblock is located at a fixed position in the data file, so, when a replica starts up, it can
 read the superblock, read root block indexes and hashes from the superblock, and through those get
-access to the rest of the data in the grid. Besides the manifest, superblock also stores a
-compressed bitset of all grid blocks which are not currently allocated.
+access to the rest of the data in the grid. Besides the manifest, superblock also references a
+compressed bitset, which is itself stored in the grid, of all grid blocks which are not currently
+allocated.
 
 ```zig
 pub const SuperBlock = struct {
     manifest_oldest: BlockReference,
     manifest_newest: BlockReference,
-    free_set: BitSet,
+    free_set: BlockReference,
 };
 ```
 
@@ -191,7 +192,8 @@ const Superblock = {
   manifest_block_oldest_checksum: u128,
   manifest_block_newest_address: u64,
   manifest_block_newest_checksum: u128,
-  free_set: BitSet,
+  free_set_last_address: u64,
+  free_set_last_checksum: u128,
 };
 ```
 

@@ -86,7 +86,7 @@ fn run_fuzz(
         env.open_superblock();
         env.wait(&env.manifest_log);
 
-        env.open_free_set();
+        env.open_grid();
         env.wait(&env.manifest_log);
 
         env.open();
@@ -257,8 +257,6 @@ fn generate_events(
 }
 
 const Environment = struct {
-    const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
-
     allocator: std.mem.Allocator,
     storage: Storage,
     storage_verify: Storage,
@@ -395,18 +393,13 @@ const Environment = struct {
         env.pending -= 1;
     }
 
-    fn open_free_set(env: *Environment) void {
+    fn open_grid(env: *Environment) void {
         assert(env.pending == 0);
         env.pending += 1;
-        env.grid.free_set_encoded.open(
-            &env.grid,
-            env.superblock.working.free_set_reference(),
-            open_free_set_callback,
-        );
+        env.grid.open(open_grid_callback);
     }
 
-    fn open_free_set_callback(free_set_encoded: *FreeSetEncoded) void {
-        const grid = @fieldParentPtr(Grid, "free_set_encoded", free_set_encoded);
+    fn open_grid_callback(grid: *Grid) void {
         const env = @fieldParentPtr(Environment, "grid", grid);
         env.pending -= 1;
     }
@@ -493,12 +486,14 @@ const Environment = struct {
             &env.superblock_context,
             .{
                 .manifest_references = env.manifest_log.checkpoint_references(),
-                .free_set_reference = env.grid.free_set_encoded.checkpoint_reference(),
+                .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum + 1,
                 .commit_min = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.commit_min),
                 .commit_max = vsr.Checkpoint.checkpoint_after(vsr_state.commit_max),
                 .sync_op_min = 0,
                 .sync_op_max = 0,
+                .storage_size = vsr.superblock.data_file_size_min +
+                    (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
             },
         );
         env.wait(&env.manifest_log);

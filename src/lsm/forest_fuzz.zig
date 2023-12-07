@@ -23,7 +23,7 @@ const Forest = StateMachine.Forest;
 const Grid = GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const FreeSet = vsr.FreeSet;
-const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
+const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
 
 pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
 
@@ -171,11 +171,7 @@ const Environment = struct {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
         try env.tick_until_state_change(.superblock_open, .free_set_open);
 
-        env.grid.free_set_encoded.open(
-            &env.grid,
-            env.superblock.working.free_set_reference(),
-            free_set_open_callback,
-        );
+        env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
         env.forest = try Forest.init(allocator, &env.grid, node_count, forest_options);
@@ -192,7 +188,7 @@ const Environment = struct {
     }
 
     /// Allocate a sparse subset of grid blocks to make sure that the encoded free set needs more
-    /// than one block to exercise the block linked list logic from FreeSetEncoded.
+    /// than one block to exercise the block linked list logic from CheckpointTrailer.
     fn fragmentate_free_set(env: *Environment) void {
         assert(env.grid.free_set.count_acquired() == 0);
 
@@ -222,8 +218,7 @@ const Environment = struct {
         env.change_state(.superblock_open, .free_set_open);
     }
 
-    fn free_set_open_callback(set: *FreeSetEncoded) void {
-        const grid = @fieldParentPtr(Grid, "free_set_encoded", set);
+    fn grid_open_callback(grid: *Grid) void {
         const env = @fieldParentPtr(@This(), "grid", grid);
         env.change_state(.free_set_open, .forest_init);
     }
@@ -272,12 +267,14 @@ const Environment = struct {
         }
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .manifest_references = env.forest.manifest_log.checkpoint_references(),
-            .free_set_reference = env.grid.free_set_encoded.checkpoint_reference(),
+            .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
             .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
             .commit_min = env.checkpoint_op.?,
             .commit_max = env.checkpoint_op.? + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,
+            .storage_size = vsr.superblock.data_file_size_min +
+                (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
         });
         try env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
 
