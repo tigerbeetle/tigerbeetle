@@ -24,8 +24,6 @@
     "node": ">=14.0.0"
   },
   "scripts": {
-    "benchmark": "./scripts/benchmark.sh",
-    "test": "node dist/test",
     "prepare": "node ./scripts/prepare.js",
     "clean": "node ./scripts/clean.js"
   },
