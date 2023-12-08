@@ -10,14 +10,9 @@ const MAX_TRANSFERS = 51200
 const MAX_REQUEST_BATCH_SIZE = 5120
 const IS_TWO_PHASE_TRANSFER = false
 
-const getEnvVar = (name: string): string => {
-  if (!process.env[name]) throw new Error(`environment variable ${name} required`)
-  return process.env[name] as string
-}
-
 const client = createClient({
   cluster_id: 0n,
-  replica_addresses: [getEnvVar('TB_ADDRESS')]
+  replica_addresses: [process.env.TB_ADDRESS || '3000']
 })
 
 const TRANSFER_SIZE = 128
