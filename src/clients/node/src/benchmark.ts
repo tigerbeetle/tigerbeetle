@@ -4,19 +4,15 @@ import {
   createClient,
   Transfer,
   TransferFlags,
-  CreateTransfersError,
-  Operation
 } from '.'
 
 const MAX_TRANSFERS = 51200
 const MAX_REQUEST_BATCH_SIZE = 5120
 const IS_TWO_PHASE_TRANSFER = false
-const PREVIOUS_BENCHMARK = IS_TWO_PHASE_TRANSFER ? 150000 : 310000
-const TOLERANCE = 10 // percent that the benchmark is allowed to deviate from the previous benchmark
 
 const client = createClient({
   cluster_id: 0n,
-  replica_addresses: ['3001']
+  replica_addresses: [process.env.TB_ADDRESS || '3000']
 })
 
 const TRANSFER_SIZE = 128
@@ -162,10 +158,6 @@ const main = async () => {
   assert(accounts.length === 2)
   assert(accounts[0].debits_posted === BigInt(MAX_TRANSFERS))
   assert(accounts[1].credits_posted === BigInt(MAX_TRANSFERS))
-
-  if (result < PREVIOUS_BENCHMARK * (100 - TOLERANCE)/100) {
-    console.warn(`There has been a performance regression. Previous benchmark=${PREVIOUS_BENCHMARK}`)
-  }
 }
 
 main().catch(error => { 

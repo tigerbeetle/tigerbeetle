@@ -11,12 +11,18 @@ const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
 pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("package.json"));
 
-    // We have some unit-tests for node, but they are likely bitrotted, as they are not run on CI.
-
     // Integration tests.
 
-    // We need to build the tigerbeetle-node library manually for samples to be able to pick it up.
+    // We need to build the tigerbeetle-node library manually for samples/testers to work.
     try shell.exec("npm install", .{});
+
+    inline for (.{ "test", "benchmark" }) |tester| {
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+        defer tmp_beetle.deinit(gpa);
+
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+        try shell.exec("node ./dist/" ++ tester, .{});
+    }
 
     inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
         try shell.pushd("./samples/" ++ sample);
