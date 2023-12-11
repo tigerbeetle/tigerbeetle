@@ -347,13 +347,13 @@ pub const SuperBlockHeader = extern struct {
 
         // Size of the encoded free set in bytes.
         // It is equal to the sum of sizes of individual free set blocks and is used for assertions.
-        free_set_size: u32,
+        free_set_size: u64,
 
         /// The number of manifest blocks in the manifest log.
         manifest_block_count: u32,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [24]u8 = [_]u8{0} ** 24,
+        reserved: [20]u8 = [_]u8{0} ** 20,
 
         comptime {
             assert(@sizeOf(CheckpointState) == 272);
@@ -520,7 +520,7 @@ pub const TrailerReference = struct {
     checksum: u128,
     last_block_address: u64,
     last_block_checksum: u128,
-    trailer_size: u32,
+    trailer_size: u64,
 
     pub fn empty(reference: *const TrailerReference) bool {
         if (reference.trailer_size == 0) {

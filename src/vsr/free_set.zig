@@ -463,6 +463,7 @@ pub const FreeSet = struct {
     /// Does not update the index and MUST therefore be paired immediately with exclude_staging().
     pub fn include_staging(set: *FreeSet) void {
         assert(set.opened);
+        assert(set.count_reservations() == 0);
         const free = set.count_free();
 
         set.blocks.toggleSet(set.staging);
