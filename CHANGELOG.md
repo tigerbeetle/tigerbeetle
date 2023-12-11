@@ -1,5 +1,33 @@
 # TigerBeetle Changelog
 
+## 2023-12-11
+
+### Safety And Performance
+
+- [#1339](https://github.com/tigerbeetle/tigerbeetle/pull/1339)
+
+  Defense in depth: add checkpoint ID to prepare messages. Checkpoint ID is a hash that covers, via
+  hash chaining, the entire state stored in the data file. Verifying that checkpoint IDs match
+  provides a direct strong cryptographic guarantee that the state is the same across replicas, on
+  top of existing guarantee that the sequence of events leading to the state is identical.
+
+### Internals
+
+- [#1343](https://github.com/tigerbeetle/tigerbeetle/pull/1343),
+  [#1341](https://github.com/tigerbeetle/tigerbeetle/pull/1341),
+  [#1340](https://github.com/tigerbeetle/tigerbeetle/pull/1340)
+
+  Gate the main branch on more checks: unit-tests for NodeJS and even more fuzzers.
+
+- [#1332](https://github.com/tigerbeetle/tigerbeetle/pull/1332),
+  [#1348](https://github.com/tigerbeetle/tigerbeetle/pull/1348)
+
+  Code cleanups after removal of storage size limit.
+
+### TigerTracks 🎧
+
+- [Concrete Reservation](https://open.spotify.com/track/1Li9HBLXG2LJSeD4fEhtcd?si=64611215922a4436)
+
 ## 2023-12-04
 
 ### Safety And Performance
