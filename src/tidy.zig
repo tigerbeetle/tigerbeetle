@@ -83,6 +83,23 @@ test "tidy changelog" {
     }
 }
 
+test "tidy naughty list" {
+    var src = try fs.cwd().openDir("src", .{});
+    defer src.close();
+
+    for (naughty_list) |naughty_path| {
+        _ = src.statFile(naughty_path) catch |err| {
+            if (err == error.FileNotFound) {
+                std.debug.print(
+                    "path does not exist: src/{s}\n",
+                    .{naughty_path},
+                );
+            }
+            return err;
+        };
+    }
+}
+
 fn banned(source: []const u8) ?[]const u8 {
     // Note: must avoid banning ourselves!
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
@@ -181,8 +198,6 @@ const naughty_list = [_][]const u8{
     "lsm/level_data_iterator.zig",
     "lsm/level_index_iterator.zig",
     "lsm/manifest_level.zig",
-    "lsm/merge_iterator.zig",
-    "lsm/posted_groove.zig",
     "lsm/segmented_array_benchmark.zig",
     "lsm/segmented_array.zig",
     "lsm/set_associative_cache.zig",
@@ -196,15 +211,6 @@ const naughty_list = [_][]const u8{
     "state_machine/workload.zig",
     "statsd.zig",
     "storage.zig",
-    "test/cluster.zig",
-    "test/cluster/network.zig",
-    "test/cluster/state_checker.zig",
-    "test/conductor.zig",
-    "test/network.zig",
-    "test/packet_simulator.zig",
-    "test/priority_queue.zig",
-    "test/storage.zig",
-    "test/time.zig",
     "testing/aof.zig",
     "testing/cluster.zig",
     "testing/cluster/network.zig",
@@ -212,7 +218,6 @@ const naughty_list = [_][]const u8{
     "testing/hash_log.zig",
     "testing/low_level_hash_vectors.zig",
     "testing/packet_simulator.zig",
-    "testing/priority_queue.zig",
     "testing/state_machine.zig",
     "testing/storage.zig",
     "testing/time.zig",
@@ -228,7 +233,6 @@ const naughty_list = [_][]const u8{
     "vsr/replica_test.zig",
     "vsr/replica.zig",
     "vsr/superblock_client_sessions.zig",
-    "vsr/superblock_client_table.zig",
     "vsr/free_set.zig",
     "vsr/superblock_quorums.zig",
     "vsr/superblock.zig",
