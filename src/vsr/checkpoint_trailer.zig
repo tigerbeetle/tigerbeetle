@@ -44,22 +44,22 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         // Chunk redundantly stores all of the start index, one-past-the-end index, and length, so
         // that the call site can avoid indexing arithmetic and associated bugs.
         const Chunk = struct {
-            start: u32,
-            end: u32,
+            start: u64,
+            end: u64,
             size: u32,
 
             fn for_block(options: struct {
                 block_index: u32,
                 block_count: u32,
-                trailer_size: u32,
+                trailer_size: u64,
             }) Chunk {
                 assert(options.block_count > 0);
                 assert(options.block_count == stdx.div_ceil(options.trailer_size, chunk_size_max));
                 assert(options.block_index < options.block_count);
 
                 const last_block = options.block_index == options.block_count - 1;
-                const chunk_size = if (last_block)
-                    options.trailer_size - (options.block_count - 1) * chunk_size_max
+                const chunk_size: u32 = if (last_block)
+                    @intCast(options.trailer_size - (options.block_count - 1) * chunk_size_max)
                 else
                     chunk_size_max;
 
@@ -73,7 +73,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             }
         };
 
-        // Reference to the grid is late-initialized in the open, because the free set is part of
+        // Reference to the grid is late-initialized in `open`, because the free set is part of
         // the grid, which doesn't have access to a stable grid pointer. It is set to null by
         // `reset`, to verify that the free set is not used before it is opened during sync.
         grid: ?*Grid = null,
@@ -96,10 +96,10 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         block_index: u32 = 0,
 
         // Size of the encoded set in bytes.
-        size: u32 = 0,
+        size: u64 = 0,
         // The number of trailer bytes read or written during disk IO. Used to cross-check that we
         // haven't lost any bytes along the way.
-        size_transferred: u32 = 0,
+        size_transferred: u64 = 0,
 
         // Checksum covering the entire encoded trailer.
         checksum: u128 = 0,
@@ -165,7 +165,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         pub fn block_count(trailer: *const Self) u32 {
-            return stdx.div_ceil(trailer.size, chunk_size_max);
+            return @intCast(stdx.div_ceil(trailer.size, chunk_size_max));
         }
 
         // These data are stored in the superblock header.
@@ -195,6 +195,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             reference: vsr.SuperBlockTrailerReference,
             callback: *const fn (trailer: *Self) void,
         ) void {
+            assert(trailer.grid == null);
             trailer.grid = grid;
 
             assert(trailer.callback == .none);

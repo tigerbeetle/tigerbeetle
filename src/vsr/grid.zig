@@ -283,11 +283,11 @@ pub fn GridType(comptime Storage: type) type {
             grid.free_set_checkpoint.open(
                 grid,
                 grid.superblock.working.free_set_reference(),
-                free_set_open_callback,
+                open_free_set_callback,
             );
         }
 
-        fn free_set_open_callback(free_set_checkpoint: *CheckpointTrailer) void {
+        fn open_free_set_callback(free_set_checkpoint: *CheckpointTrailer) void {
             const grid = @fieldParentPtr(Grid, "free_set_checkpoint", free_set_checkpoint);
             const callback = grid.callback.open;
 
@@ -299,7 +299,8 @@ pub fn GridType(comptime Storage: type) type {
                     .encoded = free_set_checkpoint.buffer[0..free_set_checkpoint.size],
                     .block_addresses = free_set_checkpoint.block_addresses[0..free_set_checkpoint.block_count()],
                 });
-                assert((free_set_checkpoint.size > 0) == (grid.free_set.count_acquired() > 0));
+                assert((grid.free_set.count_acquired() > 0) == (free_set_checkpoint.size > 0));
+                assert(grid.free_set.count_reservations() == 0);
                 assert(grid.free_set.count_released() == grid.free_set_checkpoint.block_count());
             }
 
@@ -328,6 +329,8 @@ pub fn GridType(comptime Storage: type) type {
             grid.assert_only_repairing();
 
             {
+                assert(grid.free_set.count_reservations() == 0);
+
                 grid.free_set.include_staging();
                 defer grid.free_set.exclude_staging();
 
@@ -391,7 +394,12 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn cancel(grid: *Grid, callback: *const fn (*Grid) void) void {
             // grid.open() is cancellable the same way that read_block()/write_block() are.
-            assert(grid.callback == .none or grid.callback == .open);
+            switch (grid.callback) {
+                .none => {},
+                .open => {},
+                .checkpoint => unreachable,
+                .cancel => unreachable,
+            }
 
             grid.callback = .{ .cancel = callback };
 
