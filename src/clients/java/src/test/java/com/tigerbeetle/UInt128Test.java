@@ -165,4 +165,47 @@ public class UInt128Test {
         assertSame(BigInteger.ZERO, UInt128.asBigInteger(new byte[16]));
         assertArrayEquals(new byte[16], UInt128.asBytes(BigInteger.ZERO));
     }
+
+    @Test
+    public void testULID() {
+        class DecodedULID {
+            public long timestamp;
+            public BigInteger random;
+
+            public DecodedULID(byte[] ulid) {
+                assertEquals(ulid.length, UInt128.SIZE);
+
+                var buffer = ByteBuffer.wrap(ulid).order(ByteOrder.BIG_ENDIAN);
+                timestamp = ((long)buffer.getInt()) << 32;
+                timestamp |= (long)buffer.getShort();
+
+                var entropy = ByteBuffer.allocate(80).order(ByteOrder.nativeOrder());
+                entropy.putShort(buffer.getShort());
+                entropy.putInt(buffer.getInt());
+                entropy.putInt(buffer.getInt());
+                random = new BigInteger(entropy.array());
+            }
+        }
+
+        // Test for ULID monotonicity overall.
+        var lastULID = new DecodedULID(UInt128.ULID());
+
+        // Test for ULID monotonicity across milliseconds.
+        for (int acrossMillis = 0; acrossMillis < 10; acrossMillis++) {
+            Thread.sleep(1);
+
+            // Test for ULID monotonicity with multiple calls in (around) the same millisecond.
+            for (int sameMillis = 0; sameMillis < 100; sameMillis++) {
+                var currentULID = new DecodedULID(UInt128.ULID());
+
+                var compareLast = Long.compare(lastULID.timestamp, currentULID.timestamp);
+                if (compareLast == 0) {
+                    compareLast = lastULID.random.compareTo(currentULID.random);
+                }
+
+                assertSame(compareLast, -1); 
+                lastULID = currentULID;
+            }
+        }
+    }
 }

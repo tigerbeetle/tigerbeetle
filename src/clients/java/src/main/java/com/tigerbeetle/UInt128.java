@@ -1,7 +1,9 @@
 package com.tigerbeetle;
 
+import java.security.SecureRandom;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -172,5 +174,41 @@ public enum UInt128 {
         return asBytes(bigintLsb.longValueExact(), bigintMsb.longValueExact());
     }
 
+    private static long ulidLastTimestamp = -1L;
+    private static byte[] ulidLastEntropy = new byte[80];
+    private static final SecureRandom ulidSecureRandom = new SecureRandom();
+    
 
+     /**
+     * Generates a Universally Unique Lexicographically Sortable Identifier 
+     * (<a href="https://github.com/ulid/spec">ULID</a>) as 16 bytes of a 128-bit value.
+     * 
+     * The ULID returned always increases monotonically and is thread-safe.
+     * 
+     * @return an array of 16 bytes representing the 128-bit value.
+     */
+    public static synchronized byte[] ULID() {
+        var timestamp = System.currentTimeMillis();
+        if (timestamp == ulidLastTimestamp) { 
+            var carry = true;
+            for (int i = 0; i < ulidLastEntropy.length && carry; i++) {
+                carry = ulidLastEntropy[i] == (byte)0xff;
+                ulidLastEntropy[i] = (byte)(ulidLastEntropy[i] + 1);
+            }
+        } else {
+            ulidLastTimestamp = timestamp;
+            ulidSecureRandom.nextBytes(ulidLastEntropy);
+        }
+
+        var buffer = ByteBuffer.allocate(UInt128.SIZE).order(ByteOrder.BIG_ENDIAN);
+        buffer.putInt((int)(timestamp >> 32));
+        buffer.putShort((short)timestamp);
+
+        var entropy = ByteBuffer.wrap(ulidLastEntropy).order(ByteOrder.nativeOrder());
+        buffer.putShort(entropy.getShort());
+        buffer.putInt(entropy.getInt());
+        buffer.putInt(entropy.getInt());
+
+        return buffer.array();
+    }
 }
