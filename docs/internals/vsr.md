@@ -53,9 +53,7 @@ Storage:
 |                        `block` | replica |      replica | [Sync Forest](#protocol-sync-forest), [Repair Grid](#protocol-repair-grid)       |
 |      `request_sync_checkpoint` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 |              `sync_checkpoint` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|        `request_sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 | `request_sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
-|                `sync_free_set` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 |         `sync_client_sessions` | replica |      replica | [Sync Superblock](#protocol-sync-superblock)                                     |
 
 ### Recovery

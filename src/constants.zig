@@ -183,7 +183,6 @@ comptime {
 }
 
 /// The maximum body size of:
-/// - command=sync_free_set
 /// - command=sync_client_sessions
 ///
 /// In practice, this should always be as high as possible to minimize the number of round trips

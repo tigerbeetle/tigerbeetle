@@ -101,14 +101,12 @@ State sync is initially triggered by any of the following:
 The replica concurrently sends out three request messages, with the sync target identifier attached to each:
 
 1. `command=request_sync_checkpoint`
-2. `command=request_sync_free_set`
-3. `command=request_sync_client_sessions`
+2. `command=request_sync_client_sessions`
 
 Replicas with a matching checkpoint identifier reply (respectively) with:
 
 1. `command=sync_checkpoint`
-2. `command=sync_free_set`
-3. `command=sync_client_sessions`
+2. `command=sync_client_sessions`
 
 If a trailer is too large to fit in a message, the syncing replica requests it again, with a byte offset.
 
@@ -161,10 +159,8 @@ A checkpoint identifier is attached to the following message types:
 - `command=prepare`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
 - `command=prepare_ok`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
 - `command=request_sync_checkpoint`: Requested checkpoint identifier.
-- `command=request_sync_free_set`: Requested checkpoint identifier.
 - `command=request_sync_client_sessions`: Requested checkpoint identifier.
 - `command=sync_checkpoint`: Current checkpoint identifier of sender.
-- `command=sync_free_set`: Current checkpoint identifier of sender.
 - `command=sync_client_sessions`: Current checkpoint identifier of sender.
 
 ### Canonical Checkpoint
