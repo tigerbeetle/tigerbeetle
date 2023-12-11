@@ -89,9 +89,7 @@ pub const MessagePool = struct {
         pub const Block = MessageType(.block);
         pub const RequestSyncCheckpoint = MessageType(.request_sync_checkpoint);
         pub const SyncCheckpoint = MessageType(.sync_checkpoint);
-        pub const RequestSyncFreeSet = MessageType(.request_sync_free_set);
         pub const RequestSyncClientSessions = MessageType(.request_sync_client_sessions);
-        pub const SyncFreeSet = MessageType(.sync_free_set);
         pub const SyncClientSessions = MessageType(.sync_client_sessions);
 
         // TODO Avoid the extra level of indirection.
