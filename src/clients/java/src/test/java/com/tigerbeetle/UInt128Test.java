@@ -4,6 +4,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
+import java.util.concurrent.CountDownLatch;
 import java.math.BigInteger;
 import java.nio.ByteOrder;
 import java.nio.ByteBuffer;
@@ -170,7 +171,7 @@ public class UInt128Test {
     }
 
     @Test
-    public void testULID() throws InterruptedException {
+    public void testULID() throws Exception {
         class DecodedULID {
             public final long timestamp;
             public final long randomLo;
@@ -189,30 +190,58 @@ public class UInt128Test {
             }
         }
 
-        // Start with a reference point for the past ULID.
-        var ulidA = new DecodedULID(UInt128.ULID());
-
-        // Generate ULIDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
-        for (int i = 0; i < 10_000_000; i++) {
-            if (i % 10_000 == 0) {
-                Thread.sleep(1);
-            }
-
-            var ulidB = new DecodedULID(UInt128.ULID());
-            assert ulidA.timestamp <= ulidB.timestamp;
-
-            // On similar timestamps, ensure the randomHi values don't overflow.
-            if (ulidA.timestamp == ulidB.timestamp) {
-                assert Math.abs(ulidB.randomHi - ulidA.randomHi) <= 0xffff;
-
-                // On similar randomHi values, ensure randomLo is monotonic.
-                if (ulidA.randomHi == ulidB.randomHi) {
-                    assert ulidA.randomLo < ulidB.randomLo;
+        {
+            // Generate ULIDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
+            var ulidA = new DecodedULID(UInt128.ULID());
+            for (int i = 0; i < 10_000_000; i++) {
+                if (i % 10_000 == 0) {
+                    Thread.sleep(1);
                 }
-            }
 
-            // Use the generated ULID as the new reference point for the next loop.
-            ulidA = ulidB;
+                var ulidB = new DecodedULID(UInt128.ULID());
+                assert ulidA.timestamp <= ulidB.timestamp;
+
+                // Use the generated ULID as the new reference point for the next loop.
+                ulidA = ulidB;
+            }
+        }
+
+        final var threadExceptions = new Exception[100];
+        final var latchStart = new CountDownLatch(threadExceptions.length);
+        final var latchFinish = new CountDownLatch(threadExceptions.length);
+
+        for (int i = 0; i < threadExceptions.length; i++) {
+            final int threadIndex = i;
+            new Thread(() -> {
+                try {
+                    // Wait for all threads to spawn before starting.
+                    latchStart.countDown();
+                    latchStart.await();
+
+                    // Same as serial test above, but with smaller bounds.
+                    var ulidA = new DecodedULID(UInt128.ULID());
+                    for (int j = 0; j < 10_000; j++) {
+                        if (j % 1000 == 0) {
+                            Thread.sleep(1);
+                        }
+
+                        var ulidB = new DecodedULID(UInt128.ULID());
+                        assert ulidA.timestamp <= ulidB.timestamp;
+                        ulidA = ulidB;
+                    }
+
+                } catch (Exception e) {
+                    threadExceptions[threadIndex] = e; // Propagate exceptions to main thread.
+                } finally {
+                    latchFinish.countDown(); // Make sure to unblock the main thread.
+                }
+            }).start();
+        }
+
+        latchFinish.await();
+        for (var exception : threadExceptions) {
+            if (exception != null)
+                throw exception;
         }
     }
 }
