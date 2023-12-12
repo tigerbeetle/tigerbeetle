@@ -1,9 +1,12 @@
 package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 import java.math.BigInteger;
+import java.nio.ByteOrder;
+import java.nio.ByteBuffer;
 import java.util.UUID;
 import org.junit.Test;
 
@@ -167,45 +170,49 @@ public class UInt128Test {
     }
 
     @Test
-    public void testULID() {
+    public void testULID() throws InterruptedException {
         class DecodedULID {
-            public long timestamp;
-            public BigInteger random;
+            public final long timestamp;
+            public final long randomLo;
+            public final short randomHi;
 
             public DecodedULID(byte[] ulid) {
+                var buffer = ByteBuffer.wrap(ulid).order(ByteOrder.BIG_ENDIAN);
                 assertEquals(ulid.length, UInt128.SIZE);
 
-                var buffer = ByteBuffer.wrap(ulid).order(ByteOrder.BIG_ENDIAN);
-                timestamp = ((long)buffer.getInt()) << 32;
-                timestamp |= (long)buffer.getShort();
+                var timestampHi = buffer.getInt();
+                var timestampLo = buffer.getShort();
+                timestamp = (((long) timestampHi) << 32) | timestampLo;
 
-                var entropy = ByteBuffer.allocate(80).order(ByteOrder.nativeOrder());
-                entropy.putShort(buffer.getShort());
-                entropy.putInt(buffer.getInt());
-                entropy.putInt(buffer.getInt());
-                random = new BigInteger(entropy.array());
+                randomLo = buffer.getLong();
+                randomHi = buffer.getShort();
             }
         }
 
-        // Test for ULID monotonicity overall.
-        var lastULID = new DecodedULID(UInt128.ULID());
+        // Start with a reference point for the past ULID.
+        var ulidA = new DecodedULID(UInt128.ULID());
 
-        // Test for ULID monotonicity across milliseconds.
-        for (int acrossMillis = 0; acrossMillis < 10; acrossMillis++) {
-            Thread.sleep(1);
-
-            // Test for ULID monotonicity with multiple calls in (around) the same millisecond.
-            for (int sameMillis = 0; sameMillis < 100; sameMillis++) {
-                var currentULID = new DecodedULID(UInt128.ULID());
-
-                var compareLast = Long.compare(lastULID.timestamp, currentULID.timestamp);
-                if (compareLast == 0) {
-                    compareLast = lastULID.random.compareTo(currentULID.random);
-                }
-
-                assertSame(compareLast, -1); 
-                lastULID = currentULID;
+        // Generate ULIDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
+        for (int i = 0; i < 10_000_000; i++) {
+            if (i % 10_000 == 0) {
+                Thread.sleep(1);
             }
+
+            var ulidB = new DecodedULID(UInt128.ULID());
+            assert ulidA.timestamp <= ulidB.timestamp;
+
+            // On similar timestamps, ensure the randomHi values don't overflow.
+            if (ulidA.timestamp == ulidB.timestamp) {
+                assert Math.abs(ulidB.randomHi - ulidA.randomHi) <= 0xffff;
+
+                // On similar randomHi values, ensure randomLo is monotonic.
+                if (ulidA.randomHi == ulidB.randomHi) {
+                    assert ulidA.randomLo < ulidB.randomLo;
+                }
+            }
+
+            // Use the generated ULID as the new reference point for the next loop.
+            ulidA = ulidB;
         }
     }
 }

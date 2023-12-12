@@ -174,41 +174,61 @@ public enum UInt128 {
         return asBytes(bigintLsb.longValueExact(), bigintMsb.longValueExact());
     }
 
-    private static long ulidLastTimestamp = -1L;
-    private static byte[] ulidLastEntropy = new byte[80];
+    private static long ulidLastTimestamp = 0L;
+    private static final byte[] ulidLastEntropy = new byte[80];
     private static final SecureRandom ulidSecureRandom = new SecureRandom();
-    
+    private static long ulidMonotonicCounterLo = 0;
+    private static int ulidMonotonicCounterHi = 0;
 
-     /**
-     * Generates a Universally Unique Lexicographically Sortable Identifier 
+    /**
+     * Generates a Universally Unique Lexicographically Sortable Identifier
      * (<a href="https://github.com/ulid/spec">ULID</a>) as 16 bytes of a 128-bit value.
-     * 
+     *
      * The ULID returned always increases monotonically and is thread-safe.
-     * 
+     *
      * @return an array of 16 bytes representing the 128-bit value.
      */
-    public static synchronized byte[] ULID() {
-        var timestamp = System.currentTimeMillis();
-        if (timestamp == ulidLastTimestamp) { 
-            var carry = true;
-            for (int i = 0; i < ulidLastEntropy.length && carry; i++) {
-                carry = ulidLastEntropy[i] == (byte)0xff;
-                ulidLastEntropy[i] = (byte)(ulidLastEntropy[i] + 1);
+    public static byte[] ULID() throws ArithmeticException {
+        long timestamp = System.currentTimeMillis();
+        long randomLo;
+        int randomHi;
+
+        // Only modify the static variables in the synchronized block.
+        synchronized (ulidSecureRandom) {
+            // Handle timestamps in the past or same millisecond via incrementing monotonic counter.
+            if (timestamp <= ulidLastTimestamp) {
+                timestamp = ulidLastTimestamp;
+                if (ulidMonotonicCounterLo++ == Long.MAX_VALUE) {
+                    ulidMonotonicCounterHi++;
+                }
+                if (ulidMonotonicCounterHi > 0xffff) {
+                    throw new ArithmeticException("monotonic entropy overflows 80bits");
+                }
+            } else {
+                // Timestamp progressed so reset entropy and monotonic counter.
+                ulidLastTimestamp = timestamp;
+                ulidSecureRandom.nextBytes(ulidLastEntropy);
+                ulidMonotonicCounterLo = 0;
+                ulidMonotonicCounterHi = 0;
             }
-        } else {
-            ulidLastTimestamp = timestamp;
-            ulidSecureRandom.nextBytes(ulidLastEntropy);
+
+            var entropy = ByteBuffer.wrap(ulidLastEntropy).order(ByteOrder.nativeOrder());
+            var entropyLo = entropy.getLong();
+            var entropyHi = (int) entropy.getShort();
+
+            // Apply monotonic counter to entropy value, accounting for overflow.
+            randomLo = entropyLo + ulidMonotonicCounterLo;
+            randomHi = entropyHi + ulidMonotonicCounterHi;
+            if (randomLo < entropyLo) {
+                randomHi++;
+            }
         }
 
         var buffer = ByteBuffer.allocate(UInt128.SIZE).order(ByteOrder.BIG_ENDIAN);
-        buffer.putInt((int)(timestamp >> 32));
-        buffer.putShort((short)timestamp);
-
-        var entropy = ByteBuffer.wrap(ulidLastEntropy).order(ByteOrder.nativeOrder());
-        buffer.putShort(entropy.getShort());
-        buffer.putInt(entropy.getInt());
-        buffer.putInt(entropy.getInt());
-
+        buffer.putInt((int) (timestamp >> 32)); // timestamp hi
+        buffer.putShort((short) timestamp); // timestamp lo
+        buffer.putLong(randomLo);
+        buffer.putShort((short) randomHi);
         return buffer.array();
     }
 }
