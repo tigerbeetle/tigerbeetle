@@ -191,7 +191,6 @@ const naughty_list = [_][]const u8{
     "io/test.zig",
     "io/windows.zig",
     "lsm/binary_search.zig",
-    "lsm/compaction.zig",
     "lsm/binary_search_benchmark.zig",
     "lsm/forest_fuzz.zig",
     "lsm/groove.zig",
