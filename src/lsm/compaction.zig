@@ -453,7 +453,8 @@ pub fn CompactionType(
                     var target = Table.data_block_values(compaction.data_blocks[0]);
 
                     const filled = compaction.fill_immutable_values(target);
-                    assert(filled > 0);
+                    assert(filled <= target.len);
+                    if (filled == 0) assert(Table.usage == .secondary_index);
 
                     // The immutable table is always considered "Table A", which maps to 0.
                     compaction.values_in[0] = target[0..filled];
@@ -482,8 +483,10 @@ pub fn CompactionType(
         // either using a HashMap or having to do extra sorting. They are eventually filtered out
         // by our compaction merge() however.
         //
-        /// Copies values to `target` from our immutable table input, taking the last
-        /// matching value to resolve duplicates, and updating the immutable table slice.
+        /// Copies values to `target` from our immutable table input. In the process, merge values
+        /// with identical keys (last one wins) and collapse tombstones for secondary indexes.
+        /// Return the number of values written to the output and updates immutable table slice to
+        /// the non-processed remainder.
         fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
             var source = compaction.context.table_info_a.immutable;
             assert(source.len > 0);
@@ -499,9 +502,7 @@ pub fn CompactionType(
 
             var source_index: usize = 0;
             var target_index: usize = 0;
-            while (target_index < target.len and source_index < source.len) : (source_index += 1) {
-                // The last value in a run of duplicates needs to be the one that ends up in
-                // target.
+            while (target_index < target.len and source_index < source.len) {
                 target[target_index] = source[source_index];
 
                 // If we're at the end of the source, there is no next value, so the next value
@@ -510,7 +511,20 @@ pub fn CompactionType(
                     key_from_value(&source[source_index]) ==
                     key_from_value(&source[source_index + 1]);
 
-                if (!value_next_equal) {
+                if (value_next_equal) {
+                    if (Table.usage == .secondary_index) {
+                        // Secondary index optimization --- cancel out put and remove.
+                        assert(tombstone(&source[source_index]) != tombstone(&source[source_index + 1]));
+                        source_index += 2;
+                        target_index += 0;
+                    } else {
+                        // The last value in a run of duplicates needs to be the one that ends up in
+                        // target.
+                        source_index += 1;
+                        target_index += 0;
+                    }
+                } else {
+                    source_index += 1;
                     target_index += 1;
                 }
             }
@@ -522,12 +536,14 @@ pub fn CompactionType(
             // so value_next_equal is false, or a new value is hit, which will increment it.
             const source_count = source_index;
             const target_count = target_index;
-
             assert(target_count <= source_count);
-            assert(target_count > 0);
-
             compaction.context.table_info_a.immutable =
                 compaction.context.table_info_a.immutable[source_count..];
+
+            if (target_count == 0) {
+                assert(Table.usage == .secondary_index);
+                return 0;
+            }
 
             if (constants.verify) {
                 // Our output must be strictly increasing.
@@ -540,6 +556,7 @@ pub fn CompactionType(
                 }
             }
 
+            assert(target_count > 0);
             return target_count;
         }
 
@@ -703,6 +720,7 @@ pub fn CompactionType(
 
                 values_in_a_index += 1;
                 if (tombstone(value_a)) {
+                    assert(Table.usage != .secondary_index);
                     continue;
                 }
                 values_out[values_out_index] = value_a.*;
@@ -740,6 +758,7 @@ pub fn CompactionType(
                         if (compaction.drop_tombstones and
                             tombstone(value_a))
                         {
+                            assert(Table.usage != .secondary_index);
                             continue;
                         }
                         values_out[values_out_index] = value_a.*;
@@ -754,14 +773,16 @@ pub fn CompactionType(
                         values_in_a_index += 1;
                         values_in_b_index += 1;
 
-                        // Due to our table_memory no longer performing the secondary_index
-                        // optimizations, we relax the assertions that were here about tombstones
-                        // alternating.
-                        if (compaction.drop_tombstones) {
+                        if (Table.usage == .secondary_index) {
+                            // Secondary index optimization --- cancel out put and remove.
+                            assert(tombstone(value_a) != tombstone(value_b));
+                            continue;
+                        } else if (compaction.drop_tombstones) {
                             if (tombstone(value_a)) {
                                 continue;
                             }
                         }
+
                         values_out[values_out_index] = value_a.*;
                         values_out_index += 1;
                     },
