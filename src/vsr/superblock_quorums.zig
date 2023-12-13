@@ -82,8 +82,9 @@ pub fn QuorumsType(comptime options: Options) type {
         ///
         /// * When a member of the parent quorum is still present, verify that the highest quorum is
         ///   connected.
-        /// * When there are 2 quorums: 1/4 new and 3/4 old, favor the 3/4 old since the 1/4's
-        ///   trailers may be damaged.
+        /// * When there are 2 quorums: 1/4 new and 3/4 old, favor the 3/4 old since it is safer to
+        ///   repair.
+        ///   TODO Re-examine this now that there are no superblock trailers to worry about.
         pub fn working(
             quorums: *Quorums,
             copies: []SuperBlockHeader,

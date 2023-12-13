@@ -10,7 +10,7 @@ const stdx = @import("../stdx.zig");
 pub const ReplySlot = struct { index: usize };
 
 /// Track the headers of the latest reply for each active client.
-/// Serialized/deserialized to/from the superblock trailer on-disk.
+/// Serialized/deserialized to/from the trailer on-disk.
 /// For the reply bodies, see ClientReplies.
 pub const ClientSessions = struct {
     /// We found two bugs in the VRR paper relating to the client table:
