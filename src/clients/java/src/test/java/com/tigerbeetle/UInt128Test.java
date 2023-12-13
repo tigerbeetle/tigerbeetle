@@ -174,8 +174,7 @@ public class UInt128Test {
     public void testULID() throws Exception {
         class DecodedULID {
             public final long timestamp;
-            public final long randomLo;
-            public final short randomHi;
+            public final BigInteger random;
 
             public DecodedULID(byte[] ulid) {
                 var buffer = ByteBuffer.wrap(ulid).order(ByteOrder.BIG_ENDIAN);
@@ -185,8 +184,19 @@ public class UInt128Test {
                 var timestampLo = buffer.getShort();
                 timestamp = (((long) timestampHi) << 32) | timestampLo;
 
-                randomLo = buffer.getLong();
-                randomHi = buffer.getShort();
+                var randomLo = buffer.getLong();
+                var randomHi = buffer.getShort();
+                random = UInt128.asBigInteger(randomLo, randomHi);
+            }
+
+            public void assertMonotonicSince(final DecodedULID earlier) {
+                var compareEarlier = Long.compare(earlier.timestamp, timestamp);
+                if (compareEarlier == 0) {
+                    compareEarlier = earlier.random.compareTo(random);
+                }
+
+                // earlier NOT greater than this
+                assertNotEquals(compareEarlier, 1);
             }
         }
 
@@ -199,7 +209,7 @@ public class UInt128Test {
                 }
 
                 var ulidB = new DecodedULID(UInt128.ULID());
-                assert ulidA.timestamp <= ulidB.timestamp;
+                ulidB.assertMonotonicSince(ulidA);
 
                 // Use the generated ULID as the new reference point for the next loop.
                 ulidA = ulidB;
@@ -226,7 +236,7 @@ public class UInt128Test {
                         }
 
                         var ulidB = new DecodedULID(UInt128.ULID());
-                        assert ulidA.timestamp <= ulidB.timestamp;
+                        ulidB.assertMonotonicSince(ulidA);
                         ulidA = ulidB;
                     }
 

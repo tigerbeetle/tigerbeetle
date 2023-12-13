@@ -175,10 +175,8 @@ public enum UInt128 {
     }
 
     private static long ulidLastTimestamp = 0L;
-    private static final byte[] ulidLastEntropy = new byte[80];
+    private static final byte[] ulidLastRandom = new byte[80];
     private static final SecureRandom ulidSecureRandom = new SecureRandom();
-    private static long ulidMonotonicCounterLo = 0;
-    private static int ulidMonotonicCounterHi = 0;
 
     /**
      * Generates a Universally Unique Lexicographically Sortable Identifier
@@ -189,46 +187,40 @@ public enum UInt128 {
      * @return an array of 16 bytes representing the 128-bit value.
      */
     public static byte[] ULID() throws ArithmeticException {
-        long timestamp = System.currentTimeMillis();
         long randomLo;
-        int randomHi;
+        short randomHi;
+        long timestamp = System.currentTimeMillis();
 
         // Only modify the static variables in the synchronized block.
         synchronized (ulidSecureRandom) {
-            // Handle timestamps in the past or same millisecond via incrementing monotonic counter.
+            // Ensure timestamp is monotonic. If it advances forward, also generate a new random.
             if (timestamp <= ulidLastTimestamp) {
                 timestamp = ulidLastTimestamp;
-                if (ulidMonotonicCounterLo++ == Long.MAX_VALUE) {
-                    ulidMonotonicCounterHi++;
-                }
-                if (ulidMonotonicCounterHi > 0xffff) {
-                    throw new ArithmeticException("monotonic entropy overflows 80bits");
-                }
             } else {
-                // Timestamp progressed so reset entropy and monotonic counter.
                 ulidLastTimestamp = timestamp;
-                ulidSecureRandom.nextBytes(ulidLastEntropy);
-                ulidMonotonicCounterLo = 0;
-                ulidMonotonicCounterHi = 0;
+                ulidSecureRandom.nextBytes(ulidLastRandom);
             }
 
-            var entropy = ByteBuffer.wrap(ulidLastEntropy).order(ByteOrder.nativeOrder());
-            var entropyLo = entropy.getLong();
-            var entropyHi = (int) entropy.getShort();
+            var random = ByteBuffer.wrap(ulidLastRandom).order(ByteOrder.LITTLE_ENDIAN);
+            randomLo = random.getLong();
+            randomHi = random.getShort();
 
-            // Apply monotonic counter to entropy value, accounting for overflow.
-            randomLo = entropyLo + ulidMonotonicCounterLo;
-            randomHi = entropyHi + ulidMonotonicCounterHi;
-            if (randomLo < entropyLo) {
-                randomHi++;
+            // Increment lo. If that overflows, increment hi. If that overflows, throw error.
+            // ULID spec says to throw error upon 80-bit overflow (not relative to initial random).
+            if (randomLo++ == Long.MAX_VALUE && randomHi++ == 0xffff) {
+                throw new ArithmeticException("random bits overflow");
             }
+
+            random.flip();
+            random.putLong(randomLo);
+            random.putShort(randomHi);
         }
 
         var buffer = ByteBuffer.allocate(UInt128.SIZE).order(ByteOrder.BIG_ENDIAN);
         buffer.putInt((int) (timestamp >> 32)); // timestamp hi
         buffer.putShort((short) timestamp); // timestamp lo
         buffer.putLong(randomLo);
-        buffer.putShort((short) randomHi);
+        buffer.putShort(randomHi);
         return buffer.array();
     }
 }
