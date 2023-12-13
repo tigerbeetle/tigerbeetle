@@ -445,8 +445,7 @@ const Environment = struct {
             .free_set_reference = .{
                 .last_block_checksum = 0,
                 .last_block_address = 0,
-                .free_set_size = 0,
-                .storage_size = data_file_size_min,
+                .trailer_size = 0,
                 .checksum = vsr.checksum(&.{}),
             },
             .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum,
@@ -454,6 +453,7 @@ const Environment = struct {
             .commit_max = vsr_state.commit_max,
             .sync_op_min = 0,
             .sync_op_max = 0,
+            .storage_size = data_file_size_min,
         });
     }
 

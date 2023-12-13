@@ -43,7 +43,7 @@ pub const Reservation = struct {
 pub const FreeSet = struct {
     pub const Word = u64;
 
-    // Free set is stored in the grid (see `FreeSetEncoded`) and is not available until the
+    // Free set is stored in the grid (see `CheckpointTrailer`) and is not available until the
     // relevant blocks are fetched from disk (or other replicas) and decoded.
     //
     // Without the free set, only blocks belonging to the free set might be read and no blocks could
@@ -153,7 +153,7 @@ pub const FreeSet = struct {
     ///   - the `encoded` byte buffer with the ewah encoding of bitset of allocated blocks,
     ///   - the list of block addresses used to store that encoding in the grid.
     ///
-    /// Block addresses themselves are not a part of the encoded bitset, see FreeSetEncoded for
+    /// Block addresses themselves are not a part of the encoded bitset, see CheckpointTrailer for
     /// details.
     pub fn open(set: *FreeSet, options: struct {
         encoded: []align(@alignOf(Word)) const u8,
@@ -433,7 +433,7 @@ pub const FreeSet = struct {
 
     /// Free all released blocks and release the blocks holding the free set itself.
     /// Checkpoint must not be called while there are outstanding reservations.
-    pub fn checkpoint(set: *FreeSet, free_set_encoded_blocks: []const u64) void {
+    pub fn checkpoint(set: *FreeSet, free_set_checkpoint_blocks: []const u64) void {
         assert(set.opened);
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
@@ -450,7 +450,7 @@ pub const FreeSet = struct {
         set.verify_index();
 
         var address_previous: u64 = 0;
-        for (free_set_encoded_blocks) |address| {
+        for (free_set_checkpoint_blocks) |address| {
             assert(address > 0);
             assert(address > address_previous);
             address_previous = address;
@@ -463,6 +463,7 @@ pub const FreeSet = struct {
     /// Does not update the index and MUST therefore be paired immediately with exclude_staging().
     pub fn include_staging(set: *FreeSet) void {
         assert(set.opened);
+        assert(set.count_reservations() == 0);
         const free = set.count_free();
 
         set.blocks.toggleSet(set.staging);
