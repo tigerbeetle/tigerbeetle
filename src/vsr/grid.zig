@@ -15,7 +15,6 @@ const stdx = @import("../stdx.zig");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 
 const FreeSet = @import("./free_set.zig").FreeSet;
-const FreeSetEncodedType = @import("./free_set_encoded.zig").FreeSetEncodedType;
 
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
@@ -39,7 +38,7 @@ pub fn GridType(comptime Storage: type) type {
 
     return struct {
         const Grid = @This();
-        const FreeSetEncoded = FreeSetEncodedType(Storage);
+        const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
 
         pub const read_iops_max = constants.grid_iops_read_max;
         pub const write_iops_max = constants.grid_iops_write_max;
@@ -165,7 +164,7 @@ pub fn GridType(comptime Storage: type) type {
 
         superblock: *SuperBlock,
         free_set: FreeSet,
-        free_set_encoded: FreeSetEncoded,
+        free_set_checkpoint: CheckpointTrailer,
         blocks_missing: GridBlocksMissing,
 
         cache: Cache,
@@ -194,9 +193,13 @@ pub fn GridType(comptime Storage: type) type {
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
 
-        checkpointing: ?struct { callback: *const fn (*Grid) void } = null,
+        callback: union(enum) {
+            none,
+            open: *const fn (*Grid) void,
+            checkpoint: *const fn (*Grid) void,
+            cancel: *const fn (*Grid) void,
+        } = .none,
 
-        canceling: ?struct { callback: *const fn (*Grid) void } = null,
         canceling_tick_context: NextTick = undefined,
 
         pub fn init(allocator: mem.Allocator, options: struct {
@@ -214,8 +217,9 @@ pub fn GridType(comptime Storage: type) type {
             var free_set = try FreeSet.init(allocator, block_count_limit);
             errdefer free_set.deinit(allocator);
 
-            var free_set_encoded = try FreeSetEncoded.init(allocator, block_count_limit);
-            errdefer free_set_encoded.deinit(allocator);
+            var free_set_checkpoint =
+                try CheckpointTrailer.init(allocator, FreeSet.encode_size_max(block_count_limit));
+            errdefer free_set_checkpoint.deinit(allocator);
 
             var blocks_missing = try GridBlocksMissing.init(allocator, .{
                 .blocks_max = options.missing_blocks_max,
@@ -246,7 +250,7 @@ pub fn GridType(comptime Storage: type) type {
             return Grid{
                 .superblock = options.superblock,
                 .free_set = free_set,
-                .free_set_encoded = free_set_encoded,
+                .free_set_checkpoint = free_set_checkpoint,
                 .blocks_missing = blocks_missing,
                 .cache = cache,
                 .cache_blocks = cache_blocks,
@@ -266,45 +270,94 @@ pub fn GridType(comptime Storage: type) type {
             grid.cache.deinit(allocator);
             grid.blocks_missing.deinit(allocator);
 
-            grid.free_set_encoded.deinit(allocator);
+            grid.free_set_checkpoint.deinit(allocator);
             grid.free_set.deinit(allocator);
 
             grid.* = undefined;
         }
 
-        /// Checkpointing the grid:
-        /// 1. Writes the free set to disk.
-        /// 2. Awaits all pending repair-writes to blocks that were just freed. This guarantees that
-        ///    there are no outstanding writes to (now-)free blocks when we enter the new checkpoint.
-        /// 3. Marks blocks released during the current checkpoint as free and eligible for
-        ///    acquisition in the next checkpoint.
-        /// 4. Marks the free set's own blocks as released (but not yet free).
+        pub fn open(grid: *Grid, callback: *const fn (*Grid) void) void {
+            assert(grid.callback == .none);
+
+            grid.callback = .{ .open = callback };
+            grid.free_set_checkpoint.open(
+                grid,
+                grid.superblock.working.free_set_reference(),
+                open_free_set_callback,
+            );
+        }
+
+        fn open_free_set_callback(free_set_checkpoint: *CheckpointTrailer) void {
+            const grid = @fieldParentPtr(Grid, "free_set_checkpoint", free_set_checkpoint);
+            const callback = grid.callback.open;
+
+            {
+                assert(!grid.free_set.opened);
+                defer assert(grid.free_set.opened);
+
+                grid.free_set.open(.{
+                    .encoded = free_set_checkpoint.buffer[0..free_set_checkpoint.size],
+                    .block_addresses = free_set_checkpoint.block_addresses[0..free_set_checkpoint.block_count()],
+                });
+                assert((grid.free_set.count_acquired() > 0) == (free_set_checkpoint.size > 0));
+                assert(grid.free_set.count_reservations() == 0);
+                assert(grid.free_set.count_released() == grid.free_set_checkpoint.block_count());
+            }
+
+            grid.callback = .none;
+            callback(grid);
+        }
+
+        /// Checkpoint process is delicate:
+        ///   1. Encode free set.
+        ///   2. Derive the number of blocks required to store the encoding.
+        ///   3. Allocate free set blocks for the encoding (in the old checkpoint).
+        ///   4. Write the free set blocks to disk.
+        ///   5. Awaits all pending repair-writes to blocks that were just freed. This guarantees
+        ///      that there are no outstanding writes to (now-)free blocks when we enter the new
+        ///      checkpoint. This step runs concurrently to step 4.
+        ///   6. Mark currently released blocks as free and eligible for acquisition in the next
+        ///      checkpoint.
+        ///   7. Mark the free set's own blocks as released (but not yet free).
+        ///
+        /// This function handles step 1 and 5.
+        /// This function calls `free_set_checkpoint.checkpoint`, which handles steps 2-4.
+        /// The caller is responsible for calling FreeSet.checkpoint which handles 6 and 7.
         pub fn checkpoint(grid: *Grid, callback: *const fn (*Grid) void) void {
-            assert(grid.checkpointing == null);
-            assert(grid.canceling == null);
+            assert(grid.callback == .none);
             assert(grid.read_global_queue.empty());
             grid.assert_only_repairing();
 
-            grid.checkpointing = .{ .callback = callback };
+            {
+                assert(grid.free_set.count_reservations() == 0);
+
+                grid.free_set.include_staging();
+                defer grid.free_set.exclude_staging();
+
+                grid.free_set_checkpoint.size =
+                    @as(u32, @intCast(grid.free_set.encode(grid.free_set_checkpoint.buffer)));
+                assert(grid.free_set_checkpoint.size % @sizeOf(FreeSet.Word) == 0);
+            }
+
+            grid.callback = .{ .checkpoint = callback };
             grid.blocks_missing.checkpoint_commence(&grid.free_set);
-            grid.free_set_encoded.checkpoint(checkpoint_free_set_callback);
+            grid.free_set_checkpoint.checkpoint(checkpoint_free_set_callback);
         }
 
-        fn checkpoint_free_set_callback(set: *FreeSetEncoded) void {
-            const grid = @fieldParentPtr(Grid, "free_set_encoded", set);
-            assert(grid.checkpointing != null);
+        fn checkpoint_free_set_callback(set: *CheckpointTrailer) void {
+            const grid = @fieldParentPtr(Grid, "free_set_checkpoint", set);
+            assert(grid.callback == .checkpoint);
             grid.checkpoint_join();
         }
 
         fn checkpoint_join(grid: *Grid) void {
-            assert(grid.checkpointing != null);
-            assert(grid.canceling == null);
+            assert(grid.callback == .checkpoint);
             assert(grid.read_global_queue.empty());
 
-            if (grid.free_set_encoded.callback == .checkpoint) {
+            if (grid.free_set_checkpoint.callback == .checkpoint) {
                 return; // Still writing free set blocks.
             }
-            assert(grid.free_set_encoded.callback == .none);
+            assert(grid.free_set_checkpoint.callback == .none);
             grid.assert_only_repairing();
 
             // We are still repairing some blocks that were released at the checkpoint.
@@ -330,20 +383,25 @@ pub fn GridType(comptime Storage: type) type {
             // Now that there are no writes to released blocks, we can safely mark them as free.
             // This concludes grid checkpointing.
             grid.free_set.checkpoint(
-                grid.free_set_encoded.block_addresses[0..grid.free_set_encoded.block_count()],
+                grid.free_set_checkpoint.block_addresses[0..grid.free_set_checkpoint.block_count()],
             );
-            assert(grid.free_set.count_released() == grid.free_set_encoded.block_count());
+            assert(grid.free_set.count_released() == grid.free_set_checkpoint.block_count());
 
-            const callback = grid.checkpointing.?.callback;
-            grid.checkpointing = null;
+            const callback = grid.callback.checkpoint;
+            grid.callback = .none;
             callback(grid);
         }
 
         pub fn cancel(grid: *Grid, callback: *const fn (*Grid) void) void {
-            assert(grid.canceling == null);
-            assert(grid.checkpointing == null);
+            // grid.open() is cancellable the same way that read_block()/write_block() are.
+            switch (grid.callback) {
+                .none => {},
+                .open => {},
+                .checkpoint => unreachable,
+                .cancel => unreachable,
+            }
 
-            grid.canceling = .{ .callback = callback };
+            grid.callback = .{ .cancel = callback };
 
             grid.blocks_missing.cancel();
             grid.read_queue.reset();
@@ -360,9 +418,8 @@ pub fn GridType(comptime Storage: type) type {
 
         fn cancel_tick_callback(next_tick: *NextTick) void {
             const grid = @fieldParentPtr(Grid, "canceling_tick_context", next_tick);
-            if (grid.canceling == null) return;
+            if (grid.callback != .cancel) return;
 
-            assert(grid.checkpointing == null);
             assert(grid.read_queue.empty());
             assert(grid.read_pending_queue.empty());
             assert(grid.read_global_queue.empty());
@@ -372,8 +429,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn cancel_join_callback(grid: *Grid) void {
-            assert(grid.canceling != null);
-            assert(grid.checkpointing == null);
+            assert(grid.callback == .cancel);
             assert(grid.read_queue.empty());
             assert(grid.read_pending_queue.empty());
             assert(grid.read_global_queue.empty());
@@ -382,8 +438,8 @@ pub fn GridType(comptime Storage: type) type {
             if (grid.read_iops.executing() == 0 and
                 grid.write_iops.executing() == 0)
             {
-                const callback = grid.canceling.?.callback;
-                grid.canceling = null;
+                const callback = grid.callback.cancel;
+                grid.callback = .none;
 
                 callback(grid);
             }
@@ -394,29 +450,26 @@ pub fn GridType(comptime Storage: type) type {
             callback: *const fn (*Grid.NextTick) void,
             next_tick: *Grid.NextTick,
         ) void {
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             grid.superblock.storage.on_next_tick(.lsm, callback, next_tick);
         }
 
         /// Returning null indicates that there are not enough free blocks to fill the reservation.
         pub fn reserve(grid: *Grid, blocks_count: usize) ?Reservation {
-            assert(grid.checkpointing == null);
-            assert(grid.canceling == null);
+            assert(grid.callback == .none);
             return grid.free_set.reserve(blocks_count);
         }
 
         /// Forfeit a reservation.
         pub fn forfeit(grid: *Grid, reservation: Reservation) void {
-            assert(grid.checkpointing == null);
-            assert(grid.canceling == null);
+            assert(grid.callback == .none);
             return grid.free_set.forfeit(reservation);
         }
 
         /// Returns a just-allocated block.
         /// The caller is responsible for not acquiring more blocks than they reserved.
         pub fn acquire(grid: *Grid, reservation: Reservation) u64 {
-            assert(grid.checkpointing == null);
-            assert(grid.canceling == null);
+            assert(grid.callback == .none);
             return grid.free_set.acquire(reservation).?;
         }
 
@@ -430,8 +483,7 @@ pub fn GridType(comptime Storage: type) type {
         ///
         /// Asserts that the address is not currently being read from or written to.
         pub fn release(grid: *Grid, address: u64) void {
-            assert(grid.checkpointing == null);
-            assert(grid.canceling == null);
+            assert(grid.callback == .none);
             assert(grid.writing(address, null) != .create);
             // It's safe to release an address that is being read from,
             // because the superblock will not allow it to be overwritten before
@@ -504,7 +556,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn assert_only_repairing(grid: *Grid) void {
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             assert(grid.read_global_queue.empty());
 
             var read_queue = grid.read_queue.peek();
@@ -527,7 +579,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn fulfill_block(grid: *Grid, block: BlockPtrConst) bool {
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
 
             const block_header = schema.header_from_block(block);
             assert(block_header.cluster == grid.superblock.working.cluster);
@@ -547,7 +599,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn repair_block_waiting(grid: *Grid, address: u64, checksum: u128) bool {
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             return grid.blocks_missing.repair_waiting(address, checksum);
         }
 
@@ -564,8 +616,7 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             const block_header = schema.header_from_block(block.*);
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
-            maybe(grid.checkpointing == null);
+            assert(grid.callback == .none or grid.callback == .checkpoint);
             assert(grid.writing(block_header.address, block.*) == .not_writing);
             assert(grid.blocks_missing.repair_waiting(block_header.address, block_header.checksum));
             assert(!grid.free_set.is_free(block_header.address));
@@ -584,8 +635,8 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             const block_header = schema.header_from_block(block.*);
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
-            assert((grid.checkpointing != null) == (block_header.block_type == .free_set));
+            assert(grid.callback == .none or grid.callback == .checkpoint);
+            assert((grid.callback == .checkpoint) == (block_header.block_type == .free_set));
             assert(grid.writing(block_header.address, block.*) == .not_writing);
             assert(!grid.blocks_missing.repair_waiting(
                 block_header.address,
@@ -609,7 +660,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(header.cluster == grid.superblock.working.cluster);
 
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             assert(grid.writing(header.address, block.*) == .not_writing);
             assert(!grid.free_set.is_free(header.address));
             grid.assert_coherent(header.address, header.checksum);
@@ -697,7 +748,7 @@ pub fn GridType(comptime Storage: type) type {
                 .{ .grid_write_iop = .{ .index = write_iop_index } },
             );
 
-            if (grid.canceling) |_| {
+            if (grid.callback == .cancel) {
                 assert(grid.write_queue.empty());
 
                 grid.write_iops.release(iop);
@@ -724,7 +775,7 @@ pub fn GridType(comptime Storage: type) type {
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
             completed_write.callback(completed_write);
-            if (grid.checkpointing) |_| grid.checkpoint_join();
+            if (grid.callback == .checkpoint) grid.checkpoint_join();
         }
 
         /// Fetch the block synchronously from cache, if possible.
@@ -736,7 +787,7 @@ pub fn GridType(comptime Storage: type) type {
             options: struct { coherent: bool },
         ) ?BlockPtrConst {
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             if (options.coherent) {
                 assert(grid.writing(address, null) != .create);
                 assert(!grid.free_set.is_free(address));
@@ -782,19 +833,19 @@ pub fn GridType(comptime Storage: type) type {
             },
         ) void {
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             assert(address > 0);
 
             switch (callback) {
                 .from_local_storage => {
-                    maybe(grid.checkpointing == null);
+                    maybe(grid.callback == .checkpoint);
                     // We try to read the block even when it is free — if we recently released it,
                     // it might be found on disk anyway.
                     maybe(grid.free_set.is_free(address));
                     maybe(grid.writing(address, null) == .create);
                 },
                 .from_local_or_global_storage => {
-                    assert(grid.checkpointing == null);
+                    assert(grid.callback != .checkpoint);
                     assert(!grid.free_set.is_free(address));
                     assert(grid.writing(address, null) != .create);
                     grid.assert_coherent(address, checksum);
@@ -823,7 +874,7 @@ pub fn GridType(comptime Storage: type) type {
             const read = @fieldParentPtr(Grid.Read, "next_tick", next_tick);
             const grid = read.grid;
             assert(grid.superblock.opened);
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             if (read.coherent) {
                 assert(!grid.free_set.is_free(read.address));
                 assert(grid.writing(read.address, null) != .create);
@@ -917,7 +968,7 @@ pub fn GridType(comptime Storage: type) type {
             const grid = read.grid;
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
 
-            if (grid.canceling) |_| {
+            if (grid.callback == .cancel) {
                 grid.read_iops.release(iop);
                 grid.cancel_join_callback();
                 return;
@@ -1012,7 +1063,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         fn read_block_resolve(grid: *Grid, read: *Grid.Read, result: ReadBlockResult) void {
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
 
             // Guard to make sure the cache cannot be updated by any read.callbacks() below.
             assert(!grid.read_resolving);
@@ -1098,7 +1149,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn next_batch_of_block_requests(grid: *Grid, requests: []vsr.BlockRequest) usize {
-            assert(grid.canceling == null);
+            assert(grid.callback != .cancel);
             assert(requests.len > 0);
 
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can

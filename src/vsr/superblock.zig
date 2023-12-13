@@ -46,7 +46,6 @@ pub const SuperBlockClientSessions = @import("superblock_client_sessions.zig").C
 pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
 });
-const FreeSetEncodedType = @import("free_set_encoded.zig").FreeSetEncodedType;
 
 pub const SuperBlockVersion: u16 = 0;
 
@@ -348,13 +347,13 @@ pub const SuperBlockHeader = extern struct {
 
         // Size of the encoded free set in bytes.
         // It is equal to the sum of sizes of individual free set blocks and is used for assertions.
-        free_set_size: u32,
+        free_set_size: u64,
 
         /// The number of manifest blocks in the manifest log.
         manifest_block_count: u32,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [24]u8 = [_]u8{0} ** 24,
+        reserved: [20]u8 = [_]u8{0} ** 20,
 
         comptime {
             assert(@sizeOf(CheckpointState) == 272);
@@ -481,13 +480,12 @@ pub const SuperBlockHeader = extern struct {
         };
     }
 
-    pub fn free_set_reference(superblock: *const SuperBlockHeader) FreeSetReference {
+    pub fn free_set_reference(superblock: *const SuperBlockHeader) TrailerReference {
         return .{
             .checksum = superblock.vsr_state.checkpoint.free_set_checksum,
             .last_block_address = superblock.vsr_state.checkpoint.free_set_last_block_address,
             .last_block_checksum = superblock.vsr_state.checkpoint.free_set_last_block_checksum,
-            .free_set_size = superblock.vsr_state.checkpoint.free_set_size,
-            .storage_size = superblock.vsr_state.checkpoint.storage_size,
+            .trailer_size = superblock.vsr_state.checkpoint.free_set_size,
         };
     }
 };
@@ -517,24 +515,21 @@ pub const ManifestReferences = struct {
     }
 };
 
-pub const FreeSetReference = struct {
-    /// Checksum over the entire encoded free set.
+pub const TrailerReference = struct {
+    /// Checksum over the entire encoded trailer.
     checksum: u128,
     last_block_address: u64,
     last_block_checksum: u128,
-    free_set_size: u32,
-    storage_size: u64,
+    trailer_size: u64,
 
-    pub fn empty(reference: *const FreeSetReference) bool {
-        if (reference.free_set_size == 0) {
+    pub fn empty(reference: *const TrailerReference) bool {
+        if (reference.trailer_size == 0) {
             assert(reference.checksum == vsr.checksum(&.{}));
             assert(reference.last_block_address == 0);
             assert(reference.last_block_checksum == 0);
-            assert(reference.storage_size == data_file_size_min);
             return true;
         } else {
             assert(reference.last_block_address > 0);
-            assert(reference.storage_size > data_file_size_min);
             return false;
         }
     }
@@ -850,7 +845,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             sync_op_min: u64,
             sync_op_max: u64,
             manifest_references: ManifestReferences,
-            free_set_reference: FreeSetReference,
+            free_set_reference: TrailerReference,
+            storage_size: u64,
         };
 
         /// Must update the commit_min and commit_min_checksum.
@@ -867,8 +863,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_state.checkpoint.commit_min_checksum);
             assert(update.sync_op_min <= update.sync_op_max);
 
-            assert(update.free_set_reference.storage_size >= data_file_size_min);
-            assert(update.free_set_reference.storage_size <= superblock.storage_size_limit);
+            assert(update.storage_size <= superblock.storage_size_limit);
+            assert(update.storage_size >= data_file_size_min);
+            assert((update.storage_size == data_file_size_min) ==
+                update.free_set_reference.empty());
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
@@ -878,13 +876,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .free_set_checksum = update.free_set_reference.checksum,
                 .free_set_last_block_checksum = update.free_set_reference.last_block_checksum,
                 .free_set_last_block_address = update.free_set_reference.last_block_address,
-                .free_set_size = update.free_set_reference.free_set_size,
+                .free_set_size = update.free_set_reference.trailer_size,
                 .manifest_oldest_checksum = update.manifest_references.oldest_checksum,
                 .manifest_oldest_address = update.manifest_references.oldest_address,
                 .manifest_newest_checksum = update.manifest_references.newest_checksum,
                 .manifest_newest_address = update.manifest_references.newest_address,
                 .manifest_block_count = update.manifest_references.block_count,
-                .storage_size = update.free_set_reference.storage_size,
+                .storage_size = update.storage_size,
                 .snapshots_block_checksum = vsr_state.checkpoint.snapshots_block_checksum,
                 .snapshots_block_address = vsr_state.checkpoint.snapshots_block_address,
             };
