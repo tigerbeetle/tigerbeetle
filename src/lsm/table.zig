@@ -23,10 +23,10 @@ pub const TableUsage = enum {
     /// * Only remove keys which are present.
     /// * TableKey == TableValue (modulo padding, eg CompositeKey).
     /// Then we can unlock additional optimizations:
-    /// * Immediately cancel out tombstone  and the corresponding insert, without waiting for the
-    ///   tombstone to sink to the bottom of the LSM true: absence of upserts guarantees that
+    /// * Immediately cancel out a tombstone and the corresponding insert, without waiting for the
+    ///   tombstone to sink to the bottom of the LSM true: absence of updates guarantees that
     ///   there are no otherwise visible values on lower level.
-    /// * Immediately cancel out insert and a tombstone for a "different" insert: as the values
+    /// * Immediately cancel out an insert and a tombstone for a "different" insert: as the values
     ///   are equal, it is correct to just resurrect an older value.
     secondary_index,
 };

@@ -28,7 +28,7 @@
 //! † When A's value is a tombstone, there is a special case for garbage collection. When either:
 //! * level B is the final level, or
 //! * A's key does not exist in B or any deeper level,
-//! then the tombstone is omitted from the compacted output (see: `compaction_must_drop_tombstones`).
+//! then the tombstone is omitted from the compacted output, see: `compaction_must_drop_tombstones`.
 //!
 const std = @import("std");
 const mem = std.mem;
@@ -48,7 +48,8 @@ const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
-const LevelTableValueBlockIteratorType = @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
+const LevelTableValueBlockIteratorType =
+    @import("level_data_iterator.zig").LevelTableValueBlockIteratorType;
 
 pub fn CompactionType(
     comptime Table: type,
@@ -475,14 +476,6 @@ pub fn CompactionType(
             }
         }
 
-        // TODO: We need to reimplement the .secondary_index optimization here (or at a higher
-        // level). The original optimization is described at
-        // https://github.com/tigerbeetle/tigerbeetle/pull/337/files.
-        // When updating a secondary index for a single object multiple times within a bar,
-        // redundant tombstones and puts are generated, and these are tricky to filter out without
-        // either using a HashMap or having to do extra sorting. They are eventually filtered out
-        // by our compaction merge() however.
-        //
         /// Copies values to `target` from our immutable table input. In the process, merge values
         /// with identical keys (last one wins) and collapse tombstones for secondary indexes.
         /// Return the number of values written to the output and updates immutable table slice to
@@ -514,7 +507,12 @@ pub fn CompactionType(
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {
                         // Secondary index optimization --- cancel out put and remove.
-                        assert(tombstone(&source[source_index]) != tombstone(&source[source_index + 1]));
+                        // NB: while this prevents redundant tombstones from getting to disk, we
+                        // still spend some extra CPU work to sort the entries in memory. Ideally,
+                        // we annihilate tombstones immediately, before sorting, but that's tricky
+                        // to do with scopes.
+                        assert(tombstone(&source[source_index]) !=
+                            tombstone(&source[source_index + 1]));
                         source_index += 2;
                         target_index += 0;
                     } else {
@@ -580,13 +578,19 @@ pub fn CompactionType(
             grid.release(Table.block_address(index_block));
         }
 
-        fn iterator_next_a(iterator_a: *TableDataIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_a(
+            iterator_a: *TableDataIterator,
+            data_block: ?BlockPtrConst,
+        ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_a", iterator_a);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .a }));
             compaction.iterator_next(data_block);
         }
 
-        fn iterator_next_b(iterator_b: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void {
+        fn iterator_next_b(
+            iterator_b: *LevelTableValueBlockIterator,
+            data_block: ?BlockPtrConst,
+        ) void {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.iterator_next(data_block);
