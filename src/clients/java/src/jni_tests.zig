@@ -268,7 +268,6 @@ test "JNI: References" {
 }
 
 test "JNI: LocalFrame" {
-    if (true) return error.SkipZigTest;
     var env: *JNIEnv = get_testing_env();
 
     // Creating a new local frame.
