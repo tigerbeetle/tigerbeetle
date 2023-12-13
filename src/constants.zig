@@ -182,21 +182,6 @@ comptime {
     assert(message_body_size_max >= @sizeOf(vsr.CheckpointState));
 }
 
-/// The maximum body size of:
-/// - command=sync_client_sessions
-///
-/// In practice, this should always be as high as possible to minimize the number of round trips
-/// required for sync.
-/// It is configurable to make testing multipart trailers simple.
-pub const sync_trailer_message_body_size_max =
-    config.process.sync_trailer_message_body_size_max orelse
-    message_body_size_max;
-
-comptime {
-    assert(sync_trailer_message_body_size_max > 0);
-    assert(sync_trailer_message_body_size_max <= message_body_size_max);
-}
-
 /// The maximum number of Viewstamped Replication prepare messages that can be inflight at a time.
 /// This is immutable once assigned per cluster, as replicas need to know how many operations might
 /// possibly be uncommitted during a view change, and this must be constant for all replicas.
@@ -446,8 +431,6 @@ comptime {
 ///
 /// The superblock contains local state for the replica and therefore cannot be replicated remotely.
 /// Loss of the superblock would represent loss of the replica and so it must be protected.
-/// Since each superblock copy also copies the superblock trailer (around 33 MiB), setting this
-/// beyond 4 copies (or decreasing block_size < 64 KiB) can result in a superblock zone > 264 MiB.
 ///
 /// This can mean checkpointing latencies in the rare extreme worst-case of at most 264ms, although
 /// this would require EWAH compression of our block free set to have zero effective compression.

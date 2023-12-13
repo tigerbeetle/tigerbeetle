@@ -446,10 +446,7 @@ pub const GridBlocksMissing = struct {
         };
     }
 
-    pub fn checkpoint_commence(
-        queue: *GridBlocksMissing,
-        free_set: *const vsr.superblock.SuperBlockFreeSet,
-    ) void {
+    pub fn checkpoint_commence(queue: *GridBlocksMissing, free_set: *const vsr.FreeSet) void {
         assert(queue.checkpointing == null);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);

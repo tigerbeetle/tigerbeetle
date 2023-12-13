@@ -93,7 +93,6 @@ pub fn TableType(
             assert(stdx.no_padding(Value));
 
             // These impact our calculation of:
-            // * the superblock trailer size, and
             // * the manifest log layout for alignment.
             assert(key_size >= 8);
             assert(key_size <= 32);

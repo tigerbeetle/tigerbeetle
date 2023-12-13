@@ -548,7 +548,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     assert(cluster.replica_diverged.isSet(event_data.replica));
                 },
                 .sync_stage_changed => switch (replica.syncing) {
-                    .requesting_trailers => {
+                    .requesting_checkpoint => {
                         cluster.log_replica(.sync_commenced, replica.replica);
                         cluster.sync_checker.replica_sync_start(replica);
                     },
