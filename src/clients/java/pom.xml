@@ -58,6 +58,7 @@
         </os>
       </activation>
       <properties>
+        <executable.extension>.exe</executable.extension>
         <script.extension>.bat</script.extension>
       </properties>
     </profile>
@@ -69,6 +70,7 @@
         </os>
       </activation>
       <properties>
+        <executable.extension></executable.extension>
         <script.extension>.sh</script.extension>
       </properties>
     </profile>
@@ -209,7 +211,7 @@
         <version>3.1.0</version>
         <configuration>
           <workingDirectory>${project.basedir}/../../../</workingDirectory>
-          <executable>${project.basedir}/../../../zig/zig</executable>
+          <executable>${project.basedir}/../../../zig/zig${executable.extension}</executable>
         </configuration>
         <executions>
           <execution>
