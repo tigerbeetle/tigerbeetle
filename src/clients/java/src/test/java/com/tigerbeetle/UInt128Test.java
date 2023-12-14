@@ -1,8 +1,8 @@
 package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertSame;
 import java.util.concurrent.CountDownLatch;
 import java.math.BigInteger;
@@ -172,44 +172,18 @@ public class UInt128Test {
 
     @Test
     public void testULID() throws Exception {
-        class DecodedULID {
-            public final long timestamp;
-            public final BigInteger random;
-
-            public DecodedULID(byte[] ulid) {
-                var buffer = ByteBuffer.wrap(ulid).order(ByteOrder.BIG_ENDIAN);
-                assertEquals(ulid.length, UInt128.SIZE);
-
-                var timestampHi = buffer.getInt();
-                var timestampLo = buffer.getShort();
-                timestamp = (((long) timestampHi) << 32) | timestampLo;
-
-                var randomLo = buffer.getLong();
-                var randomHi = buffer.getShort();
-                random = UInt128.asBigInteger(randomLo, randomHi);
-            }
-
-            public void assertMonotonicSince(final DecodedULID earlier) {
-                var compareEarlier = Long.compare(earlier.timestamp, timestamp);
-                if (compareEarlier == 0) {
-                    compareEarlier = earlier.random.compareTo(random);
-                }
-
-                // earlier NOT greater than this
-                assertNotEquals(compareEarlier, 1);
-            }
-        }
+        // Java's BigInteger uses bytes in big-endian, which should allow direct casting from ULID.
 
         {
             // Generate ULIDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
-            var ulidA = new DecodedULID(UInt128.ULID());
+            var ulidA = new BigInteger(UInt128.ULID());
             for (int i = 0; i < 10_000_000; i++) {
                 if (i % 10_000 == 0) {
                     Thread.sleep(1);
                 }
 
-                var ulidB = new DecodedULID(UInt128.ULID());
-                ulidB.assertMonotonicSince(ulidA);
+                var ulidB = new BigInteger(UInt128.ULID());
+                assertTrue(ulidB.compareTo(ulidA) > 0);
 
                 // Use the generated ULID as the new reference point for the next loop.
                 ulidA = ulidB;
@@ -229,14 +203,14 @@ public class UInt128Test {
                     latchStart.await();
 
                     // Same as serial test above, but with smaller bounds.
-                    var ulidA = new DecodedULID(UInt128.ULID());
+                    var ulidA = new BigInteger(UInt128.ULID());
                     for (int j = 0; j < 10_000; j++) {
                         if (j % 1000 == 0) {
                             Thread.sleep(1);
                         }
 
-                        var ulidB = new DecodedULID(UInt128.ULID());
-                        ulidB.assertMonotonicSince(ulidA);
+                        var ulidB = new BigInteger(UInt128.ULID());
+                        assertTrue(ulidB.compareTo(ulidA) > 0);
                         ulidA = ulidB;
                     }
 

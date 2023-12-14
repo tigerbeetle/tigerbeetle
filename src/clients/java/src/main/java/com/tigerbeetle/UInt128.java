@@ -184,9 +184,10 @@ public enum UInt128 {
      *
      * The ULID returned always increases monotonically and is thread-safe.
      *
+     * @throws ArithmeticException as per ULID specs, if the 80 bits of randomness overflows.
      * @return an array of 16 bytes representing the 128-bit value.
      */
-    public static byte[] ULID() throws ArithmeticException {
+    public static byte[] ULID() {
         long randomLo;
         short randomHi;
         long timestamp = System.currentTimeMillis();
@@ -205,11 +206,18 @@ public enum UInt128 {
             randomLo = random.getLong();
             randomHi = random.getShort();
 
-            // Increment lo. If that overflows, increment hi. If that overflows, throw error.
-            // ULID spec says to throw error upon 80-bit overflow (not relative to initial random).
-            if (randomLo++ == Long.MAX_VALUE && randomHi++ == 0xffff) {
-                throw new ArithmeticException("random bits overflow");
+            // If randomLo will overflow from increment, then increment randomHi as carry.
+            // If randomHi will overflow on increment, throw error on 80-bit random overflow.
+            if (randomLo == 0xFFFFFFFFFFFFFFFFL) {
+                if (randomHi == 0xffff) {
+                    throw new ArithmeticException("random bits overflow on monotonic increment");
+                } else {
+                    randomHi += 1;
+                }
             }
+
+            // Wrapping increment on randomLo. Java allows overflowing arithmetic by default.
+            randomLo += 1;
 
             random.flip();
             random.putLong(randomLo);
