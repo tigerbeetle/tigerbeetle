@@ -97,7 +97,7 @@ pub fn main() !void {
         .standby_count = standby_count,
         .client_count = client_count,
         .storage_size_limit = vsr.sector_floor(
-            constants.storage_size_max - random.uintLessThan(u64, constants.storage_size_max / 10),
+            constants.storage_size_limit_max - random.uintLessThan(u64, constants.storage_size_limit_max / 10),
         ),
         .seed = random.int(u64),
         .network = .{

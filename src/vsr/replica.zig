@@ -462,7 +462,7 @@ pub fn ReplicaType(
 
         /// Initializes and opens the provided replica using the options.
         pub fn open(self: *Self, parent_allocator: std.mem.Allocator, options: OpenOptions) !void {
-            assert(options.storage_size_limit <= constants.storage_size_max);
+            assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
             assert(options.nonce != 0);
 
