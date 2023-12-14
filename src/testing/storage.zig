@@ -96,7 +96,7 @@ pub const Storage = struct {
     /// to create a `FreeSet` covering exactly this amount of blocks.
     pub const grid_blocks_max = grid_blocks_max: {
         const free_set_shard_count = @divFloor(
-            constants.storage_size_max - superblock.data_file_size_min,
+            constants.storage_size_limit_max - superblock.data_file_size_min,
             constants.block_size * FreeSet.shard_bits,
         );
         break :grid_blocks_max free_set_shard_count * FreeSet.shard_bits;
@@ -174,7 +174,7 @@ pub const Storage = struct {
     next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
-        assert(size <= constants.storage_size_max);
+        assert(size <= constants.storage_size_limit_max);
         assert(options.write_latency_mean >= options.write_latency_min);
         assert(options.read_latency_mean >= options.read_latency_min);
         assert(options.fault_atlas == null or options.replica_index != null);
