@@ -112,7 +112,7 @@ const Environment = struct {
 
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = env.storage,
-            .storage_size_limit = constants.storage_size_max,
+            .storage_size_limit = constants.storage_size_limit_max,
         });
 
         env.grid = try Grid.init(allocator, .{
@@ -538,7 +538,7 @@ const Environment = struct {
 
 pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) !void {
     // Init mocked storage.
-    var storage = try Storage.init(allocator, constants.storage_size_max, storage_options);
+    var storage = try Storage.init(allocator, constants.storage_size_limit_max, storage_options);
     defer storage.deinit(allocator);
 
     try Environment.run(&storage, fuzz_ops);

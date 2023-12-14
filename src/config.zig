@@ -77,7 +77,7 @@ const ConfigProcess = struct {
     verify: bool,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
-    storage_size_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
+    storage_size_limit_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
     memory_size_max_default: u64 = 1024 * 1024 * 1024,
     cache_accounts_size_default: usize,
     cache_transfers_size_default: usize,
@@ -237,7 +237,7 @@ pub const configs = struct {
     /// Not suitable for production, but good for testing code that would be otherwise hard to reach.
     pub const test_min = Config{
         .process = .{
-            .storage_size_max = 200 * 1024 * 1024,
+            .storage_size_limit_max = 200 * 1024 * 1024,
             .direct_io = false,
             .direct_io_required = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 2048,
@@ -270,7 +270,7 @@ pub const configs = struct {
     /// able to max out the LSM levels.
     pub const fuzz_min = config: {
         var base = test_min;
-        base.process.storage_size_max = 1 * 1024 * 1024 * 1024;
+        base.process.storage_size_limit_max = 1 * 1024 * 1024 * 1024;
         break :config base;
     };
 

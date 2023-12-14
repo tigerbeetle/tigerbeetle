@@ -685,7 +685,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: Options) !SuperBlock {
             assert(options.storage_size_limit >= data_file_size_min);
-            assert(options.storage_size_limit <= constants.storage_size_max);
+            assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
 
             const a = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
@@ -1160,7 +1160,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             const storage_size = superblock.staging.vsr_state.checkpoint.storage_size;
             assert(storage_size >= data_file_size_min);
-            assert(storage_size <= constants.storage_size_max);
+            assert(storage_size <= constants.storage_size_limit_max);
 
             assert(context.copy.? < constants.superblock_copies);
             superblock.staging.copy = context.copy.?;
