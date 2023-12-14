@@ -120,7 +120,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(options.replica_count <= 6);
             assert(options.client_count > 0);
             assert(options.storage_size_limit % constants.sector_size == 0);
-            assert(options.storage_size_limit <= constants.storage_size_max);
+            assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage.replica_index == null);
             assert(options.storage.fault_atlas == null);
 

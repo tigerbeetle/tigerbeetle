@@ -472,7 +472,7 @@ comptime {
 ///
 /// This is a "firm" limit --- while it is a compile-time constant, it does not affect data file
 /// layout and can be safely changed for an existing cluster.
-pub const storage_size_max = config.process.storage_size_max;
+pub const storage_size_limit_max = config.process.storage_size_limit_max;
 
 /// The unit of read/write access to LSM manifest and LSM table blocks in the block storage zone.
 ///

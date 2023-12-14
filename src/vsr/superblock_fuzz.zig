@@ -80,13 +80,13 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 
     var superblock = try SuperBlock.init(allocator, .{
         .storage = &storage,
-        .storage_size_limit = constants.storage_size_max,
+        .storage_size_limit = constants.storage_size_limit_max,
     });
     defer superblock.deinit(allocator);
 
     var superblock_verify = try SuperBlock.init(allocator, .{
         .storage = &storage_verify,
-        .storage_size_limit = constants.storage_size_max,
+        .storage_size_limit = constants.storage_size_limit_max,
     });
     defer superblock_verify.deinit(allocator);
 
