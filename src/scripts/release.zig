@@ -164,10 +164,12 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\build install
                 \\    -Dtarget={target}
                 \\    -Doptimize={mode}
+                \\    -Dgit-commit={commit}
                 \\    -Dversion={version}
             , .{
                 .target = target,
                 .mode = if (debug) "Debug" else "ReleaseSafe",
+                .commit = info.sha,
                 .version = info.version,
             });
 
