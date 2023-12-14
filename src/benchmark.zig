@@ -397,11 +397,11 @@ const Benchmark = struct {
     ) void {
         b.callback = callback;
 
-        const event_size = switch (operation) {
+        const event_count = switch (operation) {
             inline else => |op| @divExact(payload.len, @sizeOf(StateMachine.Event(op))),
         };
 
-        const batch = b.client.batch_get(operation, event_size) catch unreachable;
+        const batch = b.client.batch_get(operation, event_count) catch unreachable;
         stdx.copy_disjoint(.exact, u8, batch.slice(), payload);
 
         b.client.batch_submit(
