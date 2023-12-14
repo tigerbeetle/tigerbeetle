@@ -733,7 +733,7 @@ pub fn ReplicaType(
             if (self.superblock.working.client_sessions_reference().empty()) {
                 assert(trailer_size == 0);
             } else {
-                assert(trailer_size == ClientSessions.encode_size_max);
+                assert(trailer_size == ClientSessions.encode_size);
 
                 self.client_sessions.decode(trailer_buffer[0..trailer_size]);
             }
@@ -871,8 +871,8 @@ pub fn ReplicaType(
 
             var client_sessions_checkpoint = try CheckpointTrailer.init(
                 allocator,
-                ClientSessions.encode_size_max,
                 .client_sessions,
+                ClientSessions.encode_size,
             );
             errdefer client_sessions_checkpoint.deinit(allocator);
 

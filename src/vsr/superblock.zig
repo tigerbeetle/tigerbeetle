@@ -163,11 +163,11 @@ pub const SuperBlockHeader = extern struct {
                     .previous_checkpoint_id = 0,
                     .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
                     .commit_min = 0,
-                    .free_set_checksum = vsr.checksum(&.{}),
+                    .free_set_checksum = comptime vsr.checksum(&.{}),
                     .free_set_last_block_checksum = 0,
                     .free_set_last_block_address = 0,
                     .free_set_size = 0,
-                    .client_sessions_checksum = vsr.checksum(&.{}),
+                    .client_sessions_checksum = comptime vsr.checksum(&.{}),
                     .client_sessions_last_block_checksum = 0,
                     .client_sessions_last_block_address = 0,
                     .client_sessions_size = 0,
@@ -226,7 +226,7 @@ pub const SuperBlockHeader = extern struct {
                 assert(state.checkpoint.client_sessions_size == 0);
                 assert(state.checkpoint.client_sessions_checksum == vsr.checksum(&.{}));
             } else {
-                assert(state.checkpoint.client_sessions_size == vsr.ClientSessions.encode_size_max);
+                assert(state.checkpoint.client_sessions_size == vsr.ClientSessions.encode_size);
             }
 
             if (state.checkpoint.manifest_block_count == 0) {

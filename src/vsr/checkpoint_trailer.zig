@@ -116,7 +116,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             checkpoint: *const fn (trailer: *Self) void,
         } = .none,
 
-        pub fn init(allocator: mem.Allocator, buffer_size: usize, trailer_type: TrailerType) !Self {
+        pub fn init(allocator: mem.Allocator, trailer_type: TrailerType, buffer_size: usize) !Self {
             const write_block = try allocate_block(allocator);
             errdefer allocator.free(write_block);
 
