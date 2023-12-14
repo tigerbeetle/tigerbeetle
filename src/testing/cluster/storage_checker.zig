@@ -80,7 +80,7 @@ pub const StorageChecker = struct {
         errdefer allocator.free(free_set_buffer);
 
         var client_sessions_buffer =
-            try allocator.alignedAlloc(u8, @sizeOf(u256), vsr.ClientSessions.encode_size_max);
+            try allocator.alignedAlloc(u8, @sizeOf(u256), vsr.ClientSessions.encode_size);
         errdefer allocator.free(client_sessions_buffer);
 
         return StorageChecker{
@@ -230,7 +230,7 @@ pub const StorageChecker = struct {
         checker.client_sessions.decode(checker.client_sessions_buffer[0..client_sessions_size]);
         defer checker.client_sessions.reset();
 
-        var checksum: u128 = 0;
+        var checksum = vsr.ChecksumStream.init();
         for (checker.client_sessions.entries, 0..) |client_session, slot| {
             if (client_session.session == 0) {
                 // Empty slot.
@@ -240,13 +240,13 @@ pub const StorageChecker = struct {
                 if (client_session.header.size == @sizeOf(vsr.Header)) {
                     // ClientReplies won't store this entry.
                 } else {
-                    checksum ^= vsr.checksum(superblock.storage.area_memory(
+                    checksum.add(superblock.storage.area_memory(
                         .{ .client_replies = .{ .slot = slot } },
                     )[0..vsr.sector_ceil(client_session.header.size)]);
                 }
             }
         }
-        return checksum;
+        return checksum.checksum();
     }
 
     fn checksum_grid(checker: *StorageChecker, superblock: *const SuperBlock) u128 {
