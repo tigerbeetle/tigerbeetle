@@ -12,19 +12,16 @@ State sync is used when when a lagging replica's log no longer intersects with t
 (VRR refers to state sync as "state transfer", but we already have [transfers](../reference/transfers.md) elsewhere.)
 
 In the context of state sync, "state" refers to:
-1. the superblock free set
-1. the superblock client sessions
-3. the superblock `vsr_state.checkpoint.manifest_{head,tail}_{address,checksum}`
-4. the superblock `vsr_state.checkpoint.commit_min`
-5. the superblock `vsr_state.checkpoint.commit_min_checksum`
-6. the grid (manifest blocks)
-7. the grid (LSM table data; acquired blocks only)
-8. client replies
+1. the superblock `vsr_state.checkpoint`
+2. the grid (manifest, free set, and client sessions blocks)
+3. the grid (LSM table data; acquired blocks only)
+4. client replies
 
-State sync consists of three protocols:
-- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1-5)
-- [Sync Forest](./vsr.md#protocol-sync-forest) (syncs 6-7)
-- [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 8)
+State sync consists of four protocols:
+- [Sync Superblock](./vsr.md#protocol-sync-superblock) (syncs 1)
+- [Repair Grid](./vsr.md#protocol-repair-grid) (syncs 2)
+- [Sync Forest](./vsr.md#protocol-sync-forest) (syncs 3)
+- [Sync Client Replies](./vsr.md#protocol-sync-client-replies) (syncs 4)
 
 The target of superblock-sync is the latest checkpoint of the healthy cluster.
 When we catch up to the latest checkpoint (or very close to it), then we can transition back to a healthy state.
@@ -51,25 +48,22 @@ Checkpoints:
 3. Wait for grid IO to finish. (See `Grid.cancel()`.)
 4. Wait for a usable sync target to arrive. (Usually we already have one.)
 5. Begin [sync-superblock protocol](./vsr.md#protocol-sync-superblock).
-6. [Request superblock trailers](#6-request-superblock-trailers).
-7. Update superblock headers:
+6. [Request superblock checkpoint state](#6-request-superblock-checkpoint-state).
+7. Update the superblock headers with:
     - Bump `vsr_state.checkpoint.commit_min`/`vsr_state.checkpoint.commit_min_checksum` to the sync target op/op-checksum.
     - Bump `vsr_state.checkpoint.previous_checkpoint_id` to the checkpoint id that is previous to our sync target (i.e. it isn't _our_ previous checkpoint).
     - Bump `replica.commit_min`. (If `replica.commit_min` exceeds `replica.op`, transition to `status=recovering_head`).
-    - Write the target checkpoint's trailers.
-8. Request and write manifest blocks. (Handled by [Grid Repair Protocol](./vsr.md#protocol-repair-grid).)
-9. Update the superblock with:
     - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
     - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
-10. Sync-superblock protocol is done.
-11. Repair [replies](./vsr.md#protocol-sync-client-replies), [manifest blocks, and table blocks](./vsr.md#protocol-sync-forest) that were created within the `sync_op_{min,max}` range.
-12. Update the superblock with:
+8. Sync-superblock protocol is done.
+9. Repair [replies](./vsr.md#protocol-sync-client-replies), [free set, client sessions, and manifest blocks](./vsr.md#protocol-repair-grid), and [table blocks](./vsr.md#protocol-sync-forest) that were created within the `sync_op_{min,max}` range.
+10. Update the superblock with:
     - Set `vsr_state.sync_op_min = 0`
     - Set `vsr_state.sync_op_max = 0`
 
-If a newer sync target is discovered during steps *5*-*8* or *11*, go to step *4*.
+If a newer sync target is discovered during steps *5*-*6* or *9*, go to step *4*.
 
-If the replica starts up with `vsr_state.sync_op_max ≠ 0`, go to step *11*.
+If the replica starts up with `vsr_state.sync_op_max ≠ 0`, go to step *9*.
 
 ### 0: Scenarios
 
@@ -96,19 +90,9 @@ State sync is initially triggered by any of the following:
     - a WAL or grid repair is in progress and,
     - the replica's checkpoint is lagging behind the cluster's (far enough that the repair may never complete).
 
-### 6: Request Superblock Trailers
+### 6: Request Superblock Checkpoint State
 
-The replica concurrently sends out three request messages, with the sync target identifier attached to each:
-
-1. `command=request_sync_checkpoint`
-2. `command=request_sync_client_sessions`
-
-Replicas with a matching checkpoint identifier reply (respectively) with:
-
-1. `command=sync_checkpoint`
-2. `command=sync_client_sessions`
-
-If a trailer is too large to fit in a message, the syncing replica requests it again, with a byte offset.
+The syncing replica sends `command=request_sync_checkpoint` messages (with the sync target identifier attached to each) until it receives a `command=sync_checkpoint` with a matching checkpoint identifier.
 
 ## Concepts
 ### Syncing Replica
@@ -151,7 +135,7 @@ Having 2/3 replicas syncing means that a single grid-block corruption on the pri
 
 ### Checkpoint Identifier
 
-A _checkpoint id_ is a hash of the superblock trailers.
+A _checkpoint id_ is a hash of the superblock `CheckpointState`.
 
 A checkpoint identifier is attached to the following message types:
 - `command=commit`: Current checkpoint identifier of sender.
@@ -159,9 +143,7 @@ A checkpoint identifier is attached to the following message types:
 - `command=prepare`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
 - `command=prepare_ok`: The attached checkpoint id is the checkpoint id during which the corresponding prepare was originally prepared.
 - `command=request_sync_checkpoint`: Requested checkpoint identifier.
-- `command=request_sync_client_sessions`: Requested checkpoint identifier.
 - `command=sync_checkpoint`: Current checkpoint identifier of sender.
-- `command=sync_client_sessions`: Current checkpoint identifier of sender.
 
 ### Canonical Checkpoint
 

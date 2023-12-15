@@ -10,7 +10,7 @@ const stdx = @import("../stdx.zig");
 pub const ReplySlot = struct { index: usize };
 
 /// Track the headers of the latest reply for each active client.
-/// Serialized/deserialized to/from the superblock trailer on-disk.
+/// Serialized/deserialized to/from the trailer on-disk.
 /// For the reply bodies, see ClientReplies.
 pub const ClientSessions = struct {
     /// We found two bugs in the VRR paper relating to the client table:
@@ -75,9 +75,9 @@ pub const ClientSessions = struct {
         client_sessions.entries_free = EntriesFree.initFull();
     }
 
-    /// Maximum size of the buffer needed to encode the client sessions on disk.
+    /// Size of the buffer needed to encode the client sessions on disk.
     /// (Not rounded up to a sector boundary).
-    pub const encode_size_max = blk: {
+    pub const encode_size = blk: {
         var size_max: usize = 0;
 
         // First goes the vsr headers for the entries.
@@ -95,7 +95,7 @@ pub const ClientSessions = struct {
     };
 
     pub fn encode(client_sessions: *const ClientSessions, target: []align(@alignOf(vsr.Header)) u8) u64 {
-        assert(target.len >= encode_size_max);
+        assert(target.len >= encode_size);
 
         var size: u64 = 0;
 
@@ -121,7 +121,7 @@ pub const ClientSessions = struct {
             size += @sizeOf(u64);
         }
 
-        assert(size == encode_size_max);
+        assert(size == encode_size);
         return size;
     }
 
@@ -135,7 +135,7 @@ pub const ClientSessions = struct {
 
         var size: u64 = 0;
         assert(source.len > 0);
-        assert(source.len <= encode_size_max);
+        assert(source.len <= encode_size);
 
         assert(@alignOf(vsr.Header) == 16);
         size = std.mem.alignForward(usize, size, 16);
@@ -153,7 +153,7 @@ pub const ClientSessions = struct {
         );
         size += mem.sliceAsBytes(sessions).len;
 
-        assert(size == encode_size_max);
+        assert(size == encode_size);
 
         for (headers, 0..) |*header, i| {
             const session = sessions[i];

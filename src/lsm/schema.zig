@@ -59,9 +59,10 @@ pub const BlockType = enum(u8) {
     reserved = 0,
 
     free_set = 1,
-    manifest = 2,
-    index = 3,
-    data = 4,
+    client_sessions = 2,
+    manifest = 3,
+    index = 4,
+    data = 5,
 
     pub fn valid(block_type: BlockType) bool {
         _ = std.meta.intToEnum(BlockType, @intFromEnum(block_type)) catch return false;
@@ -343,13 +344,12 @@ pub const TableData = struct {
     }
 };
 
-pub const FreeSetNode = struct {
-    pub const Word = u64;
-
+/// A TrailerNode is either a `BlockType.free_set` or `BlockType.client_sessions`.
+pub const TrailerNode = struct {
     pub const Metadata = extern struct {
-        previous_free_set_block_checksum: u128,
-        previous_free_set_block_checksum_padding: u128 = 0,
-        previous_free_set_block_address: u64,
+        previous_trailer_block_checksum: u128,
+        previous_trailer_block_checksum_padding: u128 = 0,
+        previous_trailer_block_address: u64,
         reserved: [56]u8 = .{0} ** 56,
 
         comptime {
@@ -361,20 +361,30 @@ pub const FreeSetNode = struct {
     fn metadata(free_set_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(free_set_block);
         assert(header.command == .block);
-        assert(header.block_type == .free_set);
+        assert(header.block_type == .free_set or header.block_type == .client_sessions);
         assert(header.address > 0);
         assert(header.snapshot == 0);
 
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
-        assert(header_metadata.previous_free_set_block_checksum_padding == 0);
+        assert(header_metadata.previous_trailer_block_checksum_padding == 0);
         assert(stdx.zeroed(&header_metadata.reserved));
 
-        if (header_metadata.previous_free_set_block_address == 0) {
-            assert(header_metadata.previous_free_set_block_checksum == 0);
+        if (header_metadata.previous_trailer_block_address == 0) {
+            assert(header_metadata.previous_trailer_block_checksum == 0);
         }
 
         assert(header.size > @sizeOf(vsr.Header));
-        assert((header.size - @sizeOf(vsr.Header)) % @sizeOf(Word) == 0);
+
+        switch (header.block_type) {
+            .free_set => {
+                assert((header.size - @sizeOf(vsr.Header)) % @sizeOf(u64) == 0);
+            },
+            .client_sessions => {
+                assert((header.size - @sizeOf(vsr.Header)) %
+                    (@sizeOf(vsr.Header) + @sizeOf(u64)) == 0);
+            },
+            else => unreachable,
+        }
 
         return header_metadata;
     }
@@ -386,20 +396,18 @@ pub const FreeSetNode = struct {
     pub fn previous(free_set_block: BlockPtrConst) ?BlockReference {
         const header_metadata = metadata(free_set_block);
 
-        if (header_metadata.previous_free_set_block_address == 0) {
-            assert(header_metadata.previous_free_set_block_checksum == 0);
+        if (header_metadata.previous_trailer_block_address == 0) {
+            assert(header_metadata.previous_trailer_block_checksum == 0);
             return null;
         } else {
             return .{
-                .checksum = header_metadata.previous_free_set_block_checksum,
-                .address = header_metadata.previous_free_set_block_address,
+                .checksum = header_metadata.previous_trailer_block_checksum,
+                .address = header_metadata.previous_trailer_block_address,
             };
         }
     }
 
-    pub fn encoded_words(block: BlockPtrConst) []align(@alignOf(Word)) const u8 {
-        assert_valid_header(block);
-
+    pub fn body(block: BlockPtrConst) []align(@sizeOf(vsr.Header)) const u8 {
         const header = header_from_block(block);
         return block[@sizeOf(vsr.Header)..header.size];
     }
