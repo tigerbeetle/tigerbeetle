@@ -3,7 +3,7 @@
 //! This allows them to be resent to the corresponding client if the client missed the original
 //! reply message (e.g. dropped packet).
 //!
-//! - Client replies' headers are stored in the SuperBlock's ClientSessions trailer.
+//! - Client replies' headers are stored in the `client_sessions` trailer.
 //! - Client replies (header and body) are only stored by ClientReplies in the `client_replies` zone
 //!   when `reply.header.size ≠ sizeOf(Header)` – that is, when the body is non-empty.
 //! - Corrupt client replies can be repaired from other replicas.
@@ -31,8 +31,8 @@ const IOPS = @import("../iops.zig").IOPS;
 const vsr = @import("../vsr.zig");
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessagePool = @import("../message_pool.zig").MessagePool;
-const Slot = @import("superblock_client_sessions.zig").ReplySlot;
-const ClientSessions = @import("superblock_client_sessions.zig").ClientSessions;
+const Slot = @import("client_sessions.zig").ReplySlot;
+const ClientSessions = @import("client_sessions.zig").ClientSessions;
 
 const client_replies_iops_max =
     constants.client_replies_iops_read_max + constants.client_replies_iops_write_max;
@@ -308,7 +308,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             maybe(client_replies.writing.isSet(slot.index));
             assert(message.header.command == .reply);
             // There is never any need to write a body-less message, since the header is
-            // stored safely in the client sessions superblock trailer.
+            // stored safely in the `client_sessions` trailer.
             assert(message.header.size != @sizeOf(vsr.Header));
 
             switch (trigger) {

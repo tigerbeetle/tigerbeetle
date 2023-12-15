@@ -142,6 +142,7 @@ fn test_quorums_working(
                 .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
                     .commit_min_checksum = 123,
                     .free_set_checksum = vsr.checksum(&.{}),
+                    .client_sessions_checksum = vsr.checksum(&.{}),
                     .storage_size = superblock.data_file_size_min,
                 }),
             }),

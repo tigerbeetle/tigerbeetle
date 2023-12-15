@@ -557,8 +557,9 @@ pub const Storage = struct {
         storage: *const Storage,
         copy_: u8,
     ) *const superblock.SuperBlockHeader {
-        const offset = vsr.Zone.superblock.offset(superblock.SuperBlockZone.header.start_for_copy(copy_));
-        const bytes = storage.memory[offset..][0..comptime superblock.SuperBlockZone.header.size_max()];
+        const offset =
+            vsr.Zone.superblock.offset(@as(usize, copy_) * superblock.superblock_copy_size);
+        const bytes = storage.memory[offset..][0..@sizeOf(superblock.SuperBlockHeader)];
         return @alignCast(mem.bytesAsValue(superblock.SuperBlockHeader, bytes));
     }
 
@@ -691,7 +692,7 @@ pub const Storage = struct {
 };
 
 pub const Area = union(enum) {
-    superblock: struct { zone: superblock.SuperBlockZone, copy: u8 },
+    superblock: struct { copy: u8 },
     wal_headers: struct { sector: usize },
     wal_prepares: struct { slot: usize },
     client_replies: struct { slot: usize },
@@ -701,8 +702,8 @@ pub const Area = union(enum) {
         return switch (area) {
             .superblock => |data| SectorRange.from_zone(
                 .superblock,
-                data.zone.start_for_copy(data.copy),
-                data.zone.size_max(),
+                vsr.superblock.superblock_copy_size * @as(u64, data.copy),
+                vsr.superblock.superblock_copy_size,
             ),
             .wal_headers => |data| SectorRange.from_zone(
                 .wal_headers,
@@ -783,31 +784,11 @@ pub const ClusterFaultAtlas = struct {
         faulty_grid: bool,
     };
 
-    /// This is the maximum number of faults per-trailer-area that can be safely injected on a read
-    /// or write to the superblock zone.
-    ///
-    /// It does not include the additional "torn write" fault injected upon a crash.
-    ///
-    /// For SuperBlockHeader, checkpoint() and view_change() require 3/4 valid headers (1
-    /// fault). Trailers are likewise 3/4 + 1 fault — consider if two faults were injected:
-    /// 1. `SuperBlock.checkpoint()` for sequence=6.
-    ///   - write copy 0, corrupt freeset (fault_count=1)
-    ///   - write copy 1, corrupt freeset (fault_count=2) !
-    /// 2. Crash. Recover.
-    /// 3. `SuperBlock.open()`. The highest valid quorum is sequence=6, but there is no
-    ///    valid freeset.
-    const superblock_trailer_faults_max = @divExact(constants.superblock_copies, 2) - 1;
-
-    comptime {
-        assert(superblock_trailer_faults_max >= 1);
-    }
-
     const CopySet = std.StaticBitSet(constants.superblock_copies);
     const ReplicaSet = std.StaticBitSet(constants.replicas_max);
     const headers_per_sector = @divExact(constants.sector_size, @sizeOf(vsr.Header));
     const header_sectors = @divExact(constants.journal_slot_count, headers_per_sector);
 
-    const FaultySuperBlockAreas = std.enums.EnumArray(superblock.SuperBlockZone, CopySet);
     const FaultyWALHeaders = std.StaticBitSet(@divExact(
         constants.journal_size_headers,
         constants.sector_size,
@@ -816,8 +797,6 @@ pub const ClusterFaultAtlas = struct {
     const FaultyGridBlocks = std.StaticBitSet(Storage.grid_blocks_max);
 
     options: Options,
-    faulty_superblock_areas: FaultySuperBlockAreas =
-        FaultySuperBlockAreas.initFill(CopySet.initEmpty()),
     faulty_wal_header_sectors: [constants.members_max]FaultyWALHeaders =
         [_]FaultyWALHeaders{FaultyWALHeaders.initEmpty()} ** constants.members_max,
     faulty_client_reply_slots: [constants.members_max]FaultyClientReplies =
@@ -836,22 +815,6 @@ pub const ClusterFaultAtlas = struct {
         }
 
         var atlas = ClusterFaultAtlas{ .options = options };
-
-        for (&atlas.faulty_superblock_areas.values, 0..) |*copies, area| {
-            if (area == @intFromEnum(superblock.SuperBlockZone.header)) {
-                // Only inject read/write faults into trailers, not the header.
-                // This prevents the quorum from being lost like so:
-                // - copy₀: B (ok)
-                // - copy₁: B (torn write)
-                // - copy₂: A (corrupt)
-                // - copy₃: A (ok)
-            } else {
-                var area_faults: usize = 0;
-                while (area_faults < superblock_trailer_faults_max) : (area_faults += 1) {
-                    copies.set(random.uintLessThan(usize, constants.superblock_copies));
-                }
-            }
-        }
 
         const quorums = vsr.quorums(replica_count);
         const faults_max = quorums.replication - 1;
@@ -900,21 +863,18 @@ pub const ClusterFaultAtlas = struct {
         size: u64,
     ) ?SectorRange {
         _ = replica_index;
+        _ = offset_in_zone;
+        _ = size;
         if (!atlas.options.faulty_superblock) return null;
 
-        const copy = @divFloor(offset_in_zone, superblock.superblock_copy_size);
-        const offset_in_copy = offset_in_zone % superblock.superblock_copy_size;
-        const area: superblock.SuperBlockZone = switch (offset_in_copy) {
-            superblock.SuperBlockZone.header.start() => .header,
-            superblock.SuperBlockZone.client_sessions.start() => .client_sessions,
-            else => unreachable,
-        };
-
-        if (atlas.faulty_superblock_areas.get(area).isSet(copy)) {
-            return SectorRange.from_zone(.superblock, offset_in_zone, size);
-        } else {
-            return null;
-        }
+        // Don't inject additional read/write faults into superblock headers.
+        // This prevents the quorum from being lost like so:
+        // - copy₀: B (ok)
+        // - copy₁: B (torn write)
+        // - copy₂: A (corrupt)
+        // - copy₃: A (ok)
+        // TODO Use hash-chaining to safely load copy₀, so that we can inject a superblock fault.
+        return null;
     }
 
     /// Returns a range of faulty sectors which intersect the specified range.

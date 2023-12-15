@@ -464,22 +464,6 @@ const Environment = struct {
 
         const vsr_state = &env.manifest_log.superblock.working.vsr_state;
 
-        {
-            // VSRState.monotonic() asserts that the previous_checkpoint id changes.
-            // In a normal replica this is guaranteed – even if the LSM is idle and no blocks
-            // are acquired or released, the client sessions are necessarily mutated.
-            var reply = std.mem.zeroInit(vsr.Header.Reply, .{
-                .cluster = 0,
-                .command = .reply,
-                .op = vsr_state.checkpoint.commit_min + 1,
-                .commit = vsr_state.checkpoint.commit_min + 1,
-            });
-            reply.set_checksum_body(&.{});
-            reply.set_checksum();
-
-            _ = env.manifest_log.superblock.client_sessions.put(1, &reply);
-        }
-
         env.pending += 1;
         env.manifest_log.superblock.checkpoint(
             checkpoint_superblock_callback,
@@ -487,6 +471,12 @@ const Environment = struct {
             .{
                 .manifest_references = env.manifest_log.checkpoint_references(),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
+                .client_sessions_reference = .{
+                    .last_block_checksum = 0,
+                    .last_block_address = 0,
+                    .trailer_size = 0,
+                    .checksum = vsr.checksum(&.{}),
+                },
                 .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum + 1,
                 .commit_min = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.commit_min),
                 .commit_max = vsr.Checkpoint.checkpoint_after(vsr_state.commit_max),

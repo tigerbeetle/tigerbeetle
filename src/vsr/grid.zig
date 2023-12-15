@@ -217,8 +217,11 @@ pub fn GridType(comptime Storage: type) type {
             var free_set = try FreeSet.init(allocator, block_count_limit);
             errdefer free_set.deinit(allocator);
 
-            var free_set_checkpoint =
-                try CheckpointTrailer.init(allocator, FreeSet.encode_size_max(block_count_limit));
+            var free_set_checkpoint = try CheckpointTrailer.init(
+                allocator,
+                .free_set,
+                FreeSet.encode_size_max(block_count_limit),
+            );
             errdefer free_set_checkpoint.deinit(allocator);
 
             var blocks_missing = try GridBlocksMissing.init(allocator, .{

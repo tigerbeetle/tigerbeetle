@@ -117,8 +117,6 @@ const ConfigProcess = struct {
     grid_missing_tables_max: usize = 3,
     aof_record: bool = false,
     aof_recovery: bool = false,
-    /// When null, this defaults to message_body_size_max.
-    sync_trailer_message_body_size_max: ?usize = null,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -248,8 +246,6 @@ pub const configs = struct {
             .grid_missing_blocks_max = 3,
             .grid_missing_tables_max = 2,
             .verify = true,
-            // Set to a small value to ensure the multipart trailer sync is easily tested.
-            .sync_trailer_message_body_size_max = 129,
         },
         .cluster = .{
             .clients_max = 4 + 3,

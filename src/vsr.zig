@@ -38,15 +38,14 @@ pub const SyncStage = @import("vsr/sync.zig").Stage;
 pub const SyncTarget = @import("vsr/sync.zig").Target;
 pub const SyncTargetCandidate = @import("vsr/sync.zig").TargetCandidate;
 pub const SyncTargetQuorum = @import("vsr/sync.zig").TargetQuorum;
-pub const SyncTrailer = @import("vsr/sync.zig").Trailer;
 pub const Client = @import("vsr/client.zig").Client;
 pub const ClockType = @import("vsr/clock.zig").ClockType;
 pub const GridType = @import("vsr/grid.zig").GridType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
+pub const ClientSessions = @import("vsr/client_sessions.zig").ClientSessions;
 pub const ClientRepliesType = @import("vsr/client_replies.zig").ClientRepliesType;
 pub const SlotRange = @import("vsr/journal.zig").SlotRange;
 pub const SuperBlockType = superblock.SuperBlockType;
-pub const SuperBlockTrailer = superblock.Trailer;
 pub const SuperBlockManifestReferences = superblock.ManifestReferences;
 pub const SuperBlockTrailerReference = superblock.TrailerReference;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
@@ -196,10 +195,6 @@ pub const Command = enum(u8) {
 
     request_sync_checkpoint = 21,
     sync_checkpoint = 22,
-
-    request_sync_client_sessions = 23,
-
-    sync_client_sessions = 24,
 
     comptime {
         for (std.enums.values(Command), 0..) |result, index| {
