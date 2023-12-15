@@ -305,7 +305,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             trailer.size_transferred = 0;
             trailer.checksum = vsr.checksum(trailer.buffer[0..trailer.size]);
 
-            { // TODO if trailer.size > 0
+            if (trailer.size > 0) {
                 assert(trailer.grid.?.free_set.count_reservations() == 0);
                 const reservation = trailer.grid.?.free_set.reserve(trailer.block_count()).?;
                 defer trailer.grid.?.free_set.forfeit(reservation);
