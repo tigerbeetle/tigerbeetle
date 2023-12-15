@@ -710,6 +710,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
+            assert(self.client_sessions.entries_free.count() == constants.clients_max);
             assert(std.meta.eql(
                 self.client_sessions_checkpoint.checkpoint_reference(),
                 self.superblock.working.client_sessions_reference(),
@@ -729,7 +730,6 @@ pub fn ReplicaType(
             const trailer_buffer = self.client_sessions_checkpoint.buffer;
             const trailer_size = self.client_sessions_checkpoint.size;
 
-            self.client_sessions.reset();
             if (self.superblock.working.client_sessions_reference().empty()) {
                 assert(trailer_size == 0);
             } else {
@@ -7964,6 +7964,7 @@ pub fn ReplicaType(
             self.grid.free_set.reset();
             self.grid.free_set_checkpoint.reset();
             self.client_sessions_checkpoint.reset();
+            self.client_sessions.reset();
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
