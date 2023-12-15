@@ -42,9 +42,39 @@ synchronization:
 
 All publishing keys are stored as GitHub Actions in the `release` environment.
 
-## Triggering a Release
+## Versioning
 
-Releases are triggered manually, on Monday, by pushing a commit from `origin/main` to
+Because releases are frequent, we avoid specifying the version in the source code. Instead, the
+version is setup automatically by the release process itself, using sequential build numbers as the
+patch version. It might the case that a particular version is skipped (e.g., if a release partially
+failed). It is also a possibility that two releases are functionally identical (this means that no
+pull requests were merged in a week).
+
+## Release Process
+
+Releases are triggered manually, on Monday. Default release rotation is stateless and determined by
+the following one-liner:
+
+```console
+$ python3 -c "import datetime; print((sorted(['batiati', 'cb22', 'kprotty', 'matklad', 'sentientwaffle']) * 142)[datetime.datetime.utcnow().isocalendar().week:][:3])"
+        current release
+              V
+['batiati', 'cb22', 'kprotty']
+    ^                   ^ release next week
+    + previous release
+```
+
+The middle name is the default release manager for the _current_ week. After the release, please
+ping the next person to pass the baton.
+
+Before triggering a release, update CHANGELOG.md with the changes since the last release. You can
+use the following command to see all relevant merges:
+
+```console
+$ git fetch origin && git log --merges origin/release..origin/main
+```
+
+After the changelog PR is merged, trigger a release  by pushing a commit from `origin/main` to
 `origin/release`:
 
 ```console
@@ -55,18 +85,11 @@ This triggers the `release.yml` workflow. The workflow doesn't run unit-tests,
 [not rocket science](https://graydon2.dreamwidth.org/1597.html) rule is assumed. The workflow
 requires an approval of at least one other person.
 
-## Changelog
+If the release manager isn't available on Monday, a volunteer picks up that release. Releases can be
+skipped if there are not enough people to make a release (at least two are required) or if there
+aren't any changes in a given week.
 
-Before triggering a release, update CHANGELOG.md with the changes since the last release. The merge
-commit for the changelog PR is what is pushed to the `release` branch.
-
-For the time being, changelogs are authored manually and centrally. We are likely to switch to
-something more automated in the future. You can use the following command to see all merges since
-the last release:
-
-```console
-$ git fetch origin && git log --merges origin/release..origin/main
-```
+## Changelog Guidelines
 
 Purposes of the changelog:
 
@@ -75,10 +98,9 @@ Purposes of the changelog:
   provide material for the monthly newsletter.
 - For TigerBeetle users: inform about all visible and potentially relevant changes.
 
-## Versioning
+As such:
 
-Because releases are frequent, we avoid specifying the version in the source code. Instead, the
-version is setup automatically by the release process itself, using sequential build numbers as the
-patch version. It might a case that a particular version is skipped (e.g., if a release partially
-failed). It is also a possibility that two releases are functionally identical (this means that no
-pull requests were merged in a week).
+- Consider skipping over trivial changes in the changelog.
+- Don't skip over meaningful changes of the internals, even if they are not externally visible.
+- If there is a story behind a series of pull requests, tell it.
+- And don't forget the TigerTrack of the week!
