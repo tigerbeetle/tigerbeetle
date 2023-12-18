@@ -30,7 +30,7 @@ fs.writeFileSync(defFile, 'EXPORTS\n    ' + allSymbolsArr.join('\n    '))
 execSync(`${zig} dlltool -m i386:x86-64 -D node.exe -d ${defFile} -l ${libFile}`)
 
 // Build the tigerbeetle node client.
-execSync(`${zig} build node_client -Doptimize=ReleaseSafe -Dconfig=production`)
+execSync(`${zig} build node_client -Drelease -Dconfig=production`)
 
 const bin_path = path.resolve(__dirname, '../dist/bin');
 const libs = get_libs(bin_path);

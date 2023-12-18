@@ -4,7 +4,7 @@
 //!
 //! To get a file with IR, use `-femit-llvm-ir` cli argument for `zig build-exe` or
 //!
-//!     $ zig build -Doptimize=ReleaseSafe -Demit-llvm-ir
+//!     $ zig build -Drelease -Demit-llvm-ir
 //!
 //! Pass the resulting .ll file to copyhound on stdin.
 //!
