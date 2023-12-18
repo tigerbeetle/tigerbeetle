@@ -49,6 +49,10 @@ pub fn CompositeKeyType(comptime Field: type) type {
             return @as(Key, value.timestamp & ~tombstone_bit) | (@as(Key, value.field) << 64);
         }
 
+        pub inline fn key_prefix(key: Key) Field {
+            return @truncate(key >> 64);
+        }
+
         pub inline fn tombstone(value: *const Self) bool {
             return (value.timestamp & tombstone_bit) != 0;
         }
@@ -64,6 +68,21 @@ pub fn CompositeKeyType(comptime Field: type) type {
             };
         }
     };
+}
+
+pub fn is_composite_key(comptime Value: type) bool {
+    if (@typeInfo(Value) == .Struct and
+        @hasField(Value, "field") and
+        @hasField(Value, "timestamp"))
+    {
+        const Field = std.meta.fieldInfo(Value, .field).type;
+        return switch (Field) {
+            u64, u128 => Value == CompositeKeyType(Field),
+            else => false,
+        };
+    }
+
+    return false;
 }
 
 fn composite_key_test(comptime CompositeKey: type) !void {

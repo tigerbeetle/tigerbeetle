@@ -109,3 +109,9 @@ func Greater(t *testing.T, a, b interface{}) {
 		t.Errorf("%v is not greater than %v", a, b)
 	}
 }
+
+func True(t *testing.T, condition bool) {
+	if !condition {
+		t.Errorf("condition is not true")
+	}
+}

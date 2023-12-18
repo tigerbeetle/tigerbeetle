@@ -841,6 +841,251 @@ namespace TigerBeetle.Tests
             }
         }
 
+
+        [TestMethod]
+        [DoNotParallelize]
+        public void TestGetAccountTransfers()
+        {
+            using var server = new TBServer();
+            using var client = GetClient(server.Address);
+
+            // Creating the accounts.
+            var createAccountErrors = client.CreateAccounts(accounts);
+            Assert.IsTrue(createAccountErrors.Length == 0);
+
+            // Creating a transfer.
+            var transfers = new Transfer[10];
+            for (int i = 0; i < 10; i++)
+            {
+                transfers[i] = new Transfer
+                {
+                    Id = (UInt128)(i + 1),
+
+                    // Swap the debit and credit accounts:
+                    CreditAccountId = accounts[i % 2 == 0 ? 0 : 1].Id,
+                    DebitAccountId = accounts[i % 2 == 0 ? 1 : 0].Id,
+
+                    Ledger = 1,
+                    Code = 2,
+                    Flags = TransferFlags.None,
+                    Amount = 100
+                };
+            }
+
+            var createTransferErrors = client.CreateTransfers(transfers);
+            Assert.IsTrue(createTransferErrors.Length == 0);
+
+            {
+                // Querying transfers where:
+                // `debit_account_id=$account1Id OR credit_account_id=$account1Id
+                // ORDER BY timestamp ASC`.
+                var filter = new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits
+                };
+                var account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 10);
+                ulong timestamp = 0;
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp > timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+            }
+
+            {
+                // Querying transfers where:
+                // `debit_account_id=$account2Id OR credit_account_id=$account2Id
+                // ORDER BY timestamp DESC`.
+                var filter = new GetAccountTransfers
+                {
+                    AccountId = accounts[1].Id,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits | GetAccountTransfersFlags.Reversed
+                };
+                var account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 10);
+                ulong timestamp = ulong.MaxValue;
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp < timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+            }
+
+            {
+                // Querying transfers where:
+                // `debit_account_id=$account1Id
+                // ORDER BY timestamp ASC`.                
+                var filter = new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = GetAccountTransfersFlags.Debits
+                };
+                var account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 5);
+                ulong timestamp = 0;
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp > timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+            }
+
+            {
+                // Querying transfers where:
+                // `credit_account_id=$account2Id
+                // ORDER BY timestamp DESC`.            
+                var filter = new GetAccountTransfers
+                {
+                    AccountId = accounts[1].Id,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Reversed
+                };
+                var account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 5);
+                ulong timestamp = ulong.MaxValue;
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp < timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+            }
+
+            {
+                // Querying transfers where:
+                // `debit_account_id=$account1Id OR credit_account_id=$account1Id
+                // ORDER BY timestamp ASC LIMIT 5`.       
+                var filter = new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = 0,
+                    Limit = 5,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits
+                };
+
+                // First 5 items:            
+                var account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 5);
+                ulong timestamp = 0;
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp > timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+
+                // Next 5 items from this timestamp:
+                filter.Timestamp = timestamp;
+                account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 5);
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp > timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+
+                // No more pages after that:
+                filter.Timestamp = timestamp;
+                account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 0);
+            }
+
+            {
+                // Querying transfers where:
+                // `debit_account_id=$account2Id OR credit_account_id=$account2Id
+                // ORDER BY timestamp DESC LIMIT 5`.       
+                var filter = new GetAccountTransfers
+                {
+                    AccountId = accounts[1].Id,
+                    Timestamp = 0,
+                    Limit = 5,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits | GetAccountTransfersFlags.Reversed
+                };
+
+                // First 5 items:                
+                var account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 5);
+                ulong timestamp = ulong.MaxValue;
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp < timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+
+                // Next 5 items from this timestamp:
+                filter.Timestamp = timestamp;
+                account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 5);
+                foreach (var transfer in account_transfers)
+                {
+                    Assert.IsTrue(transfer.Timestamp < timestamp);
+                    timestamp = transfer.Timestamp;
+                }
+
+                // No more pages after that:
+                filter.Timestamp = timestamp;
+                account_transfers = client.GetAccountTransfers(filter);
+                Assert.IsTrue(account_transfers.Length == 0);
+            }
+
+            {
+                // Empty filter:
+                Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers { }).Length == 0);
+
+                // Invalid account
+                Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+                {
+                    AccountId = 0,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
+                }).Length == 0);
+
+                // Invalid timestamp
+                Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = ulong.MaxValue,
+                    Limit = 8190,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
+                }).Length == 0);
+
+                // Zero limit
+                Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = 0,
+                    Limit = 0,
+                    Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
+                }).Length == 0);
+
+                // Empty flags
+                Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = (GetAccountTransfersFlags)0,
+                }).Length == 0);
+
+                // Invalid flags
+                Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+                {
+                    AccountId = accounts[0].Id,
+                    Timestamp = 0,
+                    Limit = 8190,
+                    Flags = (GetAccountTransfersFlags)0xFFFF,
+                }).Length == 0);
+            }
+        }
+
         /// <summary>
         /// This test asserts that a single Client can be shared by multiple concurrent tasks
         /// </summary>

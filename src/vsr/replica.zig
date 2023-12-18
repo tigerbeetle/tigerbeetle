@@ -9,6 +9,7 @@ const stdx = @import("../stdx.zig");
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
+const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPS = @import("../iops.zig").IOPS;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -232,7 +233,7 @@ pub fn ReplicaType(
         grid_reads: IOPS(BlockRead, constants.grid_repair_reads_max) = .{},
         grid_repair_tables: IOPS(RepairTable, constants.grid_missing_tables_max) = .{},
         grid_repair_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
-        grid_repair_write_blocks: [constants.grid_repair_writes_max]Grid.BlockPtr,
+        grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
 
         opened: bool,
 

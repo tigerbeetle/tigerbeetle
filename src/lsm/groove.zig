@@ -15,6 +15,7 @@ const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_s
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
+const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
@@ -298,6 +299,8 @@ pub fn GrooveType(
         },
     });
 
+    const has_scan = index_fields.len > 0;
+
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
     const indexes_count_expect = std.meta.fields(Object).len -
@@ -427,6 +430,8 @@ pub fn GrooveType(
             struct { level: u8 },
         );
 
+        pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
+
         compacting: ?struct {
             /// Count which tree compactions are in progress.
             pending: TreesBitSet = TreesBitSet.initFull(),
@@ -461,6 +466,8 @@ pub fn GrooveType(
         /// Invariant: if something is in the mutable or immutable table, it _must_ exist in our
         /// object cache.
         objects_cache: ObjectsCache,
+
+        scan_builder: ScanBuilder,
 
         pub const Options = struct {
             /// The maximum number of objects that might be prefetched by a batch.
@@ -549,6 +556,9 @@ pub fn GrooveType(
             try prefetch_keys.ensureTotalCapacity(allocator, options.prefetch_entries_max);
             errdefer prefetch_keys.deinit(allocator);
 
+            var scan_builder = if (has_scan) try ScanBuilder.init(allocator) else {};
+            errdefer if (has_scan) scan_builder.deinit(allocator);
+
             return Groove{
                 .objects = object_tree,
                 .ids = id_tree,
@@ -557,6 +567,8 @@ pub fn GrooveType(
                 .prefetch_keys = prefetch_keys,
                 .prefetch_snapshot = null,
                 .objects_cache = objects_cache,
+
+                .scan_builder = scan_builder,
             };
         }
 
@@ -571,6 +583,8 @@ pub fn GrooveType(
             groove.prefetch_keys.deinit(allocator);
             groove.objects_cache.deinit(allocator);
 
+            if (has_scan) groove.scan_builder.deinit(allocator);
+
             groove.* = undefined;
         }
 
@@ -584,6 +598,8 @@ pub fn GrooveType(
             groove.prefetch_keys.clearRetainingCapacity();
             groove.objects_cache.reset();
 
+            if (has_scan) groove.scan_builder.reset();
+
             groove.* = .{
                 .objects = groove.objects,
                 .ids = groove.ids,
@@ -591,6 +607,7 @@ pub fn GrooveType(
                 .prefetch_keys = groove.prefetch_keys,
                 .prefetch_snapshot = null,
                 .objects_cache = groove.objects_cache,
+                .scan_builder = groove.scan_builder,
             };
         }
 
@@ -703,36 +720,31 @@ pub fn GrooveType(
             /// I/O depth of the Grid.
             workers: [Grid.read_iops_max]PrefetchWorker = undefined,
             /// The number of workers that are currently running in parallel.
-            workers_busy: u32 = 0,
+            workers_pending: u32 = 0,
 
             fn start_workers(context: *PrefetchContext) void {
-                assert(context.workers_busy == 0);
+                assert(context.workers_pending == 0);
 
-                // Track an extra "worker" that will finish after the loop.
-                //
-                // This prevents `context.finish()` from being called within the loop body when
-                // every worker finishes synchronously. `context.finish()` calls the user-provided
-                // callback which may re-use the memory of this `PrefetchContext`. However, we
-                // rely on `context` being well-defined for the loop condition.
-                context.workers_busy += 1;
-
-                for (&context.workers) |*worker| {
+                for (&context.workers, 0..) |*worker, i| {
                     worker.* = .{ .context = context };
-                    context.workers_busy += 1;
+                    context.workers_pending += 1;
                     worker.lookup_start_next();
+
+                    // If the worker finished synchronously (e.g `workers_pending` decreased),
+                    // we don't need to start new ones.
+                    if (context.workers_pending == i) break;
                 }
 
-                assert(context.workers_busy >= 1);
-                context.worker_finished();
+                stdx.maybe(context.workers_pending > 0);
             }
 
             fn worker_finished(context: *PrefetchContext) void {
-                context.workers_busy -= 1;
-                if (context.workers_busy == 0) context.finish();
+                context.workers_pending -= 1;
+                if (context.workers_pending == 0) context.finish();
             }
 
             fn finish(context: *PrefetchContext) void {
-                assert(context.workers_busy == 0);
+                assert(context.workers_pending == 0);
 
                 assert(context.key_iterator.next() == null);
                 context.groove.prefetch_keys.clearRetainingCapacity();

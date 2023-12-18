@@ -63,6 +63,12 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
                 batch);
     }
 
+    public static BlockingRequest<TransferBatch> getAccountTransfers(
+            final NativeClient nativeClient, final AccountTransfers filter) {
+        return new BlockingRequest<TransferBatch>(nativeClient,
+                Request.Operations.GET_ACCOUNT_TRANSFERS, filter.batch);
+    }
+
     public static BlockingRequest<AccountBatch> echo(final NativeClient nativeClient,
             final AccountBatch batch) {
         return new BlockingRequest<AccountBatch>(nativeClient, Request.Operations.ECHO_ACCOUNTS,

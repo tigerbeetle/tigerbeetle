@@ -13,6 +13,8 @@ const schema = @import("schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
+const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
+
 const table_count_max = @import("tree.zig").table_count_max;
 
 pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
@@ -176,6 +178,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         node_pool: *NodePool,
         manifest_log: ManifestLog,
         manifest_log_progress: enum { idle, compacting, done, skip } = .idle,
+        scan_buffer_pool: ScanBufferPool,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -219,11 +222,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 grooves_initialized += 1;
             }
 
+            const scan_buffer_pool = try ScanBufferPool.init(allocator);
+            errdefer scan_buffer_pool.deinit(allocator);
+
             return Forest{
                 .grid = grid,
                 .grooves = grooves,
                 .node_pool = node_pool,
                 .manifest_log = manifest_log,
+                .scan_buffer_pool = scan_buffer_pool,
             };
         }
 
@@ -235,6 +242,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             forest.manifest_log.deinit(allocator);
             forest.node_pool.deinit(allocator);
             allocator.destroy(forest.node_pool);
+
+            forest.scan_buffer_pool.deinit(allocator);
         }
 
         pub fn reset(forest: *Forest) void {
@@ -244,6 +253,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             forest.manifest_log.reset();
             forest.node_pool.reset();
+            forest.scan_buffer_pool.reset();
 
             forest.* = .{
                 // Don't reset the grid – replica is responsible for grid cancellation.
@@ -251,6 +261,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .grooves = forest.grooves,
                 .node_pool = forest.node_pool,
                 .manifest_log = forest.manifest_log,
+                .scan_buffer_pool = forest.scan_buffer_pool,
             };
         }
 

@@ -43,6 +43,8 @@ const constants = @import("../constants.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
+const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const TableInfoType = @import("manifest.zig").TreeTableInfoType;
 const ManifestType = @import("manifest.zig").ManifestType;
@@ -60,8 +62,6 @@ pub fn CompactionType(
         const Compaction = @This();
 
         const Grid = GridType(Storage);
-        const BlockPtr = Grid.BlockPtr;
-        const BlockPtrConst = Grid.BlockPtrConst;
 
         const TableInfo = TableInfoType(Table);
         const Manifest = ManifestType(Table, Storage);
@@ -181,7 +181,7 @@ pub fn CompactionType(
             const index_block_b = try allocate_block(allocator);
             errdefer allocator.free(index_block_b);
 
-            var data_blocks: [2]Grid.BlockPtr = undefined;
+            var data_blocks: [2]BlockPtr = undefined;
 
             data_blocks[0] = try allocate_block(allocator);
             errdefer allocator.free(data_blocks[0]);
@@ -380,7 +380,7 @@ pub fn CompactionType(
                     .grid = context.grid,
                     .level = context.level_b,
                     .snapshot = context.op_min,
-                    .tables = compaction.context.range_b.tables.const_slice(),
+                    .tables = .{ .compaction = compaction.context.range_b.tables.const_slice() },
                     .index_block = compaction.index_block_b,
                     .direction = .ascending,
                 });
@@ -558,10 +558,14 @@ pub fn CompactionType(
             return target_count;
         }
 
-        fn on_index_block(iterator_b: *LevelTableValueBlockIterator) void {
+        fn on_index_block(
+            iterator_b: *LevelTableValueBlockIterator,
+        ) LevelTableValueBlockIterator.DataBlocksToLoad {
             const compaction = @fieldParentPtr(Compaction, "iterator_b", iterator_b);
             assert(std.meta.eql(compaction.state, .{ .iterator_next = .b }));
             compaction.release_table_blocks(compaction.index_block_b);
+
+            return .all;
         }
 
         // TODO: Support for LSM snapshots would require us to only remove blocks

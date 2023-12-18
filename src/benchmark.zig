@@ -21,6 +21,7 @@
 
 const account_count_default: usize = 10_000;
 const transfer_count_default: usize = 10_000_000;
+const query_count_default: usize = 100;
 const transfer_count_per_second_default: usize = 1_000_000;
 
 const std = @import("std");
@@ -64,6 +65,7 @@ const IdOrder = enum { sequential, random, reversed };
 const CliArgs = struct {
     account_count: usize = account_count_default,
     transfer_count: usize = transfer_count_default,
+    query_count: usize = query_count_default,
     transfer_count_per_second: usize = transfer_count_per_second_default,
     print_batch_timings: bool = false,
     id_order: IdOrder = .reversed,
@@ -131,6 +133,8 @@ pub fn main() !void {
         try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
     const transfer_latency_ns =
         try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
+    const query_latency_ns =
+        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.query_count);
     const batch_transfers =
         try std.ArrayListUnmanaged(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
     const transfer_start_ns =
@@ -162,11 +166,14 @@ pub fn main() !void {
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_index = 0,
+        .query_count = cli_args.query_count,
+        .query_index = 0,
         .account_id_permutation = account_id_permutation,
         .rng = rng,
         .timer = try std.time.Timer.start(),
         .batch_latency_ns = batch_latency_ns,
         .transfer_latency_ns = transfer_latency_ns,
+        .query_latency_ns = query_latency_ns,
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
@@ -199,11 +206,14 @@ const Benchmark = struct {
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_index: usize,
+    query_count: usize,
+    query_index: usize,
     account_id_permutation: IdPermutation,
     rng: std.rand.DefaultPrng,
     timer: std.time.Timer,
     batch_latency_ns: std.ArrayListUnmanaged(u64),
     transfer_latency_ns: std.ArrayListUnmanaged(u64),
+    query_latency_ns: std.ArrayListUnmanaged(u64),
     batch_transfers: std.ArrayListUnmanaged(tb.Transfer),
     batch_start_ns: usize,
     transfers_sent: usize,
@@ -214,7 +224,7 @@ const Benchmark = struct {
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
-    callback: ?*const fn (*Benchmark) void,
+    callback: ?*const fn (*Benchmark, StateMachine.Operation, []const u8) void,
     done: bool,
     statsd: ?*StatsD,
     print_batch_timings: bool,
@@ -252,15 +262,32 @@ const Benchmark = struct {
 
         // Submit batch.
         b.send(
-            create_accounts,
+            create_accounts_finish,
             .create_accounts,
             std.mem.sliceAsBytes(b.batch_accounts.items),
         );
     }
 
+    fn create_accounts_finish(
+        b: *Benchmark,
+        operation: StateMachine.Operation,
+        result: []const u8,
+    ) void {
+        assert(operation == .create_accounts);
+        const create_accounts_results = std.mem.bytesAsSlice(
+            tb.CreateAccountsResult,
+            result,
+        );
+        if (create_accounts_results.len > 0) {
+            panic("CreateAccountsResults: {any}", .{create_accounts_results});
+        }
+
+        b.create_accounts();
+    }
+
     fn create_transfers(b: *Benchmark) void {
         if (b.transfer_index >= b.transfer_count) {
-            b.finish();
+            b.summary_transfers();
             return;
         }
 
@@ -326,7 +353,20 @@ const Benchmark = struct {
         );
     }
 
-    fn create_transfers_finish(b: *Benchmark) void {
+    fn create_transfers_finish(
+        b: *Benchmark,
+        operation: StateMachine.Operation,
+        result: []const u8,
+    ) void {
+        assert(operation == .create_transfers);
+        const create_transfers_results = std.mem.bytesAsSlice(
+            tb.CreateTransfersResult,
+            result,
+        );
+        if (create_transfers_results.len > 0) {
+            panic("CreateTransfersResults: {any}", .{create_transfers_results});
+        }
+
         // Record latencies.
         const batch_end_ns = b.timer.read();
         const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
@@ -357,7 +397,7 @@ const Benchmark = struct {
         b.create_transfers();
     }
 
-    fn finish(b: *Benchmark) void {
+    fn summary_transfers(b: *Benchmark) void {
         const total_ns = b.timer.read();
 
         const less_than_ns = (struct {
@@ -386,12 +426,85 @@ const Benchmark = struct {
         print_deciles(stdout, "batch", b.batch_latency_ns.items);
         print_deciles(stdout, "transfer", b.transfer_latency_ns.items);
 
+        if (b.query_count > 0) {
+            b.timer.reset();
+            b.account_index = 0;
+            b.query_account_transfers();
+        } else {
+            b.done = true;
+        }
+    }
+
+    fn query_account_transfers(b: *Benchmark) void {
+        if (b.query_index >= b.query_count) {
+            b.summary_query();
+            return;
+        }
+
+        b.account_index = b.rng.random().intRangeLessThan(usize, 0, b.account_count);
+        var filter = tb.GetAccountTransfers{
+            .account_id = b.account_id_permutation.encode(b.account_index + 1),
+            .timestamp = 0,
+            .limit = transfer_count_per_batch,
+            .flags = .{
+                .credits = true,
+                .debits = true,
+                .reversed = false,
+            },
+        };
+
+        b.batch_start_ns = b.timer.read();
+        b.send(
+            query_account_transfers_finish,
+            .get_account_transfers,
+            std.mem.asBytes(&filter),
+        );
+    }
+
+    fn query_account_transfers_finish(
+        b: *Benchmark,
+        operation: StateMachine.Operation,
+        result: []const u8,
+    ) void {
+        assert(operation == .get_account_transfers);
+
+        const batch_end_ns = b.timer.read();
+        const transfers = std.mem.bytesAsSlice(tb.Transfer, result);
+        const account_id = b.account_id_permutation.encode(b.account_index + 1);
+        for (transfers) |*transfer| {
+            assert(transfer.debit_account_id == account_id or
+                transfer.credit_account_id == account_id);
+        }
+
+        b.query_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
+        b.query_index += 1;
+        b.query_account_transfers();
+    }
+
+    fn summary_query(b: *Benchmark) void {
+        const total_ns = b.timer.read();
+
+        const less_than_ns = (struct {
+            fn lessThan(_: void, ns1: u64, ns2: u64) bool {
+                return ns1 < ns2;
+            }
+        }).lessThan;
+        std.mem.sort(u64, b.query_latency_ns.items, {}, less_than_ns);
+
+        const stdout = std.io.getStdOut().writer();
+
+        stdout.print("\n{} queries in {d:.2} s\n", .{
+            b.query_count,
+            @as(f64, @floatFromInt(total_ns)) / std.time.ns_per_s,
+        }) catch unreachable;
+        print_deciles(stdout, "query", b.query_latency_ns.items);
+
         b.done = true;
     }
 
     fn send(
         b: *Benchmark,
-        callback: *const fn (*Benchmark) void,
+        callback: *const fn (*Benchmark, StateMachine.Operation, []const u8) void,
         operation: StateMachine.Operation,
         payload: []u8,
     ) void {
@@ -416,33 +529,11 @@ const Benchmark = struct {
         operation: StateMachine.Operation,
         result: []const u8,
     ) void {
-        switch (operation) {
-            .create_accounts => {
-                const create_accounts_results = std.mem.bytesAsSlice(
-                    tb.CreateAccountsResult,
-                    result,
-                );
-                if (create_accounts_results.len > 0) {
-                    panic("CreateAccountsResults: {any}", .{create_accounts_results});
-                }
-            },
-            .create_transfers => {
-                const create_transfers_results = std.mem.bytesAsSlice(
-                    tb.CreateTransfersResult,
-                    result,
-                );
-                if (create_transfers_results.len > 0) {
-                    panic("CreateTransfersResults: {any}", .{create_transfers_results});
-                }
-            },
-            else => unreachable,
-        }
-
         const b: *Benchmark = @ptrFromInt(@as(u64, @intCast(user_data)));
-
         const callback = b.callback.?;
         b.callback = null;
-        callback(b);
+
+        callback(b, operation, result);
     }
 };
 
