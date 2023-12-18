@@ -27,7 +27,7 @@ const CreateTransferResult = tb.CreateTransferResult;
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: @import("constants.zig").StateMachineConfig,
+    comptime config: global_constants.StateMachineConfig,
 ) type {
     assert(config.message_body_size_max > 0);
     assert(config.lsm_batch_multiple > 0);
@@ -99,6 +99,57 @@ pub fn StateMachineType(
                 };
             };
         };
+
+        /// Used to determine if an operation can be batched at the VSR layer.
+        /// If so, the StateMachine must support demuxing batched operations below.
+        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
+            .create_accounts = true,
+            .create_transfers = true,
+            // Don't batch lookups for now.
+            .lookup_accounts = false,
+            .lookup_transfers = false,
+        });
+
+        pub fn DemuxerType(comptime operation: Operation) type {
+            return struct {
+                const Demuxer = @This();
+                const DemuxerResult = Result(operation);
+
+                results: []DemuxerResult,
+
+                /// Create a Demuxer which can extract Results out of the reply bytes in-place.
+                pub fn init(reply: []DemuxerResult) Demuxer {
+                    return Demuxer{ .results = reply };
+                }
+
+                /// Returns a slice into the the original reply bytes with Results matching the
+                /// Event range (offset and size). Each subsequent call to demux() must have ranges
+                /// that are disjoint and increase monotonically.
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []DemuxerResult {
+                    const demuxed = blk: {
+                        if (comptime batch_logical_allowed.get(operation)) {
+                            // Count all results from out slice which match the Event range,
+                            // updating the result.indexes to be related to the EVent in the process.
+                            for (self.results, 0..) |*result, i| {
+                                if (result.index < event_offset) break :blk i;
+                                if (result.index >= event_offset + event_count) break :blk i;
+                                result.index -= event_offset;
+                            }
+                        } else {
+                            // Operations which aren't batched have the first Event consume the
+                            // entire Result down below.
+                            assert(event_offset == 0);
+                        }
+                        break :blk self.results.len;
+                    };
+
+                    // Return all results demuxed from the given Event, re-slicing them out of
+                    // self.results to "consume" them from subsequent decode() calls.
+                    defer self.results = self.results[demuxed..];
+                    return self.results[0..demuxed];
+                }
+            };
+        }
 
         const AccountsGroove = GrooveType(
             Storage,
@@ -2078,6 +2129,50 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\ lookup_transfer T4 amount  5
         \\ commit lookup_transfers
     );
+}
+
+test "StateMachine: Demuxer" {
+    const StateMachine = StateMachineType(
+        @import("testing/storage.zig").Storage,
+        global_constants.state_machine_config,
+    );
+
+    var prng = std.rand.DefaultPrng.init(42);
+    inline for ([_]StateMachine.Operation{
+        .create_accounts,
+        .create_transfers,
+    }) |operation| {
+        try expect(StateMachine.batch_logical_allowed.get(operation));
+
+        const Result = StateMachine.Result(operation);
+        var results: [@divExact(global_constants.message_body_size_max, @sizeOf(Result))]Result = undefined;
+
+        for (0..100) |_| {
+            // Generate Result errors to Events at random.
+            var reply_len: u32 = 0;
+            for (0..results.len) |i| {
+                if (prng.random().boolean()) {
+                    results[reply_len] = .{ .index = @intCast(i), .result = .ok };
+                    reply_len += 1;
+                }
+            }
+
+            // Demux events of random strides from the generated results.
+            var demuxer = StateMachine.DemuxerType(operation).init(results[0..reply_len]);
+            const event_count: u32 = @intCast(@max(1, prng.random().uintAtMost(usize, results.len)));
+            var event_offset: u32 = 0;
+            while (event_offset < event_count) {
+                const event_size = @max(1, prng.random().uintAtMost(u32, event_count - event_offset));
+                const reply = demuxer.decode(event_offset, event_size);
+                defer event_offset += event_size;
+
+                for (reply) |*result| {
+                    try expectEqual(result.result, .ok);
+                    try expect(result.index < event_offset + event_size);
+                }
+            }
+        }
+    }
 }
 
 test "StateMachine: ref all decls" {
