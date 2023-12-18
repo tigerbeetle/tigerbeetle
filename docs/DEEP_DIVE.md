@@ -45,7 +45,7 @@ Let's turn up the log level some more (and your favorite album), so you can see 
 
 - Open `src/config.zig` in your editor and change `log_level` to `.debug`.
 
-- Rebuild TigerBeetle using the new debug log level by running `zig/zig build -Doptimize=ReleaseSafe && mv zig-out/bin/tigerbeetle .`
+- Rebuild TigerBeetle using the new debug log level by running `zig/zig build -Drelease && mv zig-out/bin/tigerbeetle .`
 
 - Start a single replica cluster:
 Format the data file:
