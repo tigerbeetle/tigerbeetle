@@ -162,6 +162,7 @@ typedef enum TB_OPERATION {
     TB_OPERATION_CREATE_TRANSFERS = 129,
     TB_OPERATION_LOOKUP_ACCOUNTS = 130,
     TB_OPERATION_LOOKUP_TRANSFERS = 131,
+    TB_OPERATION_GET_ACCOUNT_TRANSFERS = 132,
 } TB_OPERATION;
 
 typedef enum TB_PACKET_STATUS {
@@ -176,6 +177,19 @@ typedef enum TB_PACKET_ACQUIRE_STATUS {
     TB_PACKET_ACQUIRE_CONCURRENCY_MAX_EXCEEDED = 1,
     TB_PACKET_ACQUIRE_SHUTDOWN = 2,
 } TB_PACKET_ACQUIRE_STATUS;
+
+typedef struct tb_get_account_transfers_t {
+    tb_uint128_t account_id;
+    uint64_t timestamp;
+    uint32_t limit;
+    uint32_t flags;
+} tb_get_account_transfers_t;
+
+typedef enum TB_GET_ACCOUNT_TRANSFERS_FLAGS {
+    TB_GET_ACCOUNT_TRANSFERS_DEBITS = 1 << 0,
+    TB_GET_ACCOUNT_TRANSFERS_CREDITS = 1 << 1,
+    TB_GET_ACCOUNT_TRANSFERS_REVERSED = 1 << 2,
+} TB_GET_ACCOUNT_TRANSFERS_FLAGS;
 
 typedef struct tb_packet_t {
     struct tb_packet_t* next;

@@ -19,6 +19,9 @@ const schema = @import("schema.zig");
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
+const GridType = @import("../vsr/grid.zig").GridType;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
+
 pub const ScopeCloseMode = enum { persist, discard };
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 
@@ -92,7 +95,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub const TableMemory = @import("table_memory.zig").TableMemoryType(Table);
         pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
 
-        const Grid = @import("../vsr/grid.zig").GridType(Storage);
+        const Grid = GridType(Storage);
         const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
         const KeyRange = Manifest.KeyRange;
 
@@ -298,8 +301,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// code must rely on the Groove cache for lookups.
         /// The returned Value pointer is only valid synchronously.
         pub fn lookup_from_memory(tree: *Tree, key: Key) ?*const Value {
-            assert(constants.verify);
+            comptime assert(constants.verify);
 
+            tree.table_mutable.sort();
             return tree.table_mutable.get(key) orelse tree.table_immutable.get(key);
         }
 
@@ -370,7 +374,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
         }
 
-        /// Call this function only after checking `lookup_from_memory()`.
+        /// Call this function only after checking `lookup_from_levels_cache()`.
         /// The callback's Value pointer is only valid synchronously within the callback.
         pub fn lookup_from_levels_storage(tree: *Tree, parameters: struct {
             callback: *const fn (*LookupContext, ?*const Value) void,
@@ -418,7 +422,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
         pub const LookupContext = struct {
             const Read = Grid.Read;
-            const BlockPtrConst = Grid.BlockPtrConst;
 
             tree: *Tree,
             completion: Read,

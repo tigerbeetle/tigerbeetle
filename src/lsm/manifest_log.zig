@@ -32,6 +32,8 @@ const stdx = @import("../stdx.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("../vsr/grid.zig").GridType;
+const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const BlockType = @import("schema.zig").BlockType;
 const tree = @import("tree.zig");
@@ -50,9 +52,6 @@ pub fn ManifestLogType(comptime Storage: type) type {
 
         const SuperBlock = SuperBlockType(Storage);
         const Grid = GridType(Storage);
-
-        const BlockPtr = Grid.BlockPtr;
-        const BlockPtrConst = Grid.BlockPtrConst;
         const Label = schema.ManifestNode.Label;
 
         pub const Callback = *const fn (manifest_log: *ManifestLog) void;
@@ -342,7 +341,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             );
         }
 
-        fn open_read_block_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn open_read_block_callback(read: *Grid.Read, block: BlockPtrConst) void {
             const manifest_log = @fieldParentPtr(ManifestLog, "read", read);
             assert(!manifest_log.opened);
             assert(manifest_log.reading);

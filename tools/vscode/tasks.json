@@ -17,5 +17,29 @@
             "problemMatcher": [],
             "group": "build",
         },
+        {
+            "label": "build benchmark",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "build_benchmark" ],
+            "problemMatcher": [],
+            "group": "build",
+        },        
+        {
+            "label": "build fuzz_lsm_tree",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "build_fuzz_lsm_tree" ],
+            "problemMatcher": [],
+            "group": "build",
+        },
+        {
+            "label": "build fuzz_lsm_forest",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "build_fuzz_lsm_forest" ],
+            "problemMatcher": [],
+            "group": "build",
+        },        
    ]
 }

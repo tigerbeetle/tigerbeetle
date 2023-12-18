@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const Direction = @import("direction.zig").Direction;
+const Direction = @import("../direction.zig").Direction;
 
 pub fn KWayMergeIteratorType(
     comptime Context: type,
@@ -17,7 +17,7 @@ pub fn KWayMergeIteratorType(
     /// must be refilled before calling peek() again.
     /// Returns Empty if the stream was fully consumed and reached the end.
     comptime stream_peek: fn (
-        context: *const Context,
+        context: *Context,
         stream_index: u32,
     ) error{ Empty, Drained }!Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,

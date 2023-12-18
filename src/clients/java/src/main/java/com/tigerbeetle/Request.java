@@ -32,6 +32,7 @@ abstract class Request<TResponse extends Batch> {
         CREATE_TRANSFERS(129),
         LOOKUP_ACCOUNTS(130),
         LOOKUP_TRANSFERS(131),
+        GET_ACCOUNT_TRANSFERS(132),
 
         ECHO_ACCOUNTS(128),
         ECHO_TRANSFERS(129);
@@ -107,12 +108,14 @@ abstract class Request<TResponse extends Batch> {
                     case CREATE_ACCOUNTS: {
                         result = replyBuffer == null ? CreateAccountResultBatch.EMPTY
                                 : new CreateAccountResultBatch(ByteBuffer.wrap(replyBuffer));
+                        checkResultLength(result);
                         break;
                     }
 
                     case CREATE_TRANSFERS: {
                         result = replyBuffer == null ? CreateTransferResultBatch.EMPTY
                                 : new CreateTransferResultBatch(ByteBuffer.wrap(replyBuffer));
+                        checkResultLength(result);
                         break;
                     }
 
@@ -120,11 +123,19 @@ abstract class Request<TResponse extends Batch> {
                     case LOOKUP_ACCOUNTS: {
                         result = replyBuffer == null ? AccountBatch.EMPTY
                                 : new AccountBatch(ByteBuffer.wrap(replyBuffer));
+                        checkResultLength(result);
                         break;
                     }
 
                     case ECHO_TRANSFERS:
                     case LOOKUP_TRANSFERS: {
+                        result = replyBuffer == null ? TransferBatch.EMPTY
+                                : new TransferBatch(ByteBuffer.wrap(replyBuffer));
+                        checkResultLength(result);
+                        break;
+                    }
+
+                    case GET_ACCOUNT_TRANSFERS: {
                         result = replyBuffer == null ? TransferBatch.EMPTY
                                 : new TransferBatch(ByteBuffer.wrap(replyBuffer));
                         break;
@@ -140,16 +151,18 @@ abstract class Request<TResponse extends Batch> {
             exception = any;
         }
 
-        if (exception != null) {
-            setException(exception);
+        if (exception == null) {
+            setResult((TResponse) result);
         } else {
-            if (result.getLength() > requestLen) {
-                setException(new AssertionError(
-                        "Amount of results is greater than the amount of requests: resultLen=%d, requestLen=%d",
-                        result.getLength(), requestLen));
-            } else {
-                setResult((TResponse) result);
-            }
+            setException(exception);
+        }
+    }
+
+    final void checkResultLength(Batch result) {
+        if (result.getLength() > requestLen) {
+            setException(new AssertionError(
+                    "Amount of results is greater than the amount of requests: resultLen=%d, requestLen=%d",
+                    result.getLength(), requestLen));
         }
     }
 

@@ -414,6 +414,36 @@ if err != nil {
 log.Println(transfers)
 ```
 
+## Get Account Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the transfers involving a given account, allowing basic filter and pagination
+capabilities.
+
+The order of transfers in the response is sorted by `timestamp` in ascending or
+descending order.
+
+```go
+filter := GetAccountTransfers{
+		AccountID: ToUint128(2),
+		Timestamp: 0, // No filter by Timestamp.
+		Limit:     10, // Limit to ten transfers at most.
+		Flags:     GetAccountTransfersFlags{
+			Debits:    true, // Include transfer from the debit side.
+			Credits:   true, // Include transfer from the credit side.
+			Reversed:  true, // Sort by timestamp in reversed chronological order.
+		}.ToUint32(),
+}
+transfers, err = client.GetAccountTransfers(filter)
+if err != nil {
+	log.Printf("Could not fetch transfers: %s", err)
+	return
+}
+log.Println(transfers)
+```
+
 ## Linked Events
 
 When the `linked` flag is specified for an account when creating accounts or

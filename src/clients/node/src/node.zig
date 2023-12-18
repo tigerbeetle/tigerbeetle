@@ -15,6 +15,8 @@ const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
+const GetAccountTransfers = tb.GetAccountTransfers;
+const GetAccountTransfersFlags = tb.GetAccountTransfersFlags;
 
 const Storage = @import("../../../storage.zig").Storage;
 const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
@@ -219,7 +221,10 @@ fn request(
 
     const packet_data = switch (operation) {
         inline else => |op| blk: {
-            const buffer = try BufferType(op).alloc(env, array_length);
+            const buffer = try BufferType(op).alloc(
+                env,
+                array_length,
+            );
             errdefer buffer.free();
 
             const events = buffer.events();
@@ -362,7 +367,7 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
     for (events, 0..) |*event, i| {
         const object = try translate.array_element(env, array, @intCast(i));
         switch (Event) {
-            Account, Transfer => {
+            Account, Transfer, GetAccountTransfers => {
                 inline for (std.meta.fields(Event)) |field| {
                     const FieldInt = switch (@typeInfo(field.type)) {
                         .Struct => |info| info.backing_integer.?,
@@ -374,13 +379,6 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                         object,
                         add_trailing_null(field.name),
                     );
-
-                    if (std.mem.eql(u8, field.name, "timestamp") and value != 0) {
-                        return translate.throw(
-                            env,
-                            "Timestamp should be set to 0 as this will be set correctly by Replica.",
-                        );
-                    }
 
                     @field(event, field.name) = switch (@typeInfo(field.type)) {
                         .Struct => @as(field.type, @bitCast(value)),
@@ -423,7 +421,7 @@ fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result)
             try @field(translate, @typeName(FieldInt) ++ "_into_object")(
                 env,
                 object,
-                @ptrCast(field.name ++ "\x00"),
+                add_trailing_null(field.name),
                 value,
                 "Failed to set property \"" ++ field.name ++ "\" of " ++ @typeName(Result) ++ " object",
             );
@@ -464,7 +462,12 @@ fn BufferType(comptime op: Operation) type {
 
         fn alloc(env: c.napi_env, count: u32) !Buffer {
             // Allocate enough bytes to hold memory for the Events and the Results.
-            const max_bytes = @max(@sizeOf(Event) * count, @sizeOf(Result) * count);
+            const max_bytes = @max(
+                @sizeOf(Event) * count,
+                @sizeOf(Result) *
+                    // Ad-hoc hack, event and result sizes are not the same size.
+                    if (op == .get_account_transfers) 8190 else count,
+            );
             if (@sizeOf(vsr.Header) + max_bytes > constants.message_size_max) {
                 return translate.throw(env, "Batch is larger than the maximum message size.");
             }
@@ -481,7 +484,12 @@ fn BufferType(comptime op: Operation) type {
         }
 
         fn free(buffer: Buffer) void {
-            const max_bytes = @max(@sizeOf(Event) * buffer.count, @sizeOf(Result) * buffer.count);
+            const max_bytes = @max(
+                @sizeOf(Event) * buffer.count,
+                @sizeOf(Result) *
+                    //TODO(batiati): Refine the way we handle events with asymmetric results.
+                    if (op == .get_account_transfers) 8190 else buffer.count,
+            );
             const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
             allocator.free(bytes);
         }
@@ -492,7 +500,9 @@ fn BufferType(comptime op: Operation) type {
         }
 
         fn results(buffer: Buffer) []Result {
-            const result_bytes = buffer.ptr[0 .. @sizeOf(Result) * buffer.count];
+            const result_bytes = buffer.ptr[0 .. @sizeOf(Result) *
+                // Ad-hoc hack, event and result sizes are not the same size.
+                if (op == .get_account_transfers) 8190 else buffer.count];
             return @alignCast(std.mem.bytesAsSlice(Result, result_bytes));
         }
     };

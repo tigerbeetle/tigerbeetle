@@ -43,6 +43,8 @@ type Client interface {
 	CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
+	GetAccountTransfers(filter types.GetAccountTransfers) ([]types.Transfer, error)
+
 	Nop() error
 	Close()
 }
@@ -125,6 +127,8 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 		fallthrough
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
 		return unsafe.Sizeof(types.Uint128{})
+	case C.TB_OPERATION_GET_ACCOUNT_TRANSFERS:
+		return unsafe.Sizeof(types.GetAccountTransfers{})
 	default:
 		return 0
 	}
@@ -139,6 +143,8 @@ func getResultSize(op C.TB_OPERATION) uintptr {
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
+		return unsafe.Sizeof(types.Transfer{})
+	case C.TB_OPERATION_GET_ACCOUNT_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
 	default:
 		return 0
@@ -239,10 +245,13 @@ func onGoPacketCompletion(
 			panic("invalid result_len:  misaligned for the event")
 		}
 
-		// Make sure the amount of results at least matches the amount of requests.
-		count := packet.data_size / C.uint32_t(getEventSize(op))
-		if count*resultSize < result_len {
-			panic("invalid result_len: implied multiple results per event")
+		//TODO(batiati): Refine the way we handle events with asymmetric results.
+		if op != C.TB_OPERATION_GET_ACCOUNT_TRANSFERS {
+			// Make sure the amount of results at least matches the amount of requests.
+			count := packet.data_size / C.uint32_t(getEventSize(op))
+			if count*resultSize < result_len {
+				panic("invalid result_len: implied multiple results per event")
+			}
 		}
 
 		// Write the result data into the request's result.
@@ -318,6 +327,27 @@ func (c *c_client) LookupTransfers(transferIDs []types.Uint128) ([]types.Transfe
 		C.TB_OPERATION_LOOKUP_TRANSFERS,
 		count,
 		unsafe.Pointer(&transferIDs[0]),
+		unsafe.Pointer(&results[0]),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	resultCount := wrote / int(unsafe.Sizeof(types.Transfer{}))
+	return results[0:resultCount], nil
+}
+
+func (c *c_client) GetAccountTransfers(filter types.GetAccountTransfers) ([]types.Transfer, error) {
+	//TODO(batiati): we need to expose the max message size to the client.
+	//since queries have asymmetric events and results, we can't allocate
+	//the results array based on the number of events.
+	results := make([]types.Transfer, 8190)
+
+	wrote, err := c.doRequest(
+		C.TB_OPERATION_GET_ACCOUNT_TRANSFERS,
+		1,
+		unsafe.Pointer(&filter),
 		unsafe.Pointer(&results[0]),
 	)
 

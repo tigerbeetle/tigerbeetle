@@ -74,6 +74,30 @@ func (f TransferFlags) ToUint16() uint16 {
 	return ret
 }
 
+type GetAccountTransfersFlags struct {
+	Debits   bool
+	Credits  bool
+	Reversed bool
+}
+
+func (f GetAccountTransfersFlags) ToUint32() uint32 {
+	var ret uint32 = 0
+
+	if f.Debits {
+		ret |= (1 << 0)
+	}
+
+	if f.Credits {
+		ret |= (1 << 1)
+	}
+
+	if f.Reversed {
+		ret |= (1 << 2)
+	}
+
+	return ret
+}
+
 type Account struct {
 	ID             Uint128
 	DebitsPending  Uint128
@@ -389,5 +413,20 @@ type AccountEventResult struct {
 type TransferEventResult struct {
 	Index  uint32
 	Result CreateTransferResult
+}
+
+type GetAccountTransfers struct {
+	AccountID Uint128
+	Timestamp uint64
+	Limit     uint32
+	Flags     uint32
+}
+
+func (o GetAccountTransfers) GetAccountTransfersFlags() GetAccountTransfersFlags {
+	var f GetAccountTransfersFlags
+	f.Debits = ((o.Flags >> 0) & 0x1) == 1
+	f.Credits = ((o.Flags >> 1) & 0x1) == 1
+	f.Reversed = ((o.Flags >> 2) & 0x1) == 1
+	return f
 }
 

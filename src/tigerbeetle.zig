@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx.zig");
 
 pub const Account = extern struct {
     id: u128,
@@ -245,6 +245,41 @@ pub const CreateTransfersResult = extern struct {
     comptime {
         assert(@sizeOf(CreateTransfersResult) == 8);
         assert(stdx.no_padding(CreateTransfersResult));
+    }
+};
+
+pub const GetAccountTransfers = extern struct {
+    /// The account id.
+    account_id: u128,
+
+    /// Use this field for pagination, transfers will be returned from this timestamp
+    /// depending on the sort order.
+    timestamp: u64,
+
+    /// Maximum number of transfers that can be returned by this query.
+    limit: u32,
+
+    /// Query flags.
+    flags: GetAccountTransfersFlags,
+
+    comptime {
+        assert(@sizeOf(GetAccountTransfers) == 32);
+        assert(stdx.no_padding(GetAccountTransfers));
+    }
+};
+
+pub const GetAccountTransfersFlags = packed struct(u32) {
+    /// Whether to include debit transfers where `debit_account_id` matches.
+    debits: bool,
+    /// Whether to include credit transfers where `credit_account_id` matches.
+    credits: bool,
+    /// Whether the results are sorted by timestamp in chronological or reverse-chronological order.
+    reversed: bool,
+    padding: u29 = 0,
+
+    comptime {
+        assert(@sizeOf(GetAccountTransfersFlags) == @sizeOf(u32));
+        assert(@bitSizeOf(GetAccountTransfersFlags) == @sizeOf(GetAccountTransfersFlags) * 8);
     }
 };
 

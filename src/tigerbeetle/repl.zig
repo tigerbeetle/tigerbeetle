@@ -830,6 +830,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
+                .get_account_transfers => unreachable,
             }
         }
 
