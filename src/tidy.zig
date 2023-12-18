@@ -110,6 +110,15 @@ fn banned(source: []const u8) ?[]const u8 {
         return "use stdx." ++ "has_unique_representation instead of std version";
     }
 
+    // Ban "fixme" comments. This allows using fixe as reminders with teeth --- when working on a
+    // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
+    // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
+    // - use fixme for issues to be fixed in the same pull request,
+    // - use todo as general-purpose long-term remainders without enforcement.
+    if (std.mem.indexOf(u8, source, "FIX" ++ "ME") != null) {
+        return "FIX" ++ "ME comments must be addressed before getting to main";
+    }
+
     return null;
 }
 
