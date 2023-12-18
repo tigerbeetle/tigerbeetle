@@ -11,15 +11,15 @@
 
 - [#1357](https://github.com/tigerbeetle/tigerbeetle/pull/1357)
 
-  Fix panic in JVM unit test on Java 21. We test JNI functions (even if they're not used by the Java
-  client) and the semantics have changed a bit since Java 11.
+  Fix panic in JVM unit test on Java 21. We test JNI functions even if they're not used by the Java
+  client and the semantics have changed a bit since Java 11.
 
 - [#1351](https://github.com/tigerbeetle/tigerbeetle/pull/1351),
   [#1356](https://github.com/tigerbeetle/tigerbeetle/pull/1356),
   [#1360](https://github.com/tigerbeetle/tigerbeetle/pull/1360)
 
   Move client sessions from the Superblock (database metadata) into the Grid (general storage). This
-  simplifies control flow for farious sub-components like Superblock checkpointing and Replica state
+  simplifies control flow for various sub-components like Superblock checkpointing and Replica state
   sync.
 
 ### Safety And Performance
@@ -27,14 +27,15 @@
 - [#1352](https://github.com/tigerbeetle/tigerbeetle/pull/1352)
   
   An optimization for removes on secondary indexes makes a return. Now tombstone values in the LSM
-  can avoid being compacted all the way down to the lowest level if they can be cancelled out.
+  can avoid being compacted all the way down to the lowest level if they can be cancelled out by
+  inserts.
 
 - [#1257](https://github.com/tigerbeetle/tigerbeetle/pull/1257)
 
-  Clients automatically batch pending similar requests 🎉. If a tigerbeetle client submits a 
-  request, and one with the same operation is currently inflight, they will be grouped and 
-  processed together where possible (currently for `CreateAccount` and `CreateTransfers`). This
-  should [greatly improve the performance](https://github.com/tigerbeetle/tigerbeetle/pull/1257#issuecomment-1812648270) 
+  Clients automatically batch pending similar requests 🎉! If a tigerbeetle client submits a 
+  request, and one with the same operation is currently in-flight, they will be grouped and 
+  processed together where possible (currently, only for `CreateAccount` and `CreateTransfers`). 
+  This should [greatly improve the performance](https://github.com/tigerbeetle/tigerbeetle/pull/1257#issuecomment-1812648270) 
   of workloads which submit a single operation at a time. 
 
 ### TigerTracks 🎧
