@@ -2,6 +2,8 @@
 
 ## 2023-12-18
 
+*As the last release of the year 2023, the TigerBeetle team wishes everyone happy holidays!* 🎁
+
 ### Internals
 
 - [#1359](https://github.com/tigerbeetle/tigerbeetle/pull/1359)
@@ -40,7 +42,7 @@
 
 ### TigerTracks 🎧
 
-- [Carouselambra](https://open.spotify.com/track/0YZKbKo9i91i7LD0m1KASq)
+- ["Carouselambra"](https://open.spotify.com/track/0YZKbKo9i91i7LD0m1KASq)
 
 ## 2023-12-11
 
