@@ -42,7 +42,7 @@
 
 ### TigerTracks 🎧
 
-- ["Carouselambra"](https://open.spotify.com/track/0YZKbKo9i91i7LD0m1KASq)
+- [Carouselambra](https://open.spotify.com/track/0YZKbKo9i91i7LD0m1KASq)
 
 ## 2023-12-11
 
