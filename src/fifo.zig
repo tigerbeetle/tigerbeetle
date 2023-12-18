@@ -42,6 +42,10 @@ pub fn FIFO(comptime T: type) type {
             return ret;
         }
 
+        pub fn peek_last(self: Self) ?*T {
+            return self.in;
+        }
+
         pub fn peek(self: Self) ?*T {
             return self.out;
         }

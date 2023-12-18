@@ -3,14 +3,14 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.state_machine);
 
 const stdx = @import("../stdx.zig");
-const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
+const global_constants = @import("../constants.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
 const ForestType = @import("../lsm/forest.zig").ForestType;
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: constants.StateMachineConfig,
+    comptime config: global_constants.StateMachineConfig,
 ) type {
     return struct {
         const StateMachine = @This();
@@ -21,6 +21,44 @@ pub fn StateMachineType(
         pub const Operation = enum(u8) {
             echo = config.vsr_operations_reserved + 0,
         };
+
+        pub const constants = struct {
+            pub const message_body_size_max = config.message_body_size_max;
+        };
+
+        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
+            // Batching not supported by test StateMachine.
+            .echo = false,
+        });
+
+        pub fn Event(comptime _: Operation) type {
+            return u8; // Must be non-zero-sized for sliceAsBytes().
+        }
+
+        pub fn Result(comptime _: Operation) type {
+            return u8; // Must be non-zero-sized for sliceAsBytes().
+        }
+
+        /// Empty demuxer to be compatible with vsr.Client batching.
+        pub fn DemuxerType(comptime operation: Operation) type {
+            return struct {
+                const Demuxer = @This();
+
+                reply: []Result(operation),
+                offset: u32 = 0,
+
+                pub fn init(reply: []Result(operation)) Demuxer {
+                    return .{ .reply = reply };
+                }
+
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
+                    assert(self.offset == event_offset);
+                    assert(event_offset + event_count <= self.reply.len);
+                    defer self.offset += event_count;
+                    return self.reply[self.offset..][0..event_count];
+                }
+            };
+        }
 
         pub const Options = struct {
             lsm_forest_node_count: u32,
@@ -222,6 +260,7 @@ pub fn StateMachineType(
 fn WorkloadType(comptime StateMachine: type) type {
     return struct {
         const Workload = @This();
+        const constants = StateMachine.constants;
 
         random: std.rand.Random,
         requests_sent: usize = 0,

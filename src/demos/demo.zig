@@ -66,18 +66,13 @@ pub fn request(
     );
     defer client.deinit(allocator);
 
-    const message = client.get_message();
-    errdefer client.release(message);
+    const client_batch = client.batch_get(operation, batch.len) catch unreachable;
+    stdx.copy_disjoint(.exact, u8, client_batch.slice(), std.mem.asBytes(&batch));
 
-    const body = std.mem.asBytes(&batch);
-    stdx.copy_disjoint(.inexact, u8, message.buffer[@sizeOf(Header)..], body);
-
-    client.request(
+    client.batch_submit(
         0,
         on_reply,
-        operation,
-        message,
-        body.len,
+        client_batch,
     );
 
     while (client.request_queue.count > 0) {
