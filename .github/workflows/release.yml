@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch: # Manual triggering to re-run a release with a different run_number
   push:
     branches:
       - release
@@ -12,6 +13,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          rev: release # Use the 'release' branch even if triggered manually
 
       - uses: actions/setup-dotnet@v3
         with:
