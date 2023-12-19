@@ -6,7 +6,7 @@ import java.util.concurrent.CompletableFuture;
 
 public final class Client implements AutoCloseable {
 
-    private static final int DEFAULT_MAX_CONCURRENCY = 32;
+    private static final int DEFAULT_MAX_CONCURRENCY = 256; // arbitrary
 
     private final byte[] clusterID;
     private final NativeClient nativeClient;

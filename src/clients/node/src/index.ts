@@ -98,7 +98,7 @@ export interface Client {
 }
 
 export function createClient (args: ClientInitArgs): Client {
-  const concurrency_max_default = 32 // arbitrary
+  const concurrency_max_default = 256 // arbitrary
   const context = binding.init({
     cluster_id: args.cluster_id,
     concurrency: args.concurrency_max || concurrency_max_default,
