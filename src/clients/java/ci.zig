@@ -133,6 +133,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
                 log.warn("waiting for 5 minutes for the {s} version to appear in maven cental", .{
                     options.version,
                 });
+                delay_minutes += delay_minutes_increment;
                 std.time.sleep(delay_minutes_increment * std.time.ns_per_min);
                 continue;
             } else {
