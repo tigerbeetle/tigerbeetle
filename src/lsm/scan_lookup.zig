@@ -36,9 +36,9 @@ pub fn ScanLookupType(comptime Groove: type, comptime Storage: type) type {
         /// up to an arbitrary constant based on the maximum number of objects per block.
         /// Reasoning: the larger the block size is, higher is the probability of multiple
         /// lookups hitting the same grid block:
-        const lookups_workers_max = @max(
+        const lookup_workers_max = @max(
             stdx.div_ceil(
-                @divExact(constants.block_size, @sizeOf(Object)),
+                @divFloor(constants.block_size, @sizeOf(Object)),
                 Grid.read_iops_max,
             ),
             Grid.read_iops_max,
@@ -53,7 +53,7 @@ pub fn ScanLookupType(comptime Groove: type, comptime Storage: type) type {
         state: enum { idle, scan, lookup, finished },
         callback: ?Callback,
 
-        workers: [lookups_workers_max]LookupWorker = undefined,
+        workers: [lookup_workers_max]LookupWorker = undefined,
         /// The number of workers that are currently running in parallel.
         workers_pending: u32 = 0,
 
@@ -92,6 +92,7 @@ pub fn ScanLookupType(comptime Groove: type, comptime Storage: type) type {
 
         pub fn slice(self: *const ScanLookup) []const Object {
             assert(self.state == .finished);
+            assert(self.workers_pending == 0);
             return self.buffer.?[0..self.buffer_produced_len];
         }
 
@@ -108,21 +109,24 @@ pub fn ScanLookupType(comptime Groove: type, comptime Storage: type) type {
             assert(self.workers_pending == 0);
 
             self.state = .lookup;
-            self.workers_pending += 1;
 
-            for (&self.workers) |*worker| {
+            for (&self.workers, 0..) |*worker, i| {
+                assert(self.workers_pending == i);
+
                 worker.* = .{ .scan_lookup = self };
                 self.workers_pending += 1;
                 self.lookup_worker_next(worker);
 
-                // The worker finished synchronously.
-                if (self.state != .lookup) break;
+                // If the worker finished synchronously (e.g `workers_pending`
+                // decreased), we don't need to start new ones.
+                if (self.workers_pending == i) break;
             }
 
-            // If the lookup has completed synchronously, we can call the callback here,
-            // since this function is always called by `scan_read_callback`.
-            assert(self.workers_pending >= 1);
-            self.lookup_worker_finished();
+            // The lookup may have been completed synchronously,
+            // and the last worker already called the callback.
+            // It's safe to call the callback synchronously here since this function
+            // is always called by `scan_read_callback`.
+            assert(self.workers_pending > 0 or self.state != .lookup);
         }
 
         fn lookup_worker_next(self: *ScanLookup, worker: *LookupWorker) void {
@@ -194,6 +198,7 @@ pub fn ScanLookupType(comptime Groove: type, comptime Storage: type) type {
                 }
             }
 
+            // The worker finished synchronously by reading from cache.
             switch (self.state) {
                 .idle, .lookup => unreachable,
                 .scan, .finished => self.lookup_worker_finished(),

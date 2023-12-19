@@ -419,7 +419,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         /// State over the manifest.
         manifest: union(enum) {
             begin,
-            moving: struct {
+            iterating: struct {
                 fetch_pending: bool,
                 key_exclusive_next: Key,
             },
@@ -454,6 +454,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         pub fn table_next(self: *ScanTreeLevel) void {
             assert(self.manifest != .finished);
             assert(self.values == .fetching);
+            assert(self.iterator.callback == .none);
 
             const scan: *ScanTree = self.scan;
             assert(scan.state == .buffering);
@@ -462,7 +463,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 const manifest: *Manifest = &scan.tree.manifest;
                 const key_exclusive_current: ?Key = switch (self.manifest) {
                     .begin => null,
-                    .moving => |state| key: {
+                    .iterating => |state| key: {
                         assert(state.fetch_pending == false);
                         break :key state.key_exclusive_next;
                     },
@@ -489,7 +490,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                         assert(scan.direction == .descending);
                         self.manifest = .finished;
                     } else {
-                        self.manifest = .{ .moving = .{
+                        self.manifest = .{ .iterating = .{
                             .key_exclusive_next = key_exclusive_next,
                             .fetch_pending = true,
                         } };
@@ -521,7 +522,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             switch (self.manifest) {
                 .begin => unreachable,
-                .moving => |*state| {
+                .iterating => |*state| {
                     // Clearing the `fetch_pending` flag:
                     // `fetch()` can be called multiple times for the same `table_info`,
                     // `fetch pending` is true only the first time.
@@ -538,6 +539,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         pub fn peek(self: *const ScanTreeLevel) error{ Drained, Empty }!Key {
+            assert(self.manifest != .begin);
             assert(self.scan.state == .seeking);
 
             switch (self.values) {
@@ -561,6 +563,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         pub fn pop(self: *ScanTreeLevel) Value {
+            assert(self.manifest != .begin);
             assert(self.values == .buffered);
             assert(self.scan.state == .seeking);
 
@@ -598,6 +601,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const self: *ScanTreeLevel = @fieldParentPtr(ScanTreeLevel, "iterator", iterator);
             const scan: *const ScanTree = self.scan;
 
+            assert(self.manifest != .begin);
             assert(self.values == .fetching);
             assert(scan.state == .buffering);
             assert(scan.state.buffering.pending_count > 0);
@@ -643,6 +647,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const self: *ScanTreeLevel = @fieldParentPtr(ScanTreeLevel, "iterator", iterator);
             const scan: *ScanTree = self.scan;
 
+            assert(self.manifest != .begin);
             assert(self.values == .fetching);
             assert(scan.state == .buffering);
             assert(scan.state.buffering.pending_count > 0);
@@ -674,7 +679,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             } else {
                 switch (self.manifest) {
                     .begin => unreachable,
-                    .moving => self.table_next(),
+                    .iterating => self.table_next(),
                     .finished => self.values = .finished,
                 }
             }

@@ -438,6 +438,7 @@ pub fn GrooveType(
             callback: Callback,
         } = null,
 
+        grid: *Grid,
         objects: ObjectTree,
         ids: IdTree,
         indexes: IndexTrees,
@@ -560,6 +561,7 @@ pub fn GrooveType(
             errdefer if (has_scan) scan_builder.deinit(allocator);
 
             return Groove{
+                .grid = grid,
                 .objects = object_tree,
                 .ids = id_tree,
                 .indexes = index_trees,
@@ -601,6 +603,7 @@ pub fn GrooveType(
             if (has_scan) groove.scan_builder.reset();
 
             groove.* = .{
+                .grid = groove.grid,
                 .objects = groove.objects,
                 .ids = groove.ids,
                 .indexes = groove.indexes,
@@ -722,10 +725,19 @@ pub fn GrooveType(
             /// The number of workers that are currently running in parallel.
             workers_pending: u32 = 0,
 
+            next_tick: Grid.NextTick = undefined,
+
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_pending == 0);
 
-                for (&context.workers, 0..) |*worker, i| {
+                // Track an extra "worker" that will finish after the loop.
+                // This allows the callback to be called asynchronously on `next_tick`
+                // if all workers are finished synchronously.
+                context.workers_pending += 1;
+
+                for (&context.workers, 1..) |*worker, i| {
+                    assert(context.workers_pending == i);
+
                     worker.* = .{ .context = context };
                     context.workers_pending += 1;
                     worker.lookup_start_next();
@@ -735,7 +747,20 @@ pub fn GrooveType(
                     if (context.workers_pending == i) break;
                 }
 
-                stdx.maybe(context.workers_pending > 0);
+                assert(context.workers_pending > 0);
+                context.workers_pending -= 1;
+
+                if (context.workers_pending == 0) {
+                    // All workers finished synchronously,
+                    // calling the callback on `next_tick`.
+                    context.groove.grid.on_next_tick(worker_next_tick, &context.next_tick);
+                }
+            }
+
+            fn worker_next_tick(completion: *Grid.NextTick) void {
+                const context = @fieldParentPtr(PrefetchContext, "next_tick", completion);
+                assert(context.workers_pending == 0);
+                context.finish();
             }
 
             fn worker_finished(context: *PrefetchContext) void {

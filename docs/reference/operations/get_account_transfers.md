@@ -18,7 +18,10 @@ Constraints:
 ### `timestamp`
 
 The [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, exclusive range
-applied as greater than `>` or less than `<` if in [reversed](#flagsreversed) chronological order.
+applied as:
+
+- Greater than `>` when [reversed](#flagsreversed) is `false`.
+- Less than `<` when [reversed](#flagsreversed) is `true`.
 
 This parameter together with [`limit`](#limit) can be used for pagination, passing the last
 timestamp seen from the previous results.
