@@ -7,6 +7,8 @@ const vsr = @import("../vsr.zig");
 const stdx = @import("../stdx.zig");
 const schema = @import("../lsm/schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
+const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const constants = @import("../constants.zig");
 const FreeSet = @import("./free_set.zig").FreeSet;
@@ -83,7 +85,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         write: Grid.Write = undefined,
         // As the trailers are each expected to fit in one block, they are written sequentially,
         // one block at a time. This is the memory used for writing.
-        write_block: Grid.BlockPtr,
+        write_block: BlockPtr,
 
         // SoA representation of block references holding the trailer itself.
         //
@@ -253,7 +255,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             );
         }
 
-        fn open_read_next_callback(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn open_read_next_callback(read: *Grid.Read, block: BlockPtrConst) void {
             const trailer = @fieldParentPtr(Self, "read", read);
             assert(trailer.callback == .open);
             assert(trailer.size > 0);

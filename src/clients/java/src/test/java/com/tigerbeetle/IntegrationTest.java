@@ -1276,6 +1276,263 @@ public class IntegrationTest {
         }
     }
 
+    @Test
+    public void testAccountTransfers() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
+
+                // Creating the accounts.
+                var createAccountErrors = client.createAccounts(accounts);
+                assertTrue(createAccountErrors.getLength() == 0);
+
+                // Creating a transfer.
+                var transfers = new TransferBatch(10);
+                for (int i = 0; i < 10; i++) {
+                    transfers.add();
+                    transfers.setId(i + 1);
+
+                    // Swap the debit and credit accounts:
+                    if (i % 2 == 0) {
+                        transfers.setCreditAccountId(account1Id);
+                        transfers.setDebitAccountId(account2Id);
+                    } else {
+                        transfers.setCreditAccountId(account2Id);
+                        transfers.setDebitAccountId(account1Id);
+                    }
+
+                    transfers.setLedger(720);
+                    transfers.setCode((short) 1);
+                    transfers.setFlags(TransferFlags.NONE);
+                    transfers.setAmount(100);
+                }
+
+                var createTransferErrors = client.createTransfers(transfers);
+                assertTrue(createTransferErrors.getLength() == 0);
+                {
+                    // Querying transfers where:
+                    // `debit_account_id=$account1Id OR credit_account_id=$account1Id
+                    // ORDER BY timestamp ASC`.
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account1Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(8190);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(false);
+                    var account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 10);
+                    long timestamp = 0;
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) > 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+                }
+
+                {
+                    // Querying transfers where:
+                    // `debit_account_id=$account2Id OR credit_account_id=$account2Id
+                    // ORDER BY timestamp DESC`.
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account2Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(8190);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(true);
+                    var account_transfers = client.getAccountTransfers(filter);
+
+                    assertTrue(account_transfers.getLength() == 10);
+                    long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) < 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+                }
+
+                {
+                    // Querying transfers where:
+                    // `debit_account_id=$account1Id
+                    // ORDER BY timestamp ASC`.
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account1Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(8190);
+                    filter.setDebits(true);
+                    filter.setCredits(false);
+                    filter.setReversed(false);
+                    var account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 5);
+                    long timestamp = 0;
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) > 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+                }
+
+                {
+                    // Querying transfers where:
+                    // `credit_account_id=$account2Id
+                    // ORDER BY timestamp DESC`.
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account2Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(8190);
+                    filter.setDebits(false);
+                    filter.setCredits(true);
+                    filter.setReversed(true);
+                    var account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 5);
+                    long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) < 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+                }
+
+                {
+                    // Querying transfers where:
+                    // `debit_account_id=$account1Id OR credit_account_id=$account1Id
+                    // ORDER BY timestamp ASC LIMIT 5`.
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account1Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(5);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(false);
+
+                    // First 5 items:
+                    var account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 5);
+                    long timestamp = 0;
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) > 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+
+                    // Next 5 items from this timestamp:
+                    filter.setTimestamp(timestamp);
+                    account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 5);
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) > 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+
+                    // No more pages after that:
+                    filter.setTimestamp(timestamp);
+                    account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 0);
+                }
+
+                {
+                    // Querying transfers where:
+                    // `debit_account_id=$account2Id OR credit_account_id=$account2Id
+                    // ORDER BY timestamp DESC LIMIT 5`.
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account2Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(5);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(true);
+
+                    // First 5 items:
+                    var account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 5);
+                    long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) < 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+
+                    // Next 5 items from this timestamp:
+                    filter.setTimestamp(timestamp);
+                    account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 5);
+                    while (account_transfers.next()) {
+                        assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(),
+                                timestamp) < 0);
+                        timestamp = account_transfers.getTimestamp();
+                    }
+
+                    // No more pages after that:
+                    filter.setTimestamp(timestamp);
+                    account_transfers = client.getAccountTransfers(filter);
+                    assertTrue(account_transfers.getLength() == 0);
+                }
+
+                {
+                    // Empty filter:
+                    var filter = new AccountTransfers();
+                    assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                }
+
+                {
+                    // Invalid account:
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(0);
+                    filter.setTimestamp(0);
+                    filter.setLimit(8190);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(false);
+                    assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                }
+
+                {
+                    // Invalid timestamp:
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account2Id);
+                    filter.setTimestamp(-1L); // -1L == ulong max value
+                    filter.setLimit(8190);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(false);
+                    assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                }
+
+                {
+                    // Zero limit:
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account2Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(0);
+                    filter.setDebits(true);
+                    filter.setCredits(true);
+                    filter.setReversed(false);
+                    assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                }
+
+                {
+                    // Zero flags:
+                    var filter = new AccountTransfers();
+                    filter.setAccountId(account2Id);
+                    filter.setTimestamp(0);
+                    filter.setLimit(0);
+                    filter.setDebits(false);
+                    filter.setCredits(false);
+                    filter.setReversed(false);
+                    assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                }
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
     private static void assertAccounts(AccountBatch account1, AccountBatch account2) {
         assertArrayEquals(account1.getId(), account2.getId());
         assertArrayEquals(account1.getUserData128(), account2.getUserData128());

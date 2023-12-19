@@ -66,6 +66,12 @@ const type_mappings = .{
         .private_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
+    .{ tb.GetAccountTransfersFlags, TypeMapping{
+        .name = "GetAccountTransfersFlags",
+        .private_fields = &.{"padding"},
+        .visibility = .public,
+        .docs_link = "reference/operations/get_account_transfers#flags",
+    } },
     .{ tb.Account, TypeMapping{
         .name = "AccountBatch",
         .private_fields = &.{"reserved"},
@@ -93,6 +99,10 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransferResultBatch",
         .readonly_fields = &.{ "index", "result" },
+    } },
+    .{ tb.GetAccountTransfers, TypeMapping{
+        .name = "GetAccountTransfersBatch",
+        .visibility = .internal,
     } },
     .{ tb_client.tb_status_t, TypeMapping{
         .name = "InitializationStatus",
@@ -133,6 +143,7 @@ fn java_type(
             // Even though, the backing fields are always stored as "short".
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
+                1 => "byte",
                 8 => "byte",
                 16, 32 => "int",
                 64 => "long",

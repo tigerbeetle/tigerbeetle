@@ -460,6 +460,18 @@ pub const NodeDocs = Docs{
     \\ */
     ,
 
+    .get_account_transfers_example =
+    \\let filter = {
+    \\  account_id: 2n,
+    \\  timestamp: 0n, // No filter by Timestamp.
+    \\  limit: 10, // Limit to ten transfers at most.
+    \\  flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
+    \\    GetAccountTransfersFlags.credits | // Include transfer from the credit side.
+    \\    GetAccountTransfersFlags.reversed, // Sort by timestamp in reverse-chronological order.
+    \\}
+    \\const account_transfers = await client.getAccountTransfers(filter)
+    ,
+
     .linked_events_example =
     \\const batch = [];
     \\let linkedFlag = 0;

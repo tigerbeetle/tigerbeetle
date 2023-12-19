@@ -8,6 +8,7 @@ const constants = @import("../constants.zig");
 const Direction = @import("direction.zig").Direction;
 const ManifestType = @import("manifest.zig").ManifestType;
 const GridType = @import("../vsr/grid.zig").GridType;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 
 /// A LevelIndexIterator iterates the index blocks of every table in a key range in ascending key order.
 pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type {
@@ -15,7 +16,6 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
         const LevelIndexIterator = @This();
         const Key = Table.Key;
         const Grid = GridType(Storage);
-        const BlockPtrConst = Grid.BlockPtrConst;
         const Manifest = ManifestType(Table, Storage);
         const TableInfo = Manifest.TableInfo;
 
@@ -131,7 +131,7 @@ pub fn LevelIndexIteratorType(comptime Table: type, comptime Storage: type) type
             }
         }
 
-        fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn on_read(read: *Grid.Read, block: BlockPtrConst) void {
             const it = @fieldParentPtr(LevelIndexIterator, "read", read);
             assert(it.callback == .read);
 

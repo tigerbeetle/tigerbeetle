@@ -487,6 +487,28 @@ ids.add(2);
 transfers = client.lookupTransfers(ids);
 ```
 
+## Get Account Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the transfers involving a given account, allowing basic filter and pagination
+capabilities.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```java
+AccountTransfers filter = new AccountTransfers();
+filter.setAccountId(2);
+filter.setTimestamp(0); // No filter by Timestamp.
+filter.setLimit(10); // Limit to ten transfers at most.
+filter.setDebits(true); // Include transfer from the debit side.
+filter.setCredits(true); // Include transfer from the credit side.
+filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+transfers = client.getAccountTransfers(filter);
+```
+
 ## Linked Events
 
 When the `linked` flag is specified for an account when creating accounts or

@@ -10,7 +10,9 @@ const stdx = @import("../stdx.zig");
 const ManifestType = @import("manifest.zig").ManifestType;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const GridType = @import("../vsr/grid.zig").GridType;
-const Direction = @import("direction.zig").Direction;
+const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
+const Direction = @import("../direction.zig").Direction;
 const TableDataIteratorType = @import("table_data_iterator.zig").TableDataIteratorType;
 
 // Iterates over the data blocks in a level B table. References to the level B
@@ -28,8 +30,6 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
         const LevelTableValueBlockIterator = @This();
 
         const Grid = GridType(Storage);
-        const BlockPtr = Grid.BlockPtr;
-        const BlockPtrConst = Grid.BlockPtrConst;
         const Manifest = ManifestType(Table, Storage);
         const TableInfo = Manifest.TableInfo;
         const TableDataIterator = TableDataIteratorType(Storage);
@@ -39,13 +39,37 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             level: u8,
             snapshot: u64,
             index_block: BlockPtr,
-
             // `tables` contains TableInfo references from ManifestLevel.
-            tables: []const Manifest.TableInfoReference,
+            tables: union(enum) {
+                compaction: []const Manifest.TableInfoReference,
+                scan: ?*const Manifest.TreeTableInfo,
+            },
             direction: Direction,
+
+            fn tables_len(context: *const Context) usize {
+                return switch (context.tables) {
+                    .compaction => |slice| slice.len,
+                    .scan => |table_info| @intFromBool(table_info != null),
+                };
+            }
+
+            fn tables_get(context: *const Context, index: usize) *const Manifest.TreeTableInfo {
+                return switch (context.tables) {
+                    .compaction => |slice| slice[index].table_info,
+                    .scan => |table_info| blk: {
+                        assert(index == 0);
+                        break :blk table_info.?;
+                    },
+                };
+            }
         };
 
-        pub const IndexCallback = *const fn (it: *LevelTableValueBlockIterator) void;
+        pub const DataBlocksToLoad = union(enum) {
+            none,
+            all,
+            range: struct { start: usize, end: usize },
+        };
+        pub const IndexCallback = *const fn (it: *LevelTableValueBlockIterator) DataBlocksToLoad;
         pub const DataCallback = *const fn (it: *LevelTableValueBlockIterator, data_block: ?BlockPtrConst) void;
         pub const Callback = struct {
             on_index: IndexCallback,
@@ -120,15 +144,15 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             // If this is the last table that we're iterating and it.table_data_iterator.empty()
             // is true, it.table_data_iterator.next takes care of calling callback.on_data with
             // a null data block.
-            if (it.table_data_iterator.empty() and it.table_index < it.context.tables.len) {
+            if (it.table_data_iterator.empty() and it.table_index < it.context.tables_len()) {
                 // Refill `table_data_iterator` before calling `table_next`.
-                const table_ref = it.context.tables[it.table_index];
+                const table_info = it.context.tables_get(it.table_index);
                 it.callback = .{ .level_next = callback };
                 it.context.grid.read_block(
                     .{ .from_local_or_global_storage = on_level_next },
                     &it.read,
-                    table_ref.table_info.address,
-                    table_ref.table_info.checksum,
+                    table_info.address,
+                    table_info.checksum,
                     .{ .cache_read = true, .cache_write = true },
                 );
             } else {
@@ -143,21 +167,40 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
             const it = @fieldParentPtr(LevelTableValueBlockIterator, "read", read);
             assert(it.table_data_iterator.empty());
 
-            const index_schema = schema.TableIndex.from(index_block);
             const callback = it.callback.level_next;
             it.callback = .none;
             // `index_block` is only valid for this callback, so copy it's contents.
             // TODO(jamii) This copy can be avoided if we bypass the cache.
             stdx.copy_disjoint(.exact, u8, it.context.index_block, index_block);
-            it.table_data_iterator.start(.{
-                .grid = it.context.grid,
-                .addresses = index_schema.data_addresses_used(it.context.index_block),
-                .checksums = index_schema.data_checksums_used(it.context.index_block),
-                .direction = it.context.direction,
-            });
-            callback.on_index(it);
+
+            const blocks_to_load = callback.on_index(it);
+
+            const index_schema = schema.TableIndex.from(it.context.index_block);
+            const data_addresses = index_schema.data_addresses_used(it.context.index_block);
+            const data_checksums = index_schema.data_checksums_used(it.context.index_block);
+            assert(data_addresses.len == data_checksums.len);
+
             it.table_index += 1;
-            it.table_next(callback);
+            switch (blocks_to_load) {
+                // In case of no data blocks to load, it's safe to call `on_data` synchronously
+                // since it's already being called from a callback.
+                .none => callback.on_data(it, null),
+                inline .all, .range => |value, tag| {
+                    it.table_data_iterator.start(.{
+                        .grid = it.context.grid,
+                        .addresses = if (tag == .all)
+                            data_addresses
+                        else
+                            data_addresses[value.start..value.end],
+                        .checksums = if (tag == .all)
+                            data_checksums
+                        else
+                            data_checksums[value.start..value.end],
+                        .direction = it.context.direction,
+                    });
+                    it.table_next(callback);
+                },
+            }
         }
 
         fn table_next(it: *LevelTableValueBlockIterator, callback: Callback) void {
@@ -168,7 +211,7 @@ pub fn LevelTableValueBlockIteratorType(comptime Table: type, comptime Storage: 
 
         fn on_table_next(
             table_data_iterator: *TableDataIterator,
-            data_block: ?Grid.BlockPtrConst,
+            data_block: ?BlockPtrConst,
         ) void {
             const it = @fieldParentPtr(
                 LevelTableValueBlockIterator,

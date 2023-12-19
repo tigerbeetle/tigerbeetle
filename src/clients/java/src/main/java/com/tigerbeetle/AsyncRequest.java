@@ -48,6 +48,12 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
                 batch);
     }
 
+    public static AsyncRequest<TransferBatch> getAccountTransfers(final NativeClient nativeClient,
+            final AccountTransfers filter) {
+        return new AsyncRequest<TransferBatch>(nativeClient,
+                Request.Operations.GET_ACCOUNT_TRANSFERS, filter.batch);
+    }
+
     public static AsyncRequest<AccountBatch> echo(final NativeClient nativeClient,
             final AccountBatch batch) {
         return new AsyncRequest<AccountBatch>(nativeClient, Request.Operations.ECHO_ACCOUNTS,

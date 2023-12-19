@@ -381,6 +381,19 @@ pub const DotnetDocs = Docs{
     \\transfers = client.LookupTransfers(new UInt128[] {1, 2});
     ,
 
+    .get_account_transfers_example =
+    \\var filter = new GetAccountTransfers 
+    \\{
+    \\  AccountId = 2,
+    \\  Timestamp = 0, // No filter by Timestamp.
+    \\  Limit = 10, // Limit to ten transfers at most.
+    \\  Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
+    \\      GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
+    \\      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+    \\};
+    \\transfers = client.GetAccountTransfers(filter);
+    ,
+
     .linked_events_example =
     \\var batch = new System.Collections.Generic.List<Transfer>();
     \\

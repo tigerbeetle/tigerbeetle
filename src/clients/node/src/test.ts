@@ -5,7 +5,9 @@ import {
   Transfer,
   TransferFlags,
   CreateAccountError,
-  CreateTransferError
+  CreateTransferError,
+  GetAccountTransfers,
+  GetAccountTransfersFlags,
 } from '.'
 
 const client = createClient({
@@ -338,6 +340,175 @@ test('can link transfers', async (): Promise<void> => {
   assert.strictEqual(accounts[1].credits_pending, 0n)
   assert.strictEqual(accounts[1].debits_posted, 150n)
   assert.strictEqual(accounts[1].debits_pending, 0n)
+})
+
+test('can get account transfers', async (): Promise<void> => {
+  const accountC: Account = {
+    id: 21n,
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,  
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 718,
+    flags: 0,
+    timestamp: 0n
+  }
+  const account_errors = await client.createAccounts([accountC])
+  assert.strictEqual(account_errors.length, 0)
+
+  var transfers_created : Transfer[] = [];
+  // Create transfers where the new account is either the debit or credit account:
+  for (var i=0; i<10;i++) {
+    transfers_created.push({
+      id: BigInt(i + 10000),
+      debit_account_id: i % 2 == 0 ? accountC.id : accountA.id,
+      credit_account_id: i % 2 == 0 ? accountB.id : accountC.id,
+      amount: 100n,
+      user_data_128: 0n,
+      user_data_64: 0n,
+      user_data_32: 0,
+      pending_id: 0n,
+      timeout: 0,
+      ledger: 1,
+      code: 1,
+      flags: 0,
+      timestamp: 0n,
+    });
+  }
+  
+  const transfers_created_result = await client.createTransfers(transfers_created)
+  assert.strictEqual(transfers_created_result.length, 0)
+
+  // Query all transfers for accountC:
+  var filter: GetAccountTransfers = {
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: 0,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  }
+  var transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length)
+  var timestamp = 0n;
+  for (var transfer of transfers) {
+    assert.ok(timestamp < transfer.timestamp);
+    timestamp = transfer.timestamp;
+  }
+
+  // Query only the debit transfers for accountC, descending:
+  filter = {
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: 8190,
+    flags: GetAccountTransfersFlags.debits |  GetAccountTransfersFlags.reversed,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length / 2)
+  timestamp = 1n << 64n;
+  for (var transfer of transfers) {
+    assert.ok(transfer.timestamp < timestamp);
+    timestamp = transfer.timestamp;
+  }  
+
+  // Query only the credit transfers for accountC, descending:
+  filter = {
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: 8190,
+    flags: GetAccountTransfersFlags.credits |  GetAccountTransfersFlags.reversed,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length / 2)
+  timestamp = 1n << 64n;
+  for (var transfer of transfers) {
+    assert.ok(transfer.timestamp < timestamp);
+    timestamp = transfer.timestamp;
+  }    
+
+  // Query the first 5 transfers for accountC:
+  filter = {
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: transfers_created.length / 2,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length / 2)
+  timestamp = 0n;
+  for (var transfer of transfers) {
+    assert.ok(timestamp < transfer.timestamp);
+    timestamp = transfer.timestamp;
+  } 
+
+  // Query the next 5 transfers for accountC, with pagination:
+  filter = {
+    account_id: accountC.id,
+    timestamp: timestamp,
+    limit: transfers_created.length / 2,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length / 2)
+  for (var transfer of transfers) {
+    assert.ok(timestamp < transfer.timestamp);
+    timestamp = transfer.timestamp;
+  } 
+
+  // Query again, no more transfers should be found:
+  filter = {
+    account_id: accountC.id,
+    timestamp: timestamp,
+    limit: transfers_created.length / 2,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, 0)
+
+
+  // Invalid account:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: 0n,
+    timestamp: timestamp,
+    limit: 8190,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  })).length, 0)
+
+  // Invalid timestamp:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: accountC.id,
+    timestamp: (1n << 64n) - 1n,
+    limit: 8190,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  })).length, 0)
+
+  // Zero limit:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: 0,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  })).length, 0) 
+  
+  // Empty flags:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: 8190,
+    flags: GetAccountTransfersFlags.none,
+  })).length, 0)
+
+  // Invalid flags:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: accountC.id,
+    timestamp: 0n,
+    limit: 8190,
+    flags: 0xFFFF,
+  })).length, 0)     
+
 })
 
 async function main () {

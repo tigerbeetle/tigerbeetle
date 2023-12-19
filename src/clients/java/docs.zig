@@ -462,6 +462,17 @@ pub const JavaDocs = Docs{
     \\transfers = client.lookupTransfers(ids);
     ,
 
+    .get_account_transfers_example =
+    \\AccountTransfers filter = new AccountTransfers();
+    \\filter.setAccountId(2);
+    \\filter.setTimestamp(0); // No filter by Timestamp.
+    \\filter.setLimit(10); // Limit to ten transfers at most.
+    \\filter.setDebits(true); // Include transfer from the debit side.
+    \\filter.setCredits(true); // Include transfer from the credit side.
+    \\filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+    \\transfers = client.getAccountTransfers(filter);
+    ,
+
     .linked_events_example =
     \\transfers = new TransferBatch(10);
     \\
