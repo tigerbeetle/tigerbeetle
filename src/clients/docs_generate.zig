@@ -666,8 +666,8 @@ const Generator = struct {
             \\Fetches the transfers involving a given account, allowing basic filter and pagination
             \\capabilities.
             \\
-            \\The order of transfers in the response is sorted by `timestamp` in ascending or
-            \\descending order.
+            \\The transfers in the response are sorted by `timestamp` in chronological or
+            \\reverse-chronological order.
         );
         mw.code(language.markdown_name, language.get_account_transfers_example);
 

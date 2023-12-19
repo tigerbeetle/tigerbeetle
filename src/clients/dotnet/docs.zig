@@ -389,7 +389,7 @@ pub const DotnetDocs = Docs{
     \\  Limit = 10, // Limit to ten transfers at most.
     \\  Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
     \\      GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
-    \\      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reversed chronological order.
+    \\      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
     \\};
     \\transfers = client.GetAccountTransfers(filter);
     ,

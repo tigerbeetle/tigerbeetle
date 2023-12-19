@@ -469,7 +469,7 @@ pub const JavaDocs = Docs{
     \\filter.setLimit(10); // Limit to ten transfers at most.
     \\filter.setDebits(true); // Include transfer from the debit side.
     \\filter.setCredits(true); // Include transfer from the credit side.
-    \\filter.setReversed(true); // Sort by timestamp in reversed chronological order.
+    \\filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
     \\transfers = client.getAccountTransfers(filter);
     ,
 

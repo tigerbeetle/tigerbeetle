@@ -467,7 +467,7 @@ pub const NodeDocs = Docs{
     \\  limit: 10, // Limit to ten transfers at most.
     \\  flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
     \\    GetAccountTransfersFlags.credits | // Include transfer from the credit side.
-    \\    GetAccountTransfersFlags.reversed, // Sort by timestamp in reversed chronological order.
+    \\    GetAccountTransfersFlags.reversed, // Sort by timestamp in reverse-chronological order.
     \\}
     \\const account_transfers = await client.getAccountTransfers(filter)
     ,

@@ -422,8 +422,8 @@ a stable querying API.
 Fetches the transfers involving a given account, allowing basic filter and pagination
 capabilities.
 
-The order of transfers in the response is sorted by `timestamp` in ascending or
-descending order.
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
 
 ```go
 filter := GetAccountTransfers{
@@ -433,7 +433,7 @@ filter := GetAccountTransfers{
 		Flags:     GetAccountTransfersFlags{
 			Debits:    true, // Include transfer from the debit side.
 			Credits:   true, // Include transfer from the credit side.
-			Reversed:  true, // Sort by timestamp in reversed chronological order.
+			Reversed:  true, // Sort by timestamp in reverse-chronological order.
 		}.ToUint32(),
 }
 transfers, err = client.GetAccountTransfers(filter)
