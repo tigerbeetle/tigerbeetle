@@ -697,15 +697,23 @@ test "Cluster: repair: ack committed prepare" {
     try expectEqual(b1.op_head(), 21);
     try expectEqual(b2.op_head(), 20);
 
+    try expectEqual(p.status(), .normal);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b2.status(), .normal);
+
     // Change views. B1/B2 participate. Don't allow B2 to repair op=21.
     t.replica(.R_).pass(.R_, .bidirectional, .start_view_change);
     t.replica(.R_).pass(.R_, .bidirectional, .do_view_change);
     p.drop(.__, .bidirectional, .prepare);
     p.drop(.__, .bidirectional, .do_view_change);
+    p.drop(.__, .bidirectional, .start_view_change);
     t.run();
-    t.run(); // TODO: Workaround after async prefetch callback.
     try expectEqual(b1.commit(), 20);
     try expectEqual(b2.commit(), 20);
+
+    try expectEqual(p.status(), .normal);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b2.status(), .normal);
 
     // But other than that, heal A0/B1, but partition B2 completely.
     // (Prevent another view change.)
@@ -716,8 +724,14 @@ test "Cluster: repair: ack committed prepare" {
     t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
     t.run();
 
+    try expectEqual(p.status(), .normal);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b2.status(), .normal);
+
     // A0 acks op=21 even though it already committed it.
+    try expectEqual(p.commit(), 21);
     try expectEqual(b1.commit(), 21);
+    try expectEqual(b2.commit(), 20);
 }
 
 test "Cluster: repair: primary checkpoint, backup crash before checkpoint, primary prepare" {
