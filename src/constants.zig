@@ -604,3 +604,7 @@ pub const aof_record = config.process.aof_record;
 /// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
 /// replay our AOF.
 pub const aof_recovery = config.process.aof_recovery;
+
+/// Maximum number of tree scans that can be performed by a single query.
+/// NOTE: Each condition in a query is a scan, for example `WHERE a=0 AND b=1` needs 2 scans.
+pub const lsm_scans_max = config.cluster.lsm_scans_max;

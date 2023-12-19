@@ -1,4 +1,6 @@
 const std = @import("std");
+const assert = std.debug.assert;
+
 const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("../c/tb_client.zig");
 
@@ -41,6 +43,12 @@ const type_mappings = .{
         .private_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
+    .{ tb.GetAccountTransfersFlags, TypeMapping{
+        .name = "GetAccountTransfersFlags",
+        .visibility = .public,
+        .private_fields = &.{"padding"},
+        .docs_link = "reference/operations/get_account_transfers#flags",
+    } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
         .visibility = .public,
@@ -72,6 +80,11 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransfersResult",
         .visibility = .public,
+    } },
+    .{ tb.GetAccountTransfers, TypeMapping{
+        .name = "GetAccountTransfers",
+        .visibility = .public,
+        .docs_link = "reference/operations/get_account_transfers#",
     } },
     .{ tb_client.tb_status_t, TypeMapping{
         .name = "InitializationStatus",
@@ -161,10 +174,10 @@ fn emit_enum(
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
     comptime int_type: []const u8,
-    comptime value_fmt: []const u8,
 ) !void {
     const is_packed_struct = @TypeOf(type_info) == std.builtin.Type.Struct;
     if (is_packed_struct) {
+        assert(type_info.layout == .Packed);
         // Packed structs represented as Enum needs a Flags attribute:
         try buffer.writer().print("    [Flags]\n", .{});
     }
@@ -192,16 +205,18 @@ fn emit_enum(
         if (comptime mapping.is_private(field.name)) continue;
 
         try emit_docs(buffer, mapping, field.name);
+        if (is_packed_struct) {
+            try buffer.writer().print("        {s} = 1 << {},\n\n", .{
+                to_case(field.name, .pascal),
+                i,
+            });
+        } else {
+            try buffer.writer().print("        {s} = {},\n\n", .{
+                to_case(field.name, .pascal),
 
-        try buffer.writer().print(
-            \\        {s} = 
-        ++ value_fmt ++ ",\n\n", .{
-            to_case(field.name, .pascal),
-            if (@typeInfo(Type) == .Enum)
-                @intFromEnum(@field(Type, field.name))
-            else
-                i, // packed struct field.
-        });
+                @intFromEnum(@field(Type, field.name)),
+            });
+        }
     }
 
     try buffer.writer().print(
@@ -392,7 +407,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                     info,
                     mapping,
                     comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
-                    "1 << {d}",
                 ),
                 .Extern => try emit_struct(
                     buffer,
@@ -407,7 +421,6 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                 info,
                 mapping,
                 comptime dotnet_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
-                "{d}",
             ),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }

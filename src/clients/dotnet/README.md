@@ -376,6 +376,30 @@ the same as the order of `id`s in the request. You can refer to the
 transfers = client.LookupTransfers(new UInt128[] {1, 2});
 ```
 
+## Get Account Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the transfers involving a given account, allowing basic filter and pagination
+capabilities.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```cs
+var filter = new GetAccountTransfers 
+{
+  AccountId = 2,
+  Timestamp = 0, // No filter by Timestamp.
+  Limit = 10, // Limit to ten transfers at most.
+  Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
+      GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
+      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+};
+transfers = client.GetAccountTransfers(filter);
+```
+
 ## Linked Events
 
 When the `linked` flag is specified for an account when creating accounts or

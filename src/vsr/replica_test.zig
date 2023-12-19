@@ -703,6 +703,7 @@ test "Cluster: repair: ack committed prepare" {
     p.drop(.__, .bidirectional, .prepare);
     p.drop(.__, .bidirectional, .do_view_change);
     t.run();
+    t.run(); // TODO: Workaround after async prefetch callback.
     try expectEqual(b1.commit(), 20);
     try expectEqual(b2.commit(), 20);
 

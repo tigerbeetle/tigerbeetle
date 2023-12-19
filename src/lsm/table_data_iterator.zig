@@ -8,7 +8,8 @@ const schema = @import("schema.zig");
 
 const stdx = @import("../stdx.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
-const Direction = @import("direction.zig").Direction;
+const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
+const Direction = @import("../direction.zig").Direction;
 
 /// A TableDataIterator iterates a table's data blocks in ascending key order.
 pub fn TableDataIteratorType(comptime Storage: type) type {
@@ -16,7 +17,6 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
         const TableDataIterator = @This();
 
         const Grid = GridType(Storage);
-        const BlockPtrConst = Grid.BlockPtrConst;
 
         pub const Callback = *const fn (it: *TableDataIterator, data_block: ?BlockPtrConst) void;
 
@@ -115,7 +115,7 @@ pub fn TableDataIteratorType(comptime Storage: type) type {
             }
         }
 
-        fn on_read(read: *Grid.Read, block: Grid.BlockPtrConst) void {
+        fn on_read(read: *Grid.Read, block: BlockPtrConst) void {
             const it = @fieldParentPtr(TableDataIterator, "read", read);
             assert(it.callback == .read);
             assert(it.context.addresses.len == it.context.checksums.len);

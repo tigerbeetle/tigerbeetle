@@ -14,7 +14,7 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 const schema = @import("schema.zig");
 
 const TreeConfig = @import("tree.zig").TreeConfig;
-const Direction = @import("direction.zig").Direction;
+const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;

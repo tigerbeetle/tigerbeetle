@@ -356,6 +356,25 @@ pub const GoDocs = Docs{
     \\log.Println(transfers)
     ,
 
+    .get_account_transfers_example =
+    \\filter := GetAccountTransfers{
+    \\		AccountID: ToUint128(2),
+    \\		Timestamp: 0, // No filter by Timestamp.
+    \\		Limit:     10, // Limit to ten transfers at most.
+    \\		Flags:     GetAccountTransfersFlags{
+    \\			Debits:    true, // Include transfer from the debit side.
+    \\			Credits:   true, // Include transfer from the credit side.
+    \\			Reversed:  true, // Sort by timestamp in reverse-chronological order.
+    \\		}.ToUint32(),
+    \\}
+    \\transfers, err = client.GetAccountTransfers(filter)
+    \\if err != nil {
+    \\	log.Printf("Could not fetch transfers: %s", err)
+    \\	return
+    \\}
+    \\log.Println(transfers)
+    ,
+
     .linked_events_example =
     \\batch := []Transfer{}
     \\linkedFlag := TransferFlags{Linked: true}.ToUint16()

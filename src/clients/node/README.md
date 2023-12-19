@@ -549,6 +549,29 @@ console.log(transfers);
  */
 ```
 
+## Get Account Transfers
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the transfers involving a given account, allowing basic filter and pagination
+capabilities.
+
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```javascript
+let filter = {
+  account_id: 2n,
+  timestamp: 0n, // No filter by Timestamp.
+  limit: 10, // Limit to ten transfers at most.
+  flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
+    GetAccountTransfersFlags.credits | // Include transfer from the credit side.
+    GetAccountTransfersFlags.reversed, // Sort by timestamp in reverse-chronological order.
+}
+const account_transfers = await client.getAccountTransfers(filter)
+```
+
 ## Linked Events
 
 When the `linked` flag is specified for an account when creating accounts or

@@ -107,6 +107,8 @@ pub const Docs = struct {
 
     lookup_transfers_example: Code,
 
+    get_account_transfers_example: Code,
+
     linked_events_example: Code,
 
     developer_setup_documentation: Markdown,

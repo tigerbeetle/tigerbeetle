@@ -71,6 +71,7 @@ pub fn ContextType(
                 .create_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
+                .get_account_transfers,
             };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {

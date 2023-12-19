@@ -19,6 +19,9 @@ const FreeSet = @import("./free_set.zig").FreeSet;
 const log = stdx.log.scoped(.grid);
 const tracer = @import("../tracer.zig");
 
+pub const BlockPtr = *align(constants.sector_size) [constants.block_size]u8;
+pub const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
+
 // Leave this outside GridType so we can call it from modules that don't know about Storage.
 pub fn allocate_block(
     allocator: mem.Allocator,
@@ -45,8 +48,6 @@ pub fn GridType(comptime Storage: type) type {
 
         pub const RepairTable = GridBlocksMissing.RepairTable;
         pub const RepairTableResult = GridBlocksMissing.RepairTableResult;
-        pub const BlockPtr = *align(constants.sector_size) [block_size]u8;
-        pub const BlockPtrConst = *align(constants.sector_size) const [block_size]u8;
         pub const Reservation = @import("./free_set.zig").Reservation;
 
         // Grid just reuses the Storage's NextTick abstraction for simplicity.

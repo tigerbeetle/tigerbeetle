@@ -66,6 +66,29 @@ export enum TransferFlags {
 
 
 /**
+* See [GetAccountTransfersFlags](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags)
+*/
+export enum GetAccountTransfersFlags {
+  none = 0,
+
+  /**
+  * See [debits](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits)
+  */
+  debits = (1 << 0),
+
+  /**
+  * See [credits](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits)
+  */
+  credits = (1 << 1),
+
+  /**
+  * See [reversed](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed)
+  */
+  reversed = (1 << 2),
+}
+
+
+/**
 * See [Account](https://docs.tigerbeetle.com/reference/accounts/#)
 */
 export type Account = {
@@ -622,10 +645,38 @@ export type CreateTransfersError = {
   result: CreateTransferError
 }
 
+
+/**
+* See [GetAccountTransfers](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#)
+*/
+export type GetAccountTransfers = {
+
+  /**
+  * See [account_id](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id)
+  */
+  account_id: bigint
+
+  /**
+  * See [timestamp](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp)
+  */
+  timestamp: bigint
+
+  /**
+  * See [limit](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit)
+  */
+  limit: number
+
+  /**
+  * See [flags](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags)
+  */
+  flags: number
+}
+
 export enum Operation {
   create_accounts = 128,
   create_transfers = 129,
   lookup_accounts = 130,
   lookup_transfers = 131,
+  get_account_transfers = 132,
 }
 

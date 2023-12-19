@@ -1,4 +1,6 @@
 const std = @import("std");
+const assert = std.debug.assert;
+
 const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("../c/tb_client.zig");
 
@@ -29,6 +31,11 @@ const type_mappings = .{
         .hidden_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
+    .{ tb.GetAccountTransfersFlags, TypeMapping{
+        .name = "GetAccountTransfersFlags",
+        .hidden_fields = &.{"padding"},
+        .docs_link = "reference/operations/get_account_transfers#flags",
+    } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
         .docs_link = "reference/accounts/#",
@@ -50,6 +57,10 @@ const type_mappings = .{
     } },
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransfersError",
+    } },
+    .{ tb.GetAccountTransfers, TypeMapping{
+        .name = "GetAccountTransfers",
+        .docs_link = "reference/operations/get_account_transfers#",
     } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "Operation",
@@ -114,6 +125,7 @@ fn emit_packed_struct(
     comptime type_info: anytype,
     comptime mapping: TypeMapping,
 ) !void {
+    assert(type_info.layout == .Packed);
     try emit_docs(buffer, mapping, 0, null);
 
     try buffer.writer().print(

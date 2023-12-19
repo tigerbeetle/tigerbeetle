@@ -119,6 +119,17 @@ namespace TigerBeetle
             return nativeClient.CallRequestAsync<Transfer, UInt128>(TBOperation.LookupTransfers, ids);
         }
 
+        public Transfer[] GetAccountTransfers(GetAccountTransfers filter)
+        {
+            return nativeClient.CallRequest<Transfer, GetAccountTransfers>(TBOperation.GetAccountTransfers, new[] { filter });
+        }
+
+        public Task<Transfer[]> GetAccountTransfersAsync(GetAccountTransfers filter)
+        {
+            return nativeClient.CallRequestAsync<Transfer, GetAccountTransfers>(TBOperation.GetAccountTransfers, new[] { filter });
+        }
+
+
         public void Dispose()
         {
             GC.SuppressFinalize(this);

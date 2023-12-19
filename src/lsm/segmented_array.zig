@@ -9,7 +9,7 @@ const stdx = @import("../stdx.zig");
 const div_ceil = @import("../stdx.zig").div_ceil;
 const binary_search_values_upsert_index = @import("binary_search.zig").binary_search_values_upsert_index;
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;
-const Direction = @import("direction.zig").Direction;
+const Direction = @import("../direction.zig").Direction;
 
 /// A "segmented array" is an array with efficient (amortized) random-insert/remove operations.
 /// Also known as an "unrolled linked list": https://en.wikipedia.org/wiki/Unrolled_linked_list

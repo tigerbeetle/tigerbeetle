@@ -67,6 +67,28 @@ namespace TigerBeetle
 
     }
 
+    [Flags]
+    public enum GetAccountTransfersFlags : uint
+    {
+        None = 0,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits
+        /// </summary>
+        Debits = 1 << 0,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits
+        /// </summary>
+        Credits = 1 << 1,
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed
+        /// </summary>
+        Reversed = 1 << 2,
+
+    }
+
     [StructLayout(LayoutKind.Sequential, Size = SIZE)]
     public struct Account
     {
@@ -691,6 +713,41 @@ namespace TigerBeetle
 
     }
 
+    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    public struct GetAccountTransfers
+    {
+        public const int SIZE = 32;
+
+        private UInt128 accountId;
+
+        private ulong timestamp;
+
+        private uint limit;
+
+        private GetAccountTransfersFlags flags;
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id
+        /// </summary>
+        public UInt128 AccountId { get => accountId; set => accountId = value; }
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp
+        /// </summary>
+        public ulong Timestamp { get => timestamp; set => timestamp = value; }
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit
+        /// </summary>
+        public uint Limit { get => limit; set => limit = value; }
+
+        /// <summary>
+        /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags
+        /// </summary>
+        public GetAccountTransfersFlags Flags { get => flags; set => flags = value; }
+
+    }
+
     public enum InitializationStatus : uint
     {
         Success = 0,
@@ -742,6 +799,8 @@ namespace TigerBeetle
         LookupAccounts = 130,
 
         LookupTransfers = 131,
+
+        GetAccountTransfers = 132,
 
     }
 

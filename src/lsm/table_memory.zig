@@ -73,7 +73,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn values_used(table: *const TableMemory) []Value {
-            return table.values[0..table.value_context.count];
+            return table.values[0..table.count()];
         }
 
         pub fn put(table: *TableMemory, value: *const Value) void {
@@ -92,23 +92,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.value_context.count += 1;
         }
 
-        /// This function is intended to never be called by regular code. It only
-        /// exists for fuzzing, due to the performance overhead it carries. Real
-        /// code must rely on the Groove cache for lookups.
+        /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
-            assert(constants.verify);
             assert(table.value_context.count <= value_count_max);
-
-            // Just sort all the keys here, for simplicity.
-            if (!table.value_context.sorted) {
-                std.mem.sort(
-                    Value,
-                    table.values_used(),
-                    {},
-                    sort_values_by_key_in_ascending_order,
-                );
-                table.value_context.sorted = true;
-            }
+            assert(table.value_context.sorted);
 
             const result = binary_search.binary_search_values(
                 Key,
@@ -133,15 +120,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             // Sort all the values. In future, this will be done incrementally, and use
             // k_way_merge, but for now the performance regression was too bad.
-            if (!table.value_context.sorted) {
-                std.mem.sort(
-                    Value,
-                    table.values_used(),
-                    {},
-                    sort_values_by_key_in_ascending_order,
-                );
-                table.value_context.sorted = true;
-            }
+            table.sort();
 
             // If we have no values, then we can consider ourselves flushed right away.
             table.mutability = .{ .immutable = .{
@@ -162,6 +141,18 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .mutability = .mutable,
                 .name = table.name,
             };
+        }
+
+        pub fn sort(table: *TableMemory) void {
+            if (!table.value_context.sorted) {
+                std.mem.sort(
+                    Value,
+                    table.values_used(),
+                    {},
+                    sort_values_by_key_in_ascending_order,
+                );
+                table.value_context.sorted = true;
+            }
         }
 
         fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
@@ -195,10 +186,6 @@ const TestTable = struct {
 
     inline fn key_from_value(v: *const Value) u32 {
         return v.key;
-    }
-
-    inline fn compare_keys(a: Key, b: Key) math.Order {
-        return math.order(a, b);
     }
 
     inline fn tombstone_from_key(a: Key) Value {

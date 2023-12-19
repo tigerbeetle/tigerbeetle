@@ -362,6 +362,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     std.mem.bytesAsSlice(u128, request_body),
                     std.mem.bytesAsSlice(tb.Transfer, reply_body),
                 ),
+                //TODO: implement query.
+                .get_account_transfers => unreachable,
             }
         }
 

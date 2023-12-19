@@ -7,16 +7,19 @@ const output_file = "src/clients/go/pkg/types/bindings.go";
 const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
+    .{ tb.GetAccountTransfersFlags, "GetAccountTransfersFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
     .{ tb.CreateAccountResult, "CreateAccountResult", "Account" },
     .{ tb.CreateTransferResult, "CreateTransferResult", "Transfer" },
     .{ tb.CreateAccountsResult, "AccountEventResult" },
     .{ tb.CreateTransfersResult, "TransferEventResult" },
+    .{ tb.GetAccountTransfers, "GetAccountTransfers" },
 };
 
 fn go_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
+        .Bool => return "bool",
         .Enum => return comptime get_mapped_type_name(Type) orelse @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         .Struct => |info| switch (info.layout) {
             .Packed => return comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
@@ -25,6 +28,7 @@ fn go_type(comptime Type: type) []const u8 {
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
+                1 => "bool",
                 8 => "uint8",
                 16 => "uint16",
                 32 => "uint32",
@@ -94,45 +98,77 @@ fn emit_enum(
     comptime Type: type,
     comptime name: []const u8,
     comptime prefix: []const u8,
-    comptime int_type: []const u8,
+    comptime tag_type: []const u8,
 ) !void {
     try buffer.writer().print("type {s} {s}\n\n" ++
         "const (\n", .{
         name,
-        int_type,
+        tag_type,
     });
 
     const type_info = @typeInfo(Type).Enum;
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
-        try buffer.writer().print("\t{s} {s} = {d}\n", .{
-            enum_name,
-            name,
-            @intFromEnum(@field(Type, field.name)),
-        });
+        if (type_info.tag_type == u1) {
+            try buffer.writer().print("\t{s} {s} = {s}\n", .{
+                enum_name,
+                name,
+                if (@intFromEnum(@field(Type, field.name)) == 1) "true" else "false",
+            });
+        } else {
+            try buffer.writer().print("\t{s} {s} = {d}\n", .{
+                enum_name,
+                name,
+                @intFromEnum(@field(Type, field.name)),
+            });
+        }
     }
 
     try buffer.writer().print(")\n\n" ++
-        "func (i {s}) String() string {{\n" ++
-        "\tswitch i {{\n", .{
+        "func (i {s}) String() string {{\n", .{
         name,
     });
 
-    inline for (type_info.fields) |field| {
-        const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
-        try buffer.writer().print("\tcase {s}:\n" ++
-            "\t\treturn \"{s}\"\n", .{
-            enum_name,
-            enum_name,
+    if (type_info.tag_type == u1) {
+        const enum_zero_name = prefix ++ comptime to_pascal_case(
+            @tagName(@as(Type, @enumFromInt(0))),
+            null,
+        );
+        const enum_one_name = prefix ++ comptime to_pascal_case(
+            @tagName(@as(Type, @enumFromInt(1))),
+            null,
+        );
+
+        try buffer.writer().print("\tif (i == {s}) {{\n" ++
+            "\t\treturn \"{s}\"\n" ++
+            "\t}} else {{\n" ++
+            "\t\treturn \"{s}\"\n" ++
+            "\t}}\n", .{
+            enum_one_name,
+            enum_one_name,
+            enum_zero_name,
         });
+    } else {
+        try buffer.writer().print("\tswitch i {{\n", .{});
+
+        inline for (type_info.fields) |field| {
+            const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
+            try buffer.writer().print("\tcase {s}:\n" ++
+                "\t\treturn \"{s}\"\n", .{
+                enum_name,
+                enum_name,
+            });
+        }
+
+        try buffer.writer().print(
+            "\t}}\n" ++
+                "\treturn \"{s}(\" + strconv.FormatInt(int64(i+1), 10) + \")\"\n",
+            .{name},
+        );
     }
 
-    try buffer.writer().print("\t}}\n" ++
-        "\treturn \"{s}(\" + strconv.FormatInt(int64(i+1), 10) + \")\"\n" ++
-        "}}\n\n", .{
-        name,
-    });
+    try buffer.writer().print("}}\n\n", .{});
 }
 
 fn emit_packed_struct(
@@ -148,8 +184,9 @@ fn emit_packed_struct(
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.eql(u8, "padding", field.name)) continue;
-        try buffer.writer().print("\t{s} bool\n", .{
+        try buffer.writer().print("\t{s} {s}\n", .{
             to_pascal_case(field.name, min_len),
+            go_type(field.type),
         });
     }
 
@@ -217,7 +254,14 @@ fn emit_struct(
     try buffer.writer().print("}}\n\n", .{});
 
     if (flagsField) {
-        const flagType = if (comptime std.mem.eql(u8, name, "Account")) tb.AccountFlags else tb.TransferFlags;
+        const flagType = if (comptime std.mem.eql(u8, name, "Account"))
+            tb.AccountFlags
+        else if (comptime std.mem.eql(u8, name, "Transfer"))
+            tb.TransferFlags
+        else if (comptime std.mem.eql(u8, name, "GetAccountTransfers"))
+            tb.GetAccountTransfersFlags
+        else
+            unreachable;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
         try buffer.writer().print(
             "func (o {s}) {s}Flags() {s}Flags {{\n" ++
