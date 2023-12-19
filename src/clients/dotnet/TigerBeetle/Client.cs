@@ -9,7 +9,7 @@ namespace TigerBeetle
 {
     public sealed class Client : IDisposable
     {
-        private const int DEFAULT_CONCURRENCY_MAX = 32;
+        private const int DEFAULT_CONCURRENCY_MAX = 256; // arbitrary
 
         private readonly UInt128 clusterID;
         private readonly NativeClient nativeClient;

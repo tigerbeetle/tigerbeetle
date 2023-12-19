@@ -119,7 +119,9 @@ pub fn ContextType(
 
             log.debug("{}: init: initializing", .{context.client_id});
 
-            if (concurrency_max == 0 or concurrency_max > 4096) {
+            // Arbitrary limit: To take advantage of batching, the `concurrency_max` should be set
+            // high enough to allow concurrent requests to completely fill the message body.
+            if (concurrency_max == 0 or concurrency_max > 8192) {
                 return error.ConcurrencyMaxInvalid;
             }
 

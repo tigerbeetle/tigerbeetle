@@ -214,7 +214,7 @@ test "c_client tb_status" {
     try assert_status(128, "127.0.0.1:3000", c.TB_STATUS_SUCCESS);
     try assert_status(512, "3000,3001,3002", c.TB_STATUS_SUCCESS);
     try assert_status(1024, "127.0.0.1,127.0.0.2,172.0.0.3", c.TB_STATUS_SUCCESS);
-    try assert_status(4096, "127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", c.TB_STATUS_SUCCESS);
+    try assert_status(8192, "127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", c.TB_STATUS_SUCCESS);
 
     // Invalid or empty address should return "TB_STATUS_ADDRESS_INVALID":
     try assert_status(1, "invalid", c.TB_STATUS_ADDRESS_INVALID);
@@ -229,7 +229,7 @@ test "c_client tb_status" {
 
     // ConcurrencyMax Zero or greater than 4096 should return "TB_STATUS_CONCURRENCY_MAX_INVALID":
     try assert_status(0, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
-    try assert_status(4097, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
+    try assert_status(8193, "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
     try assert_status(std.math.maxInt(u32), "3000", c.TB_STATUS_CONCURRENCY_MAX_INVALID);
 
     // All other status are not testable.
