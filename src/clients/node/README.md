@@ -557,8 +557,8 @@ a stable querying API.
 Fetches the transfers involving a given account, allowing basic filter and pagination
 capabilities.
 
-The order of transfers in the response is sorted by `timestamp` in ascending or
-descending order.
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
 
 ```javascript
 let filter = {
@@ -567,7 +567,7 @@ let filter = {
   limit: 10, // Limit to ten transfers at most.
   flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
     GetAccountTransfersFlags.credits | // Include transfer from the credit side.
-    GetAccountTransfersFlags.reversed, // Sort by timestamp in reversed chronological order.
+    GetAccountTransfersFlags.reversed, // Sort by timestamp in reverse-chronological order.
 }
 const account_transfers = await client.getAccountTransfers(filter)
 ```

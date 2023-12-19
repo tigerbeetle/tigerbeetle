@@ -384,8 +384,8 @@ a stable querying API.
 Fetches the transfers involving a given account, allowing basic filter and pagination
 capabilities.
 
-The order of transfers in the response is sorted by `timestamp` in ascending or
-descending order.
+The transfers in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
 
 ```cs
 var filter = new GetAccountTransfers 
@@ -395,7 +395,7 @@ var filter = new GetAccountTransfers
   Limit = 10, // Limit to ten transfers at most.
   Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
       GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
-      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reversed chronological order.
+      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 transfers = client.GetAccountTransfers(filter);
 ```

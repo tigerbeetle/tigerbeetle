@@ -364,7 +364,7 @@ pub const GoDocs = Docs{
     \\		Flags:     GetAccountTransfersFlags{
     \\			Debits:    true, // Include transfer from the debit side.
     \\			Credits:   true, // Include transfer from the credit side.
-    \\			Reversed:  true, // Sort by timestamp in reversed chronological order.
+    \\			Reversed:  true, // Sort by timestamp in reverse-chronological order.
     \\		}.ToUint32(),
     \\}
     \\transfers, err = client.GetAccountTransfers(filter)
