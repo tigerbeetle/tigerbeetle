@@ -118,7 +118,14 @@ pub fn ContextType(
 
             log.debug("{}: init: initializing", .{context.client_id});
 
-            if (concurrency_max == 0 or concurrency_max > 4096) {
+            // To take advantage of batching, the concurrency is limited to the max number of events
+            // that can be filled in a single batch.
+            const concurrency_limit = @max(
+                Client.StateMachine.constants.batch_max.create_accounts,
+                Client.StateMachine.constants.batch_max.create_transfers,
+            );
+
+            if (concurrency_max == 0 or concurrency_max > concurrency_limit) {
                 return error.ConcurrencyMaxInvalid;
             }
 
