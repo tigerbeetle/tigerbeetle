@@ -107,40 +107,44 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     //
     // Retry the download for 45 minutes, passing `--update-snapshots` to thwart local negative
     // caching.
-    var delay_minutes: u64 = 0;
-    var delay_minutes_max: u64 = 45;
-    var delay_minutes_increment: u64 = 5;
-    while (true) {
-        if (shell.exec("mvn package --update-snapshots", .{})) {
-            break;
-        } else |err| {
-            // Re-run immediately to capture stdout (sic) to check if the failure is indeed due to
-            // the package missing from the registry.
-            const exec_result = try shell.exec_raw("mvn package --update-snapshots", .{});
-
-            switch (exec_result.term) {
-                .Exited => |code| if (code == 0) break,
-                else => {},
-            }
-
-            const package_missing = std.mem.indexOf(
-                u8,
-                exec_result.stdout,
-                "Could not resolve dependencies",
-            ) != null;
-
-            if (package_missing and delay_minutes < delay_minutes_max) {
-                log.warn("waiting for 5 minutes for the {s} version to appear in maven cental", .{
-                    options.version,
-                });
-                delay_minutes += delay_minutes_increment;
-                std.time.sleep(delay_minutes_increment * std.time.ns_per_min);
-                continue;
-            } else {
+    for (0..9) |_| {
+        if (try mvn_update(shell) == .ok) break;
+        log.warn("waiting for 5 minutes for the {s} version to appear in maven cental", .{
+            options.version,
+        });
+        std.time.sleep(5 * std.time.ns_per_min);
+    } else {
+        switch (try mvn_update(shell)) {
+            .ok => {},
+            .retry => |err| {
+                log.err("package is not available in maven central", .{});
                 return err;
-            }
+            },
         }
     }
 
     try shell.exec("mvn exec:java", .{});
+}
+
+fn mvn_update(shell: *Shell) !union(enum) { ok, retry: anyerror } {
+    if (shell.exec("mvn package --update-snapshots", .{})) {
+        return .ok;
+    } else |err| {
+        // Re-run immediately to capture stdout (sic) to check if the failure is indeed due to
+        // the package missing from the registry.
+        const exec_result = try shell.exec_raw("mvn package --update-snapshots", .{});
+        switch (exec_result.term) {
+            .Exited => |code| if (code == 0) return .ok,
+            else => {},
+        }
+
+        const package_missing = std.mem.indexOf(
+            u8,
+            exec_result.stdout,
+            "Could not resolve dependencies",
+        ) != null;
+        if (package_missing) return .{ .retry = err };
+
+        return err;
+    }
 }
