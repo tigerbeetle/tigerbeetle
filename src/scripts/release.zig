@@ -168,7 +168,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dversion={version}
             , .{
                 .target = target,
-                .release = !debug,
+                .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .version = info.version,
             });
