@@ -2,6 +2,7 @@ const std = @import("std");
 const stdx = @import("./stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const mem = std.mem;
 
 const tb = @import("tigerbeetle.zig");
@@ -414,7 +415,13 @@ pub const Simulator = struct {
         // Check whether the replica is still repairing prepares/tables/replies.
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
-                if (replica.journal.faulty.count > 0) return false;
+                for (replica.op_checkpoint() + 1..replica.op + 1) |op| {
+                    const header = replica.journal.header_with_op(op).?;
+                    if (!replica.journal.has_clean(header)) return false;
+                }
+                // It's okay for a replcia to miss some prepares older than the current checkpoint.
+                maybe(replica.journal.faulty.count > 0);
+
                 if (!replica.sync_content_done()) return false;
             }
         }
