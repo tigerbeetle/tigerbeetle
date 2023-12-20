@@ -45,6 +45,10 @@ pub fn TreeTableInfoType(comptime Table: type) type {
         key_min: Key, // Inclusive.
         key_max: Key, // Inclusive.
 
+        /// The number of values this table has. Tables aren't always full, so being able to know
+        /// ahead of time how many values they have helps with compaction pacing.
+        value_count: u32,
+
         /// Every query targets a particular snapshot. The snapshot determines which tables are
         /// visible to the query — i.e., which tables are accessed to answer the query.
         ///
@@ -87,12 +91,14 @@ pub fn TreeTableInfoType(comptime Table: type) type {
                 table.snapshot_min == other.snapshot_min and
                 table.snapshot_max == other.snapshot_max and
                 table.key_min == other.key_min and
-                table.key_max == other.key_max;
+                table.key_max == other.key_max and
+                table.value_count == other.value_count;
         }
 
         pub fn decode(table: *const TableInfo) TreeTableInfo {
             assert(table.tree_id > 0);
             assert(stdx.zeroed(&table.reserved));
+            assert(table.value_count > 0);
 
             const key_min = std.mem.bytesAsValue(Key, table.key_min[0..@sizeOf(Key)]);
             const key_max = std.mem.bytesAsValue(Key, table.key_max[0..@sizeOf(Key)]);
@@ -108,6 +114,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
                 .snapshot_max = table.snapshot_max,
                 .key_min = key_min.*,
                 .key_max = key_max.*,
+                .value_count = table.value_count,
             };
         }
 
@@ -117,6 +124,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
             event: schema.ManifestNode.Event,
         }) TableInfo {
             assert(options.tree_id > 0);
+            assert(table.value_count > 0);
 
             var key_min = std.mem.zeroes(TableInfo.KeyPadded);
             var key_max = std.mem.zeroes(TableInfo.KeyPadded);
@@ -132,6 +140,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
                 .tree_id = options.tree_id,
                 .key_min = key_min,
                 .key_max = key_max,
+                .value_count = table.value_count,
                 .label = .{
                     .level = options.level,
                     .event = options.event,

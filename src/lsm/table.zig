@@ -250,6 +250,7 @@ pub fn TableType(
 
             data_block_count: u32 = 0,
             value_count: u32 = 0,
+            value_count_total: u32 = 0, // Count across the entire table.
 
             pub fn init(allocator: mem.Allocator) !Builder {
                 const index_block = try allocate_block(allocator);
@@ -380,6 +381,7 @@ pub fn TableType(
                 }
 
                 builder.data_block_count += 1;
+                builder.value_count_total += builder.value_count;
                 builder.value_count = 0;
             }
 
@@ -435,6 +437,7 @@ pub fn TableType(
                     .snapshot_min = options.snapshot_min,
                     .key_min = builder.key_min,
                     .key_max = builder.key_max,
+                    .value_count = builder.value_count_total,
                 };
 
                 assert(info.snapshot_max == math.maxInt(u64));

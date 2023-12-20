@@ -196,6 +196,7 @@ fn generate_events(
                     .snapshot_max = std.math.maxInt(u64),
                     .key_min = .{0} ** 16,
                     .key_max = .{0} ** 16,
+                    .value_count = 1,
                     .tree_id = 1,
                     .label = .{
                         .event = .insert,

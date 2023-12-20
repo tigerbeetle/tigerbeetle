@@ -943,6 +943,7 @@ pub fn TestContext(
                 .snapshot_min = context.take_snapshot(),
                 .key_min = new_key_min,
                 .key_max = new_key_max,
+                .value_count = context.random.int(u32),
             };
         }
 
