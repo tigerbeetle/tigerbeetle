@@ -419,7 +419,7 @@ pub const Simulator = struct {
                     const header = replica.journal.header_with_op(op).?;
                     if (!replica.journal.has_clean(header)) return false;
                 }
-                // It's okay for a replcia to miss some prepares older than the current checkpoint.
+                // It's okay for a replica to miss some prepares older than the current checkpoint.
                 maybe(replica.journal.faulty.count > 0);
 
                 if (!replica.sync_content_done()) return false;
