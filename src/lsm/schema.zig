@@ -464,9 +464,10 @@ pub const ManifestNode = struct {
         address: u64,
         snapshot_min: u64,
         snapshot_max: u64,
+        value_count: u32,
         tree_id: u16,
         label: Label,
-        reserved: [5]u8 = .{0} ** 5,
+        reserved: [1]u8 = .{0} ** 1,
 
         comptime {
             assert(@alignOf(TableInfo) == 16);
