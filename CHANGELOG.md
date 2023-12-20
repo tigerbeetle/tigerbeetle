@@ -47,7 +47,7 @@ to land exciting new features on the next releases.
 
 - [#1368](https://github.com/tigerbeetle/tigerbeetle/pull/1368)
 
-Bump the client's maximum limit and the detault value of `concurrency_max` to fully
+Bump the client's maximum limit and the default value of `concurrency_max` to fully
 take advantage of the batching logic.
 
 ### TigerTracks 🎧
