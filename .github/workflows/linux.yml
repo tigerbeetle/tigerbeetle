@@ -156,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build c_sample -Doptimize=ReleaseSafe
+      - run: zig/zig build c_sample -Drelease
 
   # I don't like this - having everything manually listed out here, but need to think of a better
   # way to parallelize it.
@@ -179,7 +179,7 @@ jobs:
 
       # # This both checks that the hash_log builds and acts as a regression test for
       # # https://github.com/tigerbeetle/tigerbeetle/issues/404
-      # - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=create -Doptimize=ReleaseSafe -- --seed 16319736705930193193 --events-max 10000 && zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000
+      # - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=create -Drelease -- --seed 16319736705930193193 --events-max 10000 && zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000
 
   # Check some build steps that would otherwise not get checked.
   # Things like "go_client", "java_client", "dotnet_client" are excluded here
@@ -203,5 +203,5 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build simulator_run -Dsimulator-state-machine=accounting -Doptimize=ReleaseSafe -- ${{ github.sha }}
-      - run: zig/zig build simulator_run -Dsimulator-state-machine=testing    -Doptimize=ReleaseSafe -- ${{ github.sha }}
+      - run: zig/zig build simulator_run -Dsimulator-state-machine=accounting -Drelease -- ${{ github.sha }}
+      - run: zig/zig build simulator_run -Dsimulator-state-machine=testing    -Drelease -- ${{ github.sha }}

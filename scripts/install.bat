@@ -7,4 +7,4 @@ if not exist zig\ (
 )
 
 echo "Building TigerBeetle..."
-.\zig\zig.exe build install -Doptimize=ReleaseSafe
+.\zig\zig.exe build install -Drelease

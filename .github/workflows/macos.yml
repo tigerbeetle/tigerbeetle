@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build c_sample -Doptimize=ReleaseSafe
+      - run: ./zig/zig build c_sample -Drelease
 
   repl_integration:
     strategy:

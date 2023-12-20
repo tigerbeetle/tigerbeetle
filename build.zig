@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) !void {
         }
     } else @panic("error: unsupported target");
 
-    const mode = b.standardOptimizeOption(.{});
+    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
     const emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false;
 
     const options = b.addOptions();

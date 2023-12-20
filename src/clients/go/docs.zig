@@ -408,7 +408,7 @@ pub const GoDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_sh_commands =
-    \\./zig/zig build go_client -Doptimize=ReleaseSafe -Dconfig=production
+    \\./zig/zig build go_client -Drelease -Dconfig=production
     \\cd src/clients/go
     \\if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
     ,
@@ -419,7 +419,7 @@ pub const GoDocs = Docs{
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.
     .developer_setup_pwsh_commands =
-    \\.\zig\zig build go_client -Doptimize=ReleaseSafe -Dconfig=production
+    \\.\zig\zig build go_client -Drelease -Dconfig=production
     \\cd src\clients\go
     \\if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
     ,

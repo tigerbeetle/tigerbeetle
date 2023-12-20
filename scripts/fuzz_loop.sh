@@ -9,7 +9,7 @@ FUZZ_COMMAND=$1
 
 while true; do
   SEED=$(od -A n -t u8 -N 8 /dev/urandom | xargs)
-  (zig build "$FUZZ_COMMAND" -Doptimize=ReleaseSafe -- --seed "$SEED") || \
+  (zig build "$FUZZ_COMMAND" -Drelease -- --seed "$SEED") || \
     (zig build "$FUZZ_COMMAND" -- --seed "$SEED" 2> "fuzz_${FUZZ_COMMAND}_${SEED}") || \
     true
 done

@@ -6,11 +6,11 @@ if [ ! -d "zig" ]; then
     ./scripts/install_zig.sh
 fi
 
-# TODO: remove -Doptimize=ReleaseSafe once we no longer use a lot of stack in Groove.zig
-./zig/zig build -Doptimize=ReleaseSafe -Dconfig-aof-record=true
+# TODO: remove -Drelease once we no longer use a lot of stack in Groove.zig
+./zig/zig build -Drelease -Dconfig-aof-record=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof
 
-./zig/zig build -Doptimize=ReleaseSafe -Dconfig-aof-record=true -Dconfig-aof-recovery=true
+./zig/zig build -Drelease -Dconfig-aof-record=true -Dconfig-aof-recovery=true
 mv zig-out/bin/tigerbeetle tigerbeetle-aof-recovery
 
 rm -f aof.log
