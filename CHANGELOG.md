@@ -1,5 +1,59 @@
 # TigerBeetle Changelog
 
+## 2023-12-20
+
+_“The exception confirms the rule in cases not excepted."_  ― Cicero.
+
+Due to significant commits we had this last week, we decided to make an exception
+in our release schedule and cut one more release in 2023!
+
+Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
+
+
+### Internals
+
+- [#1375](https://github.com/tigerbeetle/tigerbeetle/pull/1375)
+- [#1362](https://github.com/tigerbeetle/tigerbeetle/pull/1362)
+- [#1367](https://github.com/tigerbeetle/tigerbeetle/pull/1367)
+
+Some CI-related stuff plus the `-Drelease` flag, which will bring back the joy of
+using the compiler from the command line 🤓.
+
+### Safety And Performance
+
+- [#1346](https://github.com/tigerbeetle/tigerbeetle/pull/1346)
+
+The simulator found a failure when the WAL gets corrupted near a checkpoint boundary, leading us to
+also consider scenarios where corrupted blocks in the grid end up "intersecting" with corruption in
+the WAL, making the state unrecoverable where it should be. We fixed it by extending the durability
+of "prepares", evicting them from the WAL only when there's a quorum of checkpoints covering
+this "prepare".
+
+- [#1366](https://github.com/tigerbeetle/tigerbeetle/pull/1366)
+
+Fix a unit test that regressed after we changed an undesirable behavior that allowed `prefetch` to
+invoke its callback synchronously.
+
+### Features
+
+- [#1054](https://github.com/tigerbeetle/tigerbeetle/pull/1054)
+
+A highly anticipated feature lands on TigerBeetle: it's now possible to retrieve the transfers
+involved with a given account by using the new operation `get_account_transfers`.
+
+Note that this feature itself is an ad-hoc API intended to be replaced once we have a proper
+Querying API. The real improvement of this PR is the implementation of range queries, enabling us
+to land exciting new features on the next releases.
+
+- [#1368](https://github.com/tigerbeetle/tigerbeetle/pull/1368)
+
+Bump the client's maximum limit and the detault value of `concurrency_max` to fully
+take advantage of the batching logic.
+
+### TigerTracks 🎧
+
+- [Everybody needs somebody](https://www.youtube.com/watch?v=m1M5Tc7eLCo)
+
 ## 2023-12-18
 
 *As the last release of the year 2023, the TigerBeetle team wishes everyone happy holidays!* 🎁
