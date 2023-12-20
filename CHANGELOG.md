@@ -16,43 +16,48 @@ Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
   [#1374](https://github.com/tigerbeetle/tigerbeetle/pull/1374),
   [#1375](https://github.com/tigerbeetle/tigerbeetle/pull/1375)
 
-Some CI-related stuff plus the `-Drelease` flag, which will bring back the joy of
-using the compiler from the command line 🤓.
+  Some CI-related stuff plus the `-Drelease` flag, which will bring back the joy of
+  using the compiler from the command line 🤓.
 
 - [#1373](https://github.com/tigerbeetle/tigerbeetle/pull/1373)
 
-Added value count to `TableInfo`, allowing future optimizations for paced compaction.
+  Added value count to `TableInfo`, allowing future optimizations for paced compaction.
 
 ### Safety And Performance
 
 - [#1346](https://github.com/tigerbeetle/tigerbeetle/pull/1346)
 
-The simulator found a failure when the WAL gets corrupted near a checkpoint boundary, leading us to
-also consider scenarios where corrupted blocks in the grid end up "intersecting" with corruption in
-the WAL, making the state unrecoverable where it should be. We fixed it by extending the durability
-of "prepares", evicting them from the WAL only when there's a quorum of checkpoints covering
-this "prepare".
+  The simulator found a failure when the WAL gets corrupted near a checkpoint boundary, leading us
+  to also consider scenarios where corrupted blocks in the grid end up "intersecting" with
+  corruption in the WAL, making the state unrecoverable where it should be. We fixed it by
+  extending the durability of "prepares", evicting them from the WAL only when there's a quorum of
+  checkpoints covering this "prepare".
 
 - [#1366](https://github.com/tigerbeetle/tigerbeetle/pull/1366)
 
-Fix a unit test that regressed after we changed an undesirable behavior that allowed `prefetch` to
-invoke its callback synchronously.
+  Fix a unit test that regressed after we changed an undesirable behavior that allowed `prefetch`
+  to invoke its callback synchronously.
+
+- [#1381](https://github.com/tigerbeetle/tigerbeetle/pull/1381)
+
+  Relaxed a simulator's verification, allowing replicas of the core cluster to be missing some
+  prepares, as long as they are from a past checkpoint.
 
 ### Features
 
 - [#1054](https://github.com/tigerbeetle/tigerbeetle/pull/1054)
 
-A highly anticipated feature lands on TigerBeetle: it's now possible to retrieve the transfers
-involved with a given account by using the new operation `get_account_transfers`.
+  A highly anticipated feature lands on TigerBeetle: it's now possible to retrieve the transfers
+  involved with a given account by using the new operation `get_account_transfers`.
 
-Note that this feature itself is an ad-hoc API intended to be replaced once we have a proper
-Querying API. The real improvement of this PR is the implementation of range queries, enabling us
-to land exciting new features on the next releases.
+  Note that this feature itself is an ad-hoc API intended to be replaced once we have a proper
+  Querying API. The real improvement of this PR is the implementation of range queries, enabling
+  us to land exciting new features on the next releases.
 
 - [#1368](https://github.com/tigerbeetle/tigerbeetle/pull/1368)
 
-Bump the client's maximum limit and the default value of `concurrency_max` to fully
-take advantage of the batching logic.
+  Bump the client's maximum limit and the default value of `concurrency_max` to fully take
+  advantage of the batching logic.
 
 ### TigerTracks 🎧
 
