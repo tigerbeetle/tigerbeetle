@@ -2,22 +2,26 @@
 
 ## 2023-12-20
 
-_“The exception confirms the rule in cases not excepted."_  ― Cicero.
+_“The exception confirms the rule in cases not excepted."_ ― Cicero.
 
 Due to significant commits we had this last week, we decided to make an exception
 in our release schedule and cut one more release in 2023!
 
 Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
 
-
 ### Internals
 
-- [#1375](https://github.com/tigerbeetle/tigerbeetle/pull/1375)
-- [#1362](https://github.com/tigerbeetle/tigerbeetle/pull/1362)
-- [#1367](https://github.com/tigerbeetle/tigerbeetle/pull/1367)
+- [#1362](https://github.com/tigerbeetle/tigerbeetle/pull/1362),
+  [#1367](https://github.com/tigerbeetle/tigerbeetle/pull/1367),
+  [#1374](https://github.com/tigerbeetle/tigerbeetle/pull/1374),
+  [#1375](https://github.com/tigerbeetle/tigerbeetle/pull/1375)
 
 Some CI-related stuff plus the `-Drelease` flag, which will bring back the joy of
 using the compiler from the command line 🤓.
+
+- [#1373](https://github.com/tigerbeetle/tigerbeetle/pull/1373)
+
+Added value count to `TableInfo`, allowing future optimizations for paced compaction.
 
 ### Safety And Performance
 
