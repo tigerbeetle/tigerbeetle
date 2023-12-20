@@ -245,7 +245,7 @@
               <arguments>
                 <argument>build</argument>
                 <argument>java_client</argument>
-                <argument>-Doptimize=ReleaseSafe</argument>
+                <argument>-Drelease</argument>
                 <argument>-Dconfig=production</argument>
               </arguments>
             </configuration>

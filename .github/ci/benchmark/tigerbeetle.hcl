@@ -99,7 +99,7 @@ git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
-./zig/zig build install -Doptimize=ReleaseSafe
+./zig/zig build install -Drelease
 
 if ! [ -e "/tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle" ]; then
   ./tigerbeetle format --cluster=${var.cluster_id} --replica=${var.replica} --replica-count=${var.replica_count} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle

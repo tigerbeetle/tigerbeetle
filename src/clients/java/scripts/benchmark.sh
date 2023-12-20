@@ -8,7 +8,7 @@ COLOR_RED='\033[1;31m'
 COLOR_END='\033[0m'
 
 echo "Building TigerBeetle..."
-(cd ../../.. && ./zig/zig build install -Doptimize=ReleaseSafe)
+(cd ../../.. && ./zig/zig build install -Drelease)
 
 echo "Building TigerBeetle Java Client"
 mvn -B compile --quiet
