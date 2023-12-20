@@ -139,6 +139,6 @@ fn checkpoint_index(checkpoint_op: u64) usize {
 
     return @divExact(
         checkpoint_op + 1,
-        constants.journal_slot_count - constants.lsm_batch_multiple,
+        constants.vsr_checkpoint_interval,
     ) - 1;
 }

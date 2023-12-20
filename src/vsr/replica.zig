@@ -1914,7 +1914,7 @@ pub fn ReplicaType(
             assert(message.header.replica == self.primary_index(message.header.view));
             assert(message.header.commit >= message.header.checkpoint_op);
             assert(message.header.commit - message.header.checkpoint_op <=
-                constants.journal_slot_count);
+                constants.vsr_checkpoint_interval + constants.lsm_batch_multiple);
             assert(message.header.op >= message.header.commit);
             assert(message.header.op - message.header.commit <=
                 constants.pipeline_prepare_queue_max);
@@ -4047,10 +4047,8 @@ pub fn ReplicaType(
             // The SV includes headers corresponding to the triggers for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
             for ([_]u64{
-                self.op_checkpoint_next_trigger() -|
-                    (constants.journal_slot_count - constants.lsm_batch_multiple),
-                self.op_checkpoint_next_trigger() -|
-                    (constants.journal_slot_count - constants.lsm_batch_multiple) * 2,
+                self.op_checkpoint_next_trigger() -| constants.vsr_checkpoint_interval,
+                self.op_checkpoint_next_trigger() -| constants.vsr_checkpoint_interval * 2,
             }) |op_hook| {
                 if (op > op_hook and op_hook >= op_min) {
                     op = op_hook;
@@ -5052,19 +5050,40 @@ pub fn ReplicaType(
             return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
+        /// Returns checkpoint id associated with the op.
+        ///
+        /// Normally, this is just the id of the checkpoint the op builds on top. However, ops
+        /// between a checkpoint and its trigger can't know checkpoint's id yet, and instead use
+        /// the id of the previous checkpoint.
+        ///
+        /// Returns `null` for ops which are too far in the past/future to know their checkpoint
+        /// ids.
         fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
+            // Case 1: for the root op, checkpoint id is zero.
             if (op == 0) return Header.Prepare.root(self.cluster).checkpoint_id;
 
             if (self.op_checkpoint() > 0) {
-                if (op < self.op_repair_min()) return null;
-
-                const op_checkpoint_next_trigger_previous =
+                const op_checkpoint_trigger =
                     vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-                if (op <= op_checkpoint_next_trigger_previous) {
+                if (op <= op_checkpoint_trigger) {
+                    if (op + constants.vsr_checkpoint_interval <= op_checkpoint_trigger) {
+                        // Case 2: op is from a too distant past for us to know its checkpoint id.
+                        return null;
+                    }
+                    // Case 3: op is from the previous checkpoint whose id we still remember.
                     return self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
                 }
+
+                assert(op + constants.vsr_checkpoint_interval > self.op_checkpoint_next_trigger());
             }
-            return self.superblock.working.checkpoint_id();
+
+            if (op <= self.op_checkpoint_next_trigger()) {
+                // Case 4: op uses the current checkpoint id.
+                return self.superblock.working.checkpoint_id();
+            }
+
+            // Case 5: op is from the too far future for us to know anything!
+            return null;
         }
 
         /// Returns the oldest op that the replica must/(is permitted to) repair.
@@ -5080,8 +5099,9 @@ pub fn ReplicaType(
         ///       nacking the latter entry.
         ///     - there is no guarantee that they will ever be available (if our head is behind),
         ///       and we don't want to stall the new view startup.
-        ///   - primaries do repair checkpointed ops — as many as are guaranteed to exist anywhere in
-        ///     the cluster, so that they can help lagging backups catch up.
+        ///   - primaries do repair checkpointed ops so that they can help lagging backups catch up,
+        ///     as long as the op is new enough to be present in the WAL of some other replica and
+        ///     is from the previous checkpoint.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
         /// for ensuring that replica.op is valid.
@@ -5095,7 +5115,7 @@ pub fn ReplicaType(
                     assert(self.status == .normal or self.do_view_change_quorum or self.solo());
                     // This is the oldest op that is guaranteed to be in the WALs of any replica.
                     // (Assuming that this primary has not been superseded.)
-                    break :op @min(
+                    const op_wal_oldest = @min(
                         // Add the oldest pipeline_prepare_queue_max ops because they may have been
                         // newer ops which were then truncated by a view-change, causing the head op
                         // to backtrack.
@@ -5103,6 +5123,15 @@ pub fn ReplicaType(
                         // ...But the pipeline messages could not have moved past the checkpoint.
                         self.op_checkpoint_next_trigger(),
                     ) -| (constants.journal_slot_count - 1);
+
+                    // We know checkpoint ids for the current checkpoint and the one before that.
+                    // Don't try repairing ops with older checkpoint_ids which are impossible to
+                    // verify.
+                    const op_with_checkpoint_id_oldest =
+                        (self.op_checkpoint_next_trigger() + 1) -| constants.vsr_checkpoint_interval * 2;
+                    assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest) != null);
+
+                    break :op @max(op_wal_oldest, op_with_checkpoint_id_oldest);
                 } else {
                     // Strictly speaking a backup only needs to repair commit_min+1… to proceed.
                     // However, if the backup crashes and recovers, it will need to replay ops
@@ -5122,6 +5151,7 @@ pub fn ReplicaType(
             assert(op <= self.commit_min + 1);
             assert(op <= self.op_checkpoint() + 1);
             assert(self.op - op < constants.journal_slot_count);
+            assert(self.checkpoint_id_for_op(op) != null);
             return op;
         }
 
