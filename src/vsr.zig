@@ -1289,7 +1289,8 @@ const ViewChangeHeadersArray = struct {
         assert(headers.command == .start_view);
         // This function is only called by a replica that is lagging behind the primary's
         // checkpoint, so the start_view has a full suffix of headers.
-        assert(headers.array.get(0).op >= constants.journal_slot_count);
+        assert(headers.array.get(0).op >=
+            constants.vsr_checkpoint_interval + constants.lsm_batch_multiple);
         assert(headers.array.count() >= constants.view_change_headers_suffix_max);
         assert(headers.array.count() >= constants.pipeline_prepare_queue_max + 1);
 
@@ -1337,7 +1338,8 @@ const ViewChangeHeadersArray = struct {
     }
 };
 
-/// For a replica with journal_slot_count=8 and lsm_batch_multiple=2:
+/// For a replica with journal_slot_count=9, lsm_batch_multiple=2, pipeline_prepare_queue_max=1, and
+/// checkpoint_interval = journal_slot_count - (lsm_batch_multiple + pipeline_prepare_queue_max) = 6
 ///
 ///   checkpoint() call           0   1   2   3
 ///   op_checkpoint               0   5  11  17
@@ -1345,11 +1347,11 @@ const ViewChangeHeadersArray = struct {
 ///   op_checkpoint_next_trigger  7  13  19  25
 ///
 ///     commit log (ops)           │ write-ahead log (slots)
-///     0   4   8   2   6   0   4  │ 0---4---
-///   0 ─────✓·%                   │ 01234✓6%   initial log fill
-///   1 ───────────✓·%             │ 890✓2%45   first wrap of log
-///   2 ─────────────────✓·%       │ 6✓8%0123   second wrap of log
-///   3 ───────────────────────✓·% │ 4%67890✓   third wrap of log
+///     0   4   8   2   6   0   4  │  0  -  -  -  4  -  -  -  8
+///   0 ─────✓·%                   │[ 0  1  2  3  4  ✓] 6  %  R
+///   1 ───────────✓·%             │  9 10  ✓]12  %  5[ 6  7  8
+///   2 ─────────────────✓·%       │ 18  % 11[12 13 14 15 16  ✓]
+///   3 ───────────────────────✓·% │[18 19 20 21 22  ✓]24  % 17
 ///
 /// Legend:
 ///
@@ -1357,7 +1359,8 @@ const ViewChangeHeadersArray = struct {
 ///   ·/%  op in memory at checkpoint
 ///     ✓  op_checkpoint
 ///     %  op_checkpoint's trigger
-///
+///     R  slot reserved in WAL
+///    [ ] range of ops from a checkpoint
 pub const Checkpoint = struct {
     comptime {
         assert(constants.journal_slot_count > constants.lsm_batch_multiple);
@@ -1369,12 +1372,13 @@ pub const Checkpoint = struct {
 
         const result = op: {
             if (checkpoint == 0) {
-                // First wrap: op_checkpoint_next = 8-2-1 = 5
-                break :op constants.journal_slot_count - constants.lsm_batch_multiple - 1;
+                // First wrap: op_checkpoint_next = 6-1 = 5
+                // -1: vsr_checkpoint_interval is a count, result is an inclusive index.
+                break :op constants.vsr_checkpoint_interval - 1;
             } else {
-                // Second wrap: op_checkpoint_next = 5+8-2 = 11
-                // Third wrap: op_checkpoint_next = 11+8-2 = 17
-                break :op checkpoint + constants.journal_slot_count - constants.lsm_batch_multiple;
+                // Second wrap: op_checkpoint_next = 5+6 = 11
+                // Third wrap: op_checkpoint_next = 11+6 = 17
+                break :op checkpoint + constants.vsr_checkpoint_interval;
             }
         };
 
@@ -1395,7 +1399,7 @@ pub const Checkpoint = struct {
     }
 
     pub fn valid(op: u64) bool {
-        // Divide by `lsm_batch_multiple` instead of `journal_slot_count - lsm_batch_multiple`:
+        // Divide by `lsm_batch_multiple` instead of `vsr_checkpoint_interval`:
         // although today in practice checkpoints are evenly spaced, the LSM layer doesn't assume
         // that. LSM allows any bar boundary to become a checkpoint which happens, e.g., in the tree
         // fuzzer.

@@ -7,6 +7,7 @@ const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const tracer = @import("tracer.zig");
 const Config = @import("config.zig").Config;
+const stdx = @import("stdx.zig");
 
 pub const config = @import("config.zig").configs.current;
 
@@ -39,6 +40,23 @@ pub const vsr_operations_reserved: u8 = 128;
 
 comptime {
     assert(vsr_operations_reserved <= std.math.maxInt(u8));
+}
+
+pub const vsr_checkpoint_interval = journal_slot_count -
+    lsm_batch_multiple -
+    lsm_batch_multiple * stdx.div_ceil(pipeline_prepare_queue_max, lsm_batch_multiple);
+
+comptime {
+    // Invariant: to guarantee durability, a log entry from a previous checkpoint can be overwritten
+    // only when there is a quorum of replicas at the next checkpoint.
+    //
+    // This assert guarantees that when a prepare gets bumped from the log, there is a prepare
+    // _committed_ on top of the next checkpoint, which in turn guarantees the existence of a
+    // checkpoint quorum.
+    assert(vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max <=
+        journal_slot_count);
+    assert(vsr_checkpoint_interval >= lsm_batch_multiple);
+    assert(vsr_checkpoint_interval % lsm_batch_multiple == 0);
 }
 
 /// The maximum number of clients allowed per cluster, where each client has a unique 128-bit ID.
