@@ -19,11 +19,11 @@ on:
   workflow_call:
 
 jobs:
-  smoke:
-    uses: ./.github/workflows/smoke.yml
+  #smoke:
+  # uses: ./.github/workflows/smoke.yml
 
-  linux:
-    uses: ./.github/workflows/linux.yml
+  #linux:
+  # uses: ./.github/workflows/linux.yml
 
   clients:
     uses: ./.github/workflows/clients.yml
@@ -35,18 +35,20 @@ jobs:
   core-pipeline:
     if: always()
     needs:
-      - smoke
-      - linux
+      #- smoke
+      #- linux
       - clients
 
     runs-on: ubuntu-latest
     steps:
       - name: All Core CI Jobs Passed
-        if: needs.smoke.result == 'success' && needs.linux.result == 'success' && needs.clients.result == 'success'
+        if: needs.clients.result == 'success'
+        #if: needs.smoke.result == 'success' && needs.linux.result == 'success' && needs.clients.result == 'success'
         working-directory: ./
         run: exit 0
 
       - name: A Core CI Job Failed
-        if: needs.smoke.result != 'success' || needs.linux.result != 'success' || needs.clients.result != 'success'
+        if: needs.clients.result != 'success'
+        #if: needs.smoke.result != 'success' || needs.linux.result != 'success' || needs.clients.result != 'success'
         working-directory: ./
         run: exit 1

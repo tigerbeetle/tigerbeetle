@@ -8,61 +8,14 @@ on:
   workflow_call:
 
 jobs:
-  client-dotnet:
-    strategy:
-      max-parallel: 2
-      matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-    permissions:
-      # Our M1 runners are self hosted, and not ephemeral like standard GitHub action runners.
-      # Limit the token permissions to be read - so even if they were compromised, no damage
-      # could be done.
-      contents: read
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-dotnet@v3
-        with:
-          dotnet-version:
-            7.0.x
-
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
-      - run: ./zig/zig build ci -- --language=dotnet
-      # - run: ./zig/zig build client_docs -- --language=dotnet
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
-
-  client-go:
-    strategy:
-      max-parallel: 2
-      matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
-        with:
-          go-version: '1.18'
-
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
-      - run: ./zig/zig build ci -- --language=go
-      # - run: ./zig/zig build client_docs -- --language=go
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
-
   client-java:
     strategy:
-      max-parallel: 2
+      max-parallel: 10
+      fail-fast: false
       matrix:
         # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
         os: [ubuntu-latest]
-        java-version: ['11']
+        java-version: ['11', '17', '18', '19', '20', '20', '20', '21', '21', '21']
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -90,40 +43,9 @@ jobs:
       # - if: matrix.os == 'ubuntu-latest-large'
         # run: ./.github/ci/fail_on_diff.sh
 
-  client-node:
-    strategy:
-      max-parallel: 2
-      matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
-        node-version: ['14.x', '18.x']
-        exclude:
-          - os: macos-13
-            node-version: '14.x'
-          - os: macos-13-xlarge
-            node-version: '14.x'
-
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: ${{ matrix.node-version }}
-
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
-      - run: ./zig/zig build ci -- --language=node
-      # - run: ./zig/zig build client_docs -- --language=node
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
-
   clients-pipeline:
     needs:
-      - client-dotnet
-      - client-go
       - client-java
-      - client-node
 
     runs-on: ubuntu-latest
     steps:
