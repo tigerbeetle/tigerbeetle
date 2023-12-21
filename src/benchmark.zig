@@ -127,18 +127,22 @@ pub fn main() !void {
         },
     );
 
-    const batch_accounts =
+    var batch_accounts =
         try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
-    const batch_latency_ns =
-        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
-    const transfer_latency_ns =
-        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.transfer_count);
-    const query_latency_ns =
+    defer batch_accounts.deinit(allocator);
+
+    // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10000ms+.
+    const batch_latency_histogram = try allocator.alloc(u64, 10001);
+    @memset(batch_latency_histogram, 0);
+    defer allocator.free(batch_latency_histogram);
+
+    var query_latency_ns =
         try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.query_count);
-    const batch_transfers =
+    defer query_latency_ns.deinit(allocator);
+
+    var batch_transfers =
         try std.ArrayListUnmanaged(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
-    const transfer_start_ns =
-        try std.ArrayListUnmanaged(u64).initCapacity(allocator, transfer_count_per_batch);
+    defer batch_transfers.deinit(allocator);
 
     var statsd_opt: ?StatsD = null;
     defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
@@ -171,15 +175,13 @@ pub fn main() !void {
         .account_id_permutation = account_id_permutation,
         .rng = rng,
         .timer = try std.time.Timer.start(),
-        .batch_latency_ns = batch_latency_ns,
-        .transfer_latency_ns = transfer_latency_ns,
+        .batch_latency_histogram = batch_latency_histogram,
         .query_latency_ns = query_latency_ns,
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
         .transfer_count_per_second = cli_args.transfer_count_per_second,
         .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
-        .transfer_start_ns = transfer_start_ns,
         .batch_index = 0,
         .transfers_sent = 0,
         .transfer_index = 0,
@@ -211,8 +213,7 @@ const Benchmark = struct {
     account_id_permutation: IdPermutation,
     rng: std.rand.DefaultPrng,
     timer: std.time.Timer,
-    batch_latency_ns: std.ArrayListUnmanaged(u64),
-    transfer_latency_ns: std.ArrayListUnmanaged(u64),
+    batch_latency_histogram: []u64,
     query_latency_ns: std.ArrayListUnmanaged(u64),
     batch_transfers: std.ArrayListUnmanaged(tb.Transfer),
     batch_start_ns: usize,
@@ -220,7 +221,6 @@ const Benchmark = struct {
     transfer_count: usize,
     transfer_count_per_second: usize,
     transfer_arrival_rate_ns: usize,
-    transfer_start_ns: std.ArrayListUnmanaged(u64),
     batch_index: usize,
     transfer_index: usize,
     transfer_next_arrival_ns: usize,
@@ -300,7 +300,6 @@ const Benchmark = struct {
         const random = b.rng.random();
 
         b.batch_transfers.clearRetainingCapacity();
-        b.transfer_start_ns.clearRetainingCapacity();
 
         // Busy-wait for at least one transfer to be available.
         while (b.transfer_next_arrival_ns >= b.timer.read()) {}
@@ -336,7 +335,6 @@ const Benchmark = struct {
                 .amount = random_int_exponential(random, u64, 10_000) +| 1,
                 .timestamp = 0,
             });
-            b.transfer_start_ns.appendAssumeCapacity(b.transfer_next_arrival_ns);
 
             b.transfer_index += 1;
             b.transfer_next_arrival_ns +=
@@ -379,10 +377,7 @@ const Benchmark = struct {
             });
         }
 
-        b.batch_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
-        for (b.transfer_start_ns.items) |start_ns| {
-            b.transfer_latency_ns.appendAssumeCapacity(batch_end_ns - start_ns);
-        }
+        b.batch_latency_histogram[@min(ms_time, b.batch_latency_histogram.len - 1)] += 1;
 
         b.batch_index += 1;
         b.transfers_sent += b.batch_transfers.items.len;
@@ -399,15 +394,6 @@ const Benchmark = struct {
 
     fn summary_transfers(b: *Benchmark) void {
         const total_ns = b.timer.read();
-
-        const less_than_ns = (struct {
-            fn lessThan(_: void, ns1: u64, ns2: u64) bool {
-                return ns1 < ns2;
-            }
-        }).lessThan;
-        std.mem.sort(u64, b.batch_latency_ns.items, {}, less_than_ns);
-        std.mem.sort(u64, b.transfer_latency_ns.items, {}, less_than_ns);
-
         const stdout = std.io.getStdOut().writer();
 
         stdout.print("{} batches in {d:.2} s\n", .{
@@ -423,8 +409,7 @@ const Benchmark = struct {
                 total_ns,
             ),
         }) catch unreachable;
-        print_deciles(stdout, "batch", b.batch_latency_ns.items);
-        print_deciles(stdout, "transfer", b.transfer_latency_ns.items);
+        print_percentiles_histogram(stdout, "batch", b.batch_latency_histogram, b.batch_index);
 
         if (b.query_count > 0) {
             b.timer.reset();
@@ -552,6 +537,40 @@ fn print_deciles(
                 latencies[index],
                 std.time.ns_per_ms,
             ),
+        }) catch unreachable;
+    }
+}
+
+fn print_percentiles_histogram(
+    stdout: anytype,
+    label: []const u8,
+    latencies: []const u64,
+    count: u64,
+) void {
+    const percentiles = [_]u64{ 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 };
+    for (percentiles) |percentile| {
+        var target_count: usize = @divTrunc(count * percentile, 100);
+        var current_count: usize = 0;
+        var index: usize = 0;
+
+        // Since our histogram is 1ms buckets, index == ms.
+        while (index < latencies.len) {
+            current_count += latencies[index];
+
+            if (current_count >= target_count) {
+                break;
+            }
+
+            index += 1;
+        }
+
+        const warning = if (index == latencies.len) "+ (exceeds histogram resolution)" else "";
+
+        stdout.print("{s} latency p{} = {} ms{s}\n", .{
+            label,
+            percentile,
+            index,
+            warning,
         }) catch unreachable;
     }
 }
