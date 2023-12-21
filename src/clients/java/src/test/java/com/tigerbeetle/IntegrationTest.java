@@ -1088,7 +1088,7 @@ public class IntegrationTest {
      * threads trying to submit a request after the client was closed will fail with
      * IllegalStateException.
      */
-    // @Test
+    @Test
     public void testCloseWithConcurrentTasks() throws Throwable {
 
         try (var server = new Server()) {
