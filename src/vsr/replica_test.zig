@@ -835,6 +835,57 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     try expectEqual(t.replica(.R_).status(), .view_change);
 }
 
+test "Cluster: view-change: duel of the primaries" {
+    // In a cluster of 3, one replica gets partitioned away, and the remaining two _both_ become
+    // primaries (for different views). Additionally, the primary from the  higher view is
+    // abdicating. The primaries should figure out that they need to view-change to a higher view.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+    try expectEqual(t.replica(.R_).commit(), 20);
+
+    try expectEqual(t.replica(.R_).view(), 1);
+    try expectEqual(t.replica(.R1).role(), .primary);
+
+    t.replica(.R2).drop_all(.R_, .bidirectional);
+    t.replica(.R1).drop(.R_, .outgoing, .commit);
+    try c.request(21, 21);
+
+    try expectEqual(t.replica(.R0).commit_max(), 20);
+    try expectEqual(t.replica(.R1).commit_max(), 21);
+    try expectEqual(t.replica(.R2).commit_max(), 20);
+
+    t.replica(.R0).pass_all(.R_, .bidirectional);
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R1).drop_all(.R_, .bidirectional);
+    t.replica(.R2).drop(.R0, .bidirectional, .prepare_ok);
+    t.replica(.R2).drop(.R0, .outgoing, .do_view_change);
+    t.run();
+
+    // The stage is set: we have two primaries in different views, R2 is about to abdicate.
+    try expectEqual(t.replica(.R1).view(), 1);
+    try expectEqual(t.replica(.R1).status(), .normal);
+    try expectEqual(t.replica(.R1).role(), .primary);
+    try expectEqual(t.replica(.R1).commit(), 21);
+    try expectEqual(t.replica(.R2).op_head(), 21);
+
+    try expectEqual(t.replica(.R2).view(), 2);
+    try expectEqual(t.replica(.R2).status(), .normal);
+    try expectEqual(t.replica(.R2).role(), .primary);
+    try expectEqual(t.replica(.R2).commit(), 20);
+    try expectEqual(t.replica(.R2).op_head(), 21);
+
+    t.replica(.R1).pass_all(.R_, .bidirectional);
+    t.replica(.R2).pass_all(.R_, .bidirectional);
+    t.replica(.R0).drop_all(.R_, .bidirectional);
+    t.run();
+
+    try expectEqual(t.replica(.R1).commit(), 21);
+    try expectEqual(t.replica(.R2).commit(), 21);
+}
+
 test "Cluster: sync: partition, lag, sync (transition from idle)" {
     for ([_]u64{
         // Normal case: the cluster has committed atop the checkpoint trigger.
@@ -1151,8 +1202,7 @@ const TestContext = struct {
 
     pub fn clients(t: *TestContext, index: usize, count: usize) TestClients {
         var client_indexes = stdx.BoundedArray(usize, constants.clients_max){};
-        var i = index;
-        while (i < index + count) : (i += 1) client_indexes.append_assume_capacity(i);
+        for (index..index + count) |i| client_indexes.append_assume_capacity(i);
         return TestClients{
             .context = t,
             .cluster = t.cluster,
@@ -1313,6 +1363,10 @@ const TestReplicas = struct {
 
     pub fn commit(t: *const TestReplicas) u64 {
         return t.get(.commit_min);
+    }
+
+    pub fn commit_max(t: *const TestReplicas) u64 {
+        return t.get(.commit_max);
     }
 
     pub fn state_machine_opened(t: *const TestReplicas) bool {
