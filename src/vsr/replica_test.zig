@@ -741,7 +741,9 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     // 4. A0 commits a checkpoint trigger and checkpoints.
     // 5. B1 crashes before it can commit the trigger or checkpoint.
     // 6. A0 prepares a message.
-    // 7. B1 restarts. The very first entry in its WAL is corrupt, but A0 has already overwritten the corresponding entry in its own WAL.
+    // 7. B1 restarts. The very first entry in its WAL is corrupt.
+    // A0 has *not* already overwritten the corresponding entry in its own WAL, thanks to the
+    // pipeline component of the vsr_checkpoint_interval.
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
