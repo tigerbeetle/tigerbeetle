@@ -45,7 +45,7 @@ jobs:
       # We need llvm-lipo utility from LLVM to build a universal mac binary.
       - run: wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && sudo ./llvm.sh 16
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build release -- --build --publish --version=0.14.${{ github.run_number }} --sha=${{ github.sha }}
+      - run: ./zig/zig build scripts -- release --build --publish --version=0.14.${{ github.run_number }} --sha=${{ github.sha }}
         env:
           NUGET_KEY: ${{ secrets.NUGET_KEY }}
           TIGERBEETLE_GO_PAT: ${{ secrets.TIGERBEETLE_GO_PAT }}

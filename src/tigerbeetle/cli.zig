@@ -190,7 +190,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
     // Skip argv[0] which is the name of this executable
     assert(args.skip());
 
-    const cli_args = flags.parse_commands(&args, CliArgs);
+    const cli_args = flags.parse(&args, CliArgs);
 
     switch (cli_args) {
         .version => |version| {

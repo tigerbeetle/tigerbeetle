@@ -413,17 +413,6 @@ pub fn build(b: *std.Build) !void {
             mode,
             target,
         );
-
-        const ci_exe = b.addExecutable(.{
-            .name = "ci",
-            .root_source_file = .{ .path = "src/scripts/ci.zig" },
-            .target = target,
-            .main_pkg_path = .{ .path = "src" },
-        });
-        const ci_run = b.addRunArtifact(ci_exe);
-        if (b.args) |args| ci_run.addArgs(args);
-        const ci_step = b.step("ci", "Run CI checks");
-        ci_step.dependOn(&ci_run.step);
     }
 
     {
@@ -679,16 +668,16 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&run_cmd.step);
     }
 
-    const release_exe = b.addExecutable(.{
-        .name = "release",
-        .root_source_file = .{ .path = "src/scripts/release.zig" },
+    const scripts_exe = b.addExecutable(.{
+        .name = "scripts",
+        .root_source_file = .{ .path = "src/scripts/main.zig" },
         .target = target,
         .main_pkg_path = .{ .path = "src" },
     });
-    const release_exe_run = b.addRunArtifact(release_exe);
-    if (b.args) |args| release_exe_run.addArgs(args);
-    const release_step = b.step("release", "build and publish release artifacts");
-    release_step.dependOn(&release_exe_run.step);
+    const scripts_run = b.addRunArtifact(scripts_exe);
+    if (b.args) |args| scripts_run.addArgs(args);
+    const scripts_step = b.step("scripts", "Run automation scripts");
+    scripts_step.dependOn(&scripts_run.step);
 }
 
 fn link_tracer_backend(

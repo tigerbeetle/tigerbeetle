@@ -91,7 +91,7 @@ pub fn main() !void {
     // Discard executable name.
     _ = args.next().?;
 
-    const cli_args = flags.parse_flags(&args, CliArgs);
+    const cli_args = flags.parse(&args, CliArgs);
 
     const addresses = try vsr.parse_addresses(allocator, cli_args.addresses, constants.members_max);
     defer allocator.free(addresses);

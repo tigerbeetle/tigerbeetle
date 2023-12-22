@@ -26,7 +26,7 @@ const Shell = @import("../shell.zig");
 
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
-const CliArgs = struct {
+pub const CliArgs = struct {
     version: []const u8,
     sha: []const u8,
     language: ?Language = null,
@@ -39,27 +39,8 @@ const VersionInfo = struct {
     sha: []const u8,
 };
 
-pub fn main() !void {
-    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    defer switch (gpa_allocator.deinit()) {
-        .ok => {},
-        .leak => fatal("memory leak", .{}),
-    };
-
-    const gpa = gpa_allocator.allocator();
-    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
-    defer arena_allocator.deinit();
-
-    const shell = try Shell.create(gpa);
-    defer shell.destroy();
-
-    var args = try std.process.argsWithAllocator(gpa);
-    defer args.deinit();
-
-    // Discard executable name.
-    _ = args.next().?;
-
-    const cli_args = flags.parse_flags(&args, CliArgs);
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
+    _ = gpa;
 
     const languages = if (cli_args.language) |language|
         LanguageSet.initOne(language)
