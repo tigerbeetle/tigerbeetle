@@ -40,7 +40,7 @@ jobs:
 
       - run: ./scripts/install_zig.sh
 
-      - run: ./zig/zig build ci -- --validate-release
+      - run: ./zig/zig build scripts -- ci --validate-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

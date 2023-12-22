@@ -48,10 +48,10 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     std.os.exit(1);
 }
 
-/// Parse CLI arguments for subcommands specified as Zig `union(enum)`:
+/// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
 ///
 /// ```
-/// const cli_args = parse_commands(&args, union(enum) {
+/// const CliArgs = union(enum) {
 ///    start: struct { addresses: []const u8, replica: u32 },
 ///    format: struct {
 ///        verbose: bool = false,
@@ -63,13 +63,23 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///    pub const help =
 ///        \\ tigerbeetle start --addresses=<addresses> --replica=<replica>
 ///        \\ tigerbeetle format [--verbose] <path>
-/// })
+/// }
+///
+/// const cli_args = parse_commands(&args, CliArgs);
 /// ```
 ///
 /// `positional` field is treated specially, it designates positional arguments.
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
-pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
+pub fn parse(args: *std.process.ArgIterator, comptime CliArgs: type) CliArgs {
+    return switch (@typeInfo(CliArgs)) {
+        .Union => parse_commands(args, CliArgs),
+        .Struct => parse_flags(args, CliArgs),
+        else => unreachable,
+    };
+}
+
+fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Commands {
     comptime assert(@typeInfo(Commands) == .Union);
     comptime assert(std.meta.fields(Commands).len >= 2);
 
@@ -95,16 +105,7 @@ pub fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) C
     fatal("unknown subcommand: '{s}'", .{first_arg});
 }
 
-/// Parse CLI arguments for a single command specified as Zig `struct`:
-///
-/// ```
-/// const cli_args = parse_commands(&args, struct {
-///    verbose: bool = false,
-///    replica: u32,
-///    positional: struct { path: []const u8 = "0_0.tigerbeetle" },
-/// })
-/// ```
-pub fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
+fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     if (Flags == void) {
         if (args.next()) |arg| {
             fatal("unexpected argument: '{s}'", .{arg});
