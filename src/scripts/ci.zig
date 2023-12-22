@@ -22,31 +22,12 @@ const LanguageCI = .{
     .node = @import("../clients/node/ci.zig"),
 };
 
-const CliArgs = struct {
+pub const CliArgs = struct {
     language: ?Language = null,
     validate_release: bool = false,
 };
 
-pub fn main() !void {
-    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    defer switch (gpa_allocator.deinit()) {
-        .ok => {},
-        .leak => fatal("memory leak", .{}),
-    };
-
-    const gpa = gpa_allocator.allocator();
-    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
-    defer arena_allocator.deinit();
-
-    const shell = try Shell.create(gpa);
-    defer shell.destroy();
-
-    var args = try std.process.argsWithAllocator(gpa);
-    defer args.deinit();
-
-    assert(args.skip());
-    const cli_args = flags.parse_flags(&args, CliArgs);
-
+pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     if (cli_args.validate_release) {
         try validate_release(shell, gpa, cli_args.language);
     } else {
