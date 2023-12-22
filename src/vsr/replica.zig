@@ -4365,35 +4365,6 @@ pub fn ReplicaType(
                 });
                 return true;
             }
-
-            // TODO(Async checkpoints): Remove this check.
-            // It is a hack to prevent an availability issue, but it comes at a huge
-            // performance cost.
-            // For an explanation, see: "Cluster: repair: primary checkpoint, backup crash before
-            // checkpoint, primary prepare".
-            if (self.op_checkpoint() != 0 and
-                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).? + 1 == self.op)
-            {
-                var count: usize = 0;
-                for (self.sync_target_quorum.candidates, 0..) |target, replica_index| {
-                    if (replica_index == self.replica) {
-                        count += 1; // Count ourselves.
-                    } else {
-                        count += @intFromBool(
-                            target != null and
-                                target.?.checkpoint_op == self.op_checkpoint(),
-                        );
-                    }
-                }
-
-                if (count < self.quorum_replication) {
-                    log.warn("{}: on_request: ignoring (waiting for backups to checkpoint)", .{
-                        self.replica,
-                    });
-                    return true;
-                }
-            }
-
             return false;
         }
 
