@@ -544,33 +544,26 @@ fn print_deciles(
 fn print_percentiles_histogram(
     stdout: anytype,
     label: []const u8,
-    latencies: []const u64,
-    count: u64,
+    histogram_buckets: []const u64,
+    histogram_count: u64,
 ) void {
     const percentiles = [_]u64{ 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 };
     for (percentiles) |percentile| {
-        var target_count: usize = @divTrunc(count * percentile, 100);
-        var current_count: usize = 0;
-        var index: usize = 0;
+        var count_for_percentile: usize = @divTrunc(histogram_count * percentile, 100);
+        var count: usize = 0;
+        var bucket: usize = 0;
 
-        // Since our histogram is 1ms buckets, index == ms.
-        while (index < latencies.len) {
-            current_count += latencies[index];
-
-            if (current_count >= target_count) {
-                break;
-            }
-
-            index += 1;
+        // Since each bucket in our histogram represents 1ms, the bucket we're in is the ms value.
+        while (bucket < histogram_buckets.len) : (bucket += 1) {
+            count += histogram_buckets[bucket];
+            if (count >= count_for_percentile) break;
         }
-
-        const warning = if (index == latencies.len) "+ (exceeds histogram resolution)" else "";
 
         stdout.print("{s} latency p{} = {} ms{s}\n", .{
             label,
             percentile,
-            index,
-            warning,
+            bucket,
+            if (bucket == histogram_buckets.len) "+ (exceeds histogram resolution)" else "",
         }) catch unreachable;
     }
 }
