@@ -552,82 +552,27 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&run_cmd.step);
     }
 
-    inline for (.{
-        .{
-            .name = "fuzz_ewah",
-            .file = "src/ewah_fuzz.zig",
-            .description = "Fuzz EWAH codec. Args: [--seed <seed>]",
-        },
-        .{
-            .name = "fuzz_lsm_cache_map",
-            .file = "src/lsm/cache_map_fuzz.zig",
-            .description = "Fuzz the LSM cache map. Args: [--seed <seed>] [--events-max <count>]",
-        },
-        .{
-            .name = "fuzz_lsm_forest",
-            .file = "src/lsm/forest_fuzz.zig",
-            .description = "Fuzz the LSM forest. Args: [--seed <seed>] [--events-max <count>]",
-        },
-        .{
-            .name = "fuzz_lsm_manifest_log",
-            .file = "src/lsm/manifest_log_fuzz.zig",
-            .description = "Fuzz the ManifestLog. Args: [--seed <seed>] [--events-max <count>]",
-        },
-        .{
-            .name = "fuzz_lsm_manifest_level",
-            .file = "src/lsm/manifest_level_fuzz.zig",
-            .description = "Fuzz the ManifestLevel. Args: [--seed <seed>] [--events-max <count>]",
-        },
-        .{
-            .name = "fuzz_lsm_tree",
-            .file = "src/lsm/tree_fuzz.zig",
-            .description = "Fuzz the LSM tree. Args: [--seed <seed>] [--events-max <count>]",
-        },
-        .{
-            .name = "fuzz_lsm_segmented_array",
-            .file = "src/lsm/segmented_array_fuzz.zig",
-            .description = "Fuzz the LSM segmented array. Args: [--seed <seed>]",
-        },
-        .{
-            .name = "fuzz_vsr_journal_format",
-            .file = "src/vsr/journal_format_fuzz.zig",
-            .description = "Fuzz the WAL format. Args: [--seed <seed>]",
-        },
-        .{
-            .name = "fuzz_vsr_superblock",
-            .file = "src/vsr/superblock_fuzz.zig",
-            .description = "Fuzz the SuperBlock. Args: [--seed <seed>] [--events-max <count>]",
-        },
-        .{
-            .name = "fuzz_vsr_free_set",
-            .file = "src/vsr/free_set_fuzz.zig",
-            .description = "Fuzz the FreeSet. Args: [--seed <seed>]",
-        },
-        .{
-            .name = "fuzz_vsr_superblock_quorums",
-            .file = "src/vsr/superblock_quorums_fuzz.zig",
-            .description = "Fuzz the SuperBlock Quorums. Args: [--seed <seed>]",
-        },
-    }) |fuzzer| {
-        const exe = b.addExecutable(.{
-            .name = fuzzer.name,
-            .root_source_file = .{ .path = fuzzer.file },
+    { // Fuzzers: zig build fuzz -- lsm_tree --seed=92 --events-max=100
+        const fuzz_exe = b.addExecutable(.{
+            .name = "fuzz",
+            .root_source_file = .{ .path = "src/fuzz_tests.zig" },
             .target = target,
             .optimize = mode,
             .main_pkg_path = .{ .path = "src" },
         });
-        exe.omit_frame_pointer = false;
-        exe.addOptions("vsr_options", options);
-        link_tracer_backend(exe, git_clone_tracy, tracer_backend, target);
-        const install_step = b.addInstallArtifact(exe, .{});
-        const build_step = b.step("build_" ++ fuzzer.name, fuzzer.description);
-        build_step.dependOn(&install_step.step);
+        fuzz_exe.omit_frame_pointer = false;
+        fuzz_exe.addOptions("vsr_options", options);
+        link_tracer_backend(fuzz_exe, git_clone_tracy, tracer_backend, target);
 
-        const run_cmd = b.addRunArtifact(exe);
-        if (b.args) |args| run_cmd.addArgs(args);
+        const fuzz_run = b.addRunArtifact(fuzz_exe);
+        if (b.args) |args| fuzz_run.addArgs(args);
 
-        const run_step = b.step(fuzzer.name, fuzzer.description);
-        run_step.dependOn(&run_cmd.step);
+        const fuzz_step = b.step("fuzz", "Run the specified fuzzer");
+        fuzz_step.dependOn(&fuzz_run.step);
+
+        const fuzz_install_step = b.addInstallArtifact(fuzz_exe, .{});
+        const fuzz_build_step = b.step("build_fuzz", "Build fuzzers");
+        fuzz_build_step.dependOn(&fuzz_install_step.step);
     }
 
     inline for (.{
@@ -668,16 +613,18 @@ pub fn build(b: *std.Build) !void {
         step.dependOn(&run_cmd.step);
     }
 
-    const scripts_exe = b.addExecutable(.{
-        .name = "scripts",
-        .root_source_file = .{ .path = "src/scripts/main.zig" },
-        .target = target,
-        .main_pkg_path = .{ .path = "src" },
-    });
-    const scripts_run = b.addRunArtifact(scripts_exe);
-    if (b.args) |args| scripts_run.addArgs(args);
-    const scripts_step = b.step("scripts", "Run automation scripts");
-    scripts_step.dependOn(&scripts_run.step);
+    { // Free-form automation: `zig build scripts -- ci --language=java`
+        const scripts_exe = b.addExecutable(.{
+            .name = "scripts",
+            .root_source_file = .{ .path = "src/scripts/main.zig" },
+            .target = target,
+            .main_pkg_path = .{ .path = "src" },
+        });
+        const scripts_run = b.addRunArtifact(scripts_exe);
+        if (b.args) |args| scripts_run.addArgs(args);
+        const scripts_step = b.step("scripts", "Run automation scripts");
+        scripts_step.dependOn(&scripts_run.step);
+    }
 }
 
 fn link_tracer_backend(

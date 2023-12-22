@@ -13,11 +13,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
-
-pub fn main() !void {
-    const allocator = fuzz.allocator;
-    const fuzz_args = try fuzz.parse_fuzz_args(allocator);
+pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(fuzz_args.seed);
 
     // TODO When there is a top-level fuzz.zig main(), split these fuzzers into two different
