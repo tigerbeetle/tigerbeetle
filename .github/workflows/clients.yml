@@ -62,7 +62,7 @@ jobs:
       matrix:
         # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
         os: [ubuntu-latest]
-        java-version: ['11']
+        java-version: ['11', '21']
 
     runs-on: ${{ matrix.os }}
     permissions:
