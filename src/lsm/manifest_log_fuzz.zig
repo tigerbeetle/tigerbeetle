@@ -26,8 +26,6 @@ const schema = @import("./schema.zig");
 const tree = @import("./tree.zig");
 const TableInfo = schema.ManifestNode.TableInfo;
 
-pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
-
 const manifest_log_options = ManifestLogOptions{
     .tree_id_min = 1,
     // Use many trees so that we fill manifest blocks quickly.
@@ -44,9 +42,8 @@ const pace = @import("manifest_log.zig").Pace.init(.{
     .half_bar_compact_blocks_extra = constants.lsm_manifest_compact_blocks_extra,
 });
 
-pub fn main() !void {
+pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
-    const args = try fuzz.parse_fuzz_args(allocator);
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 

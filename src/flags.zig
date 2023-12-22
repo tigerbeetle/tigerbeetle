@@ -234,11 +234,6 @@ fn assert_valid_value_type(comptime T: type) void {
             const info = @typeInfo(T).Enum;
             assert(info.is_exhaustive);
             assert(info.fields.len >= 2);
-            for (info.fields) |enum_field| {
-                if (std.mem.indexOfAny(u8, enum_field.name, "-_ ") != null) {
-                    @compileError("ambiguous enum flag");
-                }
-            }
             return;
         }
 

@@ -861,11 +861,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 
 const io_latency_mean = 20;
 
-pub fn main() !void {
+pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     try tracer.init(allocator);
     defer tracer.deinit(allocator);
 
-    const fuzz_args = try fuzz.parse_fuzz_args(allocator);
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
