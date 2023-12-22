@@ -193,7 +193,6 @@ const naughty_list = [_][]const u8{
     "config.zig",
     "constants.zig",
     "ewah_benchmark.zig",
-    "ewah.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
     "io/linux.zig",
