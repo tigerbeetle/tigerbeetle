@@ -31,13 +31,16 @@ pub fn ewah(comptime Word: type) type {
         const marker_uniform_word_count_max = (1 << ((word_bits / 2) - 1)) - 1;
         const marker_literal_word_count_max = (1 << (word_bits / 2)) - 1;
 
-        pub const MarkerUniformCount = math.IntFittingRange(0, marker_uniform_word_count_max); // Word=usize → u31
-        pub const MarkerLiteralCount = math.IntFittingRange(0, marker_literal_word_count_max); // Word=usize → u32
+        pub const MarkerUniformCount = std.meta.Int(.unsigned, word_bits / 2 - 1); // Word=u64 → u31
+        pub const MarkerLiteralCount = std.meta.Int(.unsigned, word_bits / 2); // Word=u64 → u32
 
-        const Marker = packed struct {
-            uniform_bit: u1, // Whether the uniform word is all 0s or all 1s.
-            uniform_word_count: MarkerUniformCount, // 31-bit number of uniform words following the marker.
-            literal_word_count: MarkerLiteralCount, // 32-bit number of literal words following the uniform words.
+        const Marker = packed struct(Word) {
+            // Whether the uniform word is all 0s or all 1s.
+            uniform_bit: u1,
+            // 31-bit number of uniform words following the marker.
+            uniform_word_count: MarkerUniformCount,
+            // 32-bit number of literal words following the uniform words.
+            literal_word_count: MarkerLiteralCount,
         };
 
         comptime {
@@ -107,20 +110,30 @@ pub fn ewah(comptime Word: type) type {
                 const uniform_word_count = count: {
                     if (is_literal(word)) break :count 0;
                     // Measure run length.
-                    const uniform_max = @min(source_words.len - source_index, marker_uniform_word_count_max);
-                    var uniform: usize = 1;
-                    while (uniform < uniform_max and source_words[source_index + uniform] == word) uniform += 1;
-                    break :count uniform;
+                    const uniform_max = @min(
+                        source_words.len - source_index,
+                        marker_uniform_word_count_max,
+                    );
+                    for (source_words[source_index..][0..uniform_max], 0..) |w, i| {
+                        if (w != word) break :count i;
+                    }
+                    break :count uniform_max;
                 };
                 source_index += uniform_word_count;
                 // For consistent encoding, set the run/uniform bit to 0 when there is no run.
                 const uniform_bit = if (uniform_word_count == 0) 0 else @as(u1, @intCast(word & 1));
 
-                // Count sequential literals that immediately follow the run.
-                const literals_max = @min(source_words.len - source_index, marker_literal_word_count_max);
-                const literal_word_count = for (source_words[source_index..][0..literals_max], 0..) |w, i| {
-                    if (!is_literal(w)) break i;
-                } else literals_max;
+                const literal_word_count = count: {
+                    // Count sequential literals that immediately follow the run.
+                    const literals_max = @min(
+                        source_words.len - source_index,
+                        marker_literal_word_count_max,
+                    );
+                    for (source_words[source_index..][0..literals_max], 0..) |w, i| {
+                        if (!is_literal(w)) break :count i;
+                    }
+                    break :count literals_max;
+                };
 
                 target_words[target_index] = marker_word(.{
                     .uniform_bit = uniform_bit,
@@ -177,8 +190,7 @@ test "ewah Word=u8" {
     try test_decode_with_word(u8);
 
     const codec = ewah(u8);
-    var uniform_word_count: usize = 0;
-    while (uniform_word_count <= math.maxInt(codec.MarkerUniformCount)) : (uniform_word_count += 1) {
+    for (0..math.maxInt(codec.MarkerUniformCount) + 1) |uniform_word_count| {
         try test_decode(u8, &.{
             codec.marker_word(.{
                 .uniform_bit = 0,
