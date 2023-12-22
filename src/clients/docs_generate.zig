@@ -831,7 +831,7 @@ pub fn main() !void {
 
     assert(args.skip());
 
-    const cli_args = flags.parse_flags(&args, CliArgs);
+    const cli_args = flags.parse(&args, CliArgs);
 
     if (cli_args.validate != null and cli_args.no_validate) {
         flags.fatal("--validate: conflicts with --no-validate", .{});

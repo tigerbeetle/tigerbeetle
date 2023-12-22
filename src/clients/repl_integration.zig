@@ -246,7 +246,7 @@ pub fn main() !void {
 
     assert(args.skip());
 
-    const cli_args = flags.parse_flags(&args, CliArgs);
+    const cli_args = flags.parse(&args, CliArgs);
 
     var t = try TmpDir.init(&arena);
     defer if (!cli_args.keep_tmp) {
