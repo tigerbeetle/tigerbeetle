@@ -283,7 +283,9 @@ pub const Header = extern struct {
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
+        // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
+        // view, to avoid disrupting clock synchronization while the view is being updated.
+        view: u32 = 0,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8,
@@ -302,7 +304,6 @@ pub const Header = extern struct {
             assert(self.command == .ping);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -321,7 +322,9 @@ pub const Header = extern struct {
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
+        // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
+        // view, to avoid disrupting clock synchronization while the view is being updated.
+        view: u32 = 0,
         version: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
@@ -336,7 +339,6 @@ pub const Header = extern struct {
             assert(self.command == .pong);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.view != 0) return "view != 0";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic == 0";
             if (self.pong_timestamp_wall == 0) return "pong_timestamp_wall == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
