@@ -62,14 +62,14 @@ TigerBeetle Client
   Hit enter after a semicolon to run a command.
 
 Examples:
-  create_accounts id=1 code=10 ledger=700,
+  create_accounts id=1 code=10 ledger=700\
                   id=2 code=10 ledger=700;
   create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
   lookup_accounts id=1;
   lookup_accounts id=1, id=2;
 ```
 ```console
-create_accounts id=1 code=10 ledger=700,
+create_accounts id=1 code=10 ledger=700\
                 id=2 code=10 ledger=700;
 ```
 ```console

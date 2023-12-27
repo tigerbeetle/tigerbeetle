@@ -475,10 +475,12 @@ pub fn ReplType(comptime MessageBus: type) type {
             const stdin = std.io.getStdIn();
             var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
             var stdin_stream = stdin_buffered_reader.reader();
-
-            const input = stdin_stream.readUntilDelimiterOrEofAlloc(
+            var continue_reading = false;
+            const allocator = std.heap.page_allocator;
+            var inputs = std.ArrayList(u8).init(allocator);
+            var input = stdin_stream.readUntilDelimiterOrEofAlloc(
                 arena.allocator(),
-                ';',
+                '\n',
                 single_repl_input_max,
             ) catch |err| {
                 repl.event_loop_done = true;
@@ -490,9 +492,40 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             };
 
+            var input_len = input.len;
+            if (input_len > 1 and input[input_len - 1] == '\\') {
+                continue_reading = true;
+                input_len -= 1;
+            }
+            try inputs.appendSlice(input[0..input_len]);
+
+            while (continue_reading) {
+                continue_reading = false;
+                try repl.printer.print("... ", .{});
+                input = stdin_stream.readUntilDelimiterOrEofAlloc(
+                    arena.allocator(),
+                    '\n',
+                    single_repl_input_max,
+                ) catch |err| {
+                    repl.event_loop_done = true;
+                    return err;
+                } orelse {
+                    // EOF.
+                    repl.event_loop_done = true;
+                    try repl.fail("\nExiting.\n", .{});
+                    return;
+                };
+                input_len = input.len;
+                if (input_len > 1 and input[input_len - 1] == '\\') {
+                    continue_reading = true;
+                    input_len -= 1;
+                }
+                try inputs.appendSlice(input[0..input_len]);
+            }
+
             const statement = Parser.parse_statement(
                 arena,
-                input,
+                inputs.items,
                 repl.printer,
             ) catch |err| {
                 switch (err) {
