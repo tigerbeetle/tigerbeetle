@@ -12,8 +12,7 @@ The TigerBeetle client for .NET.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Any runtime compatible with [.NET Standard 2.1](https://learn.microsoft.com/en-us/dotnet/standard/net-standard?tabs=net-standard-2-1#select-net-standard-version).
-* Optimized for .NET >= 7.0.
+* .NET >= 7.0.
 
 And if you do not already have NuGet.org as a package
 source, make sure to add it:
@@ -135,7 +134,7 @@ account balances have a few extension methods to make it easier
 to convert 128-bit little-endian unsigned integers between
 `BigInteger`, `byte[]`, and `Guid`.
 
-See the class [UInt128Extensions](/src/clients/dotnet/TigerBeetle/UInt128.cs) for more details.
+See the class [UInt128Extensions](/src/clients/dotnet/TigerBeetle/UInt128Extensions.cs) for more details.
 
 ### Account Flags
 
