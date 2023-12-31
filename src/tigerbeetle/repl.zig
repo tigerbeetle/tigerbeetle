@@ -448,7 +448,6 @@ pub fn ReplType(comptime MessageBus: type) type {
                 },
                 .help => {
                     try repl.display_help();
-                    std.os.exit(0);
                 },
 
                 .create_accounts,
