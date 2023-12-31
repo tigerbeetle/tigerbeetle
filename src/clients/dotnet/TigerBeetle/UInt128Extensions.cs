@@ -1,10 +1,6 @@
 using System;
 using System.Numerics;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
-using System.Buffers.Binary;
-using System.Diagnostics;
-using System.Runtime.CompilerServices;
 
 namespace TigerBeetle
 {
@@ -105,51 +101,4 @@ namespace TigerBeetle
             }
         }
     }
-
-    // DotNet 7.0 already introduces UInt128.
-    // We keep the bare minimum implementation for compatibility reasons.
-#if !NET7_0_OR_GREATER
-    [StructLayout(LayoutKind.Sequential, Size = UInt128Extensions.SIZE)]
-    public struct UInt128 : IEquatable<UInt128>
-    {
-        public const int SIZE = UInt128Extensions.SIZE;
-
-        public static readonly UInt128 Zero = new();
-
-        private readonly ulong _0;
-        private readonly ulong _1;
-        public UInt128(ulong mostSignificantBytes, ulong leastSignificantBytes = 0L)
-        {
-            _0 = leastSignificantBytes;
-            _1 = mostSignificantBytes;
-        }
-
-        public override bool Equals([NotNullWhen(true)] object? obj)
-        {
-            return obj switch
-            {
-                UInt128 other => Equals(other),
-                _ => false,
-            };
-        }
-
-        public bool Equals(UInt128 other) => _0 == other._0 && _1 == other._1;
-
-        public override int GetHashCode() => HashCode.Combine(_0, _1);
-
-        public override string ToString() => this.ToBigInteger().ToString();
-
-        public static bool operator ==(UInt128 left, UInt128 right) => left.Equals(right);
-
-        public static bool operator !=(UInt128 left, UInt128 right) => !left.Equals(right);
-
-        public static implicit operator UInt128(ushort value) => new UInt128(0, value);
-
-        public static implicit operator UInt128(uint value) => new UInt128(0, value);
-
-        public static implicit operator UInt128(ulong value) => new UInt128(0, value);
-
-        public static implicit operator UInt128(nuint value) => new UInt128(0, value);
-    }
-#endif
 }

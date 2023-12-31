@@ -19,15 +19,7 @@ namespace TigerBeetle
                     uint address_len,
                     uint num_packets,
                     IntPtr on_completion_ctx,
-
-                    // Uses either the new function pointer by value, or the old managed delegate in .Net standard
-                    // https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/function-pointers
-#if NETSTANDARD
-                    [MarshalAs(UnmanagedType.FunctionPtr)]
-                    OnCompletionFn on_completion_fn
-#else
                     delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
-#endif
                 );
 
 
@@ -76,11 +68,7 @@ namespace TigerBeetle
                         (uint)addresses_byte.Length - 1,
                         (uint)concurrencyMax,
                         IntPtr.Zero,
-#if NETSTANDARD
-                        OnCompletionHandler
-#else
                         &OnCompletionCallback
-#endif
                     );
 
                     if (status != InitializationStatus.Success) throw new InitializationException(status);
@@ -168,16 +156,7 @@ namespace TigerBeetle
             }
         }
 
-        // Uses either the new function pointer by value, or the old managed delegate in .Net standard
-        // Using managed delegate, the instance must be referenced to prevents GC.
-
-#if NETSTANDARD
-        private unsafe static readonly OnCompletionFn OnCompletionHandler = new OnCompletionFn(OnCompletionCallback);
-
-        [AllowReversePInvokeCalls]
-#else
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-#endif
         private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len)
         {
             var request = IRequest.FromUserData(packet->userData);
