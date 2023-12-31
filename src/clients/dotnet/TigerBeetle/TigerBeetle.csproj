@@ -9,6 +9,9 @@
     <AssemblyName>TigerBeetle</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RollForward>LatestMajor</RollForward>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>1591</NoWarn> <!-- Disables the warning CS1591: Missing XML comment for publicly visible type or member -->
   </PropertyGroup>
   <PropertyGroup>
     <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
