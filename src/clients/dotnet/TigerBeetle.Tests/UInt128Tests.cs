@@ -60,6 +60,7 @@ namespace TigerBeetle.Tests
         [ExpectedException(typeof(ArgumentException))]
         public void InvalidArrayConvertion()
         {
+            // Expected ArgumentException.
             byte[] array = new byte[17];
             _ = array.ToUInt128();
         }
@@ -68,25 +69,37 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void BigIntegerConvertion()
         {
-            BigInteger bigInteger = BigInteger.Parse("123456789012345678901234567890123456789");
-            UInt128 value = bigInteger.ToUInt128();
+            var checkConvertion = (BigInteger bigInteger) =>
+            {
+                UInt128 uint128 = bigInteger.ToUInt128();
 
-            Assert.AreEqual(value, bigInteger.ToUInt128());
-            Assert.AreEqual(bigInteger, value.ToBigInteger());
-            Assert.IsTrue(value.Equals(bigInteger.ToUInt128()));
+                Assert.AreEqual(uint128, bigInteger.ToUInt128());
+                Assert.AreEqual(bigInteger, uint128.ToBigInteger());
+                Assert.IsTrue(uint128.Equals(bigInteger.ToUInt128()));
+            };
+
+            checkConvertion(BigInteger.Parse("0"));
+            checkConvertion(BigInteger.Parse("1"));
+            checkConvertion(BigInteger.Parse("123456789012345678901234567890123456789"));
+            checkConvertion(new BigInteger(uint.MaxValue));
+            checkConvertion(new BigInteger(ulong.MaxValue));
         }
 
+
+
         [TestMethod]
-        public void DecimalToString()
+        [ExpectedException(typeof(OverflowException))]
+        public void BigIntegerNegative()
         {
-            UInt128 value = (UInt128)1234567890;
-            Assert.AreEqual(value.ToString(), "1234567890");
+            // Expected OverflowException.
+            _ = BigInteger.MinusOne.ToUInt128();
         }
 
         [TestMethod]
         [ExpectedException(typeof(ArgumentOutOfRangeException))]
         public void BigIntegerExceedU128()
         {
+            // Expected ArgumentOutOfRangeException.
             BigInteger bigInteger = BigInteger.Parse("9999999999999999999999999999999999999999");
             _ = bigInteger.ToUInt128();
         }
@@ -101,52 +114,5 @@ namespace TigerBeetle.Tests
             Assert.IsTrue(expected.SequenceEqual(new Guid(expected).ToUInt128().ToArray()));
             Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
         }
-
-#if !NET7_0_OR_GREATER
-
-        [TestMethod]
-        public void HashCode()
-        {
-            UInt128 a = 100;
-            UInt128 b = 101;
-
-            Assert.AreNotEqual(a.GetHashCode(), b.GetHashCode());
-        }
-
-        [TestMethod]
-        public void Equals()
-        {
-            // Same type:
-            Assert.IsTrue(UInt128.Zero.Equals(UInt128.Zero));
-            Assert.IsTrue(((UInt128)1).Equals((UInt128)1));
-            Assert.IsTrue(new UInt128(0UL, ulong.MaxValue).Equals(new UInt128(0UL, ulong.MaxValue)));
-
-            // Implicit conversion:
-            Assert.IsTrue(UInt128.Zero.Equals(0));
-            Assert.IsTrue(((UInt128)1).Equals(1));
-            Assert.IsTrue(new UInt128(0UL, ulong.MaxValue).Equals(ulong.MaxValue));
-
-            // Explicit conversion:
-            Assert.IsTrue(UInt128.Zero.Equals((int)0));
-            Assert.IsTrue(((UInt128)1).Equals((int)1));
-            Assert.IsTrue(new UInt128(0UL, long.MaxValue).Equals(long.MaxValue));
-
-        }
-
-        [TestMethod]
-        public void Operators()
-        {
-            var a = new UInt128(100, 200);
-            var b = new UInt128(100, 200);
-
-            Assert.AreEqual(a, b);
-            Assert.IsTrue(a.Equals(b));
-            Assert.IsTrue(b.Equals(a));
-            Assert.IsTrue(a == b);
-            Assert.IsTrue(b == a);
-            Assert.IsFalse(a != b);
-            Assert.IsTrue(a != UInt128.Zero);
-        }
-#endif
     }
 }

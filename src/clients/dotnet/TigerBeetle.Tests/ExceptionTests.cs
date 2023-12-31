@@ -9,16 +9,17 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void AssertTrue()
         {
-            AssertionException.AssertTrue(1 == 1);
-            Assert.IsTrue(true);
+            // Should not throw an exception
+            // when the condition is true.
+            AssertionException.AssertTrue(true);
         }
 
         [TestMethod]
         [ExpectedException(typeof(AssertionException))]
         public void AssertFalse()
         {
-            AssertionException.AssertTrue(1 == 0);
-            Assert.IsTrue(true);
+            // Expected AssertionException.
+            AssertionException.AssertTrue(false);
         }
 
         [TestMethod]
@@ -26,7 +27,9 @@ namespace TigerBeetle.Tests
         {
             try
             {
-                AssertionException.AssertTrue(1 == 0, "hello {0}", "world");
+                AssertionException.AssertTrue(false, "hello {0}", "world");
+
+                // Should not be reachable:
                 Assert.IsTrue(false);
             }
             catch (AssertionException exception)
@@ -38,8 +41,7 @@ namespace TigerBeetle.Tests
         [TestMethod]
         public void AssertTrueWithMessage()
         {
-            AssertionException.AssertTrue(1 == 1, "unreachable");
-            Assert.IsTrue(true);
+            AssertionException.AssertTrue(true, "unreachable");
         }
 
         [TestMethod]

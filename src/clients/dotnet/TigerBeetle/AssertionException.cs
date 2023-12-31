@@ -2,6 +2,12 @@ using System;
 
 namespace TigerBeetle
 {
+    /// <summary>
+    /// The exception that is thrown when an assertion used for correctness checks is triggered.
+    /// Correctness check assertions differ from other assertions offered by the .Net ecosystem
+    /// i.e. Tracer.Assert and Debug.Assert, because they are not meant to be disabled or re-routed.
+    /// It's recommended that the application handle AssertionException as unrecoverable fatal errors.
+    /// </remarks>
     public sealed class AssertionException : Exception
     {
         internal AssertionException() { }

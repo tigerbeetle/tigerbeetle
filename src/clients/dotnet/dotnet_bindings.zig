@@ -179,12 +179,12 @@ fn emit_enum(
     if (is_packed_struct) {
         assert(type_info.layout == .Packed);
         // Packed structs represented as Enum needs a Flags attribute:
-        try buffer.writer().print("    [Flags]\n", .{});
+        try buffer.writer().print("[Flags]\n", .{});
     }
 
     try buffer.writer().print(
-        \\    {s} enum {s} : {s}
-        \\    {{
+        \\{s} enum {s} : {s}
+        \\{{
         \\
     , .{
         @tagName(mapping.visibility),
@@ -195,7 +195,7 @@ fn emit_enum(
     if (is_packed_struct) {
         // Packed structs represented as Enum needs a ZERO value:
         try buffer.writer().print(
-            \\        None = 0,
+            \\    None = 0,
             \\
             \\
         , .{});
@@ -206,21 +206,20 @@ fn emit_enum(
 
         try emit_docs(buffer, mapping, field.name);
         if (is_packed_struct) {
-            try buffer.writer().print("        {s} = 1 << {},\n\n", .{
+            try buffer.writer().print("    {s} = 1 << {},\n\n", .{
                 to_case(field.name, .pascal),
                 i,
             });
         } else {
-            try buffer.writer().print("        {s} = {},\n\n", .{
+            try buffer.writer().print("    {s} = {},\n\n", .{
                 to_case(field.name, .pascal),
-
                 @intFromEnum(@field(Type, field.name)),
             });
         }
     }
 
     try buffer.writer().print(
-        \\    }}
+        \\}}
         \\
         \\
     , .{});
@@ -233,10 +232,10 @@ fn emit_struct(
     comptime size: usize,
 ) !void {
     try buffer.writer().print(
-        \\    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-        \\    {s} {s}struct {s}
-        \\    {{
-        \\        public const int SIZE = {};
+        \\[StructLayout(LayoutKind.Sequential, Size = SIZE)]
+        \\{s} {s}struct {s}
+        \\{{
+        \\    public const int SIZE = {};
         \\
         \\
     , .{
@@ -253,32 +252,32 @@ fn emit_struct(
         switch (@typeInfo(field.type)) {
             .Array => |array| {
                 try buffer.writer().print(
-                    \\        [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-                    \\        private unsafe struct {s}Data
+                    \\    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+                    \\    private unsafe struct {s}Data
+                    \\    {{
+                    \\        public const int SIZE = {};
+                    \\
+                    \\        private fixed byte raw[SIZE];
+                    \\
+                    \\        public byte[] GetData()
                     \\        {{
-                    \\            public const int SIZE = {};
-                    \\
-                    \\            private fixed byte raw[SIZE];
-                    \\
-                    \\            public byte[] GetData()
+                    \\            fixed (void* ptr = raw)
                     \\            {{
-                    \\                fixed (void* ptr = raw)
-                    \\                {{
-                    \\                    return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
-                    \\                }}
-                    \\            }}
-                    \\
-                    \\            public void SetData(byte[] value)
-                    \\            {{
-                    \\                if (value == null) throw new ArgumentNullException(nameof(value));
-                    \\                if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
-                    \\
-                    \\                fixed (void* ptr = raw)
-                    \\                {{
-                    \\                    value.CopyTo(new Span<byte>(ptr, SIZE));
-                    \\                }}
+                    \\                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
                     \\            }}
                     \\        }}
+                    \\
+                    \\        public void SetData(byte[] value)
+                    \\        {{
+                    \\            if (value == null) throw new ArgumentNullException(nameof(value));
+                    \\            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                    \\
+                    \\            fixed (void* ptr = raw)
+                    \\            {{
+                    \\                value.CopyTo(new Span<byte>(ptr, SIZE));
+                    \\            }}
+                    \\        }}
+                    \\     }}
                     \\
                     \\
                 , .{
@@ -294,7 +293,7 @@ fn emit_struct(
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
             .Array => try buffer.writer().print(
-                \\        {s} {s}Data {s};
+                \\    {s} {s}Data {s};
                 \\
                 \\
             ,
@@ -305,7 +304,7 @@ fn emit_struct(
                 },
             ),
             else => try buffer.writer().print(
-                \\        {s} {s} {s};
+                \\    {s} {s} {s};
                 \\
                 \\
             ,
@@ -329,7 +328,7 @@ fn emit_struct(
 
             switch (@typeInfo(field.type)) {
                 .Array => try buffer.writer().print(
-                    \\        {s} byte[] {s} {{ get => {s}.GetData(); {s}set => {s}.SetData(value); }}
+                    \\    {s} byte[] {s} {{ get => {s}.GetData(); {s}set => {s}.SetData(value); }}
                     \\
                     \\
                 , .{
@@ -340,7 +339,7 @@ fn emit_struct(
                     to_case(field.name, .camel),
                 }),
                 else => try buffer.writer().print(
-                    \\        {s} {s} {s} {{ get => {s}; {s}set => {s} = value; }}
+                    \\    {s} {s} {s} {{ get => {s}; {s}set => {s} = value; }}
                     \\
                     \\
                 , .{
@@ -356,7 +355,7 @@ fn emit_struct(
     }
 
     try buffer.writer().print(
-        \\    }}
+        \\}}
         \\
         \\
     , .{});
@@ -365,9 +364,9 @@ fn emit_struct(
 fn emit_docs(buffer: anytype, comptime mapping: TypeMapping, comptime field: ?[]const u8) !void {
     if (mapping.docs_link) |docs_link| {
         try buffer.writer().print(
-            \\        /// <summary>
-            \\        /// https://docs.tigerbeetle.com/{s}{s}
-            \\        /// </summary>
+            \\    /// <summary>
+            \\    /// https://docs.tigerbeetle.com/{s}{s}
+            \\    /// </summary>
             \\
         , .{
             docs_link,
@@ -388,8 +387,8 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         \\using System;
         \\using System.Runtime.InteropServices;
         \\
-        \\namespace TigerBeetle
-        \\{{
+        \\namespace TigerBeetle;
+        \\
         \\
     , .{});
 
@@ -430,75 +429,54 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.writer().print(
-        \\    internal static class TBClient
-        \\    {{
-        \\        private const string LIB_NAME = "tb_client";
+        \\internal static class TBClient
+        \\{{
+        \\    private const string LIB_NAME = "tb_client";
         \\
-        \\        // Uses either the new function pointer by value, or the old managed delegate in .Net standard
-        \\        // https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-9.0/function-pointers
+        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\    public static unsafe extern InitializationStatus tb_client_init(
+        \\        IntPtr* out_client,
+        \\        UInt128Extensions.UnsafeU128 cluster_id,
+        \\        byte* address_ptr,
+        \\        uint address_len,
+        \\        uint num_packets,
+        \\        IntPtr on_completion_ctx,
+        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        \\    );
         \\
-        \\#if NETSTANDARD
-        \\        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        \\        public unsafe delegate void OnCompletionFn(IntPtr ctx, IntPtr client, TBPacket* packet, byte* result, uint result_len);
-        \\#endif
+        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\    public static unsafe extern InitializationStatus tb_client_init_echo(
+        \\        IntPtr* out_client,
+        \\        UInt128Extensions.UnsafeU128 cluster_id,
+        \\        byte* address_ptr,
+        \\        uint address_len,
+        \\        uint num_packets,
+        \\        IntPtr on_completion_ctx,
+        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
+        \\    );
         \\
-        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern InitializationStatus tb_client_init(
-        \\            IntPtr* out_client,
-        \\            UInt128Extensions.UnsafeU128 cluster_id,
-        \\            byte* address_ptr,
-        \\            uint address_len,
-        \\            uint num_packets,
-        \\            IntPtr on_completion_ctx,
+        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\    public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
+        \\        IntPtr client,
+        \\        TBPacket** out_packet
+        \\    );
         \\
-        \\#if NETSTANDARD
-        \\            [MarshalAs(UnmanagedType.FunctionPtr)]
-        \\            OnCompletionFn on_completion_fn
-        \\#else
-        \\            delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
-        \\#endif
-        \\        );
+        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\    public static unsafe extern void tb_client_release_packet(
+        \\        IntPtr client,
+        \\        TBPacket* packet
+        \\    );
         \\
-        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern InitializationStatus tb_client_init_echo(
-        \\            IntPtr* out_client,
-        \\            UInt128Extensions.UnsafeU128 cluster_id,
-        \\            byte* address_ptr,
-        \\            uint address_len,
-        \\            uint num_packets,
-        \\            IntPtr on_completion_ctx,
+        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\    public static unsafe extern void tb_client_submit(
+        \\        IntPtr client,
+        \\        TBPacket* packet
+        \\    );
         \\
-        \\#if NETSTANDARD
-        \\            [MarshalAs(UnmanagedType.FunctionPtr)]
-        \\            OnCompletionFn on_completion_fn
-        \\#else
-        \\            delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, byte*, uint, void> on_completion_fn
-        \\#endif
-        \\        );
-        \\
-        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern PacketAcquireStatus tb_client_acquire_packet(
-        \\            IntPtr client,
-        \\            TBPacket** out_packet
-        \\        );
-        \\
-        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern void tb_client_release_packet(
-        \\            IntPtr client,
-        \\            TBPacket* packet
-        \\        );
-        \\
-        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern void tb_client_submit(
-        \\            IntPtr client,
-        \\            TBPacket* packet
-        \\        );
-        \\
-        \\        [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\        public static unsafe extern void tb_client_deinit(
-        \\            IntPtr client
-        \\        );
-        \\    }}
+        \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
+        \\    public static unsafe extern void tb_client_deinit(
+        \\        IntPtr client
+        \\    );
         \\}}
         \\
         \\
