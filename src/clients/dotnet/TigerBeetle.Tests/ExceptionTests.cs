@@ -1,80 +1,81 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 
-namespace TigerBeetle.Tests
+namespace TigerBeetle.Tests;
+
+[TestClass]
+public class ExceptionTests
 {
-    [TestClass]
-    public class ExceptionTests
+    [TestMethod]
+    public void AssertTrue()
     {
-        [TestMethod]
-        public void AssertTrue()
-        {
-            AssertionException.AssertTrue(1 == 1);
-            Assert.IsTrue(true);
-        }
+        // Should not throw an exception
+        // when the condition is true.
+        AssertionException.AssertTrue(true);
+    }
 
-        [TestMethod]
-        [ExpectedException(typeof(AssertionException))]
-        public void AssertFalse()
-        {
-            AssertionException.AssertTrue(1 == 0);
-            Assert.IsTrue(true);
-        }
+    [TestMethod]
+    [ExpectedException(typeof(AssertionException))]
+    public void AssertFalse()
+    {
+        // Expected AssertionException.
+        AssertionException.AssertTrue(false);
+    }
 
-        [TestMethod]
-        public void AssertFalseWithMessage()
+    [TestMethod]
+    public void AssertFalseWithMessage()
+    {
+        try
         {
-            try
+            AssertionException.AssertTrue(false, "hello {0}", "world");
+
+            // Should not be reachable:
+            Assert.IsTrue(false);
+        }
+        catch (AssertionException exception)
+        {
+            Assert.AreEqual("hello world", exception.Message);
+        }
+    }
+
+    [TestMethod]
+    public void AssertTrueWithMessage()
+    {
+        AssertionException.AssertTrue(true, "unreachable");
+    }
+
+    [TestMethod]
+    public void InitializationException()
+    {
+        foreach (InitializationStatus status in (InitializationStatus[])Enum.GetValues(typeof(InitializationStatus)))
+        {
+            var exception = new InitializationException(status);
+            var unknownMessage = "Unknown error status " + status;
+            if (status == InitializationStatus.Success)
             {
-                AssertionException.AssertTrue(1 == 0, "hello {0}", "world");
-                Assert.IsTrue(false);
+                Assert.AreEqual(unknownMessage, exception.Message);
             }
-            catch (AssertionException exception)
+            else
             {
-                Assert.AreEqual("hello world", exception.Message);
-            }
-        }
-
-        [TestMethod]
-        public void AssertTrueWithMessage()
-        {
-            AssertionException.AssertTrue(1 == 1, "unreachable");
-            Assert.IsTrue(true);
-        }
-
-        [TestMethod]
-        public void InitializationException()
-        {
-            foreach (InitializationStatus status in (InitializationStatus[])Enum.GetValues(typeof(InitializationStatus)))
-            {
-                var exception = new InitializationException(status);
-                var unknownMessage = "Unknown error status " + status;
-                if (status == InitializationStatus.Success)
-                {
-                    Assert.AreEqual(unknownMessage, exception.Message);
-                }
-                else
-                {
-                    Assert.AreNotEqual(unknownMessage, exception.Message);
-                }
+                Assert.AreNotEqual(unknownMessage, exception.Message);
             }
         }
+    }
 
-        [TestMethod]
-        public void RequestException()
+    [TestMethod]
+    public void RequestException()
+    {
+        foreach (PacketStatus status in (PacketStatus[])Enum.GetValues(typeof(PacketStatus)))
         {
-            foreach (PacketStatus status in (PacketStatus[])Enum.GetValues(typeof(PacketStatus)))
+            var exception = new RequestException(status);
+            var unknownMessage = "Unknown error status " + status;
+            if (status == PacketStatus.Ok)
             {
-                var exception = new RequestException(status);
-                var unknownMessage = "Unknown error status " + status;
-                if (status == PacketStatus.Ok)
-                {
-                    Assert.AreEqual(unknownMessage, exception.Message);
-                }
-                else
-                {
-                    Assert.AreNotEqual(unknownMessage, exception.Message);
-                }
+                Assert.AreEqual(unknownMessage, exception.Message);
+            }
+            else
+            {
+                Assert.AreNotEqual(unknownMessage, exception.Message);
             }
         }
     }

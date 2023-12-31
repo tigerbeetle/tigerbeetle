@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <Import Project="TigerBeetle.props" />
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.1;net7.0</TargetFrameworks>
+    <TargetFrameworks>net7.0</TargetFrameworks>
     <Platforms>AnyCPU</Platforms>
     <UseCurrentRuntimeIdentifier>false</UseCurrentRuntimeIdentifier>
     <LangVersion>10</LangVersion>
@@ -9,6 +9,9 @@
     <AssemblyName>TigerBeetle</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RollForward>LatestMajor</RollForward>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>1591</NoWarn> <!-- Disables the warning CS1591: Missing XML comment for publicly visible type or member -->
   </PropertyGroup>
   <PropertyGroup>
     <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
