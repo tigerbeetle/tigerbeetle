@@ -111,6 +111,11 @@ Code](https://spinroot.com/gerard/pdf/P10.pdf) will change the way you code fore
     functions serve this purpose. The assertion density of the code must average a minimum of two
     assertions per function.
 
+  * **[Pair assertions](https://tigerbeetle.com/blog/2023-12-27-it-takes-two-to-contract/).** For
+    every property you want to enforce, try to find at least two different code paths where an
+    assertion can be added. For example, assert validity of data right before writing it to disk,
+    and also immediately after reading from disk.
+
   * On occasion, you may use a blatantly true assertion instead of a comment as stronger
     documentation where the assertion condition is critical and surprising.
 
