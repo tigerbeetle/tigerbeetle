@@ -28,15 +28,12 @@ const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../testing/fuzz.zig");
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
-
 const cluster = 0;
 const replica = 0;
 const replica_count = 6;
 
-pub fn main() !void {
+pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
-    const args = try fuzz.parse_fuzz_args(allocator);
 
     // Total calls to checkpoint() + view_change().
     const transitions_count_total = args.events_max orelse 10;

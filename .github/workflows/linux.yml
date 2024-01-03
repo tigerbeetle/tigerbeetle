@@ -158,28 +158,12 @@ jobs:
       - run: ./scripts/install_zig.sh
       - run: zig/zig build c_sample -Drelease
 
-  # I don't like this - having everything manually listed out here, but need to think of a better
-  # way to parallelize it.
   fuzz:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: zig/zig build fuzz_ewah -- --seed 123
-      - run: zig/zig build fuzz_lsm_segmented_array -- --seed 123
-      - run: zig/zig build fuzz_lsm_tree -- --seed 123 --events-max 400
-      - run: zig/zig build fuzz_vsr_journal_format -- --seed 123
-      - run: zig/zig build fuzz_vsr_superblock -- --seed 123 --events-max 3
-      - run: zig/zig build fuzz_vsr_superblock_quorums -- --seed 123
-
-      # Build the fuzzers, but don't run them, since they're slow.
-      - run: zig/zig build build_fuzz_lsm_manifest_log
-      - run: zig/zig build build_fuzz_vsr_free_set
-      - run: zig/zig build build_fuzz_lsm_forest
-
-      # # This both checks that the hash_log builds and acts as a regression test for
-      # # https://github.com/tigerbeetle/tigerbeetle/issues/404
-      # - run: zig/zig build fuzz_lsm_forest -Dhash-log-mode=create -Drelease -- --seed 16319736705930193193 --events-max 10000 && zig/zig build fuzz_lsm_forest -Dhash-log-mode=check -- --seed 16319736705930193193 --events-max 10000
+      - run: zig/zig build fuzz -- smoke
 
   # Check some build steps that would otherwise not get checked.
   # Things like "go_client", "java_client", "dotnet_client" are excluded here

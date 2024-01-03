@@ -9,11 +9,8 @@ const FreeSet = @import("./free_set.zig").FreeSet;
 const Reservation = @import("./free_set.zig").Reservation;
 const fuzz = @import("../testing/fuzz.zig");
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
-
-pub fn main() !void {
+pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
-    const args = try fuzz.parse_fuzz_args(allocator);
 
     var prng = std.rand.DefaultPrng.init(args.seed);
 

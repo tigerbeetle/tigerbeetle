@@ -32,8 +32,6 @@ const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
 
-pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
-
 const Value = packed struct(u128) {
     id: u64,
     value: u63,
@@ -674,11 +672,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     return fuzz_ops;
 }
 
-pub fn main() !void {
+pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     try tracer.init(allocator);
     defer tracer.deinit(allocator);
-
-    const fuzz_args = try fuzz.parse_fuzz_args(allocator);
 
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
