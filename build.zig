@@ -127,6 +127,9 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = mode,
     });
+    if (mode == .ReleaseSafe) {
+        tigerbeetle.strip = true;
+    }
     if (emit_llvm_ir) {
         _ = tigerbeetle.getEmittedLlvmIr();
     }
