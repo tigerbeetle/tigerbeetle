@@ -352,9 +352,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     return fuzz_ops;
 }
 
-pub fn main() !void {
-    const fuzz_args = try fuzz.parse_fuzz_args(allocator);
-
+pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 

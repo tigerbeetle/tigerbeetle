@@ -10,12 +10,9 @@ const journal = @import("./journal.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const allocator = fuzz.allocator;
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
-
 const cluster = 0;
 
-pub fn main() !void {
-    const args = try fuzz.parse_fuzz_args(allocator);
+pub fn main(args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
 
     // +10 to occasionally test formatting into a buffer larger than the total data size.
