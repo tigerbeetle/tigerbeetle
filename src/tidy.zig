@@ -7,6 +7,8 @@ const fs = std.fs;
 const mem = std.mem;
 const math = std.math;
 
+const log = std.log.scoped(.tidy);
+
 test "tidy" {
     const allocator = std.testing.allocator;
 
@@ -47,8 +49,8 @@ const SourceFile = struct { path: []const u8, text: []const u8 };
 
 fn tidy_banned(file: SourceFile) !void {
     if (banned(file.text)) |ban| {
-        std.debug.print(
-            "{s}: banned: {s}\n",
+        log.err(
+            "{s}: banned: {s}",
             .{ file.path, ban },
         );
         return error.Banned;
@@ -59,17 +61,17 @@ fn tidy_long_line(file: SourceFile) !void {
     const long_line = try find_long_line(file.text);
     if (long_line) |line_index| {
         if (!is_naughty(file.path)) {
-            std.debug.print(
-                "{s}:{d} error: line exceeds 100 columns\n",
+            log.err(
+                "{s}:{d} error: line exceeds 100 columns",
                 .{ file.path, line_index + 1 },
             );
             return error.LineTooLong;
         }
     } else {
         if (is_naughty(file.path)) {
-            std.debug.print(
+            log.err(
                 "{s}: error: no longer contains long lines, " ++
-                    "remove from the `naughty_list`\n",
+                    "remove from the `naughty_list`",
                 .{file.path},
             );
             return error.OutdatedNaughtyList;
@@ -122,7 +124,7 @@ const DeadDetector = struct {
         for (detector.files.keys(), detector.files.values()) |name, state| {
             assert(state.definition_count > 0);
             if (state.import_count == 0 and !is_entry_point(name)) {
-                std.debug.print("file never imported: {s}\n", .{name});
+                log.err("file never imported: {s}\n", .{name});
                 return error.DeadFile;
             }
         }
@@ -186,14 +188,14 @@ test "tidy changelog" {
     var line_index: usize = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
         if (std.mem.endsWith(u8, line, " ")) {
-            std.debug.print("CHANGELOG.md:{d} trailing whitespace", .{line_index + 1});
+            log.err("CHANGELOG.md:{d} trailing whitespace", .{line_index + 1});
             return error.TrailingWhitespace;
         }
         const line_length = try std.unicode.utf8CountCodepoints(line);
         const has_link = std.mem.indexOf(u8, line, "http://") orelse
             std.mem.indexOf(u8, line, "https://");
         if (line_length > 100 and has_link == null) {
-            std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
+            log.err("CHANGELOG.md:{d} line exceeds 100 columns", .{line_index + 1});
             return error.LineTooLong;
         }
     }
@@ -206,8 +208,8 @@ test "tidy naughty list" {
     for (naughty_list) |naughty_path| {
         _ = src.statFile(naughty_path) catch |err| {
             if (err == error.FileNotFound) {
-                std.debug.print(
-                    "path does not exist: src/{s}\n",
+                log.err(
+                    "path does not exist: src/{s}",
                     .{naughty_path},
                 );
             }
