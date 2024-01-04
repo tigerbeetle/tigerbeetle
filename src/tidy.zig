@@ -20,17 +20,27 @@ test "tidy" {
     var walker = try src_dir.walk(allocator);
     defer walker.deinit();
 
+    var dead_detector = DeadDetector.init(allocator);
+    defer dead_detector.deinit();
+
+    // NB: all checks are intentionally implemented in a streaming fashion, such that we only need
+    // to read the files once.
     while (try walker.next()) |entry| {
         if (entry.kind == .file and mem.endsWith(u8, entry.path, ".zig")) {
-            const source_file = try entry.dir.openFile(entry.basename, .{});
-            defer source_file.close();
+            const file = try entry.dir.openFile(entry.basename, .{});
+            defer file.close();
 
-            const bytes_read = try source_file.readAll(buffer);
+            const bytes_read = try file.readAll(buffer);
             if (bytes_read == buffer.len) return error.FileTooLong;
 
-            try tidy_banned(.{ .path = entry.path, .text = buffer[0..bytes_read] });
+            const source_file = SourceFile{ .path = entry.path, .text = buffer[0..bytes_read] };
+            try tidy_banned(source_file);
+            try tidy_long_line(source_file);
+            try dead_detector.visit(source_file);
         }
     }
+
+    try dead_detector.finish();
 }
 
 const SourceFile = struct { path: []const u8, text: []const u8 };
@@ -67,6 +77,103 @@ fn tidy_long_line(file: SourceFile) !void {
     }
     assert((long_line != null) == is_naughty(file.path));
 }
+
+// Zig's lazy compilation model makes it too easy to forget to include a file into the build --- if
+// nothing imports a file, compiler just doesn't see it and can't flag it as unused.
+//
+// DeadDetector implements heuristic detection of unused files, by "grepping" for import statements
+// and flagging file which are never imported. This gives false negatives for unreachable cycles of
+// files, as well as for identically-named files, but it should be good enough in practice.
+const DeadDetector = struct {
+    const FileName = [64]u8;
+    const FileState = struct { import_count: u32, definition_count: u32 };
+    const FileMap = std.AutoArrayHashMap(FileName, FileState);
+
+    files: FileMap,
+
+    fn init(allocator: std.mem.Allocator) DeadDetector {
+        return .{ .files = FileMap.init(allocator) };
+    }
+
+    fn deinit(detector: *DeadDetector) void {
+        assert(detector.files.count() == 0); // Sanity-check that `.finish` was called.
+        detector.files.deinit();
+    }
+
+    fn visit(detector: *DeadDetector, file: SourceFile) !void {
+        (try detector.file_state(file.path)).definition_count += 1;
+
+        var text = file.text;
+        for (0..1024) |_| {
+            const cut = stdx.cut(text, "@import(\"") orelse break;
+            text = cut.suffix;
+            const import_path = stdx.cut(text, "\")").?.prefix;
+            if (std.mem.endsWith(u8, import_path, ".zig")) {
+                (try detector.file_state(import_path)).import_count += 1;
+            }
+        } else {
+            std.debug.panic("file with more than 1024 imports: {s}", .{file.path});
+        }
+    }
+
+    fn finish(detector: *DeadDetector) !void {
+        defer detector.files.clearRetainingCapacity();
+
+        for (detector.files.keys(), detector.files.values()) |name, state| {
+            assert(state.definition_count > 0);
+            if (state.import_count == 0 and !is_entry_point(name)) {
+                std.debug.print("file never imported: {s}\n", .{name});
+                return error.DeadFile;
+            }
+        }
+    }
+
+    fn file_state(detector: *DeadDetector, path: []const u8) !*FileState {
+        var gop = try detector.files.getOrPut(path_to_name(path));
+        if (!gop.found_existing) gop.value_ptr.* = .{ .import_count = 0, .definition_count = 0 };
+        return gop.value_ptr;
+    }
+
+    fn path_to_name(path: []const u8) FileName {
+        assert(std.mem.endsWith(u8, path, ".zig"));
+        const basename = std.fs.path.basename(path);
+        var file_name: FileName = .{0} ** 64;
+        assert(basename.len <= file_name.len);
+        stdx.copy_disjoint(.inexact, u8, &file_name, basename);
+        return file_name;
+    }
+
+    fn is_entry_point(file: FileName) bool {
+        const entry_points: []const []const u8 = &.{
+            "benchmark.zig",
+            "binary_search_benchmark.zig",
+            "demo_01_create_accounts.zig",
+            "demo_02_lookup_accounts.zig",
+            "demo_03_create_transfers.zig",
+            "demo_04_create_pending_transfers.zig",
+            "demo_05_post_pending_transfers.zig",
+            "demo_06_void_pending_transfers.zig",
+            "demo_07_lookup_transfers.zig",
+            "docs_generate.zig",
+            "ewah_benchmark.zig",
+            "fuzz_tests.zig",
+            "jni_tests.zig",
+            "level_index_iterator.zig",
+            "main.zig",
+            "node.zig",
+            "repl_integration.zig",
+            "repl_test.zig",
+            "segmented_array_benchmark.zig",
+            "tb_client_header.zig",
+            "unit_tests.zig",
+            "vopr.zig",
+        };
+        for (entry_points) |entry_point| {
+            if (std.mem.startsWith(u8, &file, entry_point)) return true;
+        }
+        return false;
+    }
+};
 
 test "tidy changelog" {
     const allocator = std.testing.allocator;
@@ -212,7 +319,6 @@ const naughty_list = [_][]const u8{
     "lsm/forest_fuzz.zig",
     "lsm/groove.zig",
     "lsm/level_data_iterator.zig",
-    "lsm/level_index_iterator.zig",
     "lsm/manifest_level.zig",
     "lsm/segmented_array_benchmark.zig",
     "lsm/segmented_array.zig",
