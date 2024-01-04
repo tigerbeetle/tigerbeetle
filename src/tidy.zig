@@ -1,6 +1,7 @@
 //! Checks for various non-functional properties of the code itself.
 
 const std = @import("std");
+const assert = std.debug.assert;
 const stdx = @import("./stdx.zig");
 const fs = std.fs;
 const mem = std.mem;
@@ -26,37 +27,45 @@ test "tidy" {
 
             const bytes_read = try source_file.readAll(buffer);
             if (bytes_read == buffer.len) return error.FileTooLong;
-            const source_file_text = buffer[0..bytes_read];
 
-            if (banned(source_file_text)) |ban| {
-                std.debug.print(
-                    "{s}: banned: {s}\n",
-                    .{ entry.path, ban },
-                );
-                return error.Banned;
-            }
-
-            const long_line = try find_long_line(source_file_text);
-            if (long_line) |line_index| {
-                if (!is_naughty(entry.path)) {
-                    std.debug.print(
-                        "{s}:{d} error: line exceeds 100 columns\n",
-                        .{ entry.path, line_index + 1 },
-                    );
-                    return error.LineTooLong;
-                }
-            } else {
-                if (is_naughty(entry.path)) {
-                    std.debug.print(
-                        "{s}: error: no longer contains long lines, " ++
-                            "remove from the `naughty_list`\n",
-                        .{entry.path},
-                    );
-                    return error.OutdatedNaughtyList;
-                }
-            }
+            try tidy_banned(.{ .path = entry.path, .text = buffer[0..bytes_read] });
         }
     }
+}
+
+const SourceFile = struct { path: []const u8, text: []const u8 };
+
+fn tidy_banned(file: SourceFile) !void {
+    if (banned(file.text)) |ban| {
+        std.debug.print(
+            "{s}: banned: {s}\n",
+            .{ file.path, ban },
+        );
+        return error.Banned;
+    }
+}
+
+fn tidy_long_line(file: SourceFile) !void {
+    const long_line = try find_long_line(file.text);
+    if (long_line) |line_index| {
+        if (!is_naughty(file.path)) {
+            std.debug.print(
+                "{s}:{d} error: line exceeds 100 columns\n",
+                .{ file.path, line_index + 1 },
+            );
+            return error.LineTooLong;
+        }
+    } else {
+        if (is_naughty(file.path)) {
+            std.debug.print(
+                "{s}: error: no longer contains long lines, " ++
+                    "remove from the `naughty_list`\n",
+                .{file.path},
+            );
+            return error.OutdatedNaughtyList;
+        }
+    }
+    assert((long_line != null) == is_naughty(file.path));
 }
 
 test "tidy changelog" {
