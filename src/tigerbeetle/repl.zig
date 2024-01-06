@@ -406,6 +406,40 @@ pub const Parser = struct {
     }
 };
 
+fn handleSignal(comptime handler: *const fn () void) !void {
+    const handle_struct = struct {
+        fn handler_win(dwCtrlType: std.os.windows.DWORD) callconv(std.os.windows.WINAPI) std.os.windows.BOOL {
+            if (dwCtrlType == std.os.windows.CTRL_C_EVENT) {
+                handler();
+                return std.os.windows.TRUE;
+            } else {
+                return std.os.windows.FALSE;
+            }
+        }
+        fn handler_unix(sig: c_int) callconv(.C) void {
+            assert(sig == std.os.SIG.INT);
+            handler();
+        }
+    };
+    if (builtin.os.tag == .windows) {
+        try std.os.windows.SetConsoleCtrlHandler(handle_struct.handler_win, true);
+    } else {
+        const act = std.os.Sigaction{
+            .handler = .{ .handler = handle_struct.handler_unix },
+            .mask = std.os.empty_sigset,
+            .flags = 0,
+        };
+        try std.os.sigaction(std.os.SIG.INT, &act, null);
+    }
+}
+
+fn onCtrlC() void {
+    should_empty = true;
+    _ = std.io.getStdOut().write("\n> ") catch {};
+}
+
+var should_empty = false;
+
 pub fn ReplType(comptime MessageBus: type) type {
     const Client = vsr.Client(StateMachine, MessageBus);
 
@@ -475,23 +509,41 @@ pub fn ReplType(comptime MessageBus: type) type {
             var stdin_buffered_reader = std.io.bufferedReader(stdin.reader());
             var stdin_stream = stdin_buffered_reader.reader();
 
-            const input = stdin_stream.readUntilDelimiterOrEofAlloc(
-                arena.allocator(),
-                ';',
-                single_repl_input_max,
-            ) catch |err| {
-                repl.event_loop_done = true;
-                return err;
-            } orelse {
-                // EOF.
-                repl.event_loop_done = true;
-                try repl.fail("\nExiting.\n", .{});
+            var input = std.ArrayList(u8).init(arena.allocator());
+            defer input.deinit();
+
+            while (true) {
+                if (input.items.len > single_repl_input_max) {
+                    return error.BadInput;
+                }
+                const c = stdin_stream.readByte() catch |err| {
+                    repl.event_loop_done = true;
+                    switch (err) {
+                        error.EndOfStream => {
+                            try repl.fail("\nExiting.\n", .{});
+                            return;
+                        },
+                        else => {},
+                    }
+                    return err;
+                };
+                if (should_empty) {
+                    input.clearAndFree();
+                    should_empty = false;
+                }
+                if (c == ';') {
+                    break;
+                }
+                try input.append(c);
+            }
+
+            if (input.items.len == 0) {
                 return;
-            };
+            }
 
             const statement = Parser.parse_statement(
                 arena,
-                input,
+                try input.toOwnedSlice(),
                 repl.printer,
             ) catch |err| {
                 switch (err) {
@@ -644,6 +696,8 @@ pub fn ReplType(comptime MessageBus: type) type {
             } else {
                 try repl.display_help();
             }
+
+            try handleSignal(onCtrlC);
 
             while (!repl.event_loop_done) {
                 if (repl.request_done and repl.interactive) {
