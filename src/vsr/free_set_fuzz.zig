@@ -15,7 +15,14 @@ pub fn main(args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
 
     const blocks_count = FreeSet.shard_bits * (1 + prng.random().uintLessThan(usize, 10));
-    const events = try generate_events(allocator, prng.random(), blocks_count);
+    const events_count = @min(
+        args.events_max orelse @as(usize, 2_000_000),
+        fuzz.random_int_exponential(prng.random(), usize, blocks_count * 100),
+    );
+    const events = try generate_events(allocator, prng.random(), .{
+        .blocks_count = blocks_count,
+        .events_count = events_count,
+    });
     defer allocator.free(events);
 
     try run_fuzz(allocator, prng.random(), blocks_count, events);
@@ -112,11 +119,10 @@ const FreeSetEvent = union(enum) {
     checkpoint: void,
 };
 
-fn generate_events(
-    allocator: std.mem.Allocator,
-    random: std.rand.Random,
+fn generate_events(allocator: std.mem.Allocator, random: std.rand.Random, options: struct {
     blocks_count: usize,
-) ![]const FreeSetEvent {
+    events_count: usize,
+}) ![]const FreeSetEvent {
     const event_distribution = fuzz.Distribution(FreeSetEventType){
         .reserve = 1 + random.float(f64) * 100,
         .forfeit = 1,
@@ -125,16 +131,14 @@ fn generate_events(
         .checkpoint = random.floatExp(f64) * 10,
     };
 
-    const events = try allocator.alloc(FreeSetEvent, @min(
-        @as(usize, 2_000_000),
-        fuzz.random_int_exponential(random, usize, blocks_count * 100),
-    ));
+    const events = try allocator.alloc(FreeSetEvent, options.events_count);
     errdefer allocator.free(events);
 
     log.info("event_distribution = {:.2}", .{event_distribution});
     log.info("event_count = {d}", .{events.len});
 
-    const reservation_blocks_mean = 1 + random.uintLessThan(usize, @divFloor(blocks_count, 20));
+    const reservation_blocks_mean = 1 +
+        random.uintLessThan(usize, @divFloor(options.blocks_count, 20));
     for (events) |*event| {
         event.* = switch (fuzz.random_enum(random, FreeSetEventType, event_distribution)) {
             .reserve => FreeSetEvent{ .reserve = .{
