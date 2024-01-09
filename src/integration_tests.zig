@@ -4,7 +4,7 @@
 //!   * the test binary itself doesn't contain any code from TigerBeetle,
 //!   * but it has access to a pre-build `./tigerbeetle` binary.
 //!
-//! All the testing is done through interacting with a separate tigerbeetle process. 
+//! All the testing is done through interacting with a separate tigerbeetle process.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -37,6 +37,7 @@ test "repl integration" {
             const tigerbeetle = try tigerbeetle_exe(shell);
 
             var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, .{
+                .echo = false,
                 .prebuilt = tigerbeetle,
             });
             errdefer tmp_beetle.deinit(std.testing.allocator);
