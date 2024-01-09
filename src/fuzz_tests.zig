@@ -63,10 +63,14 @@ pub fn main() !void {
             assert(cli_args.events_max == null);
             try smoke();
         },
-        inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(.{
-            .seed = seed,
-            .events_max = cli_args.events_max,
-        }),
+        inline else => |fuzzer| {
+            var timer = try std.time.Timer.start();
+            try @field(Fuzzers, @tagName(fuzzer)).main(.{
+                .seed = seed,
+                .events_max = cli_args.events_max,
+            });
+            log.info("done in {}", .{std.fmt.fmtDuration(timer.lap())});
+        },
     }
 }
 
@@ -103,5 +107,5 @@ fn smoke() !void {
         }
     }
 
-    log.info("done {}", .{std.fmt.fmtDuration(timer_all.lap())});
+    log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
 }
