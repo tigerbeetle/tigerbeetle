@@ -39,6 +39,20 @@
 //! Note the `@src()` argument passed to the `snap(...)` invocation --- that's how it knows which
 //! lines to update.
 //!
+//! Snapshots can use `<snap:ignore>` marker to ignore part of input:
+//!
+//! ```
+//! test "time" {
+//!     var buf: [32]u8 = undefined;
+//!     const time = try std.fmt.bufPrint(&buf, "it's {}ms", .{
+//!         std.time.milliTimestamp(),
+//!     });
+//!     try Snap.snap(@src(),
+//!         \\it's <snap:ignore>ms
+//!     ).diff(time);
+//! }
+//! ```
+//!
 //! TODO:
 //!   - This doesn't actually `diff` things yet :o) But running with `SNAP_UPDATE=1` and then using
 //!     `git diff` is a workable substitute.
@@ -51,6 +65,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
 const SourceLocation = std.builtin.SourceLocation;
+
+const stdx = @import("../stdx.zig");
 
 comptime {
     assert(builtin.is_test);
@@ -114,7 +130,7 @@ pub const Snap = struct {
 
     // Compare the snapshot with a given string.
     pub fn diff(snapshot: *const Snap, got: []const u8) !void {
-        if (std.mem.eql(u8, got, snapshot.text)) return;
+        if (equal_excluding_ignored(got, snapshot.text)) return;
 
         std.debug.print(
             \\Snapshot differs.
@@ -175,6 +191,67 @@ pub const Snap = struct {
         return error.SnapUpdated;
     }
 };
+
+fn equal_excluding_ignored(got: []const u8, snapshot: []const u8) bool {
+    var got_rest = got;
+    var snapshot_rest = snapshot;
+
+    // Don't allow ignoring suffixes and prefixes, as that makes it easy to miss trailing or leading
+    // data.
+    assert(!std.mem.startsWith(u8, snapshot, "<snap:ignore>"));
+    assert(!std.mem.endsWith(u8, snapshot, "<snap:ignore>"));
+
+    for (0..10) |_| {
+        // Cut the part before the first ignore, it should be equal between two strings...
+        const snapshot_cut = stdx.cut(snapshot_rest, "<snap:ignore>") orelse break;
+        const got_cut = stdx.cut(got_rest, snapshot_cut.prefix) orelse return false;
+        if (got_cut.prefix.len != 0) return false;
+        got_rest = got_cut.suffix;
+        snapshot_rest = snapshot_cut.suffix;
+
+        // ...then find the next part that should match, and cut up to that.
+        const next_match = if (stdx.cut(snapshot_rest, "<snap:ignore>")) |snapshot_cut_next|
+            snapshot_cut_next.prefix
+        else
+            snapshot_rest;
+        assert(next_match.len > 0);
+        snapshot_rest = stdx.cut(snapshot_rest, next_match).?.suffix;
+
+        const got_cut_next = stdx.cut(got_rest, next_match) orelse return false;
+        const ignored = got_cut_next.prefix;
+        // If <snap:ignore> matched an empty string, or several lines, report it as an error.
+        if (ignored.len == 0) return false;
+        if (std.mem.indexOf(u8, ignored, "\n") != null) return false;
+        got_rest = got_cut_next.suffix;
+    } else @panic("more than 10 ignores");
+
+    return std.mem.eql(u8, got_rest, snapshot_rest);
+}
+
+test equal_excluding_ignored {
+    const TestCase = struct { got: []const u8, snapshot: []const u8 };
+
+    const cases_ok: []const TestCase = &.{
+        .{ .got = "ABA", .snapshot = "ABA" },
+        .{ .got = "ABBA", .snapshot = "A<snap:ignore>A" },
+        .{ .got = "ABBACABA", .snapshot = "AB<snap:ignore>CA<snap:ignore>A" },
+    };
+    for (cases_ok) |case| {
+        try std.testing.expect(equal_excluding_ignored(case.got, case.snapshot));
+    }
+
+    const cases_err: []const TestCase = &.{
+        .{ .got = "ABA", .snapshot = "ACA" },
+        .{ .got = "ABBA", .snapshot = "A<snap:ignore>C" },
+        .{ .got = "ABBACABA", .snapshot = "AB<snap:ignore>DA<snap:ignore>BA" },
+        .{ .got = "ABBACABA", .snapshot = "AB<snap:ignore>BA<snap:ignore>DA" },
+        .{ .got = "ABA", .snapshot = "AB<snap:ignore>A" },
+        .{ .got = "A\nB\nA", .snapshot = "A<snap:ignore>A" },
+    };
+    for (cases_err) |case| {
+        try std.testing.expect(!equal_excluding_ignored(case.got, case.snapshot));
+    }
+}
 
 const Range = struct { start: usize, end: usize };
 

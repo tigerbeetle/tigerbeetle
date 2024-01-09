@@ -73,7 +73,8 @@ pub fn init(
     const data_file: []const u8 = try std.fs.path.join(gpa, &.{ tmp_dir_path, "0_0.tigerbeetle" });
     defer gpa.free(data_file);
 
-    try shell.exec(
+    try shell.exec_options(
+        .{ .echo = options.echo },
         "{tigerbeetle} format --cluster=0 --replica=0 --replica-count=1 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );

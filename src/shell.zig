@@ -332,6 +332,15 @@ pub fn copy_path(
 /// })
 /// ```
 pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+    return exec_options(shell, .{ .echo = true }, cmd, cmd_args);
+}
+
+pub fn exec_options(
+    shell: Shell,
+    options: struct { echo: bool },
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) !void {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
@@ -345,10 +354,15 @@ pub fn exec(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
     child.cwd = cwd_path;
     child.env_map = &shell.env;
     child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
+    if (options.echo) {
+        child.stdout_behavior = .Inherit;
+        child.stderr_behavior = .Inherit;
+    } else {
+        child.stdout_behavior = .Ignore;
+        child.stderr_behavior = .Ignore;
+    }
 
-    echo_command(argv.slice());
+    if (options.echo) echo_command(argv.slice());
     const term = try child.spawnAndWait();
 
     switch (term) {
