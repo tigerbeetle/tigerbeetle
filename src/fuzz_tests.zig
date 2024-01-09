@@ -10,6 +10,10 @@ const log = std.log.scoped(.fuzz);
 // NB: this changes values in `constants.zig`!
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
+pub const std_options = struct {
+    pub const log_level: std.log.Level = .info;
+};
+
 const Fuzzers = .{
     .ewah = @import("./ewah_fuzz.zig"),
     .lsm_cache_map = @import("./lsm/cache_map_fuzz.zig"),
@@ -67,25 +71,37 @@ pub fn main() !void {
 }
 
 fn smoke() !void {
+    var timer_all = try std.time.Timer.start();
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
-        switch (fuzzer) {
-            .smoke => {},
+        const fuzz_args = switch (fuzzer) {
+            .smoke => continue,
             // TODO: At one point, these were too slow to run, but surely there is _some_ way
             // to run them fast enough?
             .lsm_forest,
             .lsm_cache_map,
             .lsm_manifest_log,
             .vsr_free_set,
-            => {},
+            => continue,
 
-            .lsm_tree => try Fuzzers.lsm_tree.main(.{ .seed = 123, .events_max = 400 }),
-            .vsr_superblock => try Fuzzers.lsm_tree.main(.{ .seed = 123, .events_max = 3 }),
+            .lsm_tree => .{ .seed = 123, .events_max = 400 },
+            .vsr_superblock => .{ .seed = 123, .events_max = 3 },
 
             inline .ewah,
             .lsm_segmented_array,
             .vsr_journal_format,
             .vsr_superblock_quorums,
-            => |f| try @field(Fuzzers, @tagName(f)).main(.{ .seed = 123, .events_max = null }),
+            => .{ .seed = 123, .events_max = null },
+        };
+
+        var timer_single = try std.time.Timer.start();
+        try @field(Fuzzers, @tagName(fuzzer)).main(fuzz_args);
+        const fuzz_duration = timer_single.lap();
+        if (fuzz_duration > 60 * std.time.ns_per_s) {
+            log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {}", .{
+                std.fmt.fmtDuration(fuzz_duration),
+            });
         }
     }
+
+    log.info("done {}", .{std.fmt.fmtDuration(timer_all.lap())});
 }
