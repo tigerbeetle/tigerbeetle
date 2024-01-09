@@ -70,10 +70,8 @@ fn main_smoke() !void {
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
             .smoke => continue,
-            // TODO: At one point, these were too slow to run, but surely there is _some_ way
-            // to run them fast enough?
-            .lsm_cache_map => continue,
 
+            .lsm_cache_map => 20_000,
             .lsm_forest => 10_000,
             .lsm_manifest_log => 2_000,
             .lsm_tree => 400,
