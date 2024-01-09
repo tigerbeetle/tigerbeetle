@@ -38,6 +38,7 @@ test {
     _ = @import("state_machine/workload.zig");
 
     _ = @import("testing/id.zig");
+    _ = @import("testing/snaptest.zig");
     _ = @import("testing/storage.zig");
     _ = @import("testing/table.zig");
     _ = @import("testing/tmp_tigerbeetle.zig");
