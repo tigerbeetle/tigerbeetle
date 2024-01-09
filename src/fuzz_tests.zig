@@ -72,11 +72,10 @@ fn main_smoke() !void {
             .smoke => continue,
             // TODO: At one point, these were too slow to run, but surely there is _some_ way
             // to run them fast enough?
-            .lsm_cache_map,
-            .lsm_manifest_log,
-            => continue,
+            .lsm_cache_map => continue,
 
             .lsm_forest => 10_000,
+            .lsm_manifest_log => 2_000,
             .lsm_tree => 400,
             .vsr_free_set => 10_000,
             .vsr_superblock => 3,
