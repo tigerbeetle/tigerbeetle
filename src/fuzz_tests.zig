@@ -90,11 +90,11 @@ fn smoke() !void {
             // to run them fast enough?
             .lsm_cache_map,
             .lsm_manifest_log,
-            .vsr_free_set,
             => continue,
 
-            .lsm_forest => 10000,
+            .lsm_forest => 10_000,
             .lsm_tree => 400,
+            .vsr_free_set => 10_000,
             .vsr_superblock => 3,
 
             inline .ewah,
