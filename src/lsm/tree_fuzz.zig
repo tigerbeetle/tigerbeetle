@@ -534,7 +534,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                         var it = model.iterator();
                         while (it.next()) |entry| {
                             const model_value_key = Value.key_from_value(entry.value_ptr);
-                            const search = binary_search.binary_search_values(
+                            const value_maybe = binary_search.binary_search_values(
                                 u64,
                                 Value,
                                 Table.key_from_value,
@@ -547,7 +547,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                                 model_value_key <= scan_range.max)
                             {
                                 // Must be found:
-                                if (!search.exact) {
+                                if (value_maybe == null) {
                                     // Or our buffer has exceeded, in this case the key should
                                     // be less than the first element or greater than the last element,
                                     // depending on the scan direction.
@@ -565,9 +565,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                                 }
                             } else {
                                 // Must not be found:
-                                if (search.exact) {
+                                if (value_maybe) |value| {
                                     // Or it's a tombstone.
-                                    assert(Table.tombstone(&tree_values[search.index]));
+                                    assert(Table.tombstone(value));
                                 }
                             }
                         }

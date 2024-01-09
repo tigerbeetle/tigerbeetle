@@ -177,7 +177,7 @@ pub inline fn binary_search_values(
     values: []const Value,
     key: Key,
     comptime config: Config,
-) BinarySearchResult {
+) ?*const Value {
     const index = binary_search_values_upsert_index(
         Key,
         Value,
@@ -186,10 +186,19 @@ pub inline fn binary_search_values(
         key,
         config,
     );
-    return .{
-        .index = index,
-        .exact = index < values.len and key_from_value(&values[index]) == key,
-    };
+    const exact = index < values.len and key_from_value(&values[index]) == key;
+
+    if (exact) {
+        const value = &values[index];
+        if (constants.verify) {
+            assert(key == key_from_value(value));
+        }
+        return value;
+    } else {
+        // TODO: Figure out how to fuzz this without causing asymptotic
+        //       slowdown in all fuzzers
+        return null;
+    }
 }
 
 pub inline fn binary_search_keys(
