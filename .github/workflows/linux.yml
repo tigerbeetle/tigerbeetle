@@ -128,15 +128,6 @@ jobs:
   #         name: coverage-diff.html
   #         path: coverage-diff.html
 
-  repl_integration:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v3
-      - run: ./scripts/install.sh
-      - run: ./zig/zig build repl_integration
-      - run: ./zig-out/bin/repl_integration
-
   benchmark:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -294,14 +294,27 @@ pub fn build(b: *std.Build) !void {
         const install_unit_tests_exe = b.addInstallArtifact(unit_tests, .{});
         unit_tests_exe_step.dependOn(&install_unit_tests_exe.step);
 
-        const unit_tests_step = b.step("test:unit", "Run the unit tests");
         const run_unit_tests = b.addRunArtifact(unit_tests);
+        const unit_tests_step = b.step("test:unit", "Run the unit tests");
         unit_tests_step.dependOn(&run_unit_tests.step);
+
+        const integration_tests = b.addTest(.{
+            .root_source_file = .{ .path = "src/integration_tests.zig" },
+            .target = target,
+            .optimize = mode,
+        });
+        const run_integration_tests = b.addRunArtifact(integration_tests);
+        // Ensure integration test have tigerbeetle binary.
+        run_integration_tests.step.dependOn(b.getInstallStep());
+        const integration_tests_step = b.step("test:integration", "Run the integration tests");
+        integration_tests_step.dependOn(&run_integration_tests.step);
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&run_unit_tests.step);
 
         if (test_filter == null) {
+            test_step.dependOn(&run_integration_tests.step);
+
             // Test that our demos compile, but don't run them.
             inline for (.{
                 "demo_01_create_accounts",
@@ -389,11 +402,6 @@ pub fn build(b: *std.Build) !void {
         );
         client_docs(
             b.allocator,
-            b,
-            mode,
-            target,
-        );
-        repl_integration(
             b,
             mode,
             target,
@@ -1131,26 +1139,6 @@ fn client_docs(
     client_docs_build.dependOn(&install_step.step);
 
     maybe_execute(b, allocator, client_docs_build, install_step, "client_docs");
-}
-
-fn repl_integration(
-    b: *std.build.Builder,
-    mode: Mode,
-    target: CrossTarget,
-) void {
-    const binary = b.addExecutable(.{
-        .name = "repl_integration",
-        .root_source_file = .{ .path = "src/clients/repl_integration.zig" },
-        .target = target,
-        .optimize = mode,
-        .main_pkg_path = .{ .path = "src" },
-    });
-
-    const repl_integration_build = b.step("repl_integration", "Build cli client integration test script.");
-    repl_integration_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary, .{});
-    repl_integration_build.dependOn(&install_step.step);
 }
 
 /// Steps which unconditionally fails with a message.
