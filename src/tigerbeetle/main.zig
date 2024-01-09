@@ -13,8 +13,6 @@ const constants = vsr.constants;
 const config = constants.config;
 const tracer = vsr.tracer;
 
-const ReplType = @import("repl.zig").ReplType;
-
 const cli = @import("cli.zig");
 const fatal = vsr.flags.fatal;
 
@@ -276,7 +274,7 @@ const Command = struct {
     }
 
     pub fn repl(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Repl) !void {
-        const Repl = ReplType(vsr.message_bus.MessageBusClient);
+        const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
 };

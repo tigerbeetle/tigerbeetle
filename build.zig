@@ -262,19 +262,6 @@ pub fn build(b: *std.Build) !void {
             "Skip tests that do not match filter",
         );
 
-        // This needs to be built separately from src/unit_tests.zig
-        // because repl.zig and repl_test.zig depend on the `vsr`
-        // package. Zig 0.11.0 is no longer ok with importing both `vsr`,
-        // the module, and `vsr.zig` within the same build unit.
-        const repl_tests = b.addTest(.{
-            .root_source_file = .{ .path = "src/tigerbeetle/repl_test.zig" },
-            .target = target,
-            .optimize = mode,
-            .filter = test_filter,
-        });
-        repl_tests.addModule("vsr", vsr_module);
-        repl_tests.addModule("vsr_options", vsr_options_module);
-
         const unit_tests = b.addTest(.{
             .root_source_file = .{ .path = "src/unit_tests.zig" },
             .target = target,
@@ -305,19 +292,14 @@ pub fn build(b: *std.Build) !void {
 
         const unit_tests_exe_step = b.step("test:build", "Build the unit tests");
         const install_unit_tests_exe = b.addInstallArtifact(unit_tests, .{});
-        const install_repl_tests_exe = b.addInstallArtifact(repl_tests, .{});
         unit_tests_exe_step.dependOn(&install_unit_tests_exe.step);
-        unit_tests_exe_step.dependOn(&install_repl_tests_exe.step);
 
         const unit_tests_step = b.step("test:unit", "Run the unit tests");
         const run_unit_tests = b.addRunArtifact(unit_tests);
-        const run_repl_tests = b.addRunArtifact(repl_tests);
         unit_tests_step.dependOn(&run_unit_tests.step);
-        unit_tests_step.dependOn(&run_repl_tests.step);
 
         const test_step = b.step("test", "Run the unit tests");
         test_step.dependOn(&run_unit_tests.step);
-        test_step.dependOn(&run_repl_tests.step);
 
         if (test_filter == null) {
             // Test that our demos compile, but don't run them.

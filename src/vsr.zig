@@ -21,6 +21,7 @@ pub const stdx = @import("stdx.zig");
 pub const flags = @import("flags.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
+pub const repl = @import("repl.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .groove = @import("lsm/groove.zig"),
