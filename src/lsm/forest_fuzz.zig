@@ -216,6 +216,7 @@ const Environment = struct {
     /// than one block to exercise the block linked list logic from CheckpointTrailer.
     fn fragmentate_free_set(env: *Environment) void {
         assert(env.grid.free_set.count_acquired() == 0);
+        assert(free_set_fragments_max * free_set_fragment_size <= env.grid.free_set.count_free());
 
         var reservations: [free_set_fragments_max]Reservation = undefined;
         for (&reservations) |*reservation| {
