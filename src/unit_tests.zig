@@ -5,6 +5,7 @@ test {
     _ = @import("fifo.zig");
     _ = @import("flags.zig");
     _ = @import("io.zig");
+    _ = @import("repl.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
