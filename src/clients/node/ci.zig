@@ -24,7 +24,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.exec("node ./dist/" ++ tester, .{});
     }
 
-    inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
+    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
