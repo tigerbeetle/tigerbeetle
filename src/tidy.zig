@@ -291,7 +291,6 @@ const naughty_list = [_][]const u8{
     "clients/c/tb_client/context.zig",
     "clients/c/tb_client/signal.zig",
     "clients/c/test.zig",
-    "clients/docs_types.zig",
     "clients/dotnet/docs.zig",
     "clients/dotnet/dotnet_bindings.zig",
     "clients/go/docs.zig",
