@@ -97,7 +97,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.count <= value_count_max);
             assert(table.value_context.sorted);
 
-            const result = binary_search.binary_search_values(
+            return binary_search.binary_search_values(
                 Key,
                 Value,
                 key_from_value,
@@ -105,13 +105,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                 key,
                 .{ .mode = .upper_bound },
             );
-            if (result.exact) {
-                const value = &table.values[result.index];
-                assert(key == key_from_value(value));
-                return value;
-            }
-
-            return null;
         }
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {

@@ -530,7 +530,7 @@ pub fn TableType(
         pub fn data_block_search(data_block: BlockPtrConst, key: Key) ?*const Value {
             const values = data_block_values_used(data_block);
 
-            const result = binary_search.binary_search_values(
+            return binary_search.binary_search_values(
                 Key,
                 Value,
                 key_from_value,
@@ -538,21 +538,6 @@ pub fn TableType(
                 key,
                 .{},
             );
-            if (result.exact) {
-                const value = &values[result.index];
-                if (constants.verify) {
-                    assert(key == key_from_value(value));
-                }
-                return value;
-            }
-
-            if (constants.verify) {
-                for (values) |*value| {
-                    assert(key != key_from_value(value));
-                }
-            }
-
-            return null;
         }
 
         pub fn verify(
