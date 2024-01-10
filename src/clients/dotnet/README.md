@@ -82,18 +82,11 @@ environment variable and defaults to port `3000`.
 
 ```cs
 var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
-var client = new Client(
-  clusterID: UInt128.Zero,
-  addresses: new[] {tbAddress != null ? tbAddress : "3000"}
-);
-```
-
-If you create a `Client` like this, don't forget to call
-`client.Dispose()` when you are done with it. Otherwise you
-can use the `using` syntax:
-```csharp
-using (var client = new Client(...)) {
-  // Use client
+var clusterID = UInt128.Zero;
+var addresses = new[] { tbAddress != null ? tbAddress : "3000" };
+using (var client = new Client(clusterID, addresses))
+{
+    // Use client
 }
 ```
 
@@ -114,16 +107,16 @@ reference](https://docs.tigerbeetle.com/reference/accounts).
 
 ```cs
 var accounts = new[] {
-  new Account
-  {
-    Id = 137,
-    UserData128 = Guid.NewGuid().ToUInt128(),
-    UserData64 = 1000,
-    UserData32 = 100,
-    Ledger = 1,
-    Code = 718,
-    Flags = AccountFlags.None,
-  },
+    new Account
+    {
+        Id = 137,
+        UserData128 = Guid.NewGuid().ToUInt128(),
+        UserData64 = 1000,
+        UserData32 = 100,
+        Ledger = 1,
+        Code = 718,
+        Flags = AccountFlags.None,
+    },
 };
 
 var createAccountsError = client.CreateAccounts(accounts);
@@ -154,11 +147,11 @@ For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
 
 ```cs
-var account0 = new Account{ /* ... account values ... */ };
-var account1 = new Account{ /* ... account values ... */ };
+var account0 = new Account { /* ... account values ... */ };
+var account1 = new Account { /* ... account values ... */ };
 account0.Flags = AccountFlags.Linked;
 
-createAccountsError = client.CreateAccounts(new []{account0, account1});
+createAccountsError = client.CreateAccounts(new[] { account0, account1 });
 ```
 
 ### Response and Errors
@@ -174,14 +167,15 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
 
 ```cs
-var account2 = new Account{ /* ... account values ... */ };
-var account3 = new Account{ /* ... account values ... */ };
-var account4 = new Account{ /* ... account values ... */ };
+var account2 = new Account { /* ... account values ... */ };
+var account3 = new Account { /* ... account values ... */ };
+var account4 = new Account { /* ... account values ... */ };
 
-createAccountsError = client.CreateAccounts(new []{account2, account3, account4});
-foreach (var error in createAccountsError) {
-	Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-	return;
+createAccountsError = client.CreateAccounts(new[] { account2, account3, account4 });
+foreach (var error in createAccountsError)
+{
+    Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+    return;
 }
 ```
 
@@ -209,20 +203,20 @@ reference](https://docs.tigerbeetle.com/reference/transfers).
 
 ```cs
 var transfers = new[] {
-  new Transfer
-  {
-    Id = 1,
-    DebitAccountId = 1,
-    CreditAccountId = 2,
-    Amount = 10,
-    UserData128 = 2000,
-    UserData64 = 200,
-    UserData32 = 2,
-    Timeout = 0,
-    Ledger = 1,
-    Code = 1,
-    Flags = TransferFlags.None,
-  }
+    new Transfer
+    {
+        Id = 1,
+        DebitAccountId = 1,
+        CreditAccountId = 2,
+        Amount = 10,
+        UserData128 = 2000,
+        UserData64 = 200,
+        UserData32 = 2,
+        Timeout = 0,
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.None,
+    }
 };
 
 var createTransfersError = client.CreateTransfers(transfers);
@@ -240,9 +234,10 @@ See all error conditions in the [create_transfers
 reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
 
 ```cs
-foreach (var error in createTransfersError) {
-  Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-  return;
+foreach (var error in createTransfersError)
+{
+    Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
+    return;
 }
 ```
 
@@ -254,9 +249,10 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```cs
-foreach(var t in transfers) {
-  createTransfersError = client.CreateTransfers(new []{t});
-  // error handling omitted
+foreach (var t in transfers)
+{
+    createTransfersError = client.CreateTransfers(new[] { t });
+    // error handling omitted
 }
 ```
 
@@ -268,14 +264,16 @@ is 8190.
 
 ```cs
 var BATCH_SIZE = 8190;
-for (int i = 0; i < transfers.Length; i += BATCH_SIZE) {
-  var batchSize = BATCH_SIZE;
-  if (i + BATCH_SIZE > transfers.Length) {
-    batchSize = transfers.Length - i;
-  }
-  var segment = new ArraySegment<Transfer>(transfers, i, batchSize);
-  createTransfersError = client.CreateTransfers(segment.Array);
-  // error handling omitted
+for (int i = 0; i < transfers.Length; i += BATCH_SIZE)
+{
+    var batchSize = BATCH_SIZE;
+    if (i + BATCH_SIZE > transfers.Length)
+    {
+        batchSize = transfers.Length - i;
+    }
+    var segment = new ArraySegment<Transfer>(transfers, i, batchSize);
+    createTransfersError = client.CreateTransfers(segment.Array);
+    // error handling omitted
 }
 ```
 
@@ -305,10 +303,11 @@ To toggle behavior for an account, combine enum values stored in the
 For example, to link `transfer0` and `transfer1`:
 
 ```cs
-var transfer0 = new Transfer{ /* ... account values ... */ };
-var transfer1 = new Transfer{ /* ... account values ... */ };
+var transfer0 = new Transfer { /* ... account values ... */ };
+var transfer1 = new Transfer { /* ... account values ... */ };
 transfer0.Flags = TransferFlags.Linked;
-createTransfersError = client.CreateTransfers(new Transfer[] {transfer0, transfer1});
+createTransfersError = client.CreateTransfers(new Transfer[] { transfer0, transfer1 });
+
 ```
 
 ### Two-Phase Transfers
@@ -330,11 +329,11 @@ appropriate accounts and apply them to the `debits_posted` and
 ```cs
 var transfer = new Transfer
 {
-  Id = 2,
-  PendingId = 1,
-  Flags = TransferFlags.PostPendingTransfer,
+    Id = 2,
+    PendingId = 1,
+    Flags = TransferFlags.PostPendingTransfer,
 };
-createTransfersError = client.CreateTransfers(new Transfer[] {transfer});
+createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
 // error handling omitted
 ```
 
@@ -349,11 +348,11 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 ```cs
 transfer = new Transfer
 {
-  Id = 2,
-  PendingId = 1,
-  Flags = TransferFlags.PostPendingTransfer,
+    Id = 2,
+    PendingId = 1,
+    Flags = TransferFlags.PostPendingTransfer,
 };
-createTransfersError = client.CreateTransfers(new Transfer[] {transfer});
+createTransfersError = client.CreateTransfers(new Transfer[] { transfer });
 // error handling omitted
 ```
 
@@ -372,7 +371,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```cs
-transfers = client.LookupTransfers(new UInt128[] {1, 2});
+transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
 ```
 
 ## Get Account Transfers
@@ -387,14 +386,14 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```cs
-var filter = new GetAccountTransfers 
+var filter = new GetAccountTransfers
 {
-  AccountId = 2,
-  Timestamp = 0, // No filter by Timestamp.
-  Limit = 10, // Limit to ten transfers at most.
-  Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
-      GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
-      GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+    AccountId = 2,
+    Timestamp = 0, // No filter by Timestamp.
+    Limit = 10, // Limit to ten transfers at most.
+    Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
+        GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
+        GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 transfers = client.GetAccountTransfers(filter);
 ```
@@ -421,25 +420,25 @@ chain will have their error result set to `linked_event_failed`.
 var batch = new System.Collections.Generic.List<Transfer>();
 
 // An individual transfer (successful):
-batch.Add(new Transfer{Id = 1, /* ... rest of transfer ... */ });
+batch.Add(new Transfer { Id = 1, /* ... rest of transfer ... */ });
 
 // A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
-batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
-batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
-batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Fail with exists
-batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ }); // Fail without committing
+batch.Add(new Transfer { Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Commit/rollback.
+batch.Add(new Transfer { Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked }); // Fail with exists
+batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ }); // Fail without committing
 
 // An individual transfer (successful):
 // This should not see any effect from the failed chain above.
-batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ });
+batch.Add(new Transfer { Id = 2, /* ... rest of transfer ... */ });
 
 // A chain of 2 transfers (the first transfer fails the chain):
-batch.Add(new Transfer{Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
-batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ });
+batch.Add(new Transfer { Id = 2, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ });
 
 // A chain of 2 transfers (successful):
-batch.Add(new Transfer{Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
-batch.Add(new Transfer{Id = 4, /* ... rest of transfer ... */ });
+batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
+batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 
 createTransfersError = client.CreateTransfers(batch.ToArray());
 // error handling omitted
