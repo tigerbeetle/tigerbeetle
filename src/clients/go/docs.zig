@@ -2,86 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const Docs = @import("../docs_types.zig").Docs;
-const run = @import("../shutil.zig").run;
-const file_or_directory_exists = @import("../shutil.zig").file_or_directory_exists;
-const binary_filename = @import("../shutil.zig").binary_filename;
-
-fn go_current_commit_pre_install_hook(
-    arena: *std.heap.ArenaAllocator,
-    sample_dir: []const u8,
-    _: []const u8,
-) !void {
-    for (&[_][]const u8{ "go.mod", "go.sum" }) |file| {
-        const path = try std.fmt.allocPrint(
-            arena.allocator(),
-            "{s}/{s}",
-            .{ sample_dir, file },
-        );
-        // TODO(Zig): Mismatching internal std.os.unlink() error in Zig 0.11.0
-        const unlink_result = switch (builtin.os.tag) {
-            .windows => blk: {
-                const path_w = try std.os.windows.sliceToPrefixedFileW(path);
-                break :blk std.os.windows.DeleteFile(path_w.span(), .{ .dir = std.fs.cwd().fd });
-            },
-            else => std.os.unlink(path),
-        };
-        unlink_result catch {
-            // Delete only if they exist.
-        };
-    }
-}
-
-fn go_current_commit_post_install_hook(
-    arena: *std.heap.ArenaAllocator,
-    sample_dir: []const u8,
-    root: []const u8,
-) !void {
-    try std.os.chdir(root);
-    if (!file_or_directory_exists("src/clients/go/pkg/native/x86_64-linux")) {
-        try run(arena, &[_][]const u8{
-            try binary_filename(arena, &[_][]const u8{ "zig", "zig" }),
-            "build",
-            "go_client",
-        });
-    }
-
-    try std.os.chdir(sample_dir);
-    const go_mod = try std.fs.cwd().openFile(
-        "go.mod",
-        .{ .mode = .read_write },
-    );
-
-    const file_size = try go_mod.getEndPos();
-    var go_mod_contents = try arena.allocator().alloc(u8, file_size);
-
-    _ = try go_mod.read(go_mod_contents);
-
-    go_mod_contents = try std.mem.replaceOwned(
-        u8,
-        arena.allocator(),
-        go_mod_contents,
-        "require",
-        try std.fmt.allocPrint(
-            arena.allocator(),
-            "replace github.com/tigerbeetle/tigerbeetle-go => {s}/src/clients/go\n\nrequire",
-            .{root},
-        ),
-    );
-    std.debug.print("go.mod:\n\n{s}\n\n", .{go_mod_contents});
-
-    // First truncate.
-    try go_mod.setEndPos(0);
-    // Reset cursor.
-    try go_mod.seekTo(0);
-    try go_mod.writeAll(go_mod_contents);
-    go_mod.close();
-
-    try run(arena, &[_][]const u8{
-        "go",
-        "mod",
-        "tidy",
-    });
-}
 
 pub const GoDocs = Docs{
     .directory = "go",
@@ -139,10 +59,6 @@ pub const GoDocs = Docs{
     \\go build main.go
     ,
     .run_commands = "go run main.go",
-
-    .current_commit_install_commands_hook = null,
-    .current_commit_build_commands_hook = null,
-    .current_commit_run_commands_hook = null,
 
     .install_documentation = "",
 
@@ -205,9 +121,6 @@ pub const GoDocs = Docs{
     \\cd src/clients/go
     \\if [ "$TEST" = "true" ]; then go test; else echo "Skipping client unit tests"; fi
     ,
-
-    .current_commit_pre_install_hook = go_current_commit_pre_install_hook,
-    .current_commit_post_install_hook = go_current_commit_post_install_hook,
 
     // Extra steps to determine commit and repo so this works in
     // CI against forks and pull requests.

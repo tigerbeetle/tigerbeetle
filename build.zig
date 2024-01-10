@@ -394,12 +394,6 @@ pub fn build(b: *std.Build) !void {
             git_clone_tracy,
             tracer_backend,
         );
-        run_with_tb(
-            b.allocator,
-            b,
-            mode,
-            target,
-        );
         client_docs(
             b.allocator,
             b,
@@ -1091,30 +1085,6 @@ fn maybe_execute(
         run.step.dependOn(&install_step.step);
         top_level_step.dependOn(&run.step);
     }
-}
-
-// See src/clients/README.md for documentation.
-fn run_with_tb(
-    allocator: std.mem.Allocator,
-    b: *std.Build,
-    mode: Mode,
-    target: CrossTarget,
-) void {
-    const binary = b.addExecutable(.{
-        .name = "run_with_tb",
-        .root_source_file = .{ .path = "src/clients/run_with_tb.zig" },
-        .target = target,
-        .optimize = mode,
-        .main_pkg_path = .{ .path = "src" },
-    });
-
-    const run_with_tb_build = b.step("run_with_tb", "Build the run_with_tb helper");
-    run_with_tb_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary, .{});
-    run_with_tb_build.dependOn(&install_step.step);
-
-    maybe_execute(b, allocator, run_with_tb_build, install_step, "run_with_tb");
 }
 
 // See src/clients/README.md for documentation.
