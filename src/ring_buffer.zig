@@ -228,12 +228,10 @@ pub fn RingBuffer(
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
-                if (it.ring.buffer.len == 0) return null;
-                // TODO Use next_ptr() internally to avoid duplicating this code.
-                assert(it.count <= it.ring.count);
-                if (it.count == it.ring.count) return null;
-                defer it.count += 1;
-                return it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
+                if (it.next_ptr()) |item| {
+                    return item.*;
+                }
+                return null;
             }
 
             pub fn next_ptr(it: *Iterator) ?*const T {
