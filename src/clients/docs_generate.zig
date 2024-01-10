@@ -316,76 +316,6 @@ const Generator = struct {
         ) catch unreachable;
     }
 
-    fn validate_minimal(self: Generator, keep_tmp: bool) !void {
-        // Test the sample file
-        self.print("Building minimal sample file");
-        var tmp_dir = try TmpDir.init(self.arena);
-        defer if (!keep_tmp) tmp_dir.deinit();
-
-        try self.build_file_within_project(tmp_dir, self.language.install_sample_file, true);
-    }
-
-    fn validate_aggregate(self: Generator, keep_tmp: bool) !void {
-        // Test major parts of sample code
-        var sample = try self.make_aggregate_sample();
-        self.print("Aggregate");
-        var line_no: u32 = 0;
-        var lines = std.mem.split(u8, sample, "\n");
-        while (lines.next()) |line| {
-            line_no += 1;
-            std.debug.print("{: >3} {s}\n", .{ line_no, line });
-        }
-        self.print("Building aggregate sample file");
-        var tmp_dir = try TmpDir.init(self.arena);
-        defer if (!keep_tmp) tmp_dir.deinit();
-
-        try self.build_file_within_project(tmp_dir, sample, false);
-    }
-
-    const tests = [_]struct {
-        name: []const u8,
-        validate: *const fn (Generator, bool) anyerror!void,
-    }{
-        .{
-            .name = "minimal",
-            .validate = validate_minimal,
-        },
-        .{
-            .name = "aggregate",
-            .validate = validate_aggregate,
-        },
-    };
-
-    // This will not include every snippet but it includes as much as //
-    // reasonable. Both so we can type-check as much as possible and also so
-    // we can produce a building sample file for READMEs.
-    fn make_aggregate_sample(self: Generator) ![]const u8 {
-        var parts = [_][]const u8{
-            self.language.test_main_prefix,
-            self.language.client_object_example,
-            self.language.create_accounts_example,
-            self.language.account_flags_example,
-            self.language.create_accounts_errors_example,
-            self.language.lookup_accounts_example,
-            self.language.create_transfers_example,
-            self.language.create_transfers_errors_example,
-            self.language.lookup_transfers_example,
-            self.language.get_account_transfers_example,
-            self.language.no_batch_example,
-            self.language.batch_example,
-            self.language.transfer_flags_link_example,
-            self.language.transfer_flags_post_example,
-            self.language.transfer_flags_void_example,
-            self.language.linked_events_example,
-            self.language.test_main_suffix,
-        };
-        var aggregate = std.ArrayList(u8).init(self.arena.allocator());
-        for (parts) |part| {
-            try aggregate.writer().print("{s}\n", .{part});
-        }
-        return aggregate.items;
-    }
-
     fn generate_language_setup_steps(
         self: Generator,
         mw: *MarkdownWriter,
@@ -881,8 +811,6 @@ const Generator = struct {
 
 const CliArgs = struct {
     language: ?[]const u8 = null,
-    validate: ?[]const u8 = null,
-    no_validate: bool = false,
     no_generate: bool = false,
     keep_tmp: bool = false,
 };
@@ -899,10 +827,6 @@ pub fn main() !void {
     assert(args.skip());
 
     const cli_args = flags.parse(&args, CliArgs);
-
-    if (cli_args.validate != null and cli_args.no_validate) {
-        flags.fatal("--validate: conflicts with --no-validate", .{});
-    }
 
     if (cli_args.language) |filter| {
         skip_language = .{true} ** languages.len;
@@ -931,28 +855,6 @@ pub fn main() !void {
         var mw = MarkdownWriter.init(&buf);
 
         var generator = try Generator.init(&arena, language);
-        if (!cli_args.no_validate) {
-            generator.print("Validating");
-
-            for (Generator.tests) |t| {
-                if (cli_args.validate) |validate_only| {
-                    var parts = std.mem.split(u8, validate_only, ",");
-
-                    const found = while (parts.next()) |name| {
-                        if (std.mem.eql(u8, name, t.name)) break true;
-                    } else false;
-
-                    if (!found) {
-                        generator.printf("Skipping test [{s}]", .{t.name});
-                        continue;
-                    }
-                }
-
-                const root = try git_root(&arena);
-                try std.os.chdir(root);
-                try t.validate(generator, cli_args.keep_tmp);
-            }
-        }
 
         if (!cli_args.no_generate) {
             generator.print("Generating main README");

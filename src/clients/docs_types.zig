@@ -78,41 +78,22 @@ pub const Docs = struct {
     // Path to the file with code inside walkthrough sample.
     walkthrough: []const u8,
 
-    client_object_example: Code,
     client_object_documentation: Markdown,
 
-    create_accounts_example: Code,
     create_accounts_documentation: Markdown,
 
-    create_accounts_errors_example: Code,
     create_accounts_errors_documentation: Markdown,
 
-    account_flags_example: Code,
     account_flags_documentation: Markdown,
 
-    lookup_accounts_example: Code,
-
-    create_transfers_example: Code,
     create_transfers_documentation: Markdown,
 
-    create_transfers_errors_example: Code,
     create_transfers_errors_documentation: Markdown,
 
     // Good example of using batches to create transfers.
-    batch_example: Code,
     // Bad example of not using batches well to create transfers.
-    no_batch_example: Code,
 
     transfer_flags_documentation: Markdown,
-    transfer_flags_link_example: Code,
-    transfer_flags_post_example: Code,
-    transfer_flags_void_example: Code,
-
-    lookup_transfers_example: Code,
-
-    get_account_transfers_example: Code,
-
-    linked_events_example: Code,
 
     developer_setup_documentation: Markdown,
 
