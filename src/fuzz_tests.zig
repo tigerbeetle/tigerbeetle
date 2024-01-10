@@ -52,33 +52,17 @@ pub fn main() !void {
     assert(args.skip()); // Discard executable name.
     const cli_args = flags.parse(&args, CliArgs);
 
-    const seed: usize = cli_args.seed orelse seed: {
-        // If no seed was given, use a random seed instead.
-        var seed_random: u64 = undefined;
-        try std.os.getrandom(std.mem.asBytes(&seed_random));
-        break :seed seed_random;
-    };
-
-    log.info("Fuzz seed = {}", .{seed});
-
     switch (cli_args.positional.fuzzer) {
         .smoke => {
             assert(cli_args.seed == null);
             assert(cli_args.events_max == null);
-            try smoke();
+            try main_smoke();
         },
-        inline else => |fuzzer| {
-            var timer = try std.time.Timer.start();
-            try @field(Fuzzers, @tagName(fuzzer)).main(.{
-                .seed = seed,
-                .events_max = cli_args.events_max,
-            });
-            log.info("done in {}", .{std.fmt.fmtDuration(timer.lap())});
-        },
+        else => try main_single(cli_args),
     }
 }
 
-fn smoke() !void {
+fn main_smoke() !void {
     var timer_all = try std.time.Timer.start();
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
@@ -112,4 +96,25 @@ fn smoke() !void {
     }
 
     log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
+}
+
+fn main_single(cli_args: CliArgs) !void {
+    assert(cli_args.positional.fuzzer != .smoke);
+
+    const seed: usize = cli_args.seed orelse seed: {
+        // If no seed was given, use a random seed instead.
+        var seed_random: u64 = undefined;
+        try std.os.getrandom(std.mem.asBytes(&seed_random));
+        break :seed seed_random;
+    };
+    log.info("Fuzz seed = {}", .{seed});
+
+    var timer = try std.time.Timer.start();
+    switch (cli_args.positional.fuzzer) {
+        .smoke => unreachable,
+        inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(
+            .{ .seed = seed, .events_max = cli_args.events_max },
+        ),
+    }
+    log.info("done in {}", .{std.fmt.fmtDuration(timer.lap())});
 }
