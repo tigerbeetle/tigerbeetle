@@ -16,6 +16,9 @@ comptime {
 
 pub const std_options = struct {
     pub const log_level: std.log.Level = .info;
+    pub const log_scope_levels = &[_]std.log.ScopeLevel{
+        .{ .scope = .superblock_quorums, .level = .err },
+    };
 };
 
 const Fuzzers = .{
