@@ -219,6 +219,8 @@ pub const JavaDocs = Docs{
 
     .examples = "",
 
+    .walkthrough = "src/main/java/Main.java",
+
     .client_object_example =
     \\var replicaAddress = System.getenv("TB_ADDRESS");
     \\byte[] clusterID = UInt128.asBytes(0);
@@ -229,18 +231,7 @@ pub const JavaDocs = Docs{
     \\);
     ,
 
-    .client_object_documentation =
-    \\If you create a `Client` like this, don't forget to call
-    \\`client.close()` when you are done with it. Otherwise you
-    \\can use the
-    \\[try-with-resources](https://docs.oracle.com/javase/tutorial/essential/exceptions/tryResourceClose.html)
-    \\syntax:
-    \\```java
-    \\try (var client = new Client(...)) {
-    \\  // Use client
-    \\}
-    \\```
-    ,
+    .client_object_documentation = "",
 
     .create_accounts_example =
     \\AccountBatch accounts = new AccountBatch(1);
