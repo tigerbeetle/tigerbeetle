@@ -943,7 +943,9 @@ fn SegmentedArrayType(
     };
 }
 
-fn TestContext(
+/// In order to avoid making internal details of segmented array public, the fuzzing code is defined
+/// in this file an is driven by =segmented_array_fuzz.zig`.
+fn FuzzContextType(
     comptime T: type,
     comptime node_size: u32,
     comptime element_count_max: u32,
@@ -1268,7 +1270,7 @@ fn TestContext(
     };
 }
 
-pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Options) !void {
+pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Options) !void {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
@@ -1325,7 +1327,7 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
         TestOptions{ .element_type = TableInfo, .node_size = 1024, .element_count_max = 1024 },
     }) |test_options| {
         inline for (.{ .sorted, .unsorted }) |order| {
-            const Context = TestContext(
+            const Context = FuzzContextType(
                 test_options.element_type,
                 test_options.node_size,
                 test_options.element_count_max,
@@ -1347,9 +1349,4 @@ pub fn run_tests(allocator: std.mem.Allocator, seed: u64, comptime options: Opti
 
     assert(tested_padding);
     assert(tested_node_capacity_min);
-}
-
-test "SegmentedArray" {
-    const seed = 42;
-    try run_tests(std.testing.allocator, seed, .{ .verify = true });
 }
