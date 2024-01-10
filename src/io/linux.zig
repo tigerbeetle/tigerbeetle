@@ -999,7 +999,10 @@ pub const IO = struct {
         var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
 
-        // TODO Document this and investigate whether this is in fact correct to set here.
+        // This is not strictly necessary on 64bit systems but it's harmless.
+        // This will avoid errors with handling large files on certain configurations
+        // of 32bit kernels. In all other cases, it's a noop.
+        // See: <https://github.com/torvalds/linux/blob/ab27740f76654ed58dd32ac0ba0031c18a6dea3b/fs/open.c#L1602>
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
