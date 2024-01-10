@@ -998,12 +998,39 @@ pub const IO = struct {
     ) !os.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
-
-        // TODO Use O_EXCL when opening as a block device to obtain a mandatory exclusive lock.
-        // This is much stronger than an advisory exclusive lock, and is required on some platforms.
+        // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
+        assert(!std.fs.path.isAbsolute(relative_path));
 
         var flags: u32 = os.O.CLOEXEC | os.O.RDWR | os.O.DSYNC;
         var mode: os.mode_t = 0;
+
+        const kind: enum { file, block_device } = blk: {
+            const stat = os.fstatat(
+                dir_fd,
+                relative_path,
+                0,
+            ) catch |err| switch (err) {
+                error.FileNotFound => {
+                    if (method == .create or method == .create_or_open) {
+                        // It's impossible to distinguish creating a new file and opening a new block
+                        // device with the current API. So if it's possible that we should create a file
+                        // we try that instead of failing here.
+                        break :blk .file;
+                    } else {
+                        @panic("Block device not found.");
+                    }
+                },
+                else => |err_| return err_,
+            };
+            if (os.S.ISBLK(stat.mode)) {
+                break :blk .block_device;
+            } else {
+                if (!os.S.ISREG(stat.mode)) {
+                    @panic("Datafile path does not point to block device or regular file.");
+                }
+                break :blk .file;
+            }
+        };
 
         // This is not strictly necessary on 64bit systems but it's harmless.
         // This will avoid errors with handling large files on certain configurations
@@ -1011,56 +1038,91 @@ pub const IO = struct {
         // See: <https://github.com/torvalds/linux/blob/ab27740f76654ed58dd32ac0ba0031c18a6dea3b/fs/open.c#L1602>
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
-        var direct_io_supported = false;
-        const dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
-
-        if (dir_on_tmpfs) {
-            log.warn("tmpfs is not durable, and your data will be lost on reboot", .{});
-        }
-
-        // Special case. tmpfs doesn't support Direct I/O. Normally we would panic here (see below)
-        // but being able to benchmark production workloads on tmpfs is very useful for removing
-        // disk speed from the equation.
-        if (constants.direct_io and !dir_on_tmpfs) {
-            direct_io_supported = try fs_supports_direct_io(dir_fd);
-            if (direct_io_supported) {
-                flags |= os.O.DIRECT;
-            } else if (!constants.direct_io_required) {
-                log.warn("file system does not support Direct I/O", .{});
-            } else {
-                // We require Direct I/O for safety to handle fsync failure correctly, and therefore
-                // panic in production if it is not supported.
-                @panic("file system does not support Direct I/O");
-            }
-        }
-
-        switch (method) {
-            .create => {
-                flags |= os.O.CREAT;
-                flags |= os.O.EXCL;
-                mode = 0o666;
-                log.info("creating \"{s}\"...", .{relative_path});
+        switch (kind) {
+            .block_device => {
+                if (constants.direct_io) {
+                    // Block devices should always support Direct IO.
+                    flags |= os.O.DIRECT;
+                    // Use O_EXCL when opening as a block device to obtain an advisory exclusive lock.
+                    // Normally, you can't do this for files you don't create, but for block devices this
+                    // guarantees:
+                    //     - that there are no mounts using this block device
+                    //     - that no new mounts can use this block device while we have it open
+                    //
+                    // However it doesn't prevent other processes with root from opening without
+                    // O_EXCL and writing (mount is just a special case that always checks O_EXCL).
+                    //
+                    // This should be stronger than flock(2) locks, which work on a separate system.
+                    // The relevant kernel code (as of v6.7) is here:
+                    // <https://github.com/torvalds/linux/blob/7da71072e1d6967c0482abcbb5991ffb5953fdf2/block/bdev.c#L932>
+                    flags |= os.O.EXCL;
+                }
+                // TODO: Do a check using `method` to avoid overwriting existing data on a block device
+                //       .create doesn't really make sense for a block device, so we unconditionally
+                //       open for now
+                log.info("opening block device \"{s}\"...", .{relative_path});
             },
-            .create_or_open => {
-                flags |= os.O.CREAT;
-                mode = 0o666;
-                log.info("opening or creating \"{s}\"...", .{relative_path});
-            },
-            .open => {
-                log.info("opening \"{s}\"...", .{relative_path});
+            .file => {
+                var direct_io_supported = false;
+                var dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
+
+                if (dir_on_tmpfs) {
+                    log.warn(
+                        "tmpfs is not durable, and your data will be lost on reboot",
+                        .{},
+                    );
+                }
+
+                // Special case. tmpfs doesn't support Direct I/O. Normally we would panic here (see below)
+                // but being able to benchmark production workloads on tmpfs is very useful for removing
+                // disk speed from the equation.
+                if (constants.direct_io and !dir_on_tmpfs) {
+                    direct_io_supported = try fs_supports_direct_io(dir_fd);
+                    if (direct_io_supported) {
+                        flags |= os.O.DIRECT;
+                    } else if (!constants.direct_io_required) {
+                        log.warn("file system does not support Direct I/O", .{});
+                    } else {
+                        // We require Direct I/O for safety to handle fsync failure correctly, and therefore
+                        // panic in production if it is not supported.
+                        @panic("file system does not support Direct I/O");
+                    }
+                }
+
+                switch (method) {
+                    .create => {
+                        flags |= os.O.CREAT;
+                        flags |= os.O.EXCL;
+                        mode = 0o666;
+                        log.info("creating \"{s}\"...", .{relative_path});
+                    },
+                    .create_or_open => {
+                        flags |= os.O.CREAT;
+                        mode = 0o666;
+                        log.info("opening or creating \"{s}\"...", .{relative_path});
+                    },
+                    .open => {
+                        log.info("opening \"{s}\"...", .{relative_path});
+                    },
+                }
             },
         }
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
         assert((flags & os.O.DSYNC) > 0);
 
-        // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
-        assert(!std.fs.path.isAbsolute(relative_path));
         const fd = try os.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
         errdefer os.close(fd);
 
-        // TODO Check that the file is actually a file.
+        {
+            // Make sure we're getting the type of file descriptor we expect.
+            const stat = try os.fstat(fd);
+            switch (kind) {
+                .file => assert(os.S.ISREG(stat.mode)),
+                .block_device => assert(os.S.ISBLK(stat.mode)),
+            }
+        }
 
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
@@ -1072,7 +1134,7 @@ pub const IO = struct {
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        if (method == .create) {
+        if (method == .create and kind == .file) {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {
@@ -1106,8 +1168,41 @@ pub const IO = struct {
         // We always do this when opening because we don't know if this was done before crashing.
         try os.fsync(dir_fd);
 
-        const stat = try os.fstat(fd);
-        if (stat.size < size) @panic("data file inode size was truncated or corrupted");
+        switch (kind) {
+            .file => {
+                if ((try os.fstat(fd)).size < size) {
+                    @panic("data file inode size was truncated or corrupted");
+                }
+            },
+            .block_device => {
+                const BLKGETSIZE64 = os.linux.IOCTL.IOR(0x12, 114, usize);
+                var block_device_size: usize = 0;
+
+                switch (std.os.errno(os.linux.ioctl(
+                    fd,
+                    BLKGETSIZE64,
+                    @intFromPtr(&block_device_size),
+                ))) {
+                    .SUCCESS => {},
+
+                    // These are the only errors that are supposed to be possible from ioctl(2).
+                    .BADF => return error.InvalidFileDescriptor,
+                    .NOTTY => return error.BadRequest,
+                    .FAULT => return error.InvalidAddress,
+                    else => |err| return os.unexpectedErrno(err),
+                }
+
+                if (block_device_size < size) {
+                    std.debug.panic(
+                        "The block device used is too small ({} needed/{} available).",
+                        .{
+                            std.fmt.fmtIntSizeBin(size),
+                            std.fmt.fmtIntSizeBin(block_device_size),
+                        },
+                    );
+                }
+            },
+        }
 
         return fd;
     }
