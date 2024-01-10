@@ -3,6 +3,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const flags = @import("../flags.zig");
+const stdx = @import("../stdx.zig");
 
 const Docs = @import("./docs_types.zig").Docs;
 const go = @import("./go/docs.zig").GoDocs;
@@ -204,6 +205,7 @@ const Generator = struct {
     arena: *std.heap.ArenaAllocator,
     language: Docs,
     test_file_name: []const u8,
+    walkthrough: []const u8,
 
     fn init(
         arena: *std.heap.ArenaAllocator,
@@ -214,11 +216,30 @@ const Generator = struct {
             test_file_name = "main";
         }
 
-        return Generator{
+        var result = Generator{
             .arena = arena,
             .language = language,
             .test_file_name = test_file_name,
+            .walkthrough = &.{},
         };
+        try result.read_walkthrough();
+        assert(result.walkthrough.len > 0);
+        return result;
+    }
+
+    fn read_walkthrough(self: *Generator) !void {
+        assert(self.walkthrough.len == 0);
+
+        const root = try git_root(self.arena);
+        self.walkthrough = try std.fs.cwd().readFileAlloc(
+            self.arena.allocator(),
+            self.sprintf("{s}/src/clients/{s}/samples/walkthrough/{s}", .{
+                root,
+                self.language.directory,
+                self.language.walkthrough,
+            }),
+            1024 * 1024,
+        );
     }
 
     fn ensure_path(self: Generator, path: []const u8) !void {
@@ -409,6 +430,52 @@ const Generator = struct {
         ));
     }
 
+    // Pulls a single "section" of code out of the entire walkthrough sample.
+    //
+    // A section is delimited by a pair of `section:SECTION_NAME` and `endsection:SECTION_NAME`
+    // comments. If there are several such pairs, their contents is concatenated (see the `imports`
+    // section in the Java sample for a motivational example for concatenation behavior).
+    fn code_section(self: Generator, mw: *MarkdownWriter, section_name: []const u8) void {
+        var code = std.ArrayList(u8).init(self.arena.allocator());
+
+        const section_start = self.sprintf("section:{s}\n", .{section_name});
+        const section_end = self.sprintf("endsection:{s}\n", .{section_name});
+
+        var text = self.walkthrough;
+        for (0..10) |_| {
+            text = (stdx.cut(text, section_start) orelse break).suffix;
+
+            const section_cut = stdx.cut(text, section_end).?;
+            text = section_cut.suffix;
+
+            var section = section_cut.prefix;
+            section = section[0..std.mem.lastIndexOf(u8, section, "\n").?];
+
+            var indent_min: usize = std.math.maxInt(usize);
+            var lines = std.mem.split(u8, section, "\n");
+            while (lines.next()) |line| {
+                if (line.len == 0) continue;
+                var indent_line: usize = 0;
+                while (line[indent_line] == ' ' or line[indent_line] == '\t') indent_line += 1;
+                indent_min = @min(indent_min, indent_line);
+            }
+            assert(indent_min < 16);
+
+            lines = std.mem.split(u8, section, "\n");
+            while (lines.next()) |line| {
+                if (line.len > 0) {
+                    assert(line.len > indent_min);
+                    code.appendSlice(line[indent_min..]) catch unreachable;
+                }
+                code.append('\n') catch unreachable;
+            }
+        } else @panic("too many parts in a section");
+        assert(code.pop() == '\n');
+
+        assert(code.items.len > 0);
+        mw.code(self.language.markdown_name, code.items);
+    }
+
     fn generate_main_readme(self: Generator, mw: *MarkdownWriter) !void {
         var language = self.language;
 
@@ -438,7 +505,7 @@ const Generator = struct {
             self.test_file_name,
             language.extension,
         });
-        mw.code(language.markdown_name, language.install_sample_file);
+        self.code_section(mw, "imports");
         mw.paragraph("Finally, build and run:");
         mw.commands(language.run_commands);
 
@@ -492,7 +559,7 @@ const Generator = struct {
             \\replica. The address is read from the `TB_ADDRESS`
             \\environment variable and defaults to port `3000`.
         );
-        mw.code(language.markdown_name, language.client_object_example);
+        self.code_section(mw, "client");
         mw.paragraph(language.client_object_documentation);
 
         mw.paragraph(
@@ -507,7 +574,7 @@ const Generator = struct {
             \\See details for account fields in the [Accounts
             \\reference](https://docs.tigerbeetle.com/reference/accounts).
         );
-        mw.code(language.markdown_name, language.create_accounts_example);
+        self.code_section(mw, "create-accounts");
         mw.paragraph(language.create_accounts_documentation);
 
         mw.header(3, "Account Flags");
@@ -522,7 +589,7 @@ const Generator = struct {
             \\For example, to link two accounts where the first account
             \\additionally has the `debits_must_not_exceed_credits` constraint:
         );
-        mw.code(language.markdown_name, language.account_flags_example);
+        self.code_section(mw, "account-flags");
 
         mw.header(3, "Response and Errors");
         mw.paragraph(
@@ -537,7 +604,7 @@ const Generator = struct {
             \\reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
         );
 
-        mw.code(language.markdown_name, language.create_accounts_errors_example);
+        self.code_section(mw, "create-accounts-errors");
 
         mw.paragraph(language.create_accounts_errors_documentation);
 
@@ -552,7 +619,7 @@ const Generator = struct {
             \\request. You can refer to the ID field in the response to
             \\distinguish accounts.
         );
-        mw.code(language.markdown_name, language.lookup_accounts_example);
+        self.code_section(mw, "lookup-accounts");
 
         mw.header(2, "Create Transfers");
         mw.paragraph(
@@ -561,7 +628,7 @@ const Generator = struct {
             \\See details for transfer fields in the [Transfers
             \\reference](https://docs.tigerbeetle.com/reference/transfers).
         );
-        mw.code(language.markdown_name, language.create_transfers_example);
+        self.code_section(mw, "create-transfers");
 
         mw.header(3, "Response and Errors");
         mw.paragraph(
@@ -574,7 +641,7 @@ const Generator = struct {
             \\See all error conditions in the [create_transfers
             \\reference](https://docs.tigerbeetle.com/reference/operations/create_transfers).
         );
-        mw.code(language.markdown_name, language.create_transfers_errors_example);
+        self.code_section(mw, "create-transfers-errors");
 
         mw.paragraph(language.create_transfers_errors_documentation);
 
@@ -585,7 +652,7 @@ const Generator = struct {
             \\you. So, for example, you *can* insert 1 million transfers
             \\one at a time like so:
         );
-        mw.code(language.markdown_name, language.no_batch_example);
+        self.code_section(mw, "no-batch");
         mw.paragraph(
             \\But the insert rate will be a *fraction* of
             \\potential. Instead, **always batch what you can**.
@@ -593,7 +660,7 @@ const Generator = struct {
             \\The maximum batch size is set in the TigerBeetle server. The default
             \\is 8190.
         );
-        mw.code(language.markdown_name, language.batch_example);
+        self.code_section(mw, "batch");
 
         mw.header(3, "Queues and Workers");
         mw.paragraph(
@@ -612,7 +679,7 @@ const Generator = struct {
         );
         mw.paragraph(language.transfer_flags_documentation);
         mw.paragraph("For example, to link `transfer0` and `transfer1`:");
-        mw.code(language.markdown_name, language.transfer_flags_link_example);
+        self.code_section(mw, "transfer-flags-link");
 
         mw.header(3, "Two-Phase Transfers");
         mw.paragraph(
@@ -630,7 +697,7 @@ const Generator = struct {
             \\appropriate accounts and apply them to the `debits_posted` and
             \\`credits_posted` balances.
         );
-        mw.code(language.markdown_name, language.transfer_flags_post_example);
+        self.code_section(mw, "transfer-flags-post");
 
         mw.header(4, "Void a Pending Transfer");
         mw.paragraph(
@@ -640,7 +707,7 @@ const Generator = struct {
             \\appropriate accounts and **not** apply them to the `debits_posted` and
             \\`credits_posted` balances.
         );
-        mw.code(language.markdown_name, language.transfer_flags_void_example);
+        self.code_section(mw, "transfer-flags-void");
 
         mw.header(2, "Transfer Lookup");
         mw.paragraph(
@@ -656,7 +723,7 @@ const Generator = struct {
             \\the same as the order of `id`s in the request. You can refer to the
             \\`id` field in the response to distinguish transfers.
         );
-        mw.code(language.markdown_name, language.lookup_transfers_example);
+        self.code_section(mw, "lookup-transfers");
 
         mw.header(2, "Get Account Transfers");
         mw.paragraph(
@@ -669,7 +736,7 @@ const Generator = struct {
             \\The transfers in the response are sorted by `timestamp` in chronological or
             \\reverse-chronological order.
         );
-        mw.code(language.markdown_name, language.get_account_transfers_example);
+        self.code_section(mw, "get-account-transfers");
 
         mw.header(2, "Linked Events");
         mw.paragraph(
@@ -689,7 +756,7 @@ const Generator = struct {
             \\break the chain will have a unique error result. Other events in the
             \\chain will have their error result set to `linked_event_failed`.
         );
-        mw.code(language.markdown_name, language.linked_events_example);
+        self.code_section(mw, "linked-events");
 
         mw.header(2, "Development Setup");
         if (language.developer_setup_documentation.len > 0) {

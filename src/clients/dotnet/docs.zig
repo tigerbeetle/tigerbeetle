@@ -198,6 +198,8 @@ pub const DotnetDocs = Docs{
 
     .examples = "",
 
+    .walkthrough = "Program.cs",
+
     .client_object_example =
     \\var tbAddress = Environment.GetEnvironmentVariable("TB_ADDRESS");
     \\var client = new Client(
@@ -207,15 +209,6 @@ pub const DotnetDocs = Docs{
     ,
 
     .client_object_documentation =
-    \\If you create a `Client` like this, don't forget to call
-    \\`client.Dispose()` when you are done with it. Otherwise you
-    \\can use the `using` syntax:
-    \\```csharp
-    \\using (var client = new Client(...)) {
-    \\  // Use client
-    \\}
-    \\```
-    \\
     \\The `Client` class is thread-safe and for better performance, a
     \\single instance should be shared between multiple concurrent
     \\tasks. Multiple clients can be instantiated in case of connecting
@@ -381,7 +374,7 @@ pub const DotnetDocs = Docs{
     ,
 
     .get_account_transfers_example =
-    \\var filter = new GetAccountTransfers 
+    \\var filter = new GetAccountTransfers
     \\{
     \\  AccountId = 2,
     \\  Timestamp = 0, // No filter by Timestamp.

@@ -148,6 +148,8 @@ pub const GoDocs = Docs{
 
     .examples = "",
 
+    .walkthrough = "main.go",
+
     .client_object_example =
     \\tbAddress := os.Getenv("TB_ADDRESS")
     \\if len(tbAddress) == 0 {

@@ -113,6 +113,8 @@ pub const NodeDocs = Docs{
     \\`BigInt(1)`.
     ,
 
+    .walkthrough = "main.js",
+
     .client_object_example =
     \\const client = createClient({
     \\  cluster_id: 0n,
