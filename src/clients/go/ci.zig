@@ -34,7 +34,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.zig("build install -Drelease -Dconfig=production", .{});
     try shell.exec("go test", .{});
 
-    inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
+    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
