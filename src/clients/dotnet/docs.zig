@@ -35,28 +35,11 @@ pub const DotnetDocs = Docs{
 
     .test_file_name = "Program",
 
-    .install_prereqs = "",
-    .install_sample_file =
-    \\using System;
-    \\
-    \\using TigerBeetle;
-    \\
-    \\// Validate import works.
-    \\Console.WriteLine("SUCCESS");
-    ,
-
     .install_commands =
     \\dotnet new console
     \\dotnet add package tigerbeetle
     ,
-    .build_commands =
-    \\dotnet restore
-    \\dotnet clean --verbosity minimal
-    \\dotnet build
-    ,
     .run_commands = "dotnet run",
-
-    .install_documentation = "",
 
     .examples = "",
 
@@ -119,14 +102,4 @@ pub const DotnetDocs = Docs{
     \\dotnet build
     \\if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
     ,
-
-    .test_main_prefix =
-    \\using System;
-    \\using System.Diagnostics;
-    \\
-    \\using TigerBeetle;
-    \\
-    ,
-
-    .test_main_suffix = "",
 };

@@ -23,21 +23,8 @@ pub const NodeDocs = Docs{
     .project_file_name = "",
     .test_file_name = "",
 
-    .install_prereqs = "apk add -U python3",
-
-    .install_sample_file =
-    \\const { createClient } = require("tigerbeetle-node");
-    \\console.log("Import ok!");
-    ,
-
     .install_commands = "npm install tigerbeetle-node",
-    .build_commands =
-    \\npm install typescript @types/node
-    \\npx tsc --allowJs --noEmit main.js
-    ,
     .run_commands = "node main.js",
-
-    .install_documentation = "",
 
     .examples =
     \\### Sidenote: `BigInt`
@@ -108,20 +95,5 @@ pub const NodeDocs = Docs{
     \\cd src/clients/node
     \\npm install --include dev
     \\npm pack
-    ,
-    .test_main_prefix =
-    \\const {
-    \\  createClient,
-    \\  AccountFlags,
-    \\  TransferFlags,
-    \\  CreateTransferError,
-    \\  CreateAccountError,
-    \\} = require("tigerbeetle-node");
-    \\
-    \\async function main() {
-    ,
-    .test_main_suffix =
-    \\}
-    \\main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
     ,
 };
