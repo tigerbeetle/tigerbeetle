@@ -72,11 +72,6 @@ pub const Docs = struct {
 
     transfer_flags_documentation: Markdown,
 
-    developer_setup_documentation: Markdown,
-
-    developer_setup_sh_commands: Code,
-    developer_setup_pwsh_commands: Code,
-
     // Optional prefix if test code must be in a certain directory
     // (e.g. Java and `src/main/java`).
     test_source_path: String,

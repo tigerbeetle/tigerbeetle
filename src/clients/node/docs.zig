@@ -73,27 +73,4 @@ pub const NodeDocs = Docs{
     \\* `TransferFlags.post_pending_transfer`
     \\* `TransferFlags.void_pending_transfer`
     ,
-
-    .developer_setup_documentation = "",
-
-    // Extra steps to determine commit and repo so this works in
-    // CI against forks and pull requests.
-    .developer_setup_sh_commands =
-    \\cd src/clients/node
-    \\npm install --include dev
-    \\npm pack
-    ,
-
-    // TODO(phil): node tests are the only ones that expect to have a TigerBeetle instance running.
-    // From what I can tell they were never running in CI since I was the first person to add anything Node to CI.
-    // Soon what it tests will be replaced with sample code that is integration tested anyway.
-    // \\if [ "$TEST" = "true" ]; then npm test; else echo "Skipping client unit tests"; fi
-
-    // Extra steps to determine commit and repo so this works in
-    // CI against forks and pull requests.
-    .developer_setup_pwsh_commands =
-    \\cd src/clients/node
-    \\npm install --include dev
-    \\npm pack
-    ,
 };
