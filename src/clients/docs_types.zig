@@ -65,9 +65,6 @@ pub const Docs = struct {
     // If you want to include links to examples.
     examples: Markdown,
 
-    // Path to the file with code inside walkthrough sample.
-    walkthrough: []const u8,
-
     client_object_documentation: Markdown,
 
     create_accounts_documentation: Markdown,

@@ -60,8 +60,6 @@ pub const DotnetDocs = Docs{
 
     .examples = "",
 
-    .walkthrough = "Program.cs",
-
     .client_object_documentation =
     \\The `Client` class is thread-safe and for better performance, a
     \\single instance should be shared between multiple concurrent

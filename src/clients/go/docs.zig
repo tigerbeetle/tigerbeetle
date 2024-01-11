@@ -64,8 +64,6 @@ pub const GoDocs = Docs{
 
     .examples = "",
 
-    .walkthrough = "main.go",
-
     .client_object_documentation =
     \\The third argument to `NewClient` is a `uint` max concurrency
     \\setting. `256` is a good default and can increase to `8192`
