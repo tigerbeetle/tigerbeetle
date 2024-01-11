@@ -78,25 +78,8 @@ pub const JavaDocs = Docs{
 
     .test_file_name = "Main",
 
-    .install_sample_file =
-    \\package com.tigerbeetle.samples;
-    \\
-    \\import com.tigerbeetle.*;
-    \\
-    \\public final class Main {
-    \\    public static void main(String[] args) {
-    \\        System.out.println("Import ok!");
-    \\    }
-    \\}
-    ,
-
-    .install_prereqs = "apk add -U maven openjdk11",
-
     .install_commands = "mvn install",
-    .build_commands = "mvn compile",
     .run_commands = "mvn exec:java",
-
-    .install_documentation = "",
 
     .examples = "",
 
@@ -157,15 +140,4 @@ pub const JavaDocs = Docs{
     // It's needed as a workaround for Windows workers.
     \\if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
     ,
-
-    .test_main_prefix =
-    \\package com.tigerbeetle.samples;
-    \\
-    \\import com.tigerbeetle.*;
-    \\public final class Main {
-    \\  public static void main(String[] args)
-    \\      throws RequestException, ConcurrencyExceededException {
-    ,
-
-    .test_main_suffix = "} }",
 };

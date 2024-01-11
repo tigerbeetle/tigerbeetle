@@ -314,8 +314,6 @@ const Generator = struct {
             ,
         );
 
-        mw.paragraph(language.install_documentation);
-
         mw.header(2, "Sample projects");
         mw.paragraph(
             \\This document is primarily a reference guide to
