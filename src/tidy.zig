@@ -299,7 +299,6 @@ const naughty_list = [_][]const u8{
     "clients/java/java_bindings.zig",
     "clients/java/src/client.zig",
     "clients/java/src/jni_tests.zig",
-    "clients/node/docs.zig",
     "clients/node/node_bindings.zig",
     "clients/node/src/node.zig",
     "clients/node/src/translate.zig",

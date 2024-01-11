@@ -27,7 +27,7 @@ for exactly what we're benchmarking.
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
-## Running the server
+## Running the Server
 
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
@@ -106,14 +106,14 @@ Beyond being a deterministic simulator, *The VOPR* also features [a state checke
 
 Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
 
-## Hacking on clients
+## Hacking on Clients
 
-Detailed instructions for each client are in their respective README:
+Each client is build using language specific tooling (`npm`, `maven`, `dotnet`, and `go`), and links
+to a native library built with Zig. This is quite a zoo! To complicate things, some languages
+trigger native build automatically, while others require manually running `./zig/zig build
+lang_client`.
 
-* [.NET Development Setup](/src/clients/dotnet#development-setup)
-* [Java Development Setup](/src/clients/java#development-setup)
-* [Go Development Setup](/src/clients/go#development-setup)
-* [Node.js Development Setup](/src/clients/node#development-setup)
+See `client/$LANG/ci.zig` scripts for exact commands we use on CI to build clients.
 
 ### Testing Client Libraries
 
