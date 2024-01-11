@@ -115,15 +115,12 @@ Detailed instructions for each client are in their respective README:
 * [Go Development Setup](/src/clients/go#development-setup)
 * [Node.js Development Setup](/src/clients/node#development-setup)
 
-### Running client integration tests
+### Testing Client Libraries
 
-The `client_integration` target in build.zig helps with running the
-sample programs for each client as an integration test.
+Each language client is tested by a mixture of unit-tests written using language-specific test
+frameworks, and integration tests which run sample projects against a real `tigerbeetle` process.
+Everything is orchestrated by [ci.zig](/src/scripts/ci.zig) script:
 
 ```console
-./zig/zig build client_integration -- --language=go --sample=basic
+./zig/zig build scripts -- ci --language=go
 ```
-
-See [the src/clients/README.md
-section](/src/clients#integrationzig--client_integration) on this
-script for details.
