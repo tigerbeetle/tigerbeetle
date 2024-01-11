@@ -262,7 +262,6 @@ pub fn RingBuffer(
             }
         };
 
-        // TODO Add to tests.
         pub fn iterator_mutable(self: *Self) IteratorMutable {
             return .{ .ring = self };
         }
@@ -274,18 +273,31 @@ const testing = std.testing;
 fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     const ring_index = ring.index;
 
-    var loops: usize = 0;
-    while (loops < 2) : (loops += 1) {
-        var iterator = ring.iterator();
-        var index: usize = 0;
-        while (iterator.next()) |item| {
-            try testing.expectEqual(values[index], item);
-            index += 1;
+    inline for (.{ .immutable, .mutable }) |mutability| {
+        var loops: usize = 0;
+        while (loops < 2) : (loops += 1) {
+            var iterator = switch (mutability) {
+                .immutable => ring.iterator(),
+                .mutable => ring.iterator_mutable(),
+                else => unreachable,
+            };
+            var index: usize = 0;
+            switch (mutability) {
+                .immutable => while (iterator.next()) |item| {
+                    try testing.expectEqual(values[index], item);
+                    index += 1;
+                },
+                .mutable => while (iterator.next_ptr()) |item| {
+                    try testing.expectEqual(values[index], item.*);
+                    index += 1;
+                },
+                else => unreachable,
+            }
+            try testing.expectEqual(values.len, index);
         }
-        try testing.expectEqual(values.len, index);
-    }
 
-    try testing.expectEqual(ring_index, ring.index);
+        try testing.expectEqual(ring_index, ring.index);
+    }
 }
 
 fn test_low_level_interface(comptime Ring: type, ring: *Ring) !void {
