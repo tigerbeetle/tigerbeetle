@@ -49,8 +49,6 @@ pub const NodeDocs = Docs{
     \\`BigInt(1)`.
     ,
 
-    .walkthrough = "main.js",
-
     .client_object_documentation = "",
     .create_accounts_documentation = "",
     .account_flags_documentation =

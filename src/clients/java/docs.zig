@@ -100,8 +100,6 @@ pub const JavaDocs = Docs{
 
     .examples = "",
 
-    .walkthrough = "src/main/java/Main.java",
-
     .client_object_documentation = "",
 
     .create_accounts_documentation =
