@@ -154,7 +154,6 @@ const DeadDetector = struct {
             "demo_05_post_pending_transfers.zig",
             "demo_06_void_pending_transfers.zig",
             "demo_07_lookup_transfers.zig",
-            "docs_generate.zig",
             "ewah_benchmark.zig",
             "fuzz_tests.zig",
             "integration_tests.zig",

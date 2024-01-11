@@ -21,7 +21,7 @@ pub const NodeDocs = Docs{
 
     .project_file = "",
     .project_file_name = "",
-    .test_file_name = "",
+    .test_file_name = "main",
 
     .install_commands = "npm install tigerbeetle-node",
     .run_commands = "node main.js",

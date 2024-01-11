@@ -14,7 +14,9 @@ const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 const TmpTigerBeetle = @import("../testing/tmp_tigerbeetle.zig");
 
-const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
+const client_readmes = @import("./client_readmes.zig");
+
+pub const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
 const LanguageCI = .{
     .dotnet = @import("../clients/dotnet/ci.zig"),
     .go = @import("../clients/go/ci.zig"),
@@ -31,7 +33,19 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     if (cli_args.validate_release) {
         try validate_release(shell, gpa, cli_args.language);
     } else {
+        try generate_readmes(shell, gpa, cli_args.language);
         try run_tests(shell, gpa, cli_args.language);
+    }
+}
+
+fn generate_readmes(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {
+    inline for (comptime std.enums.values(Language)) |language| {
+        if (language_requested == language or language_requested == null) {
+            try shell.pushd("./src/clients/" ++ @tagName(language));
+            defer shell.popd();
+
+            try client_readmes.test_freshness(shell, gpa, language);
+        }
     }
 }
 
