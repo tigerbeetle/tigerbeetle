@@ -545,33 +545,3 @@ transfers.setId(4);
 
 transferErrors = client.createTransfers(transfers);
 ```
-
-## Development Setup
-
-### On Linux and macOS
-
-In a POSIX shell run:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle
-cd tigerbeetle
-git submodule update --init --recursive
-./scripts/install_zig.sh
-cd src/clients/java
-./scripts/install.sh
-if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi
-```
-
-### On Windows
-
-In PowerShell run:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle
-cd tigerbeetle
-git submodule update --init --recursive
-.\scripts\install_zig.bat
-cd src/clients/java
-.\scripts\install.bat
-if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
-```

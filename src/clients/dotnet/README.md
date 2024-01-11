@@ -443,37 +443,3 @@ batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 createTransfersError = client.CreateTransfers(batch.ToArray());
 // error handling omitted
 ```
-
-## Development Setup
-
-### On Linux and macOS
-
-In a POSIX shell run:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle
-cd tigerbeetle
-git submodule update --init --recursive
-./scripts/install_zig.sh
-cd src/clients/dotnet
-dotnet restore
-dotnet clean --verbosity minimal
-dotnet build
-if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
-```
-
-### On Windows
-
-In PowerShell run:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle
-cd tigerbeetle
-git submodule update --init --recursive
-.\scripts\install_zig.bat
-cd src/clients/dotnet
-dotnet restore
-dotnet clean --verbosity minimal
-dotnet build
-if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
-```

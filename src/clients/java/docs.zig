@@ -124,20 +124,4 @@ pub const JavaDocs = Docs{
     \\* `TransferFlags.POST_PENDING_TRANSFER`
     \\* `TransferFlags.VOID_PENDING_TRANSFER`
     ,
-
-    .developer_setup_documentation = "",
-
-    .developer_setup_sh_commands =
-    \\cd src/clients/java
-    \\./scripts/install.sh
-    \\if [ "$TEST" = "true" ]; then mvn test; else echo "Skipping client unit tests"; fi
-    ,
-
-    .developer_setup_pwsh_commands =
-    \\cd src/clients/java
-    \\.\scripts\install.bat
-    // Note: -Xms and -Xmx define the initial and max memory a JVM heap can have.
-    // It's needed as a workaround for Windows workers.
-    \\if ($env:TEST -eq 'true') { mvn test } else { echo "Skipping client unit test" }
-    ,
 };

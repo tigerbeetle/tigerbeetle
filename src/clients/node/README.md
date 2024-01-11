@@ -643,33 +643,3 @@ const errors = await client.createTransfers(batch);
  * ]
  */
 ```
-
-## Development Setup
-
-### On Linux and macOS
-
-In a POSIX shell run:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle
-cd tigerbeetle
-git submodule update --init --recursive
-./scripts/install_zig.sh
-cd src/clients/node
-npm install --include dev
-npm pack
-```
-
-### On Windows
-
-In PowerShell run:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle
-cd tigerbeetle
-git submodule update --init --recursive
-.\scripts\install_zig.bat
-cd src/clients/node
-npm install --include dev
-npm pack
-```
