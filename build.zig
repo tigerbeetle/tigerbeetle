@@ -394,12 +394,6 @@ pub fn build(b: *std.Build) !void {
             git_clone_tracy,
             tracer_backend,
         );
-        client_docs(
-            b.allocator,
-            b,
-            mode,
-            target,
-        );
     }
 
     {
@@ -1034,81 +1028,6 @@ fn c_client_sample(
 
     const install_step = b.addInstallArtifact(sample, .{});
     c_sample_build.dependOn(&install_step.step);
-}
-
-// Allows a build step to run the command it builds after it builds it if the user passes --.
-// e.g.: ./zig/zig build docs_generate --
-// Whereas `./zig/zig build docs_generate` would not run the command.
-fn maybe_execute(
-    b: *std.Build,
-    allocator: std.mem.Allocator,
-    top_level_step: *std.Build.Step,
-    install_step: *std.Build.Step.InstallArtifact,
-    binary_name: []const u8,
-) void {
-    var to_run = std.ArrayList([]const u8).init(allocator);
-    defer to_run.deinit();
-
-    const sep = if (builtin.os.tag == .windows) "\\" else "/";
-    const ext = if (builtin.os.tag == .windows) ".exe" else "";
-    to_run.append(
-        std.fmt.allocPrint(
-            allocator,
-            ".{s}zig-out{s}bin{s}{s}{s}",
-            .{
-                sep,
-                sep,
-                sep,
-                binary_name,
-                ext,
-            },
-        ) catch unreachable,
-    ) catch unreachable;
-
-    var args = std.process.argsWithAllocator(allocator) catch unreachable;
-    defer args.deinit();
-
-    var build_and_run = false;
-    while (args.next()) |arg| {
-        if (std.mem.eql(u8, arg, "--")) {
-            build_and_run = true;
-            continue;
-        }
-
-        if (build_and_run) {
-            to_run.append(arg) catch unreachable;
-        }
-    }
-
-    if (build_and_run) {
-        const run = b.addSystemCommand(to_run.items);
-        run.step.dependOn(&install_step.step);
-        top_level_step.dependOn(&run.step);
-    }
-}
-
-// See src/clients/README.md for documentation.
-fn client_docs(
-    allocator: std.mem.Allocator,
-    b: *std.Build,
-    mode: Mode,
-    target: CrossTarget,
-) void {
-    const binary = b.addExecutable(.{
-        .name = "client_docs",
-        .root_source_file = .{ .path = "src/clients/docs_generate.zig" },
-        .target = target,
-        .optimize = mode,
-        .main_pkg_path = .{ .path = "src" },
-    });
-
-    const client_docs_build = b.step("client_docs", "Generate documentation for a client library");
-    client_docs_build.dependOn(&binary.step);
-
-    const install_step = b.addInstallArtifact(binary, .{});
-    client_docs_build.dependOn(&install_step.step);
-
-    maybe_execute(b, allocator, client_docs_build, install_step, "client_docs");
 }
 
 /// Steps which unconditionally fails with a message.
