@@ -15,13 +15,6 @@ const TmpDir = @import("./shutil.zig").TmpDir;
 const file_or_directory_exists =
     @import("./shutil.zig").file_or_directory_exists;
 const git_root = @import("./shutil.zig").git_root;
-const shell_wrap = @import("./shutil.zig").shell_wrap;
-const run_shell = @import("./shutil.zig").run_shell;
-const cmd_sep = @import("./shutil.zig").cmd_sep;
-const write_shell_newlines_into_single_line =
-    @import("./shutil.zig").write_shell_newlines_into_single_line;
-const run_shell_with_env = @import("./shutil.zig").run_shell_with_env;
-const run_with_tb = @import("./run_with_tb.zig").run_with_tb;
 
 const languages = [_]Docs{ go, node, java, dotnet };
 
@@ -122,85 +115,6 @@ const MarkdownWriter = struct {
     }
 };
 
-pub fn prepare_directory(
-    arena: *std.heap.ArenaAllocator,
-    language: Docs,
-    dir: []const u8,
-) !void {
-    // Some languages (Java) have an additional project file
-    // (pom.xml) they need to have available.
-    if (language.project_file.len > 0) {
-        const project_file_path = try std.fs.path.join(
-            arena.allocator(),
-            &.{ dir, language.project_file_name },
-        );
-        try std.fs.cwd().writeFile(project_file_path, language.project_file);
-    }
-
-    const root = try git_root(arena);
-    if (language.current_commit_pre_install_hook) |hook| {
-        try hook(arena, dir, root);
-    }
-
-    // Then set up project, within tmp dir
-    try std.os.chdir(dir);
-    defer std.os.chdir(root) catch unreachable;
-
-    var cmd = std.ArrayList(u8).init(arena.allocator());
-    defer cmd.deinit();
-
-    try write_shell_newlines_into_single_line(
-        &cmd,
-        if (language.current_commit_install_commands_hook) |hook|
-            try hook(arena, language.install_commands)
-        else
-            language.install_commands,
-    );
-    try run_shell(arena, cmd.items);
-}
-
-pub fn integrate(
-    arena: *std.heap.ArenaAllocator,
-    language: Docs,
-    dir: []const u8,
-    run: bool,
-) !void {
-    const root = try git_root(arena);
-
-    if (language.current_commit_post_install_hook) |hook| {
-        try hook(arena, dir, root);
-    }
-
-    // Run project within dir
-    try std.os.chdir(dir);
-    defer std.os.chdir(root) catch unreachable;
-
-    var cmd = std.ArrayList(u8).init(arena.allocator());
-    defer cmd.deinit();
-
-    try write_shell_newlines_into_single_line(
-        &cmd,
-        if (language.current_commit_build_commands_hook) |hook|
-            try hook(arena, language.build_commands)
-        else
-            language.build_commands,
-    );
-    try run_shell(arena, cmd.items);
-
-    if (run) {
-        cmd.clearRetainingCapacity();
-        try write_shell_newlines_into_single_line(
-            &cmd,
-            if (language.current_commit_run_commands_hook) |hook|
-                try hook(arena, language.run_commands)
-            else
-                language.run_commands,
-        );
-
-        try run_with_tb(arena, try shell_wrap(arena, cmd.items), dir);
-    }
-}
-
 const Generator = struct {
     arena: *std.heap.ArenaAllocator,
     language: Docs,
@@ -248,53 +162,6 @@ const Generator = struct {
             .{path},
         );
         try std.fs.cwd().makePath(path);
-    }
-
-    fn build_file_within_project(
-        self: Generator,
-        tmp_dir: TmpDir,
-        file: []const u8,
-        run_setup_tests: bool,
-    ) !void {
-        try prepare_directory(self.arena, self.language, tmp_dir.path);
-
-        var tmp_file_name = self.sprintf(
-            "{s}/{s}{s}.{s}",
-            .{
-                tmp_dir.path,
-                self.language.test_source_path,
-                self.test_file_name,
-                self.language.extension,
-            },
-        );
-        try self.ensure_path(std.fs.path.dirname(tmp_file_name).?);
-
-        try std.fs.cwd().writeFile(tmp_file_name, file);
-
-        const root = try git_root(self.arena);
-        try std.os.chdir(root);
-        var cmd = std.ArrayList(u8).init(self.arena.allocator());
-        // First run general setup within already cloned repo
-        try write_shell_newlines_into_single_line(&cmd, if (builtin.os.tag == .windows)
-            self.language.developer_setup_pwsh_commands
-        else
-            self.language.developer_setup_sh_commands);
-
-        var env = std.ArrayList([]const u8).init(self.arena.allocator());
-        defer env.deinit();
-
-        if (run_setup_tests) {
-            try env.appendSlice(&[_][]const u8{ "TEST", "true" });
-        }
-        try run_shell_with_env(
-            self.arena,
-            cmd.items,
-            env.items,
-        );
-
-        // TODO: JavaScript integration is not yet working.
-        const run = !std.mem.eql(u8, self.language.markdown_name, "javascript");
-        try integrate(self.arena, self.language, tmp_dir.path, run);
     }
 
     fn print(self: Generator, msg: []const u8) void {
