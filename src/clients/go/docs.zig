@@ -36,35 +36,13 @@ pub const GoDocs = Docs{
 
     .test_file_name = "",
 
-    .install_sample_file =
-    \\package main
-    \\
-    \\import _ "github.com/tigerbeetle/tigerbeetle-go"
-    \\import _ "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
-    \\import "fmt"
-    \\
-    \\func main() {
-    \\	fmt.Println("Import ok!")
-    \\}
-    ,
-
-    .install_prereqs = "",
-
     .install_commands =
     \\go mod init tbtest
     \\go get github.com/tigerbeetle/tigerbeetle-go
     ,
-    .build_commands =
-    \\go mod tidy
-    \\go build main.go
-    ,
     .run_commands = "go run main.go",
 
-    .install_documentation = "",
-
     .examples = "",
-
-    .walkthrough = "main.go",
 
     .client_object_documentation =
     \\The third argument to `NewClient` is a `uint` max concurrency
@@ -129,18 +107,4 @@ pub const GoDocs = Docs{
     \\cd src\clients\go
     \\if ($env:TEST -eq 'true') { go test } else { echo "Skipping client unit test" }
     ,
-
-    .test_main_prefix =
-    \\package main
-    \\
-    \\import "log"
-    \\import "os"
-    \\
-    \\import . "github.com/tigerbeetle/tigerbeetle-go"
-    \\import . "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
-    \\
-    \\func main() {
-    ,
-
-    .test_main_suffix = "}",
 };

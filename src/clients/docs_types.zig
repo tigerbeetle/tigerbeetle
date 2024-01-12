@@ -44,29 +44,16 @@ pub const Docs = struct {
     // such as when file names have meaning (i.e. Java).
     test_file_name: String,
 
-    // Alpine instructions to get the environment set up.
-    install_prereqs: Code,
-
     // Any setup needed for a project before compiling and running
     // such as `go mod init myProject && go mod tidy` or `npm install
     // tigerbeetle-node`.
     install_commands: Code,
-    // Minimal code just to test importing the package works.
-    install_sample_file: Code,
 
-    // Commands for building code without running it.
-    build_commands: Code,
     // Commands for building and running code.
     run_commands: Code,
 
-    // Additional instructions for install.
-    install_documentation: Markdown,
-
     // If you want to include links to examples.
     examples: Markdown,
-
-    // Path to the file with code inside walkthrough sample.
-    walkthrough: []const u8,
 
     client_object_documentation: Markdown,
 
@@ -93,13 +80,6 @@ pub const Docs = struct {
     // Optional prefix if test code must be in a certain directory
     // (e.g. Java and `src/main/java`).
     test_source_path: String,
-
-    // All code that must exist before sample code is concatenated
-    // such as main function declaration, import declaration, etc.
-    test_main_prefix: Code,
-    // All code that must exist after sample code is concatenated such
-    // as closing braces.
-    test_main_suffix: Code,
 };
 
 pub const Sample = struct {
