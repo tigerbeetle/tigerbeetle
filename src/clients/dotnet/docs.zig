@@ -84,22 +84,4 @@ pub const DotnetDocs = Docs{
     \\* `TransferFlags.PostPendingTransfer`
     \\* `TransferFlags.VoidPendingTransfer`
     ,
-
-    .developer_setup_documentation = "",
-
-    .developer_setup_sh_commands =
-    \\cd src/clients/dotnet
-    \\dotnet restore
-    \\dotnet clean --verbosity minimal
-    \\dotnet build
-    \\if [ "$TEST" = "true" ]; then dotnet test; else echo "Skipping client unit tests"; fi
-    ,
-
-    .developer_setup_pwsh_commands =
-    \\cd src/clients/dotnet
-    \\dotnet restore
-    \\dotnet clean --verbosity minimal
-    \\dotnet build
-    \\if ($env:TEST -eq 'true') { dotnet test } else { echo "Skipping client unit test" }
-    ,
 };
