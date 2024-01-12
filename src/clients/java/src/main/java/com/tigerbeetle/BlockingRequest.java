@@ -85,7 +85,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
         return result != null || exception != null;
     }
 
-    public TResponse waitForResult() throws RequestException {
+    public TResponse waitForResult() {
 
         waitForCompletionUninterruptibly();
         return getResult();
@@ -143,7 +143,7 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
         }
     }
 
-    TResponse getResult() throws RequestException {
+    TResponse getResult() {
 
         assertTrue(result != null || exception != null, "Unexpected request result: result=null");
 
