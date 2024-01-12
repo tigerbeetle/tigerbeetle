@@ -7,7 +7,7 @@ import com.tigerbeetle.*;
 
 public final class Main {
 	public static void main(String[] args)
-			throws RequestException, ConcurrencyExceededException {
+			throws ConcurrencyExceededException {
 		String replicaAddress = System.getenv("TB_ADDRESS");
 
 		byte[] clusterID = UInt128.asBytes(0);

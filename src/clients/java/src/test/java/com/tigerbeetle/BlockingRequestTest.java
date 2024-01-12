@@ -93,7 +93,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidOperation() throws RequestException {
+    public void testEndRequestWithInvalidOperation() {
 
         var client = getDummyClient();
         var batch = new TransferBatch(1);
@@ -113,7 +113,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithUnknownOperation() throws RequestException {
+    public void testEndRequestWithUnknownOperation() {
 
         var client = getDummyClient();
         var batch = new TransferBatch(1);
@@ -135,7 +135,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testEndRequestWithNullBuffer() throws RequestException {
+    public void testEndRequestWithNullBuffer() {
 
         var client = getDummyClient();
         var batch = new TransferBatch(1);
@@ -154,7 +154,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidBufferSize() throws RequestException {
+    public void testEndRequestWithInvalidBufferSize() {
 
         var client = getDummyClient();
         var batch = new TransferBatch(1);
@@ -175,7 +175,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testGetResultBeforeEndRequest() throws RequestException {
+    public void testGetResultBeforeEndRequest() {
 
         var client = getDummyClient();
         var batch = new TransferBatch(1);
@@ -216,8 +216,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests()
-            throws RequestException {
+    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests() {
         var client = getDummyClient();
 
         // A batch with only 1 item
@@ -237,7 +236,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestTwice() throws RequestException {
+    public void testEndRequestTwice() {
         var client = getDummyClient();
 
         // A batch with only 1 item
@@ -268,7 +267,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testCreateAccountEndRequest() throws RequestException {
+    public void testCreateAccountEndRequest() {
         var client = getDummyClient();
         var batch = new AccountBatch(2);
         batch.add();
@@ -301,7 +300,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testCreateTransferEndRequest() throws RequestException {
+    public void testCreateTransferEndRequest() {
         var client = getDummyClient();
         var batch = new TransferBatch(2);
         batch.add();
@@ -334,7 +333,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testLookupAccountEndRequest() throws RequestException {
+    public void testLookupAccountEndRequest() {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -365,7 +364,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testLookupTransferEndRequest() throws RequestException {
+    public void testLookupTransferEndRequest() {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -396,7 +395,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testSuccessCompletion() throws RequestException {
+    public void testSuccessCompletion() {
 
         var client = getDummyClient();
         var batch = new IdBatch(2);
