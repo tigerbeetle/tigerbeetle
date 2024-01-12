@@ -30,9 +30,6 @@ jobs:
 
       - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=dotnet
-      # - run: ./zig/zig build client_docs -- --language=dotnet
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
 
   client-go:
     strategy:
@@ -52,9 +49,6 @@ jobs:
 
       - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=go
-      # - run: ./zig/zig build client_docs -- --language=go
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
 
   client-java:
     strategy:
@@ -86,9 +80,6 @@ jobs:
 
       - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=java
-      # - run: ./zig/zig build client_docs -- --language=java
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
 
   client-node:
     strategy:
@@ -114,9 +105,6 @@ jobs:
 
       - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=node
-      # - run: ./zig/zig build client_docs -- --language=node
-      # - if: matrix.os == 'ubuntu-latest-large'
-        # run: ./.github/ci/fail_on_diff.sh
 
   clients-pipeline:
     needs:
