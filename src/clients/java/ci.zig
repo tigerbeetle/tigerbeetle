@@ -18,7 +18,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec("mvn --batch-mode --file pom.xml --quiet formatter:validate", .{});
     try shell.exec("mvn --batch-mode --file pom.xml --quiet install", .{});
 
-    inline for (.{ "basic", "two-phase", "two-phase-many" }) |sample| {
+    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 

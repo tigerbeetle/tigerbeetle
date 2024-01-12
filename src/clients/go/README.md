@@ -40,9 +40,14 @@ Now, create `main.go` and copy this into it:
 ```go
 package main
 
-import _ "github.com/tigerbeetle/tigerbeetle-go"
-import _ "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"os"
+
+	. "github.com/tigerbeetle/tigerbeetle-go"
+	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
+)
 
 func main() {
 	fmt.Println("Import ok!")
@@ -89,7 +94,7 @@ environment variable and defaults to port `3000`.
 ```go
 tbAddress := os.Getenv("TB_ADDRESS")
 if len(tbAddress) == 0 {
-  tbAddress = "3000"
+	tbAddress = "3000"
 }
 client, err := NewClient(ToUint128(0), []string{tbAddress}, 256)
 if err != nil {
@@ -239,7 +244,7 @@ See details for transfer fields in the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfers).
 
 ```go
-transfer := Transfer{
+transfers := []Transfer{{
 	ID:              ToUint128(1),
 	DebitAccountID:  ToUint128(1),
 	CreditAccountID: ToUint128(2),
@@ -253,9 +258,9 @@ transfer := Transfer{
 	Code:            1,
 	Flags:           0,
 	Timestamp:       0,
-}
+}}
 
-transfersRes, err := client.CreateTransfers([]Transfer{transfer})
+transfersRes, err := client.CreateTransfers(transfers)
 if err != nil {
 	log.Printf("Error creating transfer batch: %s", err)
 	return
@@ -304,10 +309,10 @@ is 8190.
 BATCH_SIZE := 8190
 for i := 0; i < len(transfers); i += BATCH_SIZE {
 	batch := BATCH_SIZE
-	if i + BATCH_SIZE > len(transfers) {
+	if i+BATCH_SIZE > len(transfers) {
 		batch = len(transfers) - i
 	}
-	transfersRes, err = client.CreateTransfers(transfers[i:i + batch])
+	transfersRes, err = client.CreateTransfers(transfers[i : i+batch])
 	// error handling omitted
 }
 ```
@@ -362,11 +367,11 @@ appropriate accounts and apply them to the `debits_posted` and
 `credits_posted` balances.
 
 ```go
-transfer = Transfer{
-	ID:         ToUint128(2),
-	PendingID:  ToUint128(1),
-	Flags:      TransferFlags{PostPendingTransfer: true}.ToUint16(),
-	Timestamp:  0,
+transfer := Transfer{
+	ID:        ToUint128(2),
+	PendingID: ToUint128(1),
+	Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
+	Timestamp: 0,
 }
 transfersRes, err = client.CreateTransfers([]Transfer{transfer})
 // error handling omitted
@@ -382,10 +387,10 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 
 ```go
 transfer = Transfer{
-	ID:         ToUint128(2),
-	PendingID:  ToUint128(1),
-	Flags:      TransferFlags{VoidPendingTransfer: true}.ToUint16(),
-	Timestamp:  0,
+	ID:        ToUint128(2),
+	PendingID: ToUint128(1),
+	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
+	Timestamp: 0,
 }
 transfersRes, err = client.CreateTransfers([]Transfer{transfer})
 // error handling omitted
@@ -406,7 +411,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```go
-transfers, err := client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
+transfers, err = client.LookupTransfers([]Uint128{ToUint128(1), ToUint128(2)})
 if err != nil {
 	log.Printf("Could not fetch transfers: %s", err)
 	return
@@ -427,14 +432,14 @@ reverse-chronological order.
 
 ```go
 filter := GetAccountTransfers{
-		AccountID: ToUint128(2),
-		Timestamp: 0, // No filter by Timestamp.
-		Limit:     10, // Limit to ten transfers at most.
-		Flags:     GetAccountTransfersFlags{
-			Debits:    true, // Include transfer from the debit side.
-			Credits:   true, // Include transfer from the credit side.
-			Reversed:  true, // Sort by timestamp in reverse-chronological order.
-		}.ToUint32(),
+	AccountID: ToUint128(2),
+	Timestamp: 0,  // No filter by Timestamp.
+	Limit:     10, // Limit to ten transfers at most.
+	Flags: GetAccountTransfersFlags{
+		Debits:   true, // Include transfer from the debit side.
+		Credits:  true, // Include transfer from the credit side.
+		Reversed: true, // Sort by timestamp in reverse-chronological order.
+	}.ToUint32(),
 }
 transfers, err = client.GetAccountTransfers(filter)
 if err != nil {
@@ -467,25 +472,25 @@ batch := []Transfer{}
 linkedFlag := TransferFlags{Linked: true}.ToUint16()
 
 // An individual transfer (successful):
-batch = append(batch, Transfer{ID: ToUint128(1), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(1) /* ... rest of transfer ... */})
 
 // A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
-batch = append(batch, Transfer{ID: ToUint128(2), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
-batch = append(batch, Transfer{ID: ToUint128(3), /* ... , */ Flags: linkedFlag }) // Commit/rollback.
-batch = append(batch, Transfer{ID: ToUint128(2), /* ... , */ Flags: linkedFlag }) // Fail with exists
-batch = append(batch, Transfer{ID: ToUint128(4), /* ... , */ }) // Fail without committing
+batch = append(batch, Transfer{ID: ToUint128(2) /* ... , */, Flags: linkedFlag}) // Commit/rollback.
+batch = append(batch, Transfer{ID: ToUint128(3) /* ... , */, Flags: linkedFlag}) // Commit/rollback.
+batch = append(batch, Transfer{ID: ToUint128(2) /* ... , */, Flags: linkedFlag}) // Fail with exists
+batch = append(batch, Transfer{ID: ToUint128(4) /* ... , */})                    // Fail without committing
 
 // An individual transfer (successful):
 // This should not see any effect from the failed chain above.
-batch = append(batch, Transfer{ID: ToUint128(2), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(2) /* ... rest of transfer ... */})
 
 // A chain of 2 transfers (the first transfer fails the chain):
-batch = append(batch, Transfer{ID: ToUint128(2), /* ... rest of transfer ... */ Flags: linkedFlag })
-batch = append(batch, Transfer{ID: ToUint128(3), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(2) /* ... rest of transfer ... */, Flags: linkedFlag})
+batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */})
 
 // A chain of 2 transfers (successful):
-batch = append(batch, Transfer{ID: ToUint128(3), /* ... rest of transfer ... */ Flags: linkedFlag })
-batch = append(batch, Transfer{ID: ToUint128(4), /* ... rest of transfer ... */ })
+batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
+batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
 
 transfersRes, err = client.CreateTransfers(batch)
 ```

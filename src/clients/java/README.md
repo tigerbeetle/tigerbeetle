@@ -88,7 +88,7 @@ package com.tigerbeetle.samples;
 import com.tigerbeetle.*;
 
 public final class Main {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         System.out.println("Import ok!");
     }
 }
@@ -132,23 +132,11 @@ replica. The address is read from the `TB_ADDRESS`
 environment variable and defaults to port `3000`.
 
 ```java
-var replicaAddress = System.getenv("TB_ADDRESS");
+String replicaAddress = System.getenv("TB_ADDRESS");
 byte[] clusterID = UInt128.asBytes(0);
 String[] replicaAddresses = new String[] {replicaAddress == null ? "3000" : replicaAddress};
-Client client = new Client(
-  clusterID,
-  replicaAddresses
-);
-```
-
-If you create a `Client` like this, don't forget to call
-`client.close()` when you are done with it. Otherwise you
-can use the
-[try-with-resources](https://docs.oracle.com/javase/tutorial/essential/exceptions/tryResourceClose.html)
-syntax:
-```java
-try (var client = new Client(...)) {
-  // Use client
+try (var client = new Client(clusterID, replicaAddresses)) {
+    // Use client
 }
 ```
 
@@ -232,32 +220,16 @@ See all error conditions in the [create_accounts
 reference](https://docs.tigerbeetle.com/reference/operations/create_accounts).
 
 ```java
-accounts = new AccountBatch(3);
-
-// First account
-accounts.add();
-// Code to fill out fields for first account
-
-// Second account
-accounts.add();
-// Code to fill out fields for second account
-
-// Third account
-accounts.add();
-// Code to fill out fields for third account
-
-accountErrors = client.createAccounts(accounts);
 while (accountErrors.next()) {
     switch (accountErrors.getResult()) {
         case Exists:
             System.err.printf("Account at %d already exists.\n",
-                accountErrors.getIndex());
+                    accountErrors.getIndex());
             break;
 
         default:
             System.err.printf("Error creating account at %d: %s\n",
-                accountErrors.getIndex(),
-                accountErrors.getResult());
+                    accountErrors.getIndex(), accountErrors.getResult());
             break;
     }
 }
@@ -322,13 +294,12 @@ while (transferErrors.next()) {
     switch (transferErrors.getResult()) {
         case ExceedsCredits:
             System.err.printf("Transfer at %d exceeds credits.\n",
-                transferErrors.getIndex());
+                    transferErrors.getIndex());
             break;
 
         default:
             System.err.printf("Error creating transfer at %d: %s\n",
-                transferErrors.getIndex(),
-                transferErrors.getResult());
+                    transferErrors.getIndex(), transferErrors.getResult());
             break;
     }
 }
@@ -342,20 +313,20 @@ you. So, for example, you *can* insert 1 million transfers
 one at a time like so:
 
 ```java
-var transferIds = new long[]{100, 101, 102};
-var debitIds = new long[]{1, 2, 3};
-var creditIds = new long[]{4, 5, 6};
-var amounts = new long[]{1000, 29, 11};
+var transferIds = new long[] {100, 101, 102};
+var debitIds = new long[] {1, 2, 3};
+var creditIds = new long[] {4, 5, 6};
+var amounts = new long[] {1000, 29, 11};
 for (int i = 0; i < transferIds.length; i++) {
-  TransferBatch batch = new TransferBatch(1);
-  batch.add();
-  batch.setId(transferIds[i]);
-  batch.setDebitAccountId(debitIds[i]);
-  batch.setCreditAccountId(creditIds[i]);
-  batch.setAmount(amounts[i]);
+    TransferBatch batch = new TransferBatch(1);
+    batch.add();
+    batch.setId(transferIds[i]);
+    batch.setDebitAccountId(debitIds[i]);
+    batch.setCreditAccountId(creditIds[i]);
+    batch.setAmount(amounts[i]);
 
-  CreateTransferResultBatch errors = client.createTransfers(batch);
-  // error handling omitted
+    CreateTransferResultBatch errors = client.createTransfers(batch);
+    // error handling omitted
 }
 ```
 
@@ -368,18 +339,18 @@ is 8190.
 ```java
 var BATCH_SIZE = 8190;
 for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
-  TransferBatch batch = new TransferBatch(BATCH_SIZE);
+    TransferBatch batch = new TransferBatch(BATCH_SIZE);
 
-  for (int j = 0; j < BATCH_SIZE && i + j < transferIds.length; j++) {
-    batch.add();
-    batch.setId(transferIds[i+j]);
-    batch.setDebitAccountId(debitIds[i+j]);
-    batch.setCreditAccountId(creditIds[i+j]);
-    batch.setAmount(amounts[i+j]);
-  }
+    for (int j = 0; j < BATCH_SIZE && i + j < transferIds.length; j++) {
+        batch.add();
+        batch.setId(transferIds[i + j]);
+        batch.setDebitAccountId(debitIds[i + j]);
+        batch.setCreditAccountId(creditIds[i + j]);
+        batch.setAmount(amounts[i + j]);
+    }
 
-  CreateTransferResultBatch errors = client.createTransfers(batch);
-  // error handling omitted
+    CreateTransferResultBatch errors = client.createTransfers(batch);
+    // error handling omitted
 }
 ```
 
@@ -534,7 +505,8 @@ transfers = new TransferBatch(10);
 transfers.add();
 transfers.setId(1);
 
-// A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
+// A chain of 4 transfers (the last transfer in the chain closes the chain with
+// linked=false):
 transfers.add();
 transfers.setId(2); // Commit/rollback.
 transfers.setFlags(TransferFlags.LINKED);

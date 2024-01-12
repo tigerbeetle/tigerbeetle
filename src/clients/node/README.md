@@ -28,6 +28,7 @@ Now, create `main.js` and copy this into it:
 
 ```javascript
 const { createClient } = require("tigerbeetle-node");
+
 console.log("Import ok!");
 ```
 
@@ -79,7 +80,7 @@ environment variable and defaults to port `3000`.
 ```javascript
 const client = createClient({
   cluster_id: 0n,
-  replica_addresses: [process.env.TB_ADDRESS || '3000']
+  replica_addresses: [process.env.TB_ADDRESS || "3000"],
 });
 ```
 
@@ -162,7 +163,8 @@ let account1 = {
   timestamp: 0n,
   flags: 0,
 };
-account0.flags = AccountFlags.linked | AccountFlags.debits_must_not_exceed_credits;
+account0.flags = AccountFlags.linked |
+  AccountFlags.debits_must_not_exceed_credits;
 accountErrors = await client.createAccounts([account0, account1]);
 ```
 
@@ -229,9 +231,13 @@ for (const error of accountErrors) {
   switch (error.result) {
     case CreateAccountError.exists:
       console.error(`Batch account at ${error.index} already exists.`);
-	  break;
+      break;
     default:
-      console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
+      console.error(
+        `Batch account at ${error.index} failed to create: ${
+          CreateAccountError[error.result]
+        }.`,
+      );
   }
 }
 ```
@@ -282,7 +288,7 @@ See details for transfer fields in the [Transfers
 reference](https://docs.tigerbeetle.com/reference/transfers).
 
 ```javascript
-let transfer = {
+let transfers = [{
   id: 1n,
   debit_account_id: 102n,
   credit_account_id: 103n,
@@ -296,8 +302,8 @@ let transfer = {
   code: 720,
   flags: 0,
   timestamp: 0n,
-};
-let transferErrors = await client.createTransfers([transfer]);
+}];
+let transferErrors = await client.createTransfers(transfers);
 ```
 
 ### Response and Errors
@@ -316,9 +322,13 @@ for (const error of transferErrors) {
   switch (error.result) {
     case CreateTransferError.exists:
       console.error(`Batch transfer at ${error.index} already exists.`);
-	  break;
+      break;
     default:
-      console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
+      console.error(
+        `Batch transfer at ${error.index} failed to create: ${
+          CreateTransferError[error.result]
+        }.`,
+      );
   }
 }
 ```
@@ -351,7 +361,9 @@ is 8190.
 ```javascript
 const BATCH_SIZE = 8190;
 for (let i = 0; i < transfers.length; i += BATCH_SIZE) {
-  const transferErrors = await client.createTransfers(transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)));
+  const transferErrors = await client.createTransfers(
+    transfers.slice(i, Math.min(transfers.length, BATCH_SIZE)),
+  );
   // error handling omitted
 }
 ```
@@ -528,7 +540,7 @@ the same as the order of `id`s in the request. You can refer to the
 `id` field in the response to distinguish transfers.
 
 ```javascript
-const transfers = await client.lookupTransfers([1n, 2n]);
+transfers = await client.lookupTransfers([1n, 2n]);
 console.log(transfers);
 /*
  * [{
@@ -568,8 +580,8 @@ let filter = {
   flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
     GetAccountTransfersFlags.credits | // Include transfer from the credit side.
     GetAccountTransfersFlags.reversed, // Sort by timestamp in reverse-chronological order.
-}
-const account_transfers = await client.getAccountTransfers(filter)
+};
+const account_transfers = await client.getAccountTransfers(filter);
 ```
 
 ## Linked Events
@@ -602,7 +614,7 @@ batch.push({ id: 1n /* , ... */ });
 batch.push({ id: 2n, /* ..., */ flags: linkedFlag }); // Commit/rollback.
 batch.push({ id: 3n, /* ..., */ flags: linkedFlag }); // Commit/rollback.
 batch.push({ id: 2n, /* ..., */ flags: linkedFlag }); // Fail with exists
-batch.push({ id: 4n, /* ..., */ flags: 0 });          // Fail without committing.
+batch.push({ id: 4n, /* ..., */ flags: 0 }); // Fail without committing.
 
 // An individual transfer (successful):
 // This should not see any effect from the failed chain above.
