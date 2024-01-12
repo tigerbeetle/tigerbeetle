@@ -108,9 +108,9 @@ Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com
 
 ## Hacking on Clients
 
-Each client is build using language specific tooling (`npm`, `maven`, `dotnet`, and `go`), and links
+Each client is built using language-specific tooling (`npm`, `maven`, `dotnet`, and `go`), and links
 to a native library built with Zig. This is quite a zoo! To complicate things, some languages
-trigger native build automatically, while others require manually running `./zig/zig build
+trigger the native build automatically, while others require manually running `./zig/zig build
 lang_client`.
 
 See `client/$LANG/ci.zig` scripts for exact commands we use on CI to build clients.
