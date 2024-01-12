@@ -147,10 +147,12 @@ const Generator = struct {
         const root = try git_root(self.arena);
         self.walkthrough = try std.fs.cwd().readFileAlloc(
             self.arena.allocator(),
-            self.sprintf("{s}/src/clients/{s}/samples/walkthrough/{s}", .{
+            self.sprintf("{s}/src/clients/{s}/samples/walkthrough/{s}{s}.{s}", .{
                 root,
                 self.language.directory,
-                self.language.walkthrough,
+                self.language.test_source_path,
+                self.test_file_name,
+                self.language.extension,
             }),
             1024 * 1024,
         );
@@ -311,8 +313,6 @@ const Generator = struct {
             \\up, let's dig into using TigerBeetle.
             ,
         );
-
-        mw.paragraph(language.install_documentation);
 
         mw.header(2, "Sample projects");
         mw.paragraph(
