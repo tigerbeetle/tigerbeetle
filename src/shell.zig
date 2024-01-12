@@ -243,6 +243,23 @@ fn subdir_exists(dir: std.fs.Dir, path: []const u8) !bool {
     return stat.kind == .directory;
 }
 
+pub fn file_ensure_content(
+    shell: *Shell,
+    path: []const u8,
+    content: []const u8,
+) !enum { unchanged, updated } {
+    const max_bytes = 1024 * 1024;
+    const content_current = shell.cwd.readFileAlloc(shell.gpa, path, max_bytes) catch null;
+    defer if (content_current) |slice| shell.gpa.free(slice);
+
+    if (content_current != null and std.mem.eql(u8, content_current.?, content)) {
+        return .unchanged;
+    }
+
+    try shell.cwd.writeFile(path, content);
+    return .updated;
+}
+
 const FindOptions = struct {
     where: []const []const u8,
     extension: ?[]const u8 = null,

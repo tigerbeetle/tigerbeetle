@@ -34,7 +34,7 @@ pub const GoDocs = Docs{
     .project_file = "",
     .project_file_name = "",
 
-    .test_file_name = "",
+    .test_file_name = "main",
 
     .install_commands =
     \\go mod init tbtest

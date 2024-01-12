@@ -3,13 +3,13 @@
 ## Documentation
 
 Documentation for clients (i.e. client `README.md`s) are generated
-from [docs_generate.zig](./docs_generate.zig).
+from [../scripts/client_readmes.zig](../scripts/client_readmes.zig).
 
 Each client implements the `Docs` struct from
 [docs_types.zig](./docs_types.zig).
 
 The template for the README is in code in
-[docs_generate.zig](./docs_generate.zig).
+[../scripts/client_readmes.zig](../scripts/client_readmes.zig).
 
 Existing `Docs` struct implementations are in:
 
@@ -34,21 +34,15 @@ script on Windows.
 To build and run the client docs generator:
 
 ```console
-./zig/zig build client_docs --
+./zig/zig build scripts -- ci
 ```
-
-Note: Omitting the `--` will only build, not run the client_docs script.
 
 ### Just one language
 
 To run the generator only for a certain language (defined by `.markdown_name`):
 
 ```console
-./zig/zig build client_docs -- --language=node
-```
-
-```console
-./zig/zig build client_docs -- --language=node,go
+./zig/zig build scripts -- ci --language=go
 ```
 
 Docs are only regenerated/modified when there would be a diff so the
