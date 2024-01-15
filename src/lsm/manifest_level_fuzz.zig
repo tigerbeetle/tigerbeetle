@@ -34,9 +34,10 @@ const lsm = @import("tree.zig");
 const allocator = fuzz.allocator;
 
 const Key = u64;
-const Value = struct {
+const Value = packed struct(u128) {
     key: Key,
     tombstone: bool,
+    padding: u63 = 0,
 };
 
 inline fn key_from_value(value: *const Value) Key {
@@ -64,9 +65,7 @@ const Table = @import("table.zig").TableType(
 
 pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
 
-pub fn main() !void {
-    const args = try fuzz.parse_fuzz_args(allocator);
-
+pub fn main(args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
     const random = prng.random();
 
@@ -233,7 +232,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
             TableInfo,
             table_count_max,
         );
-        pub const TableInfo = @import("manifest.zig").TableInfoType(Table);
+        pub const TableInfo = @import("manifest.zig").TreeTableInfoType(Table);
         pool: NodePool,
         level: ManifestLevel,
         buffer: TableBuffer,
@@ -366,6 +365,7 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 .snapshot_min = env.snapshot,
                 .key_min = new_key_min,
                 .key_max = new_key_max,
+                .value_count = 64,
             };
         }
 
@@ -448,7 +448,8 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 env.mark_removed_table(level_table);
 
                 assert(level_table.invisible(&snapshots));
-                env.level.remove_table_invisible(&env.pool, &snapshots, level_table);
+                var level_table_copy = level_table.*;
+                env.level.remove_table(&env.pool, &level_table_copy);
 
                 remove_amount -= 1;
                 if (remove_amount == 0) break;
@@ -471,8 +472,8 @@ pub fn EnvironmentType(comptime table_count_max: u32, comptime node_size: u32) t
                 env.mark_removed_table(level_table);
 
                 assert(level_table.visible(lsm.snapshot_latest));
-                const removed = env.level.remove_table_visible(&env.pool, level_table);
-                assert(removed.equal(level_table));
+                var level_table_copy = level_table.*;
+                env.level.remove_table(&env.pool, &level_table_copy);
 
                 remove_amount -= 1;
                 if (remove_amount == 0) break;
