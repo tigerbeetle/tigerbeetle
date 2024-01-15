@@ -7,7 +7,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: zig/zig build lint
     env:
@@ -16,19 +16,19 @@ jobs:
   docs_link_spellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./.github/ci/docs_check.sh
 
   test_on_alpine:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./.github/ci/tests_on_alpine.sh
 
   test_on_ubuntu:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: |
           COV=1 ./.github/ci/tests_on_ubuntu.sh && \
           (cp kcov-output/test.*/cobertura.xml cov-pr.xml) || true
@@ -46,10 +46,10 @@ jobs:
   #   continue-on-error: true
   #   steps:
   #     # Check out the PR, copy the tests_on_ubuntu.sh from there, checkout main.
-  #     - uses: actions/checkout@v3
+  #     - uses: actions/checkout@v4
   #     - run: cp ./.github/ci/tests_on_ubuntu.sh /tmp/tests_on_ubuntu.sh
   #     - run: cp ./build.zig /tmp/build.zig
-  #     - uses: actions/checkout@v3
+  #     - uses: actions/checkout@v4
   #       with:
   #         ref: 'main'
 
@@ -83,8 +83,8 @@ jobs:
   #   needs: [test_on_ubuntu, test_on_ubuntu_main]
   #   continue-on-error: true
   #   steps:
-  #     - uses: actions/checkout@v3
-  #     - uses: actions/checkout@v3
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v4
   #       with:
   #         ref: 'main'
   #         path: 'tigerbeetle-main'
@@ -132,27 +132,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/benchmark.sh --transfer-count=4000
 
   aof:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: ./.github/ci/test_aof.sh
 
   c_sample:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: zig/zig build c_sample -Drelease
 
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: zig/zig build fuzz -- smoke
 
@@ -162,7 +162,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - run: ./scripts/install_zig.sh
@@ -176,7 +176,7 @@ jobs:
   simulate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: zig/zig build simulator_run -Dsimulator-state-machine=accounting -Drelease -- ${{ github.sha }}
       - run: zig/zig build simulator_run -Dsimulator-state-machine=testing    -Drelease -- ${{ github.sha }}
