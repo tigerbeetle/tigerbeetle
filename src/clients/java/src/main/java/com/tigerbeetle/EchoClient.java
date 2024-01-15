@@ -11,15 +11,13 @@ public final class EchoClient implements AutoCloseable {
         this.nativeClient = NativeClient.initEcho(clusterID, replicaAddresses, concurrencyMax);
     }
 
-    public AccountBatch echo(final AccountBatch batch)
-            throws ConcurrencyExceededException, RequestException {
+    public AccountBatch echo(final AccountBatch batch) throws ConcurrencyExceededException {
         final var request = BlockingRequest.echo(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
     }
 
-    public TransferBatch echo(final TransferBatch batch)
-            throws ConcurrencyExceededException, RequestException {
+    public TransferBatch echo(final TransferBatch batch) throws ConcurrencyExceededException {
         final var request = BlockingRequest.echo(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
