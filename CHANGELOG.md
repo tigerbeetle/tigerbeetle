@@ -1,5 +1,88 @@
 # TigerBeetle Changelog
 
+## 2024-01-15
+
+Welcome to 2024!
+
+### Safety And Performance
+
+- [#1425](https://github.com/tigerbeetle/tigerbeetle/pull/1425),
+  [#1412](https://github.com/tigerbeetle/tigerbeetle/pull/1412),
+  [#1410](https://github.com/tigerbeetle/tigerbeetle/pull/1410),
+  [#1408](https://github.com/tigerbeetle/tigerbeetle/pull/1408),
+  [#1395](https://github.com/tigerbeetle/tigerbeetle/pull/1395).
+
+  Run more fuzzers directly in CI as a part of not rocket science package.
+
+- [#1413](https://github.com/tigerbeetle/tigerbeetle/pull/1413)
+
+   Formalize some ad-hoc testing practices as proper integration tests (that is, tests that interact
+   with a `tigerbeetle` binary through IPC).
+
+- [#1404](https://github.com/tigerbeetle/tigerbeetle/pull/1404)
+
+   Add a lint check for unused Zig files.
+
+- [#1390](https://github.com/tigerbeetle/tigerbeetle/pull/1390)
+
+  Improve cluster availability by including conservative information about the current view into
+  ping-pong messages. In particular, prevent the cluster from getting stuck when all replicas become
+  primaries for different views.
+
+- [#1365](https://github.com/tigerbeetle/tigerbeetle/pull/1365)
+
+  Test both the latest and the oldest supported Java version on CI.
+
+- [#1389](https://github.com/tigerbeetle/tigerbeetle/pull/1389)
+
+  Fix a data race on close in the Java client.
+
+### Features
+
+- [#1403](https://github.com/tigerbeetle/tigerbeetle/pull/1403)
+
+  Make binaries on Linux about six times smaller (12MiB -> 2MiB). Turns `tigerbeetle` was
+  accidentally including 10 megabytes worth of debug info! Note that unfortunately stripping _all_
+  debug info also prevents getting a nice stack trace in case of a crash. We are working on finding
+  the minimum amount of debug information required to get _just_ the stack traces.
+
+- [#1423](https://github.com/tigerbeetle/tigerbeetle/pull/1423),
+  [#1426](https://github.com/tigerbeetle/tigerbeetle/pull/1426).
+
+  Cleanup error handling API for Java client to never surface internal errors as checked exceptions.
+
+- [#1405](https://github.com/tigerbeetle/tigerbeetle/pull/1405)
+
+  Add example for setting up TigerBeetle as a systemd service.
+
+- [#1400 ](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
+
+  Drop support for .Net Standard 2.1.
+
+- [#1397](https://github.com/tigerbeetle/tigerbeetle/pull/1397)
+
+  Don't exit repl on `help` command.
+
+### Internals
+
+- [#1422](https://github.com/tigerbeetle/tigerbeetle/pull/1422),
+  [#1420](https://github.com/tigerbeetle/tigerbeetle/pull/1420),
+  [#1417](https://github.com/tigerbeetle/tigerbeetle/pull/1417)
+
+  Overhaul documentation-testing infrastructure to reduce code duplication.
+
+- [#1398](https://github.com/tigerbeetle/tigerbeetle/pull/1398)
+
+  Don't test NodeJS client on platforms for which there are no simple upstream installation scripts.
+
+- [#1388](https://github.com/tigerbeetle/tigerbeetle/pull/1388)
+
+  Use histogram in the benchmark script to reduce memory usage.
+
+### TigerTracks 🎧
+
+- [Stripped](https://open.spotify.com/track/20BDMQu40KIUxUeFusq6eq)
+
 ## 2023-12-20
 
 _“The exception confirms the rule in cases not excepted."_ ― Cicero.
