@@ -2,10 +2,12 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
-const stdx = @import("./stdx.zig");
 const fs = std.fs;
 const mem = std.mem;
 const math = std.math;
+
+const stdx = @import("./stdx.zig");
+const Shell = @import("./shell.zig");
 
 test "tidy" {
     const allocator = std.testing.allocator;
@@ -211,6 +213,51 @@ test "tidy naughty list" {
             return err;
         };
     }
+}
+
+test "tidy no large blobs" {
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const MiB = 1024 * 1024;
+    const rev_list = try shell.exec_stdout_options(
+        .{ .max_output_bytes = 50 * MiB },
+        "git rev-list --objects HEAD",
+        .{},
+    );
+    const objects = try shell.exec_stdout_options(
+        .{ .max_output_bytes = 50 * MiB, .stdin_slice = rev_list },
+        "git cat-file --batch-check={format}",
+        .{ .format = "%(objecttype) %(objectname) %(objectsize) %(rest)" },
+    );
+
+    var has_large_blobs = false;
+
+    var lines = std.mem.split(u8, objects, "\n");
+    while (lines.next()) |line| {
+        // Parsing lines like
+        //     blob 1e14bf1d29c316a8f41063d3db82209e8041f07a 1032 client/package.json
+        var blob = stdx.cut_prefix(line, "blob ") orelse continue;
+
+        var cut = stdx.cut(blob, " ").?;
+        const hash = cut.prefix;
+        blob = cut.suffix;
+
+        cut = stdx.cut(blob, " ").?;
+        const size = try std.fmt.parseInt(u64, cut.prefix, 10);
+        const path = cut.suffix;
+
+        _ = hash;
+
+        if (std.mem.eql(u8, path, "src/vsr/replica.zig")) continue; // :-)
+        if (std.mem.eql(u8, path, "src/docs_website/package-lock.json")) continue; // :-(
+        if (size > @divExact(MiB, 4)) {
+            has_large_blobs = true;
+            std.debug.print("{s}\n", .{line});
+        }
+    }
+    if (has_large_blobs) return error.HasLargeBlobs;
 }
 
 fn banned(source: []const u8) ?[]const u8 {

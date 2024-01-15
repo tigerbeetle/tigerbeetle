@@ -171,6 +171,14 @@ pub fn cut(haystack: []const u8, needle: []const u8) ?Cut {
     };
 }
 
+pub fn cut_prefix(haystack: []const u8, needle: []const u8) ?[] const u8 {
+    if (std.mem.startsWith(u8, haystack, needle)) {
+        return haystack[needle.len..];
+    }
+    return null;
+}
+
+
 /// `maybe` is the dual of `assert`: it signals that condition is sometimes true
 ///  and sometimes false.
 ///

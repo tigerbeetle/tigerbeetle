@@ -422,6 +422,23 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
 ///
 /// Trims the trailing newline, if any.
 pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) ![]const u8 {
+    return shell.exec_stdout_options(.{}, cmd, cmd_args);
+}
+
+/// Run the command and return its stdout.
+///
+/// Returns an error if the command exists with a non-zero status or a non-empty stderr.
+///
+/// Trims the trailing newline, if any.
+pub fn exec_stdout_options(
+    shell: *Shell,
+    options: struct {
+        stdin_slice: ?[]const u8 = null,
+        max_output_bytes: usize = 50 * 1024,
+    },
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) ![]const u8 {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
@@ -431,28 +448,63 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     const cwd_path = try shell.cwd.realpath(".", &buffer);
 
-    const child = try std.ChildProcess.exec(.{
-        .allocator = shell.arena.allocator(),
-        .argv = argv.slice(),
-        .cwd = cwd_path,
-    });
-    defer shell.arena.allocator().free(child.stderr);
+    var child = std.ChildProcess.init(argv.slice(), shell.arena.allocator());
+    child.stdin_behavior = if (options.stdin_slice == null) .Ignore else .Pipe;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.cwd = cwd_path;
+
+    var stdout = std.ArrayList(u8).init(shell.gpa);
+    var stderr = std.ArrayList(u8).init(shell.gpa);
+    defer {
+        stdout.deinit();
+        stderr.deinit();
+    }
+
+    try child.spawn();
+    defer {
+        _ = child.kill() catch {};
+    }
+
+    var stdin_writer: ?std.Thread = null;
+    defer if (stdin_writer) |thread| thread.join();
+
+    if (options.stdin_slice) |stdin_slice| {
+        assert(child.stdin != null);
+
+        stdin_writer = try std.Thread.spawn(
+            .{},
+            struct {
+                fn write_stdin(destination: std.fs.File, source: []const u8) void {
+                    defer destination.close();
+
+                    destination.writeAll(source) catch {};
+                }
+            }.write_stdin,
+            .{ child.stdin.?, stdin_slice },
+        );
+        child.stdin = null;
+    }
+
+    try child.collectOutput(&stdout, &stderr, options.max_output_bytes);
+    const term = try child.wait();
     errdefer {
         log.err("command failed", .{});
         echo_command(argv.slice());
-        log.err("stdout:\n{s}\nstderr:\n{s}", .{ child.stdout, child.stderr });
+        log.err("stdout:\n{s}\nstderr:\n{s}", .{ stdout.items, stderr.items });
     }
 
-    switch (child.term) {
+    switch (term) {
         .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
         else => return error.CommandFailed,
     }
 
-    const trailing_newline = if (std.mem.indexOf(u8, child.stdout, "\n")) |first_newline|
-        first_newline == child.stdout.len - 1
+    const trailing_newline = if (std.mem.indexOf(u8, stdout.items, "\n")) |first_newline|
+        first_newline == stdout.items.len - 1
     else
         false;
-    return child.stdout[0 .. child.stdout.len - if (trailing_newline) @as(usize, 1) else 0];
+    const len_without_newline = stdout.items.len - if (trailing_newline) @as(usize, 1) else 0;
+    return shell.arena.allocator().dupe(u8, stdout.items[0..len_without_newline]);
 }
 
 /// Run the command and return its status, stderr and stdout. The caller is responsible for checking
