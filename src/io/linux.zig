@@ -1057,9 +1057,6 @@ pub const IO = struct {
                     // <https://github.com/torvalds/linux/blob/7da71072e1d6967c0482abcbb5991ffb5953fdf2/block/bdev.c#L932>
                     flags |= os.O.EXCL;
                 }
-                // TODO: Do a check using `method` to avoid overwriting existing data on a block device
-                //       .create doesn't really make sense for a block device, so we unconditionally
-                //       open for now
                 log.info("opening block device \"{s}\"...", .{relative_path});
             },
             .file => {
@@ -1200,6 +1197,31 @@ pub const IO = struct {
                             std.fmt.fmtIntSizeBin(block_device_size),
                         },
                     );
+                }
+
+                if (method == .create or method == .create_or_open) {
+                    // Check that the first superblock_zone_size bytes are 0.
+                    // - It'll ensure that the block device is not directly TigerBeetle.
+                    // - It'll be very likely to catch any cases where there's an existing
+                    //   other filesystem.
+                    // - In the case of there being a partition table (eg, two partitions,
+                    //   one starting at 0MB, one at 1024MB) and the operator tries to format
+                    //   the raw disk (/dev/sda) while a partition later is
+                    //   TigerBeetle (/dev/sda2) it'll be blocked by the MBR/GPT existing.
+                    const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
+                    var read_buf: [superblock_zone_size]u8 align(constants.sector_size) = undefined;
+
+                    // We can do this without worrying about retrying partial reads because on linux,
+                    // read(2) on block devices can not be interrupted by signals. See signal(7).
+                    assert(superblock_zone_size == try os.read(fd, &read_buf));
+                    if (!std.mem.allEqual(u8, &read_buf, 0)) {
+                        @panic(
+                            "Superblock on block device not empty. If this is the correct block device to use, please format it first.",
+                        );
+                    }
+                    // Reset position in the block device to compensate for read(2).
+                    try os.lseek_CUR(fd, -superblock_zone_size);
+                    assert(try os.lseek_CUR_get(fd) == 0);
                 }
             },
         }
