@@ -104,7 +104,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CreateAccountResultBatch createAccounts(final AccountBatch batch)
-            throws ConcurrencyExceededException, RequestException {
+            throws ConcurrencyExceededException {
         final var request = BlockingRequest.createAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -142,8 +142,7 @@ public final class Client implements AutoCloseable {
      *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBatch lookupAccounts(final IdBatch batch)
-            throws ConcurrencyExceededException, RequestException {
+    public AccountBatch lookupAccounts(final IdBatch batch) throws ConcurrencyExceededException {
         final var request = BlockingRequest.lookupAccounts(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -183,7 +182,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public CreateTransferResultBatch createTransfers(final TransferBatch batch)
-            throws ConcurrencyExceededException, RequestException {
+            throws ConcurrencyExceededException {
         final var request = BlockingRequest.createTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -221,8 +220,7 @@ public final class Client implements AutoCloseable {
      *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
-    public TransferBatch lookupTransfers(final IdBatch batch)
-            throws ConcurrencyExceededException, RequestException {
+    public TransferBatch lookupTransfers(final IdBatch batch) throws ConcurrencyExceededException {
         final var request = BlockingRequest.lookupTransfers(this.nativeClient, batch);
         request.beginRequest();
         return request.waitForResult();
@@ -260,7 +258,7 @@ public final class Client implements AutoCloseable {
      * @throws IllegalStateException if this client is closed.
      */
     public TransferBatch getAccountTransfers(final AccountTransfers filter)
-            throws ConcurrencyExceededException, RequestException {
+            throws ConcurrencyExceededException {
         final var request = BlockingRequest.getAccountTransfers(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
