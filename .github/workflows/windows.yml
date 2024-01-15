@@ -7,12 +7,12 @@ jobs:
   benchmark:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: .\scripts\benchmark.bat --transfer-count=4000
 
   c_sample:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: .\scripts\install_zig.bat
       - run: .\zig\zig build c_sample
