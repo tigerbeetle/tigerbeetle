@@ -18,8 +18,8 @@ public sealed class RequestException : Exception
             switch (Status)
             {
                 case PacketStatus.TooMuchData: return "Too much data provided on this batch.";
-                case PacketStatus.InvalidOperation: return "Invalid operation. Check if this client is compatible with the server's version.";
-                case PacketStatus.InvalidDataSize: return "Invalid data size. Check if this client is compatible with the server's version.";
+                case PacketStatus.InvalidOperation: return "Invalid operation.";
+                case PacketStatus.InvalidDataSize: return "Invalid data size.";
                 default: return "Unknown error status " + Status;
             }
         }
