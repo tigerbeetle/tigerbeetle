@@ -1315,12 +1315,11 @@ pub fn StateMachineType(
 
             return .{
                 .accounts = .{
-                    .prefetch_entries_max = @max(
-                        // create_account()/lookup_account() looks up 1 AccountImmutable per item.
-                        batch_accounts_max,
-                        // create_transfer()/post_or_void_pending_transfer() looks up 2
-                        // AccountImmutables for every transfer.
-                        2 * batch_transfers_max,
+                    // lookup_account() looks up 1 AccountImmutable per item.
+                    .prefetch_entries_for_read_max = batch_accounts_max,
+                    .prefetch_entries_for_update_max = @max(
+                        batch_accounts_max, // create_account()
+                        2 * batch_transfers_max, // create_transfer(), debit and credit accounts
                     ),
                     .cache_entries_max = options.cache_entries_accounts,
                     .tree_options_object = .{},
@@ -1338,8 +1337,11 @@ pub fn StateMachineType(
                     },
                 },
                 .transfers = .{
-                    // *2 to fetch pending and post/void transfer.
-                    .prefetch_entries_max = 2 * batch_transfers_max,
+                    // lookup_transfer() looks up 1 Transfer.
+                    // create_transfer() looks up at most 1 Transfer for posting/voiding.
+                    .prefetch_entries_for_read_max = batch_transfers_max,
+                    // create_transfer() updates a single Transfer.
+                    .prefetch_entries_for_update_max = batch_transfers_max,
                     .cache_entries_max = options.cache_entries_transfers,
                     .tree_options_object = .{},
                     .tree_options_id = .{},
@@ -1357,7 +1359,10 @@ pub fn StateMachineType(
                     },
                 },
                 .posted = .{
-                    .prefetch_entries_max = batch_transfers_max,
+                    // Nothing lookups posted groove.
+                    .prefetch_entries_for_read_max = 0,
+                    // create_transfer() posts/voids at most one transfer.
+                    .prefetch_entries_for_update_max = batch_transfers_max,
                     .cache_entries_max = options.cache_entries_posted,
                     .tree_options_object = .{},
                     .tree_options_id = {},
