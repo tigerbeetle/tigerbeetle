@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ !(github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           rev: release # Use the 'release' branch even if triggered by cron.
 

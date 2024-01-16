@@ -13,7 +13,7 @@ jobs:
         target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build test
       - run: ./scripts/install.sh
@@ -25,7 +25,7 @@ jobs:
         target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/benchmark.sh --transfer-count=4000
 
   c_sample:
@@ -34,6 +34,6 @@ jobs:
         target: [macos-13]
     runs-on: ${{ matrix.target }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build c_sample -Drelease
