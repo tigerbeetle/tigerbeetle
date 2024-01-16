@@ -268,8 +268,8 @@ Beyond these rules:
 * Callbacks go last in the list of parameters. This mirrors control flow: callbacks are also
   _invoked_ last.
 
-* More generally, _order_ matters for readability even if it doesn't affect semantics. On the
-  initial scan, a file is read top-down, so put important things near the top. The `main` function
+* _Order_ matters for readability (even if it doesn't affect semantics). On the
+  first read, a file is read top-down, so put important things near the top. The `main` function
   goes first.
 
   At the same time, not everything has a single right order. When in doubt, consider sorting
