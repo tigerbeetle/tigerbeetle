@@ -99,7 +99,7 @@ Again, the second transfer is rejected because it was never created.
 ```bash
 zig/zig run src/demos/demo_05_post_pending_transfers.zig --deps vsr --mod vsr::src/vsr.zig
 # At this point, Account[1] has reached its credit limit (no more debit transfers allowed).
-zig/zig run src/demos/demo_02_lookup_accountsf.zig --deps vsr --mod vsr::src/vsr.zig
+zig/zig run src/demos/demo_02_lookup_accounts.zig --deps vsr --mod vsr::src/vsr.zig
 ```
 
 Let's also pretend someone else tried to void the pending transfer concurrently:
