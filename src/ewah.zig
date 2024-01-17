@@ -5,6 +5,7 @@ const mem = std.mem;
 const stdx = @import("stdx.zig");
 const div_ceil = stdx.div_ceil;
 const disjoint_slices = stdx.disjoint_slices;
+const maybe = stdx.maybe;
 
 /// Encode or decode a bitset using Daniel Lemire's EWAH codec.
 /// ("Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes")
@@ -64,20 +65,42 @@ pub fn ewah(comptime Word: type) type {
         pub const Decoder = struct {
             target_words: []Word,
             target_index: usize = 0,
+            source_literal_words: usize = 0,
 
             /// Returns the number of *words* written to `target_words` by this invocation.
-            // TODO Refactor to return an error when `source` is invalid,
+            // TODO Refactor to return an error when `source_chunk` is invalid,
             // so that we can test invalid encodings.
-            pub fn decode(decoder_: *Decoder, source: []align(@alignOf(Word)) const u8) usize {
-                assert(source.len % @sizeOf(Word) == 0);
+            pub fn decode(
+                decoder_: *Decoder,
+                source_chunk: []align(@alignOf(Word)) const u8,
+            ) usize {
+                assert(source_chunk.len % @sizeOf(Word) == 0);
 
+                const source_words = mem.bytesAsSlice(Word, source_chunk);
                 const target_words = decoder_.target_words;
-                assert(disjoint_slices(u8, Word, source, target_words));
+                assert(disjoint_slices(u8, Word, source_chunk, target_words));
 
-                const source_words = mem.bytesAsSlice(Word, source);
                 var source_index: usize = 0;
                 var target_index: usize = decoder_.target_index;
-                while (source_index < source_words.len) {
+
+                if (decoder_.source_literal_words > 0) {
+                    const literal_word_count_chunk =
+                        @min(decoder_.source_literal_words, source_words.len);
+
+                    stdx.copy_disjoint(
+                        .exact,
+                        Word,
+                        target_words[target_index..][0..literal_word_count_chunk],
+                        source_words[source_index..][0..literal_word_count_chunk],
+                    );
+                    source_index += literal_word_count_chunk;
+                    target_index += literal_word_count_chunk;
+                    decoder_.source_literal_words -= literal_word_count_chunk;
+                }
+
+                while (source_index < source_words.len and target_index < target_words.len) {
+                    assert(decoder_.source_literal_words == 0);
+
                     const marker: *const Marker = @ptrCast(&source_words[source_index]);
                     source_index += 1;
                     @memset(
@@ -85,16 +108,21 @@ pub fn ewah(comptime Word: type) type {
                         if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
                     );
                     target_index += marker.uniform_word_count;
+
+                    const literal_word_count_chunk =
+                        @min(marker.literal_word_count, source_words.len - source_index);
                     stdx.copy_disjoint(
                         .exact,
                         Word,
-                        target_words[target_index..][0..marker.literal_word_count],
-                        source_words[source_index..][0..marker.literal_word_count],
+                        target_words[target_index..][0..literal_word_count_chunk],
+                        source_words[source_index..][0..literal_word_count_chunk],
                     );
-                    source_index += marker.literal_word_count;
-                    target_index += marker.literal_word_count;
+                    source_index += literal_word_count_chunk;
+                    target_index += literal_word_count_chunk;
+                    decoder_.source_literal_words =
+                        marker.literal_word_count - literal_word_count_chunk;
                 }
-                assert(source_index == source_words.len);
+                assert(source_index <= source_words.len);
                 assert(target_index <= target_words.len);
 
                 defer decoder_.target_index = target_index;
@@ -120,19 +148,44 @@ pub fn ewah(comptime Word: type) type {
         pub const Encoder = struct {
             source_words: []const Word,
             source_index: usize = 0,
+            /// The number of literals left over from the previous encode() call that still need to
+            /// be copied.
+            literal_word_count: usize = 0,
 
-            /// Returns the number of bytes written to `target` by this invocation.
-            pub fn encode(encoder_: *Encoder, target: []align(@alignOf(Word)) u8) usize {
+            /// Returns the number of bytes written to `target_chunk` by this invocation.
+            pub fn encode(encoder_: *Encoder, target_chunk: []align(@alignOf(Word)) u8) usize {
                 const source_words = encoder_.source_words;
-                assert(disjoint_slices(Word, u8, source_words, target));
+                assert(disjoint_slices(Word, u8, source_words, target_chunk));
                 assert(encoder_.source_index <= encoder_.source_words.len);
+                assert(encoder_.literal_word_count <= encoder_.source_words.len);
 
-                const target_words = mem.bytesAsSlice(Word, target);
+                const target_words = mem.bytesAsSlice(Word, target_chunk);
                 @memset(target_words, 0);
 
                 var target_index: usize = 0;
                 var source_index: usize = encoder_.source_index;
-                while (source_index < source_words.len) {
+
+                if (encoder_.literal_word_count > 0) {
+                    maybe(encoder_.source_index == 0);
+
+                    const literal_word_count_chunk =
+                        @min(encoder_.literal_word_count, target_words.len);
+
+                    stdx.copy_disjoint(
+                        .exact,
+                        Word,
+                        target_words[target_index..][0..literal_word_count_chunk],
+                        source_words[source_index..][0..literal_word_count_chunk],
+                    );
+
+                    source_index += literal_word_count_chunk;
+                    target_index += literal_word_count_chunk;
+                    encoder_.literal_word_count -= literal_word_count_chunk;
+                }
+
+                while (source_index < source_words.len and target_index < target_words.len) {
+                    assert(encoder_.literal_word_count == 0);
+
                     const word = source_words[source_index];
 
                     const uniform_word_count = count: {
@@ -170,16 +223,21 @@ pub fn ewah(comptime Word: type) type {
                         .literal_word_count = @as(MarkerLiteralCount, @intCast(literal_word_count)),
                     });
                     target_index += 1;
+
+                    const literal_word_count_chunk =
+                        @min(literal_word_count, target_words.len - target_index);
                     stdx.copy_disjoint(
                         .exact,
                         Word,
-                        target_words[target_index..][0..literal_word_count],
-                        source_words[source_index..][0..literal_word_count],
+                        target_words[target_index..][0..literal_word_count_chunk],
+                        source_words[source_index..][0..literal_word_count_chunk],
                     );
-                    source_index += literal_word_count;
-                    target_index += literal_word_count;
+                    source_index += literal_word_count_chunk;
+                    target_index += literal_word_count_chunk;
+
+                    encoder_.literal_word_count = literal_word_count - literal_word_count_chunk;
                 }
-                assert(source_index == source_words.len);
+                assert(source_index <= source_words.len);
 
                 encoder_.source_index = source_index;
                 return target_index * @sizeOf(Word);
