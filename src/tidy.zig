@@ -339,7 +339,6 @@ const naughty_list = [_][]const u8{
     "testing/storage.zig",
     "testing/time.zig",
     "tigerbeetle/main.zig",
-    "time.zig",
     "tracer.zig",
     "vsr.zig",
     "vsr/client_replies.zig",
