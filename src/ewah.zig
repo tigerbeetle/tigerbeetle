@@ -61,98 +61,149 @@ pub fn ewah(comptime Word: type) type {
             return @as(Word, @bitCast(mark));
         }
 
+        pub const Decoder = struct {
+            target_words: []Word,
+            target_index: usize = 0,
+
+            /// Returns the number of *words* written to `target_words` by this invocation.
+            // TODO Refactor to return an error when `source` is invalid,
+            // so that we can test invalid encodings.
+            pub fn decode(decoder_: *Decoder, source: []align(@alignOf(Word)) const u8) usize {
+                assert(source.len % @sizeOf(Word) == 0);
+
+                const target_words = decoder_.target_words;
+                assert(disjoint_slices(u8, Word, source, target_words));
+
+                const source_words = mem.bytesAsSlice(Word, source);
+                var source_index: usize = 0;
+                var target_index: usize = decoder_.target_index;
+                while (source_index < source_words.len) {
+                    const marker: *const Marker = @ptrCast(&source_words[source_index]);
+                    source_index += 1;
+                    @memset(
+                        target_words[target_index..][0..marker.uniform_word_count],
+                        if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
+                    );
+                    target_index += marker.uniform_word_count;
+                    stdx.copy_disjoint(
+                        .exact,
+                        Word,
+                        target_words[target_index..][0..marker.literal_word_count],
+                        source_words[source_index..][0..marker.literal_word_count],
+                    );
+                    source_index += marker.literal_word_count;
+                    target_index += marker.literal_word_count;
+                }
+                assert(source_index == source_words.len);
+                assert(target_index <= target_words.len);
+
+                defer decoder_.target_index = target_index;
+                return target_index - decoder_.target_index;
+            }
+        };
+
+        pub fn decoder(target_words: []Word) Decoder {
+            return .{ .target_words = target_words };
+        }
+
+        // (This is a helper for testing only.)
         /// Decodes the compressed bitset in `source` into `target_words`.
         /// Returns the number of *words* written to `target_words`.
-        // TODO Refactor to return an error when `source` is invalid,
-        // so that we can test invalid encodings.
         pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
             assert(source.len % @sizeOf(Word) == 0);
             assert(disjoint_slices(u8, Word, source, target_words));
 
-            const source_words = mem.bytesAsSlice(Word, source);
-            var source_index: usize = 0;
-            var target_index: usize = 0;
-            while (source_index < source_words.len) {
-                const marker: *const Marker = @ptrCast(&source_words[source_index]);
-                source_index += 1;
-                @memset(
-                    target_words[target_index..][0..marker.uniform_word_count],
-                    if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
-                );
-                target_index += marker.uniform_word_count;
-                stdx.copy_disjoint(
-                    .exact,
-                    Word,
-                    target_words[target_index..][0..marker.literal_word_count],
-                    source_words[source_index..][0..marker.literal_word_count],
-                );
-                source_index += marker.literal_word_count;
-                target_index += marker.literal_word_count;
-            }
-            assert(source_index == source_words.len);
-            assert(target_index <= target_words.len);
-            return target_index;
+            var decoder_ = decoder(target_words);
+            return decoder_.decode(source);
         }
 
+        pub const Encoder = struct {
+            source_words: []const Word,
+            source_index: usize = 0,
+
+            /// Returns the number of bytes written to `target` by this invocation.
+            pub fn encode(encoder_: *Encoder, target: []align(@alignOf(Word)) u8) usize {
+                const source_words = encoder_.source_words;
+                assert(disjoint_slices(Word, u8, source_words, target));
+                assert(encoder_.source_index <= encoder_.source_words.len);
+
+                const target_words = mem.bytesAsSlice(Word, target);
+                @memset(target_words, 0);
+
+                var target_index: usize = 0;
+                var source_index: usize = encoder_.source_index;
+                while (source_index < source_words.len) {
+                    const word = source_words[source_index];
+
+                    const uniform_word_count = count: {
+                        if (is_literal(word)) break :count 0;
+                        // Measure run length.
+                        const uniform_max = @min(
+                            source_words.len - source_index,
+                            marker_uniform_word_count_max,
+                        );
+                        for (source_words[source_index..][0..uniform_max], 0..) |w, i| {
+                            if (w != word) break :count i;
+                        }
+                        break :count uniform_max;
+                    };
+                    source_index += uniform_word_count;
+                    // For consistent encoding, set the run/uniform bit to 0 when there is no run.
+                    const uniform_bit =
+                        if (uniform_word_count == 0) 0 else @as(u1, @intCast(word & 1));
+
+                    const literal_word_count = count: {
+                        // Count sequential literals that immediately follow the run.
+                        const literals_max = @min(
+                            source_words.len - source_index,
+                            marker_literal_word_count_max,
+                        );
+                        for (source_words[source_index..][0..literals_max], 0..) |w, i| {
+                            if (!is_literal(w)) break :count i;
+                        }
+                        break :count literals_max;
+                    };
+
+                    target_words[target_index] = marker_word(.{
+                        .uniform_bit = uniform_bit,
+                        .uniform_word_count = @as(MarkerUniformCount, @intCast(uniform_word_count)),
+                        .literal_word_count = @as(MarkerLiteralCount, @intCast(literal_word_count)),
+                    });
+                    target_index += 1;
+                    stdx.copy_disjoint(
+                        .exact,
+                        Word,
+                        target_words[target_index..][0..literal_word_count],
+                        source_words[source_index..][0..literal_word_count],
+                    );
+                    source_index += literal_word_count;
+                    target_index += literal_word_count;
+                }
+                assert(source_index == source_words.len);
+
+                encoder_.source_index = source_index;
+                return target_index * @sizeOf(Word);
+            }
+
+            pub fn done(encoder_: *const Encoder) bool {
+                assert(encoder_.source_index <= encoder_.source_words.len);
+                return encoder_.source_index == encoder_.source_words.len;
+            }
+        };
+
+        pub fn encoder(source_words: []const Word) Encoder {
+            return .{ .source_words = source_words };
+        }
+
+        // (This is a helper for testing only.)
         // Returns the number of bytes written to `target`.
         pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
             assert(target.len == encode_size_max(source_words.len));
             assert(disjoint_slices(Word, u8, source_words, target));
 
-            const target_words = mem.bytesAsSlice(Word, target);
-            @memset(target_words, 0);
-
-            var target_index: usize = 0;
-            var source_index: usize = 0;
-            while (source_index < source_words.len) {
-                const word = source_words[source_index];
-
-                const uniform_word_count = count: {
-                    if (is_literal(word)) break :count 0;
-                    // Measure run length.
-                    const uniform_max = @min(
-                        source_words.len - source_index,
-                        marker_uniform_word_count_max,
-                    );
-                    for (source_words[source_index..][0..uniform_max], 0..) |w, i| {
-                        if (w != word) break :count i;
-                    }
-                    break :count uniform_max;
-                };
-                source_index += uniform_word_count;
-                // For consistent encoding, set the run/uniform bit to 0 when there is no run.
-                const uniform_bit = if (uniform_word_count == 0) 0 else @as(u1, @intCast(word & 1));
-
-                const literal_word_count = count: {
-                    // Count sequential literals that immediately follow the run.
-                    const literals_max = @min(
-                        source_words.len - source_index,
-                        marker_literal_word_count_max,
-                    );
-                    for (source_words[source_index..][0..literals_max], 0..) |w, i| {
-                        if (!is_literal(w)) break :count i;
-                    }
-                    break :count literals_max;
-                };
-
-                target_words[target_index] = marker_word(.{
-                    .uniform_bit = uniform_bit,
-                    .uniform_word_count = @as(MarkerUniformCount, @intCast(uniform_word_count)),
-                    .literal_word_count = @as(MarkerLiteralCount, @intCast(literal_word_count)),
-                });
-                target_index += 1;
-                stdx.copy_disjoint(
-                    .exact,
-                    Word,
-                    target_words[target_index..][0..literal_word_count],
-                    source_words[source_index..][0..literal_word_count],
-                );
-                source_index += literal_word_count;
-                target_index += literal_word_count;
-            }
-            assert(source_index == source_words.len);
-
-            return target_index * @sizeOf(Word);
+            var encoder_ = encoder(source_words);
+            defer assert(encoder_.done());
+            return encoder_.encode(target);
         }
 
         /// Returns the maximum number of bytes required to encode `word_count` words.
