@@ -300,7 +300,7 @@ pub fn GridType(comptime Storage: type) type {
                 defer assert(grid.free_set.opened);
 
                 grid.free_set.open(.{
-                    .encoded = free_set_checkpoint.buffer[0..free_set_checkpoint.size],
+                    .encoded = free_set_checkpoint.chunks(free_set_checkpoint.size),
                     .block_addresses = free_set_checkpoint.block_addresses[0..free_set_checkpoint.block_count()],
                 });
                 assert((grid.free_set.count_acquired() > 0) == (free_set_checkpoint.size > 0));
@@ -338,8 +338,21 @@ pub fn GridType(comptime Storage: type) type {
                 grid.free_set.include_staging();
                 defer grid.free_set.exclude_staging();
 
-                grid.free_set_checkpoint.size =
-                    @as(u32, @intCast(grid.free_set.encode(grid.free_set_checkpoint.buffer)));
+                var free_set_encoder = grid.free_set.encoder();
+                defer assert(free_set_encoder.done());
+
+                const free_set_chunks = grid.free_set_checkpoint.chunks(
+                    FreeSet.encode_size_max(grid.free_set.blocks.bit_length),
+                );
+
+                grid.free_set_checkpoint.size = 0;
+                for (free_set_chunks) |chunk| {
+                    grid.free_set_checkpoint.size +=
+                        @as(u32, @intCast(free_set_encoder.encode(chunk)));
+
+                    if (free_set_encoder.done()) break;
+                }
+                assert(free_set_encoder.done());
                 assert(grid.free_set_checkpoint.size % @sizeOf(FreeSet.Word) == 0);
             }
 

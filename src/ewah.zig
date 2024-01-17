@@ -7,6 +7,8 @@ const div_ceil = stdx.div_ceil;
 const disjoint_slices = stdx.disjoint_slices;
 const maybe = stdx.maybe;
 
+const constants = @import("constants.zig");
+
 /// Encode or decode a bitset using Daniel Lemire's EWAH codec.
 /// ("Histogram-Aware Sorting for Enhanced Word-Aligned Compression in Bitmap Indexes")
 ///
@@ -138,6 +140,7 @@ pub fn ewah(comptime Word: type) type {
         /// Decodes the compressed bitset in `source` into `target_words`.
         /// Returns the number of *words* written to `target_words`.
         pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
+            assert(constants.verify);
             assert(source.len % @sizeOf(Word) == 0);
             assert(disjoint_slices(u8, Word, source, target_words));
 
@@ -256,6 +259,7 @@ pub fn ewah(comptime Word: type) type {
         // (This is a helper for testing only.)
         // Returns the number of bytes written to `target`.
         pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
+            assert(constants.verify);
             assert(target.len == encode_size_max(source_words.len));
             assert(disjoint_slices(Word, u8, source_words, target));
 

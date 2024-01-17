@@ -156,12 +156,12 @@ pub const FreeSet = struct {
     /// Block addresses themselves are not a part of the encoded bitset, see CheckpointTrailer for
     /// details.
     pub fn open(set: *FreeSet, options: struct {
-        encoded: []align(@alignOf(Word)) const u8,
+        encoded: []const []align(@alignOf(Word)) const u8,
         block_addresses: []const u64,
     }) void {
         assert(!set.opened);
         assert((options.encoded.len == 0) == (options.block_addresses.len == 0));
-        set.decode(options.encoded);
+        set.decode_chunks(options.encoded);
         set.mark_released(options.block_addresses);
         set.opened = true;
     }
@@ -482,9 +482,19 @@ pub const FreeSet = struct {
         assert(set.count_free() == free - set.staging.count());
     }
 
+    /// (This is a helper for testing only.)
     /// Decodes the compressed bitset in `source` into `set`.
     /// Panics if the `source` encoding is invalid.
     pub fn decode(set: *FreeSet, source: []align(@alignOf(Word)) const u8) void {
+        set.decode_chunks(&.{source});
+    }
+
+    /// Decodes the compressed bitset chunks in `source_chunks` into `set`.
+    /// Panics if the `source_chunks` encoding is invalid.
+    pub fn decode_chunks(
+        set: *FreeSet,
+        source_chunks: []const []align(@alignOf(Word)) const u8,
+    ) void {
         assert(!set.opened);
         // Verify that this FreeSet is entirely unallocated.
         assert(set.index.count() == 0);
@@ -493,7 +503,11 @@ pub const FreeSet = struct {
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
-        const words_decoded = ewah.decode(source, bit_set_masks(set.blocks));
+        var decoder = ewah.decoder(bit_set_masks(set.blocks));
+        var words_decoded: usize = 0;
+        for (source_chunks) |source_chunk| {
+            words_decoded += decoder.decode(source_chunk);
+        }
         assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks.bit_length);
 
         for (0..set.index.bit_length) |shard| {
@@ -509,9 +523,20 @@ pub const FreeSet = struct {
         return ewah.encode_size_max(@divExact(blocks_count, @bitSizeOf(Word)));
     }
 
+    /// The encoded data does *not* include staged changes.
+    pub fn encoder(set: *const FreeSet) ewah.Encoder {
+        assert(set.opened);
+        assert(set.reservation_count == 0);
+        assert(set.reservation_blocks == 0);
+
+        return ewah.encoder(bit_set_masks(set.blocks));
+    }
+
+    /// (This is a helper for testing only.)
     /// Returns the number of bytes written to `target`.
     /// The encoded data does *not* include staged changes.
     pub fn encode(set: FreeSet, target: []align(@alignOf(Word)) u8) usize {
+        assert(constants.verify);
         assert(set.opened);
         assert(target.len == FreeSet.encode_size_max(set.blocks.bit_length));
         assert(set.reservation_count == 0);

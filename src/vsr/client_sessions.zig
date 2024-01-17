@@ -91,6 +91,9 @@ pub const ClientSessions = struct {
         size_max = std.mem.alignForward(usize, size_max, 8);
         size_max += @sizeOf(u64) * constants.clients_max;
 
+        // For encoding/decoding simplicity, the ClientSessions always fits in a single block.
+        assert(size_max <= constants.block_size - @sizeOf(vsr.Header));
+
         break :blk size_max;
     };
 
