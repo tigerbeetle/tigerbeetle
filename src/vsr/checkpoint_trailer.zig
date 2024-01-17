@@ -42,19 +42,12 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         const chunk_size_max = constants.block_size - @sizeOf(vsr.Header);
 
         // Chunk describes a slice of encoded trailer that goes into nth block on disk.
-        //
-        // Chunk redundantly stores all of the start index, one-past-the-end index, and length, so
-        // that the call site can avoid indexing arithmetic and associated bugs.
         const Chunk = struct {
-            start: u64,
-            end: u64,
-            size: u32,
-
-            fn for_block(options: struct {
+            fn size(options: struct {
                 block_index: u32,
                 block_count: u32,
                 trailer_size: u64,
-            }) Chunk {
+            }) u32 {
                 assert(options.block_count > 0);
                 assert(options.block_count == stdx.div_ceil(options.trailer_size, chunk_size_max));
                 assert(options.block_index < options.block_count);
@@ -65,12 +58,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 else
                     chunk_size_max;
 
-                const chunk_start = chunk_size_max * options.block_index;
-                const chunk_end = chunk_start + chunk_size;
-                assert(chunk_end <= options.trailer_size);
-                assert(chunk_size > 0);
-
-                return .{ .start = chunk_start, .end = chunk_end, .size = chunk_size };
+                return chunk_size;
             }
         };
 
@@ -182,13 +170,13 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 trailer.blocks[0..chunk_count],
                 0..,
             ) |*block_body, block, block_index| {
-                const chunk = Chunk.for_block(.{
+                const chunk_size = Chunk.size(.{
                     .block_index = @intCast(block_index),
                     .block_count = chunk_count,
                     .trailer_size = trailer_size,
                 });
 
-                block_body.* = block[@sizeOf(vsr.Header)..][0..chunk.size];
+                block_body.* = block[@sizeOf(vsr.Header)..][0..chunk_size];
             }
             return trailer.block_bodies[0..chunk_count];
         }
@@ -290,7 +278,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             const block_header = schema.header_from_block(block);
             assert(block_header.block_type == trailer.trailer_type.block_type());
 
-            const chunk = Chunk.for_block(.{
+            const chunk_size = Chunk.size(.{
                 .block_index = trailer.block_index,
                 .block_count = trailer.block_count(),
                 .trailer_size = trailer.size,
@@ -299,10 +287,10 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                trailer.blocks[trailer.block_index][@sizeOf(vsr.Header)..][0..chunk.size],
+                trailer.blocks[trailer.block_index][@sizeOf(vsr.Header)..][0..chunk_size],
                 schema.TrailerNode.body(block),
             );
-            trailer.size_transferred += chunk.size;
+            trailer.size_transferred += chunk_size;
 
             if (schema.TrailerNode.previous(block)) |previous| {
                 assert(trailer.block_index > 0);
@@ -378,7 +366,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             assert(trailer.block_index < trailer.block_count());
             assert((trailer.size_transferred == 0) == (trailer.block_index == 0));
 
-            const chunk = Chunk.for_block(.{
+            const chunk_size = Chunk.size(.{
                 .block_index = trailer.block_index,
                 .block_count = trailer.block_count(),
                 .trailer_size = trailer.size,
@@ -400,12 +388,12 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 .metadata_bytes = @bitCast(metadata),
                 .address = trailer.block_addresses[trailer.block_index],
                 .snapshot = 0, // TODO(snapshots): Set this properly; it is useful for debugging.
-                .size = @sizeOf(vsr.Header) + chunk.size,
+                .size = @sizeOf(vsr.Header) + chunk_size,
                 .command = .block,
                 .block_type = trailer.trailer_type.block_type(),
             };
-            trailer.size_transferred += chunk.size;
-            header.set_checksum_body(block.*[@sizeOf(vsr.Header)..][0..chunk.size]);
+            trailer.size_transferred += chunk_size;
+            header.set_checksum_body(block.*[@sizeOf(vsr.Header)..][0..chunk_size]);
             header.set_checksum();
             schema.TrailerNode.assert_valid_header(block.*);
 
