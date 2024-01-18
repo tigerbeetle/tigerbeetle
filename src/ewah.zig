@@ -286,16 +286,23 @@ test "ewah encode→decode cycle" {
     var prng = std.rand.DefaultPrng.init(123);
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
-        var decoded: [4096]Word = undefined;
+        for ([_]usize{ 1, 2, 4, 5, 8, 16, 17, 32 }) |chunk_count| {
+            var decoded: [4096]Word = undefined;
 
-        @memset(&decoded, 0);
-        try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
+            var fuzz_options = .{
+                .encode_chunk_words_count = @divFloor(decoded.len, chunk_count),
+                .decode_chunk_words_count = @divFloor(decoded.len, chunk_count),
+            };
 
-        @memset(&decoded, std.math.maxInt(Word));
-        try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
+            @memset(&decoded, 0);
+            try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded, fuzz_options);
 
-        prng.random().bytes(std.mem.asBytes(&decoded));
-        try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded);
+            @memset(&decoded, std.math.maxInt(Word));
+            try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded, fuzz_options);
+
+            prng.random().bytes(std.mem.asBytes(&decoded));
+            try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded, fuzz_options);
+        }
     }
 }
 

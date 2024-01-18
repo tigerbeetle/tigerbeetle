@@ -3,6 +3,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_ewah);
 
+const stdx = @import("./stdx.zig");
 const ewah = @import("./ewah.zig");
 const fuzz = @import("./testing/fuzz.zig");
 
@@ -25,14 +26,23 @@ pub fn main(args: fuzz.FuzzArgs) !void {
         var context = try ContextType(Word).init(allocator, decoded.len);
         defer context.deinit(allocator);
 
-        const encoded_size = try context.test_encode_decode(decoded);
+        const encode_chunk_words_count = 1 + random.uintLessThan(usize, decoded_size);
+        const decode_chunk_words_count = 1 + random.uintLessThan(usize, decoded_size);
 
-        log.info("word={} decoded={} encoded={} compression_ratio={d:.2} set={d:.2}", .{
+        const encoded_size = try context.test_encode_decode(decoded, .{
+            .encode_chunk_words_count = encode_chunk_words_count,
+            .decode_chunk_words_count = decode_chunk_words_count,
+        });
+
+        log.info("word={} decoded={} encoded={} compression_ratio={d:.2} set={d:.2} " ++
+            "encode_chunk={} decode_chunk={}", .{
             Word,
             decoded_size,
             encoded_size,
             @as(f64, @floatFromInt(decoded_size)) / @as(f64, @floatFromInt(encoded_size)),
             @as(f64, @floatFromInt(decoded_bits)) / @as(f64, @floatFromInt(decoded_bits_total)),
+            encode_chunk_words_count,
+            decode_chunk_words_count,
         });
     }
 }
@@ -41,11 +51,12 @@ pub fn fuzz_encode_decode(
     comptime Word: type,
     allocator: std.mem.Allocator,
     decoded: []const Word,
+    options: ContextType(Word).TestOptions,
 ) !void {
     var context = try ContextType(Word).init(allocator, decoded.len);
     defer context.deinit(allocator);
 
-    _ = try context.test_encode_decode(decoded);
+    _ = try context.test_encode_decode(decoded, options);
 }
 
 /// Modify `data` such that it has exactly `bits_set_total` randomly-chosen bits set,
@@ -106,14 +117,46 @@ fn ContextType(comptime Word: type) type {
             allocator.free(context.encoded_actual);
         }
 
-        fn test_encode_decode(context: Self, decoded_expect: []const Word) !usize {
+        const TestOptions = struct {
+            encode_chunk_words_count: usize,
+            decode_chunk_words_count: usize,
+        };
+
+        fn test_encode_decode(
+            context: Self,
+            decoded_expect: []const Word,
+            options: TestOptions,
+        ) !usize {
             assert(decoded_expect.len > 0);
 
-            const encoded_size = Codec.encode(decoded_expect, context.encoded_actual);
-            const decoded_actual_size = Codec.decode(
-                context.encoded_actual[0..encoded_size],
-                context.decoded_actual[0..],
-            );
+            var encoder = Codec.encoder(decoded_expect);
+            var encoded_size: usize = 0;
+            while (!encoder.done()) {
+                const chunk_words_count = @min(
+                    @divExact(context.encoded_actual.len - encoded_size, @sizeOf(Word)),
+                    options.encode_chunk_words_count,
+                );
+
+                const chunk =
+                    context.encoded_actual[encoded_size..][0 .. chunk_words_count * @sizeOf(Word)];
+
+                encoded_size += encoder.encode(@alignCast(chunk));
+            }
+
+            var decoder = Codec.decoder(context.decoded_actual[0..]);
+            var decoded_actual_size: usize = 0;
+            var decoder_input_offset: usize = 0;
+            while (decoder_input_offset < encoded_size) {
+                const chunk_size = @min(
+                    encoded_size - decoder_input_offset,
+                    options.decode_chunk_words_count * @sizeOf(Word),
+                );
+
+                const chunk = context.encoded_actual[decoder_input_offset..][0..chunk_size];
+
+                decoded_actual_size += decoder.decode(@alignCast(chunk));
+                decoder_input_offset += chunk_size;
+            }
 
             try std.testing.expectEqual(decoded_expect.len, decoded_actual_size);
             try std.testing.expectEqualSlices(
