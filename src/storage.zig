@@ -188,6 +188,7 @@ pub const Storage = struct {
 
     fn start_read(self: *Storage, read: *Storage.Read, bytes_read: ?usize) void {
         assert(read.offset % constants.sector_size == 0);
+        maybe(bytes_read == 0); // Retrying erroneous read at the same offset with smaller window.
 
         const bytes = bytes_read orelse 0;
         assert(bytes <= read.target().len);
@@ -299,7 +300,8 @@ pub const Storage = struct {
         // - Another replica requested a block, but we are lagging far behind, and the block address
         //   requested is beyond the end of our data file.
         if (bytes_read == 0) {
-            read.callback(read);
+            @memset(read.buffer, 0);
+            self.start_read(read, read.buffer.len);
             return;
         }
 
