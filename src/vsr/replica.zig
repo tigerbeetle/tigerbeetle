@@ -85,10 +85,6 @@ pub const ReplicaEvent = union(enum) {
     /// 3. Crash.
     /// 4. Recover in the new checkpoint (but op_checkpoint wasn't called).
     checkpoint_completed,
-    /// Either:
-    /// - The primary received an ack from a diverged replica.
-    /// - A replica has learned that it has diverged.
-    checkpoint_divergence_detected: struct { replica: u8 },
     sync_stage_changed,
 };
 
@@ -1399,16 +1395,13 @@ pub fn ReplicaType(
             }
 
             if (message.header.checkpoint_id != self.superblock.working.checkpoint_id()) {
-                // Reject prepares which do not match our own checkpoint id.
-                // This ensures that no replica can diverge from the canonical history by more than
-                // one checkpoint.
+                // Panic on encountering a prepare which does not match our own checkpoint id.
                 //
                 // If this branch is hit, there is a storage determinism problem. At this point in
                 // the code it is not possible to distinguish whether the problem is with this
-                // replica, the prepare's replica, or both independently. One of these replicas will
-                // need to state sync.
-                log.warn("{}: on_prepare: ignoring op={}; checkpoint_id mismatch " ++
-                    "(expect={x:0>32} received={x:0>32} from={})", .{
+                // replica, the prepare's replica, or both independently.
+                log.err("{}: on_prepare: checkpoint diverged " ++
+                    "(op={} expect={x:0>32} received={x:0>32} from={})", .{
                     self.replica,
                     message.header.op,
                     self.superblock.working.checkpoint_id(),
@@ -1416,14 +1409,8 @@ pub fn ReplicaType(
                     message.header.replica,
                 });
 
-                if (self.event_callback) |hook| {
-                    hook(self, .{ .checkpoint_divergence_detected = .{
-                        .replica = message.header.replica,
-                    } });
-                }
-
                 assert(self.backup());
-                return;
+                @panic("checkpoint diverged");
             }
 
             if (message.header.op > self.op + 1) {
@@ -8474,10 +8461,7 @@ pub fn ReplicaType(
                 if (candidate.checkpoint_op == self.op_checkpoint() and
                     candidate.checkpoint_id != self.superblock.working.checkpoint_id())
                 {
-                    // Normally we wait for the repair_sync_timeout before starting sync.
-                    // However, if our checkpoint diverged, transition immediately —
-                    // there is no chance of recovering via repair.
-                    log.err("{}: on_{s}: jump_sync_target: diverged; starting sync " ++
+                    log.err("{}: on_{s}: jump_sync_target: checkpoint diverged " ++
                         "(op={} id_local={x:0>32} id_canonical={x:0>32})", .{
                         self.replica,
                         @tagName(header.command),
@@ -8486,12 +8470,7 @@ pub fn ReplicaType(
                         candidate.checkpoint_id,
                     });
 
-                    if (self.event_callback) |hook| {
-                        hook(self, .{ .checkpoint_divergence_detected = .{
-                            .replica = self.replica,
-                        } });
-                    }
-                    self.sync_start_from_committing();
+                    @panic("checkpoint diverged");
                 }
             } else {
                 self.sync_start_from_sync();

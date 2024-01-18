@@ -260,13 +260,7 @@ pub const SuperBlockHeader = extern struct {
                     assert(old.log_view == 0);
                     assert(old.view == 0);
                 } else {
-                    assert(old.checkpoint.commit_min_checksum ==
-                        new.checkpoint.commit_min_checksum);
-                    assert(old.checkpoint.previous_checkpoint_id ==
-                        new.checkpoint.previous_checkpoint_id);
-                    // If we are recovering from a checkpoint divergence, we might have a different
-                    // CheckpointState for the same `commit_min`.
-                    maybe(stdx.equal_bytes(CheckpointState, &old.checkpoint, &new.checkpoint));
+                    assert(stdx.equal_bytes(CheckpointState, &old.checkpoint, &new.checkpoint));
                 }
             } else {
                 assert(old.checkpoint.commit_min_checksum != new.checkpoint.commit_min_checksum);
@@ -945,9 +939,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
 
-            // VSRState is usually updated, but not if we are syncing to the same checkpoint op
-            // (i.e. if we are a divergent replica trying to un-diverge).
-            maybe(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+            assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
             context.* = .{
                 .superblock = superblock,

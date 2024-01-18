@@ -89,8 +89,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replica_pools: []MessagePool,
         replica_health: []ReplicaHealth,
         replica_count: u8,
-        replica_diverged: std.StaticBitSet(constants.members_max) =
-            std.StaticBitSet(constants.members_max).initEmpty(),
         standby_count: u8,
 
         clients: []Client,
@@ -364,29 +362,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
         }
 
-        /// Causes the checkpoint identifier of each replica to diverge.
-        /// This simulates a storage determinism bug.
-        ///
-        /// (Replica must be running and also between compaction beats for this to run.)
-        // TODO Test the occasional divergence in the VOPR.
-        pub fn diverge(cluster: *Self, replica_index: u8) void {
-            assert(cluster.replica_health[replica_index] == .up);
-
-            cluster.replica_diverged.set(replica_index);
-
-            const replica = &cluster.replicas[replica_index];
-            assert(replica.commit_stage == .idle);
-
-            const reservation = replica.grid.free_set.reserve(1).?;
-            defer replica.grid.free_set.forfeit(reservation);
-
-            cluster.storages[replica_index].options.grid_checker = null;
-
-            // We don't need to actually use the block for the storage to diverge —
-            // it is marked as acquired in the superblock free set.
-            _ = replica.grid.free_set.acquire(reservation).?;
-        }
-
         /// Returns an error when the replica was unable to recover (open).
         pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .down);
@@ -524,9 +499,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     cluster.state_checker.on_message(message);
                 },
                 .state_machine_opened => {
-                    if (!cluster.replica_diverged.isSet(replica.replica)) {
-                        cluster.manifest_checker.forest_open(&replica.state_machine.forest);
-                    }
+                    cluster.manifest_checker.forest_open(&replica.state_machine.forest);
                 },
                 .committed => {
                     cluster.log_replica(.commit, replica.replica);
@@ -540,22 +513,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 },
                 .checkpoint_completed => {
                     cluster.log_replica(.checkpoint_completed, replica.replica);
-                    if (cluster.replica_diverged.isSet(replica.replica)) {
-                        log.debug("{}: on_checkpoint: skipping StorageChecker; diverged", .{
-                            replica.replica,
-                        });
-                    } else {
-                        cluster.manifest_checker.forest_checkpoint(&replica.state_machine.forest);
-                        cluster.storage_checker.replica_checkpoint(
-                            &replica.superblock,
-                        ) catch |err| {
-                            fatal(.correctness, "storage checker error: {}", .{err});
-                        };
-                    }
-                },
-                .checkpoint_divergence_detected => |event_data| {
-                    // If the replica diverged, ensure that it was deliberate.
-                    assert(cluster.replica_diverged.isSet(event_data.replica));
+                    cluster.manifest_checker.forest_checkpoint(&replica.state_machine.forest);
+                    cluster.storage_checker.replica_checkpoint(
+                        &replica.superblock,
+                    ) catch |err| {
+                        fatal(.correctness, "storage checker error: {}", .{err});
+                    };
                 },
                 .sync_stage_changed => switch (replica.syncing) {
                     .requesting_checkpoint => {
@@ -565,10 +528,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .idle => {
                         cluster.log_replica(.sync_completed, replica.replica);
                         cluster.sync_checker.replica_sync_done(replica);
-                        if (cluster.replica_diverged.isSet(replica.replica)) {
-                            cluster.replica_diverged.unset(replica.replica);
-                            log.debug("{}: on_sync_done: clearing deviation", .{replica.replica});
-                        }
                     },
                     else => {},
                 },
