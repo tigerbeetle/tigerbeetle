@@ -105,7 +105,7 @@ pub fn ewah(comptime Word: type) type {
                     decoder_.source_literal_words -= literal_word_count_chunk;
                 }
 
-                while (source_index < source_words.len and target_index < target_words.len) {
+                while (source_index < source_words.len) {
                     assert(decoder_.source_literal_words == 0);
 
                     const marker: *const Marker = @ptrCast(&source_words[source_index]);
