@@ -75,24 +75,24 @@ pub fn ewah(comptime Word: type) type {
             /// Returns the number of *words* written to `target_words` by this invocation.
             // TODO Refactor to return an error when `source_chunk` is invalid,
             // so that we can test invalid encodings.
-            pub fn decode(
-                decoder_: *Decoder,
+            pub fn decode_chunk(
+                decoder: *Decoder,
                 source_chunk: []align(@alignOf(Word)) const u8,
             ) usize {
                 assert(source_chunk.len % @sizeOf(Word) == 0);
 
-                decoder_.source_size_remaining -= source_chunk.len;
+                decoder.source_size_remaining -= source_chunk.len;
 
                 const source_words = mem.bytesAsSlice(Word, source_chunk);
-                const target_words = decoder_.target_words;
+                const target_words = decoder.target_words;
                 assert(disjoint_slices(u8, Word, source_chunk, target_words));
 
                 var source_index: usize = 0;
-                var target_index: usize = decoder_.target_index;
+                var target_index: usize = decoder.target_index;
 
-                if (decoder_.source_literal_words > 0) {
+                if (decoder.source_literal_words > 0) {
                     const literal_word_count_chunk =
-                        @min(decoder_.source_literal_words, source_words.len);
+                        @min(decoder.source_literal_words, source_words.len);
 
                     stdx.copy_disjoint(
                         .exact,
@@ -102,11 +102,11 @@ pub fn ewah(comptime Word: type) type {
                     );
                     source_index += literal_word_count_chunk;
                     target_index += literal_word_count_chunk;
-                    decoder_.source_literal_words -= literal_word_count_chunk;
+                    decoder.source_literal_words -= literal_word_count_chunk;
                 }
 
                 while (source_index < source_words.len) {
-                    assert(decoder_.source_literal_words == 0);
+                    assert(decoder.source_literal_words == 0);
 
                     const marker: *const Marker = @ptrCast(&source_words[source_index]);
                     source_index += 1;
@@ -126,30 +126,30 @@ pub fn ewah(comptime Word: type) type {
                     );
                     source_index += literal_word_count_chunk;
                     target_index += literal_word_count_chunk;
-                    decoder_.source_literal_words =
+                    decoder.source_literal_words =
                         marker.literal_word_count - literal_word_count_chunk;
                 }
                 assert(source_index <= source_words.len);
                 assert(target_index <= target_words.len);
 
-                defer decoder_.target_index = target_index;
-                return target_index - decoder_.target_index;
+                defer decoder.target_index = target_index;
+                return target_index - decoder.target_index;
             }
 
-            pub fn done(decoder_: *const Decoder) bool {
-                assert(decoder_.target_index <= decoder_.target_words.len);
+            pub fn done(decoder: *const Decoder) bool {
+                assert(decoder.target_index <= decoder.target_words.len);
 
-                if (decoder_.source_size_remaining == 0) {
-                    assert(decoder_.source_literal_words == 0);
+                if (decoder.source_size_remaining == 0) {
+                    assert(decoder.source_literal_words == 0);
                     return true;
                 } else {
-                    maybe(decoder_.source_literal_words == 0);
+                    maybe(decoder.source_literal_words == 0);
                     return false;
                 }
             }
         };
 
-        pub fn decoder(target_words: []Word, source_size: usize) Decoder {
+        pub fn decode_chunks(target_words: []Word, source_size: usize) Decoder {
             return .{
                 .target_words = target_words,
                 .source_size_remaining = source_size,
@@ -159,13 +159,13 @@ pub fn ewah(comptime Word: type) type {
         // (This is a helper for testing only.)
         /// Decodes the compressed bitset in `source` into `target_words`.
         /// Returns the number of *words* written to `target_words`.
-        pub fn decode(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
+        pub fn decode_all(source: []align(@alignOf(Word)) const u8, target_words: []Word) usize {
             assert(constants.verify);
             assert(source.len % @sizeOf(Word) == 0);
             assert(disjoint_slices(u8, Word, source, target_words));
 
-            var decoder_ = decoder(target_words, source.len);
-            return decoder_.decode(source);
+            var decoder = decode_chunks(target_words, source.len);
+            return decoder.decode_chunk(source);
         }
 
         pub const Encoder = struct {
@@ -176,23 +176,23 @@ pub fn ewah(comptime Word: type) type {
             literal_word_count: usize = 0,
 
             /// Returns the number of bytes written to `target_chunk` by this invocation.
-            pub fn encode(encoder_: *Encoder, target_chunk: []align(@alignOf(Word)) u8) usize {
-                const source_words = encoder_.source_words;
+            pub fn encode_chunk(encoder: *Encoder, target_chunk: []align(@alignOf(Word)) u8) usize {
+                const source_words = encoder.source_words;
                 assert(disjoint_slices(Word, u8, source_words, target_chunk));
-                assert(encoder_.source_index <= encoder_.source_words.len);
-                assert(encoder_.literal_word_count <= encoder_.source_words.len);
+                assert(encoder.source_index <= encoder.source_words.len);
+                assert(encoder.literal_word_count <= encoder.source_words.len);
 
                 const target_words = mem.bytesAsSlice(Word, target_chunk);
                 @memset(target_words, 0);
 
                 var target_index: usize = 0;
-                var source_index: usize = encoder_.source_index;
+                var source_index: usize = encoder.source_index;
 
-                if (encoder_.literal_word_count > 0) {
-                    maybe(encoder_.source_index == 0);
+                if (encoder.literal_word_count > 0) {
+                    maybe(encoder.source_index == 0);
 
                     const literal_word_count_chunk =
-                        @min(encoder_.literal_word_count, target_words.len);
+                        @min(encoder.literal_word_count, target_words.len);
 
                     stdx.copy_disjoint(
                         .exact,
@@ -203,11 +203,11 @@ pub fn ewah(comptime Word: type) type {
 
                     source_index += literal_word_count_chunk;
                     target_index += literal_word_count_chunk;
-                    encoder_.literal_word_count -= literal_word_count_chunk;
+                    encoder.literal_word_count -= literal_word_count_chunk;
                 }
 
                 while (source_index < source_words.len and target_index < target_words.len) {
-                    assert(encoder_.literal_word_count == 0);
+                    assert(encoder.literal_word_count == 0);
 
                     const word = source_words[source_index];
 
@@ -258,34 +258,34 @@ pub fn ewah(comptime Word: type) type {
                     source_index += literal_word_count_chunk;
                     target_index += literal_word_count_chunk;
 
-                    encoder_.literal_word_count = literal_word_count - literal_word_count_chunk;
+                    encoder.literal_word_count = literal_word_count - literal_word_count_chunk;
                 }
                 assert(source_index <= source_words.len);
 
-                encoder_.source_index = source_index;
+                encoder.source_index = source_index;
                 return target_index * @sizeOf(Word);
             }
 
-            pub fn done(encoder_: *const Encoder) bool {
-                assert(encoder_.source_index <= encoder_.source_words.len);
-                return encoder_.source_index == encoder_.source_words.len;
+            pub fn done(encoder: *const Encoder) bool {
+                assert(encoder.source_index <= encoder.source_words.len);
+                return encoder.source_index == encoder.source_words.len;
             }
         };
 
-        pub fn encoder(source_words: []const Word) Encoder {
+        pub fn encode_chunks(source_words: []const Word) Encoder {
             return .{ .source_words = source_words };
         }
 
         // (This is a helper for testing only.)
         // Returns the number of bytes written to `target`.
-        pub fn encode(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
+        pub fn encode_all(source_words: []const Word, target: []align(@alignOf(Word)) u8) usize {
             assert(constants.verify);
             assert(target.len == encode_size_max(source_words.len));
             assert(disjoint_slices(Word, u8, source_words, target));
 
-            var encoder_ = encoder(source_words);
-            defer assert(encoder_.done());
-            return encoder_.encode(target);
+            var encoder = encode_chunks(source_words);
+            defer assert(encoder.done());
+            return encoder.encode_chunk(target);
         }
 
         /// Returns the maximum number of bytes required to encode `word_count` words.
@@ -344,7 +344,7 @@ test "ewah Word=u8" {
     }
 
     try std.testing.expectEqual(codec.encode_size_max(0), 0);
-    try std.testing.expectEqual(codec.encode(&.{}, &.{}), 0);
+    try std.testing.expectEqual(codec.encode_all(&.{}, &.{}), 0);
 }
 
 test "ewah Word=u16" {
@@ -412,7 +412,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []const Word) !void {
     const decoded_expect_data = try std.testing.allocator.alloc(Word, 4 * math.maxInt(Word));
     defer std.testing.allocator.free(decoded_expect_data);
 
-    const decoded_expect_length = codec.decode(encoded_expect, decoded_expect_data);
+    const decoded_expect_length = codec.decode_all(encoded_expect, decoded_expect_data);
     const decoded_expect = decoded_expect_data[0..decoded_expect_length];
     const encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
@@ -421,7 +421,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []const Word) !void {
     );
     defer std.testing.allocator.free(encoded_actual);
 
-    const encoded_actual_length = codec.encode(decoded_expect, encoded_actual);
+    const encoded_actual_length = codec.encode_all(decoded_expect, encoded_actual);
     try std.testing.expectEqual(encoded_expect.len, encoded_actual_length);
     try std.testing.expectEqualSlices(u8, encoded_expect, encoded_actual[0..encoded_actual_length]);
 
@@ -431,7 +431,7 @@ fn test_decode(comptime Word: type, encoded_expect_words: []const Word) !void {
     const decoded_actual = try std.testing.allocator.alloc(Word, decoded_expect.len);
     defer std.testing.allocator.free(decoded_actual);
 
-    const decoded_actual_length = codec.decode(encoded_actual, decoded_actual);
+    const decoded_actual_length = codec.decode_all(encoded_actual, decoded_actual);
     try std.testing.expectEqual(decoded_expect.len, decoded_actual_length);
     try std.testing.expectEqualSlices(Word, decoded_expect, decoded_actual);
 }

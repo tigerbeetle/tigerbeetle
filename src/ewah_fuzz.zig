@@ -129,7 +129,7 @@ fn ContextType(comptime Word: type) type {
         ) !usize {
             assert(decoded_expect.len > 0);
 
-            var encoder = Codec.encoder(decoded_expect);
+            var encoder = Codec.encode_chunks(decoded_expect);
             var encoded_size: usize = 0;
             while (!encoder.done()) {
                 const chunk_words_count = @min(
@@ -140,10 +140,10 @@ fn ContextType(comptime Word: type) type {
                 const chunk =
                     context.encoded_actual[encoded_size..][0 .. chunk_words_count * @sizeOf(Word)];
 
-                encoded_size += encoder.encode(@alignCast(chunk));
+                encoded_size += encoder.encode_chunk(@alignCast(chunk));
             }
 
-            var decoder = Codec.decoder(context.decoded_actual[0..], encoded_size);
+            var decoder = Codec.decode_chunks(context.decoded_actual[0..], encoded_size);
             var decoded_actual_size: usize = 0;
             var decoder_input_offset: usize = 0;
             while (decoder_input_offset < encoded_size) {
@@ -154,7 +154,7 @@ fn ContextType(comptime Word: type) type {
 
                 const chunk = context.encoded_actual[decoder_input_offset..][0..chunk_size];
 
-                decoded_actual_size += decoder.decode(@alignCast(chunk));
+                decoded_actual_size += decoder.decode_chunk(@alignCast(chunk));
                 decoder_input_offset += chunk_size;
             }
             assert(decoder.done());

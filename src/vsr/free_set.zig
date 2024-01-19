@@ -508,10 +508,10 @@ pub const FreeSet = struct {
             source_size += source_chunk.len;
         }
 
-        var decoder = ewah.decoder(bit_set_masks(set.blocks), source_size);
+        var decoder = ewah.decode_chunks(bit_set_masks(set.blocks), source_size);
         var words_decoded: usize = 0;
         for (source_chunks) |source_chunk| {
-            words_decoded += decoder.decode(source_chunk);
+            words_decoded += decoder.decode_chunk(source_chunk);
         }
         assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks.bit_length);
         assert(decoder.done());
@@ -530,12 +530,12 @@ pub const FreeSet = struct {
     }
 
     /// The encoded data does *not* include staged changes.
-    pub fn encoder(set: *const FreeSet) ewah.Encoder {
+    pub fn encode_chunks(set: *const FreeSet) ewah.Encoder {
         assert(set.opened);
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
-        return ewah.encoder(bit_set_masks(set.blocks));
+        return ewah.encode_chunks(bit_set_masks(set.blocks));
     }
 
     /// (This is a helper for testing only.)
@@ -548,7 +548,7 @@ pub const FreeSet = struct {
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
-        return ewah.encode(bit_set_masks(set.blocks), target);
+        return ewah.encode_all(bit_set_masks(set.blocks), target);
     }
 
     /// Returns `blocks_count` rounded down to the nearest multiple of shard and word bit count.

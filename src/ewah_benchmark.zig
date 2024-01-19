@@ -54,7 +54,7 @@ pub fn main() !void {
             var j: usize = 0;
             var size: usize = undefined;
             while (j < repeats) : (j += 1) {
-                size = ewah.encode(bitsets[i], bitsets_encoded[i]);
+                size = ewah.encode_all(bitsets[i], bitsets_encoded[i]);
             }
             bitset_lengths[i] = size;
         }
@@ -67,7 +67,7 @@ pub fn main() !void {
             const bitset_encoded = bitsets_encoded[i][0..bitset_lengths[i]];
             var j: usize = 0;
             while (j < repeats) : (j += 1) {
-                _ = ewah.decode(bitset_encoded, bitsets_decoded[i]);
+                _ = ewah.decode_all(bitset_encoded, bitsets_decoded[i]);
             }
         }
         const decode_time = decode_timer.read() / samples / repeats;

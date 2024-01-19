@@ -338,7 +338,7 @@ pub fn GridType(comptime Storage: type) type {
                 grid.free_set.include_staging();
                 defer grid.free_set.exclude_staging();
 
-                var free_set_encoder = grid.free_set.encoder();
+                var free_set_encoder = grid.free_set.encode_chunks();
                 defer assert(free_set_encoder.done());
 
                 const free_set_chunks = grid.free_set_checkpoint.chunks(
@@ -348,7 +348,7 @@ pub fn GridType(comptime Storage: type) type {
                 grid.free_set_checkpoint.size = 0;
                 for (free_set_chunks) |chunk| {
                     grid.free_set_checkpoint.size +=
-                        @as(u32, @intCast(free_set_encoder.encode(chunk)));
+                        @as(u32, @intCast(free_set_encoder.encode_chunk(chunk)));
 
                     if (free_set_encoder.done()) break;
                 }
