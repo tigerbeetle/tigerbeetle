@@ -227,7 +227,7 @@ public enum UInt128 {
         buffer.putLong(randomLo);
         buffer.putShort(randomHi);
         buffer.putShort((short) timestamp); // timestamp lo
-        buffer.putInt((int) (timestamp >> 32)); // timestamp hi
+        buffer.putInt((int) (timestamp >> 16)); // timestamp hi
         return buffer.array();
     }
 }
