@@ -244,7 +244,8 @@ pub const Storage = struct {
                     assert(target.len > 0);
                     const target_sectors = @divFloor(target.len - 1, constants.sector_size) + 1;
                     assert(target_sectors > 0);
-                    read.target_max = (@divFloor(target_sectors - 1, 2) + 1) * constants.sector_size;
+                    read.target_max =
+                        (@divFloor(target_sectors - 1, 2) + 1) * constants.sector_size;
                     assert(read.target_max >= constants.sector_size);
 
                     // Pass 0 for `bytes_read`, we want to retry the read with smaller `target_max`:
