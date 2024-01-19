@@ -729,7 +729,7 @@ pub fn ReplicaType(
             }
 
             const trailer_size = self.client_sessions_checkpoint.size;
-            const trailer_chunks = self.client_sessions_checkpoint.chunks(trailer_size);
+            const trailer_chunks = self.client_sessions_checkpoint.decode_chunks();
 
             if (self.superblock.working.client_sessions_reference().empty()) {
                 assert(trailer_chunks.len == 0);
@@ -3167,7 +3167,7 @@ pub fn ReplicaType(
                 .checkpoint_client_sessions => {
                     // For encoding/decoding simplicity, require that the entire ClientSessions fits
                     // in a single block.
-                    const chunks = self.client_sessions_checkpoint.chunks(ClientSessions.encode_size);
+                    const chunks = self.client_sessions_checkpoint.encode_chunks();
                     assert(chunks.len == 1);
 
                     self.client_sessions_checkpoint.size = self.client_sessions.encode(chunks[0]);

@@ -300,7 +300,7 @@ pub fn GridType(comptime Storage: type) type {
                 defer assert(grid.free_set.opened);
 
                 grid.free_set.open(.{
-                    .encoded = free_set_checkpoint.chunks(free_set_checkpoint.size),
+                    .encoded = free_set_checkpoint.decode_chunks(),
                     .block_addresses = free_set_checkpoint.block_addresses[0..free_set_checkpoint.block_count()],
                 });
                 assert((grid.free_set.count_acquired() > 0) == (free_set_checkpoint.size > 0));
@@ -341,9 +341,7 @@ pub fn GridType(comptime Storage: type) type {
                 var free_set_encoder = grid.free_set.encode_chunks();
                 defer assert(free_set_encoder.done());
 
-                const free_set_chunks = grid.free_set_checkpoint.chunks(
-                    FreeSet.encode_size_max(grid.free_set.blocks.bit_length),
-                );
+                const free_set_chunks = grid.free_set_checkpoint.encode_chunks();
 
                 grid.free_set_checkpoint.size = 0;
                 for (free_set_chunks) |chunk| {

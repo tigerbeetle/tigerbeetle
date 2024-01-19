@@ -75,7 +75,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         // TODO(Grid pool): Acquire blocks as-needed from the grid pool. The common-case number of
         // blocks needed is much less than the worst-case number of blocks.
         blocks: []BlockPtr,
-        /// `CheckpointTrailer.chunks()` returns slices into this memory.
+        /// `encode_chunks()`/`decode_chunks()` return slices into this memory.
         block_bodies: [][]align(@sizeOf(u256)) u8,
 
         // SoA representation of block references holding the trailer itself.
@@ -163,8 +163,18 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             return @intCast(stdx.div_ceil(trailer.size, chunk_size_max));
         }
 
-        pub fn chunks(trailer: *Self, trailer_size: u64) []const []align(@sizeOf(u256)) u8 {
-            const chunk_count: u32 = @intCast(stdx.div_ceil(trailer_size, chunk_size_max));
+        /// Each returned chunk has `chunk.len == chunk_size_max`.
+        pub fn encode_chunks(trailer: *Self) []const []align(@sizeOf(u256)) u8 {
+            for (trailer.block_bodies, trailer.blocks) |*block_body, block| {
+                block_body.* = block[@sizeOf(vsr.Header)..];
+
+                assert(block_body.*.len == chunk_size_max);
+            }
+            return trailer.block_bodies;
+        }
+
+        pub fn decode_chunks(trailer: *const Self) []const []align(@sizeOf(u256)) const u8 {
+            const chunk_count: u32 = @intCast(stdx.div_ceil(trailer.size, chunk_size_max));
             for (
                 trailer.block_bodies[0..chunk_count],
                 trailer.blocks[0..chunk_count],
@@ -173,7 +183,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 const chunk_size = Chunk.size(.{
                     .block_index = @intCast(block_index),
                     .block_count = chunk_count,
-                    .trailer_size = trailer_size,
+                    .trailer_size = trailer.size,
                 });
 
                 block_body.* = block[@sizeOf(vsr.Header)..][0..chunk_size];
@@ -309,7 +319,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             assert(trailer.size_transferred == trailer.size);
 
             var checksum_stream = vsr.ChecksumStream.init();
-            for (trailer.chunks(trailer.size)) |chunk| checksum_stream.add(chunk);
+            for (trailer.decode_chunks()) |chunk| checksum_stream.add(chunk);
             assert(trailer.checksum == checksum_stream.checksum());
 
             const callback = trailer.callback.open;
@@ -322,7 +332,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             defer assert(trailer.callback == .checkpoint);
 
             var checksum_stream = vsr.ChecksumStream.init();
-            for (trailer.chunks(trailer.size)) |chunk| checksum_stream.add(chunk);
+            for (trailer.decode_chunks()) |chunk| checksum_stream.add(chunk);
 
             trailer.size_transferred = 0;
             trailer.checksum = checksum_stream.checksum();
