@@ -171,22 +171,20 @@ public class UInt128Test {
     }
 
     @Test
-    public void testULID() throws Exception {
-        // Java's BigInteger uses bytes in big-endian, which should allow direct casting from ULID.
-
+    public void testID() throws Exception {
         {
-            // Generate ULIDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
-            var ulidA = new BigInteger(UInt128.ULID());
+            // Generate IDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
+            var idA = UInt128.asBigInteger(UInt128.ID());
             for (int i = 0; i < 10_000_000; i++) {
                 if (i % 10_000 == 0) {
                     Thread.sleep(1);
                 }
 
-                var ulidB = new BigInteger(UInt128.ULID());
-                assertTrue(ulidB.compareTo(ulidA) > 0);
+                var idB = UInt128.asBigInteger(UInt128.ID());
+                assertTrue(idB.compareTo(idA) > 0);
 
-                // Use the generated ULID as the new reference point for the next loop.
-                ulidA = ulidB;
+                // Use the generated ID as the new reference point for the next loop.
+                idA = idB;
             }
         }
 
@@ -203,15 +201,15 @@ public class UInt128Test {
                     latchStart.await();
 
                     // Same as serial test above, but with smaller bounds.
-                    var ulidA = new BigInteger(UInt128.ULID());
+                    var idA = UInt128.asBigInteger(UInt128.ID());
                     for (int j = 0; j < 10_000; j++) {
                         if (j % 1000 == 0) {
                             Thread.sleep(1);
                         }
 
-                        var ulidB = new BigInteger(UInt128.ULID());
-                        assertTrue(ulidB.compareTo(ulidA) > 0);
-                        ulidA = ulidB;
+                        var idB = UInt128.asBigInteger(UInt128.ID());
+                        assertTrue(idB.compareTo(idA) > 0);
+                        idA = idB;
                     }
 
                 } catch (Exception e) {

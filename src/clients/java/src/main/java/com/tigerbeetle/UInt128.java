@@ -174,35 +174,35 @@ public enum UInt128 {
         return asBytes(bigintLsb.longValueExact(), bigintMsb.longValueExact());
     }
 
-    private static long ulidLastTimestamp = 0L;
-    private static final byte[] ulidLastRandom = new byte[80];
-    private static final SecureRandom ulidSecureRandom = new SecureRandom();
+    private static long idLastTimestamp = 0L;
+    private static final byte[] idLastRandom = new byte[80];
+    private static final SecureRandom idSecureRandom = new SecureRandom();
 
     /**
-     * Generates a Universally Unique Lexicographically Sortable Identifier
-     * (<a href="https://github.com/ulid/spec">ULID</a>) as 16 bytes of a 128-bit value.
+     * Generates a Universally Unique Sortable Identifier as 16 bytes of a 128-bit value.
      *
-     * The ULID returned always increases monotonically and is thread-safe.
+     * The ID() function is thread-safe, the bytes returned are formatted in little endian, and the
+     * unsigned 128-bit value always monotonically increasing.
      *
-     * @throws ArithmeticException as per ULID specs, if the 80 bits of randomness overflows.
-     * @return an array of 16 bytes representing the 128-bit value.
+     * @throws ArithmeticException if the random monotonic value in the same millisecond overflows.
+     * @return an array of 16 bytes representing an unsigned 128-bit value in little endian.
      */
-    public static byte[] ULID() {
+    public static byte[] ID() {
         long randomLo;
         short randomHi;
         long timestamp = System.currentTimeMillis();
 
         // Only modify the static variables in the synchronized block.
-        synchronized (ulidSecureRandom) {
+        synchronized (idSecureRandom) {
             // Ensure timestamp is monotonic. If it advances forward, also generate a new random.
-            if (timestamp <= ulidLastTimestamp) {
-                timestamp = ulidLastTimestamp;
+            if (timestamp <= idLastTimestamp) {
+                timestamp = idLastTimestamp;
             } else {
-                ulidLastTimestamp = timestamp;
-                ulidSecureRandom.nextBytes(ulidLastRandom);
+                idLastTimestamp = timestamp;
+                idSecureRandom.nextBytes(idLastRandom);
             }
 
-            var random = ByteBuffer.wrap(ulidLastRandom).order(ByteOrder.LITTLE_ENDIAN);
+            var random = ByteBuffer.wrap(idLastRandom).order(ByteOrder.nativeOrder());
             randomLo = random.getLong();
             randomHi = random.getShort();
 
@@ -211,24 +211,23 @@ public enum UInt128 {
             if (randomLo == 0xFFFFFFFFFFFFFFFFL) {
                 if (randomHi == 0xffff) {
                     throw new ArithmeticException("random bits overflow on monotonic increment");
-                } else {
-                    randomHi += 1;
                 }
+                randomHi += 1;
             }
-
             // Wrapping increment on randomLo. Java allows overflowing arithmetic by default.
             randomLo += 1;
 
+            // Write back the incremented random.
             random.flip();
             random.putLong(randomLo);
             random.putShort(randomHi);
         }
 
-        var buffer = ByteBuffer.allocate(UInt128.SIZE).order(ByteOrder.BIG_ENDIAN);
-        buffer.putInt((int) (timestamp >> 32)); // timestamp hi
-        buffer.putShort((short) timestamp); // timestamp lo
+        var buffer = ByteBuffer.allocate(UInt128.SIZE).order(Batch.BYTE_ORDER);
         buffer.putLong(randomLo);
         buffer.putShort(randomHi);
+        buffer.putShort((short) timestamp); // timestamp lo
+        buffer.putInt((int) (timestamp >> 32)); // timestamp hi
         return buffer.array();
     }
 }
