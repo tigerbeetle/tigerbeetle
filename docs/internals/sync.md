@@ -150,7 +150,6 @@ A checkpoint identifier is attached to the following message types:
 A _canonical_ checkpoint is a checkpoint:
 1. with an op committed atop it by the primary (discovery via `command=commit`), or
 2. that a majority quorum of replicas have reached (discovery via `command=ping`), or
-3. (when `R=2`: that a single replica has reached).
 
 The primary ignores `command=prepare`s which have a different checkpoint id attached than they expect.
 This means that if a replica's history diverges (due to nondeterminism), the diverging replica is effectively excluded from participating in consensus until it has performed superblock-sync.

@@ -964,8 +964,7 @@ test "Cluster: sync: sync, bump target, sync" {
     try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
-test "Cluster: sync: R=2" {
-    // TODO explicit code coverage marks: "candidate is canonical (R=2)"
+test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
     const t = try TestContext.init(.{ .replica_count = 2 });
     defer t.deinit();
 
@@ -987,23 +986,23 @@ test "Cluster: sync: R=2" {
     try expectEqual(b1.op_checkpoint(), 0);
 
     // On B1, corrupt the same slot that A0 is about to overwrite with a new prepare.
+    // (B1 doesn't have any prepare in this slot, thanks to the vsr_checkpoint_interval.)
     b1.stop();
     b1.pass(.R_, .incoming, .commit);
     b1.corrupt(.{ .wal_prepare = (checkpoint_1_trigger + 2) % slot_count });
 
-    // Prepare 2 more ops, to overwrite A0's slots 0,1 in the WAL.
-    try c.request(checkpoint_1_trigger + 2, checkpoint_1_trigger);
+    // Prepare a full pipeline of ops. Since B1 is still lagging behind, this doesn't actually
+    // overwrite any entries from the previous wrap.
+    const pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max;
+    try c.request(checkpoint_1_trigger + pipeline_prepare_queue_max, checkpoint_1_trigger);
 
     try b1.open();
     t.run();
 
-    // B1 needs a prepare that no longer exists anywhere in the cluster.
-    // So it state syncs. This is a special case, since normally A0's latest checkpoint
-    // would not be recognized as canonical until it was committed.
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + pipeline_prepare_queue_max);
+    try expectEqual(c.replies(), checkpoint_1_trigger + pipeline_prepare_queue_max);
 
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 2);
-    try expectEqual(c.replies(), checkpoint_1_trigger + 2);
-
+    // Neither replica used state sync, but it is "done" since all content is present.
     try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 

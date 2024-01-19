@@ -2650,17 +2650,6 @@ pub fn ReplicaType(
             assert(self.primary_pipeline_pending() != null);
             self.primary_abdicate_timeout.reset();
             if (self.solo()) return;
-            // Abdication with R=2 could deadlock:
-            // 1. Primary checkpoints.
-            // 2. Backup starts to checkpoint, but crashes before finishing.
-            // 3. Primary prepares the first op immediately following its checkpoint trigger.
-            // 4. Backup restarts. The op in the same slot that Primary just overwrote is corrupt.
-            // 5. Backup cannot repair that entry (primary overwrote it).
-            // 6. Backup needs a `commit` message to learn its sync target.
-            // (Both replication and view-change quorums are also 2, so abdication isn't needed.)
-            // See "Cluster: sync: R=2" test.
-            // TODO: If we sync to uncanonical checkpoints, then this can be removed.
-            if (self.replica_count == 2) return;
 
             log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
                 self.replica,
@@ -8410,22 +8399,6 @@ pub fn ReplicaType(
                 if (header.into_const(.commit)) |h| {
                     // Normal case: The primary has committed atop the checkpoint.
                     if (h.commit > candidate_trigger) break :canonical true;
-                }
-
-                if (header.command == .commit and
-                    self.replica_count == 2 and
-                    self.replica < self.replica_count)
-                {
-                    // Special case for R=2:
-                    // The cluster must commit atop the checkpoint for it to be canonical.
-                    // But we may need to sync in order for the cluster to commit.
-                    // See the "Cluster: sync: R=2" test for more detail on this special case.
-                    // TODO: If we sync to uncanonical checkpoints, then this can be removed.
-                    log.warn("{}: on_{s}: jump_sync_target: candidate is canonical (R=2)", .{
-                        self.replica,
-                        @tagName(header.command),
-                    });
-                    break :canonical true;
                 }
 
                 // TODO(Async checkpoints): Replica this whole candidate quorum. Instead, sync to the
