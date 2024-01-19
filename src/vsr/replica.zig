@@ -728,15 +728,18 @@ pub fn ReplicaType(
                 }
             }
 
-            const trailer_buffer = self.client_sessions_checkpoint.buffer;
             const trailer_size = self.client_sessions_checkpoint.size;
+            const trailer_chunks = self.client_sessions_checkpoint.decode_chunks();
 
             if (self.superblock.working.client_sessions_reference().empty()) {
+                assert(trailer_chunks.len == 0);
                 assert(trailer_size == 0);
             } else {
+                assert(trailer_chunks.len == 1);
                 assert(trailer_size == ClientSessions.encode_size);
+                assert(trailer_size == trailer_chunks[0].len);
 
-                self.client_sessions.decode(trailer_buffer[0..trailer_size]);
+                self.client_sessions.decode(trailer_chunks[0]);
             }
 
             self.state_machine.open(state_machine_open_callback);
@@ -3151,8 +3154,14 @@ pub fn ReplicaType(
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
                 .checkpoint_client_sessions => {
-                    self.client_sessions_checkpoint.size =
-                        self.client_sessions.encode(self.client_sessions_checkpoint.buffer);
+                    // For encoding/decoding simplicity, require that the entire ClientSessions fits
+                    // in a single block.
+                    const chunks = self.client_sessions_checkpoint.encode_chunks();
+                    assert(chunks.len == 1);
+
+                    self.client_sessions_checkpoint.size = self.client_sessions.encode(chunks[0]);
+                    assert(self.client_sessions_checkpoint.size == ClientSessions.encode_size);
+
                     self.client_sessions_checkpoint.checkpoint(commit_op_checkpoint_client_sessions_callback);
                 },
                 .checkpoint_grid => self.commit_op_checkpoint_grid(),

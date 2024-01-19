@@ -42,19 +42,12 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         const chunk_size_max = constants.block_size - @sizeOf(vsr.Header);
 
         // Chunk describes a slice of encoded trailer that goes into nth block on disk.
-        //
-        // Chunk redundantly stores all of the start index, one-past-the-end index, and length, so
-        // that the call site can avoid indexing arithmetic and associated bugs.
         const Chunk = struct {
-            start: u64,
-            end: u64,
-            size: u32,
-
-            fn for_block(options: struct {
+            fn size(options: struct {
                 block_index: u32,
                 block_count: u32,
                 trailer_size: u64,
-            }) Chunk {
+            }) u32 {
                 assert(options.block_count > 0);
                 assert(options.block_count == stdx.div_ceil(options.trailer_size, chunk_size_max));
                 assert(options.block_index < options.block_count);
@@ -65,12 +58,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 else
                     chunk_size_max;
 
-                const chunk_start = chunk_size_max * options.block_index;
-                const chunk_end = chunk_start + chunk_size;
-                assert(chunk_end <= options.trailer_size);
-                assert(chunk_size > 0);
-
-                return .{ .start = chunk_start, .end = chunk_end, .size = chunk_size };
+                return chunk_size;
             }
         };
 
@@ -83,9 +71,12 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         next_tick: Grid.NextTick = undefined,
         read: Grid.Read = undefined,
         write: Grid.Write = undefined,
-        // As the trailers are each expected to fit in one block, they are written sequentially,
-        // one block at a time. This is the memory used for writing.
-        write_block: BlockPtr,
+
+        // TODO(Grid pool): Acquire blocks as-needed from the grid pool. The common-case number of
+        // blocks needed is much less than the worst-case number of blocks.
+        blocks: []BlockPtr,
+        /// `encode_chunks()`/`decode_chunks()` return slices into this memory.
+        block_bodies: [][]align(@sizeOf(u256)) u8,
 
         // SoA representation of block references holding the trailer itself.
         //
@@ -98,19 +89,15 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         block_index: u32 = 0,
 
         // Size of the encoded set in bytes.
+        // (Does not include block headers.)
         size: u64 = 0,
         // The number of trailer bytes read or written during disk IO. Used to cross-check that we
         // haven't lost any bytes along the way.
         size_transferred: u64 = 0,
 
         // Checksum covering the entire encoded trailer.
+        // (Does not include block headers.)
         checksum: u128 = 0,
-
-        // In-memory buffer for storing encoded trailer in contagious manner.
-        // TODO: instead of copying the data, store a list of grid blocks and implement chunked
-        // decoding. That way, the blocks can be shared with grid cache, increasing the usable cache
-        // size in the common case of a small free set.
-        buffer: []align(@sizeOf(u256)) u8,
 
         callback: union(enum) {
             none,
@@ -119,13 +106,21 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         } = .none,
 
         pub fn init(allocator: mem.Allocator, trailer_type: TrailerType, buffer_size: usize) !Self {
-            const write_block = try allocate_block(allocator);
-            errdefer allocator.free(write_block);
-
-            const buffer = try allocator.alignedAlloc(u8, @sizeOf(u256), buffer_size);
-            errdefer allocator.free(buffer);
-
             const block_count_max = stdx.div_ceil(buffer_size, chunk_size_max);
+
+            const blocks = try allocator.alloc(BlockPtr, block_count_max);
+            errdefer allocator.free(blocks);
+
+            for (blocks, 0..) |*block, i| {
+                errdefer for (blocks[0..i]) |b| allocator.free(b);
+                block.* = try allocate_block(allocator);
+            }
+            errdefer for (blocks) |block| allocator.free(block);
+
+            const block_bodies = try allocator.alloc([]align(@sizeOf(u256)) u8, block_count_max);
+            errdefer allocator.free(block_bodies);
+            @memset(block_bodies, undefined);
+
             const block_addresses = try allocator.alloc(u64, block_count_max);
             errdefer allocator.free(block_addresses);
 
@@ -134,8 +129,8 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
 
             return .{
                 .trailer_type = trailer_type,
-                .write_block = write_block,
-                .buffer = buffer,
+                .blocks = blocks,
+                .block_bodies = block_bodies,
                 .block_addresses = block_addresses,
                 .block_checksums = block_checksums,
             };
@@ -144,8 +139,9 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         pub fn deinit(trailer: *Self, allocator: mem.Allocator) void {
             allocator.free(trailer.block_checksums);
             allocator.free(trailer.block_addresses);
-            allocator.free(trailer.buffer);
-            allocator.free(trailer.write_block);
+            allocator.free(trailer.block_bodies);
+            for (trailer.blocks) |block| allocator.free(block);
+            allocator.free(trailer.blocks);
         }
 
         pub fn reset(trailer: *Self) void {
@@ -156,8 +152,8 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             }
             trailer.* = .{
                 .trailer_type = trailer.trailer_type,
-                .write_block = trailer.write_block,
-                .buffer = trailer.buffer,
+                .blocks = trailer.blocks,
+                .block_bodies = trailer.block_bodies,
                 .block_addresses = trailer.block_addresses,
                 .block_checksums = trailer.block_checksums,
             };
@@ -165,6 +161,34 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
 
         pub fn block_count(trailer: *const Self) u32 {
             return @intCast(stdx.div_ceil(trailer.size, chunk_size_max));
+        }
+
+        /// Each returned chunk has `chunk.len == chunk_size_max`.
+        pub fn encode_chunks(trailer: *Self) []const []align(@sizeOf(u256)) u8 {
+            for (trailer.block_bodies, trailer.blocks) |*block_body, block| {
+                block_body.* = block[@sizeOf(vsr.Header)..];
+
+                assert(block_body.*.len == chunk_size_max);
+            }
+            return trailer.block_bodies;
+        }
+
+        pub fn decode_chunks(trailer: *const Self) []const []align(@sizeOf(u256)) const u8 {
+            const chunk_count: u32 = @intCast(stdx.div_ceil(trailer.size, chunk_size_max));
+            for (
+                trailer.block_bodies[0..chunk_count],
+                trailer.blocks[0..chunk_count],
+                0..,
+            ) |*block_body, block, block_index| {
+                const chunk_size = Chunk.size(.{
+                    .block_index = @intCast(block_index),
+                    .block_count = chunk_count,
+                    .trailer_size = trailer.size,
+                });
+
+                block_body.* = block[@sizeOf(vsr.Header)..][0..chunk_size];
+            }
+            return trailer.block_bodies[0..chunk_count];
         }
 
         // These data are stored in the superblock header.
@@ -264,7 +288,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             const block_header = schema.header_from_block(block);
             assert(block_header.block_type == trailer.trailer_type.block_type());
 
-            const chunk = Chunk.for_block(.{
+            const chunk_size = Chunk.size(.{
                 .block_index = trailer.block_index,
                 .block_count = trailer.block_count(),
                 .trailer_size = trailer.size,
@@ -273,10 +297,10 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             stdx.copy_disjoint(
                 .exact,
                 u8,
-                trailer.buffer[chunk.start..chunk.end],
+                trailer.blocks[trailer.block_index][@sizeOf(vsr.Header)..][0..chunk_size],
                 schema.TrailerNode.body(block),
             );
-            trailer.size_transferred += chunk.size;
+            trailer.size_transferred += chunk_size;
 
             if (schema.TrailerNode.previous(block)) |previous| {
                 assert(trailer.block_index > 0);
@@ -293,7 +317,10 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
 
             assert(trailer.block_index == 0);
             assert(trailer.size_transferred == trailer.size);
-            assert(trailer.checksum == vsr.checksum(trailer.buffer[0..trailer.size]));
+
+            var checksum_stream = vsr.ChecksumStream.init();
+            for (trailer.decode_chunks()) |chunk| checksum_stream.add(chunk);
+            assert(trailer.checksum == checksum_stream.checksum());
 
             const callback = trailer.callback.open;
             trailer.callback = .none;
@@ -304,8 +331,11 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             assert(trailer.callback == .none);
             defer assert(trailer.callback == .checkpoint);
 
+            var checksum_stream = vsr.ChecksumStream.init();
+            for (trailer.decode_chunks()) |chunk| checksum_stream.add(chunk);
+
             trailer.size_transferred = 0;
-            trailer.checksum = vsr.checksum(trailer.buffer[0..trailer.size]);
+            trailer.checksum = checksum_stream.checksum();
 
             if (trailer.size > 0) {
                 assert(trailer.grid.?.free_set.count_reservations() == 0);
@@ -346,13 +376,14 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             assert(trailer.block_index < trailer.block_count());
             assert((trailer.size_transferred == 0) == (trailer.block_index == 0));
 
-            const chunk = Chunk.for_block(.{
+            const chunk_size = Chunk.size(.{
                 .block_index = trailer.block_index,
                 .block_count = trailer.block_count(),
                 .trailer_size = trailer.size,
             });
 
             const block_index = trailer.block_index;
+            const block = &trailer.blocks[block_index];
             const metadata: schema.TrailerNode.Metadata = if (block_index == 0) .{
                 .previous_trailer_block_checksum = 0,
                 .previous_trailer_block_address = 0,
@@ -361,36 +392,25 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 .previous_trailer_block_address = trailer.block_addresses[block_index - 1],
             };
 
-            const header = mem.bytesAsValue(
-                vsr.Header.Block,
-                trailer.write_block[0..@sizeOf(vsr.Header)],
-            );
+            const header = mem.bytesAsValue(vsr.Header.Block, block.*[0..@sizeOf(vsr.Header)]);
             header.* = .{
                 .cluster = trailer.grid.?.superblock.working.cluster,
                 .metadata_bytes = @bitCast(metadata),
                 .address = trailer.block_addresses[trailer.block_index],
                 .snapshot = 0, // TODO(snapshots): Set this properly; it is useful for debugging.
-                .size = @sizeOf(vsr.Header) + chunk.size,
+                .size = @sizeOf(vsr.Header) + chunk_size,
                 .command = .block,
                 .block_type = trailer.trailer_type.block_type(),
             };
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                trailer.write_block[@sizeOf(vsr.Header)..][0..chunk.size],
-                trailer.buffer[chunk.start..chunk.end],
-            );
-            trailer.size_transferred += chunk.size;
-            header.set_checksum_body(trailer.write_block[@sizeOf(vsr.Header)..][0..chunk.size]);
+            trailer.size_transferred += chunk_size;
+            header.set_checksum_body(block.*[@sizeOf(vsr.Header)..][0..chunk_size]);
             header.set_checksum();
-            schema.TrailerNode.assert_valid_header(trailer.write_block);
+            schema.TrailerNode.assert_valid_header(block.*);
 
-            trailer.block_checksums[trailer.block_index] = header.checksum;
-            trailer.grid.?.create_block(
-                checkpoint_write_next_callback,
-                &trailer.write,
-                &trailer.write_block,
-            );
+            trailer.block_checksums[block_index] = header.checksum;
+            // create_block swaps out the `blocks` BlockPtr, so our reference to it will be invalid.
+            trailer.block_bodies[block_index] = undefined;
+            trailer.grid.?.create_block(checkpoint_write_next_callback, &trailer.write, block);
         }
 
         fn checkpoint_write_next_callback(write: *Grid.Write) void {
