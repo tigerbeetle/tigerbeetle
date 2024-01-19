@@ -108,7 +108,8 @@ pub fn StateMachineType(
                 .{
                     .things = .{
                         .cache_entries_max = 2048,
-                        .prefetch_entries_max = 1,
+                        .prefetch_entries_for_read_max = 0,
+                        .prefetch_entries_for_update_max = 1,
                         .tree_options_object = .{},
                         .tree_options_id = .{},
                         .tree_options_index = .{ .value = .{} },

@@ -471,8 +471,10 @@ pub fn GrooveType(
         scan_builder: ScanBuilder,
 
         pub const Options = struct {
-            /// The maximum number of objects that might be prefetched by a batch.
-            prefetch_entries_max: u32,
+            /// The maximum number of objects that might be prefetched and not modified by a batch.
+            prefetch_entries_for_read_max: u32,
+            /// The maximum number of objects that might be prefetched and then modified by a batch.
+            prefetch_entries_for_update_max: u32,
             cache_entries_max: u32,
 
             tree_options_object: ObjectTree.Options,
@@ -491,9 +493,10 @@ pub fn GrooveType(
 
                 // In the worst case, each Map must be able to store the value_count_max (to
                 // contain either TableMutable or TableImmutable) as well as the maximum number of
-                // prefetches a bar may perform.
+                // prefetches a bar may perform, excluding prefetches already accounted for by
+                // value_count_max.
                 .map_value_count_max = @as(u32, ObjectTree.Table.value_count_max) +
-                    (options.prefetch_entries_max * constants.lsm_batch_multiple),
+                    (options.prefetch_entries_for_read_max * constants.lsm_batch_multiple),
 
                 // Scopes are limited to a single beat, so the maximum number of entries in a
                 // single scope is value_count_max / constants.lsm_batch_multiple.
@@ -554,7 +557,10 @@ pub fn GrooveType(
             }
 
             var prefetch_keys = PrefetchKeys{};
-            try prefetch_keys.ensureTotalCapacity(allocator, options.prefetch_entries_max);
+            try prefetch_keys.ensureTotalCapacity(
+                allocator,
+                options.prefetch_entries_for_read_max + options.prefetch_entries_for_update_max,
+            );
             errdefer prefetch_keys.deinit(allocator);
 
             var scan_builder = if (has_scan) try ScanBuilder.init(allocator) else {};
