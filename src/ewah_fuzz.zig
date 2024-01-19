@@ -143,7 +143,7 @@ fn ContextType(comptime Word: type) type {
                 encoded_size += encoder.encode(@alignCast(chunk));
             }
 
-            var decoder = Codec.decoder(context.decoded_actual[0..]);
+            var decoder = Codec.decoder(context.decoded_actual[0..], encoded_size);
             var decoded_actual_size: usize = 0;
             var decoder_input_offset: usize = 0;
             while (decoder_input_offset < encoded_size) {
@@ -157,6 +157,7 @@ fn ContextType(comptime Word: type) type {
                 decoded_actual_size += decoder.decode(@alignCast(chunk));
                 decoder_input_offset += chunk_size;
             }
+            assert(decoder.done());
 
             try std.testing.expectEqual(decoded_expect.len, decoded_actual_size);
             try std.testing.expectEqualSlices(

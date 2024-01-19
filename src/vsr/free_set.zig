@@ -503,12 +503,18 @@ pub const FreeSet = struct {
         assert(set.reservation_count == 0);
         assert(set.reservation_blocks == 0);
 
-        var decoder = ewah.decoder(bit_set_masks(set.blocks));
+        var source_size: usize = 0;
+        for (source_chunks) |source_chunk| {
+            source_size += source_chunk.len;
+        }
+
+        var decoder = ewah.decoder(bit_set_masks(set.blocks), source_size);
         var words_decoded: usize = 0;
         for (source_chunks) |source_chunk| {
             words_decoded += decoder.decode(source_chunk);
         }
         assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks.bit_length);
+        assert(decoder.done());
 
         for (0..set.index.bit_length) |shard| {
             if (set.find_free_block_in_shard(shard) == null) set.index.set(shard);

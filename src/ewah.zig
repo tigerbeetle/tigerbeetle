@@ -65,6 +65,9 @@ pub fn ewah(comptime Word: type) type {
         }
 
         pub const Decoder = struct {
+            /// The number of bytes of the source buffer (the encoded data) that still need to be
+            /// processed.
+            source_size_remaining: usize,
             target_words: []Word,
             target_index: usize = 0,
             source_literal_words: usize = 0,
@@ -77,6 +80,8 @@ pub fn ewah(comptime Word: type) type {
                 source_chunk: []align(@alignOf(Word)) const u8,
             ) usize {
                 assert(source_chunk.len % @sizeOf(Word) == 0);
+
+                decoder_.source_size_remaining -= source_chunk.len;
 
                 const source_words = mem.bytesAsSlice(Word, source_chunk);
                 const target_words = decoder_.target_words;
@@ -130,10 +135,25 @@ pub fn ewah(comptime Word: type) type {
                 defer decoder_.target_index = target_index;
                 return target_index - decoder_.target_index;
             }
+
+            pub fn done(decoder_: *const Decoder) bool {
+                assert(decoder_.target_index <= decoder_.target_words.len);
+
+                if (decoder_.source_size_remaining == 0) {
+                    assert(decoder_.source_literal_words == 0);
+                    return true;
+                } else {
+                    maybe(decoder_.source_literal_words == 0);
+                    return false;
+                }
+            }
         };
 
-        pub fn decoder(target_words: []Word) Decoder {
-            return .{ .target_words = target_words };
+        pub fn decoder(target_words: []Word, source_size: usize) Decoder {
+            return .{
+                .target_words = target_words,
+                .source_size_remaining = source_size,
+            };
         }
 
         // (This is a helper for testing only.)
@@ -144,7 +164,7 @@ pub fn ewah(comptime Word: type) type {
             assert(source.len % @sizeOf(Word) == 0);
             assert(disjoint_slices(u8, Word, source, target_words));
 
-            var decoder_ = decoder(target_words);
+            var decoder_ = decoder(target_words, source.len);
             return decoder_.decode(source);
         }
 
