@@ -351,8 +351,7 @@ pub fn GridType(comptime Storage: type) type {
                         @as(u32, @intCast(free_set_encoder.encode_chunk(chunk)));
 
                     if (free_set_encoder.done()) break;
-                }
-                assert(free_set_encoder.done());
+                } else unreachable;
                 assert(grid.free_set_checkpoint.size % @sizeOf(FreeSet.Word) == 0);
             }
 

@@ -89,6 +89,7 @@ pub fn ewah(comptime Word: type) type {
 
                 var source_index: usize = 0;
                 var target_index: usize = decoder.target_index;
+                defer decoder.target_index = target_index;
 
                 if (decoder.source_literal_words > 0) {
                     const literal_word_count_chunk =
@@ -132,7 +133,6 @@ pub fn ewah(comptime Word: type) type {
                 assert(source_index <= source_words.len);
                 assert(target_index <= target_words.len);
 
-                defer decoder.target_index = target_index;
                 return target_index - decoder.target_index;
             }
 

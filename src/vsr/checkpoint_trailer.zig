@@ -137,10 +137,10 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
         }
 
         pub fn deinit(trailer: *Self, allocator: mem.Allocator) void {
-            for (trailer.blocks) |block| allocator.free(block);
             allocator.free(trailer.block_checksums);
             allocator.free(trailer.block_addresses);
             allocator.free(trailer.block_bodies);
+            for (trailer.blocks) |block| allocator.free(block);
             allocator.free(trailer.blocks);
         }
 
