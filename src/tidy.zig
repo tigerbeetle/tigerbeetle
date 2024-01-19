@@ -259,6 +259,42 @@ test "tidy no large blobs" {
     if (has_large_blobs) return error.HasLargeBlobs;
 }
 
+// Sanity check for "unexpected" files in the repository.
+test "tidy extensions" {
+    const allowed_extensions = std.ComptimeStringMap(void, .{
+        .{".bat"}, .{".c"},     .{".cs"},   .{".csproj"},  .{".css"},  .{".go"},
+        .{".h"},   .{".hcl"},   .{".java"}, .{".js"},      .{".json"}, .{".md"},
+        .{".mod"}, .{".props"}, .{".ps1"},  .{".service"}, .{".sh"},   .{".sln"},
+        .{".sum"}, .{".ts"},    .{".txt"},  .{".xml"},     .{".yml"},  .{".zig"},
+    });
+
+    const exceptions = std.ComptimeStringMap(void, .{
+        .{".editorconfig"}, .{".gitattributes"}, .{".gitignore"},             .{".nojekyll"},
+        .{"CNAME"},         .{"Dockerfile"},     .{"exclude-pmd.properties"}, .{"favicon.ico"},
+        .{"favicon.png"},   .{"LICENSE"},        .{"logo.svg"},               .{"module-info.test"},
+    });
+
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const files = try shell.exec_stdout("git ls-files", .{});
+    var lines = std.mem.split(u8, files, "\n");
+    var bad_extension = false;
+    while (lines.next()) |path| {
+        if (path.len == 0) continue;
+        const extension = std.fs.path.extension(path);
+        if (!allowed_extensions.has(extension)) {
+            const basename = std.fs.path.basename(path);
+            if (!exceptions.has(basename)) {
+                std.debug.print("bad extension: {s}\n", .{path});
+                bad_extension = true;
+            }
+        }
+    }
+    if (bad_extension) return error.BadExtension;
+}
+
 fn banned(source: []const u8) ?[]const u8 {
     // Note: must avoid banning ourselves!
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
