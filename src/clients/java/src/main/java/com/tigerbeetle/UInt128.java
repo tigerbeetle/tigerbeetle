@@ -179,12 +179,13 @@ public enum UInt128 {
     private static final SecureRandom idSecureRandom = new SecureRandom();
 
     /**
-     * Generates a Universally Unique Sortable Identifier as 16 bytes of a 128-bit value.
+     * Generates a Universally Unique Binary Sortable Identifier as 16 bytes of a 128-bit value.
      *
-     * The ID() function is thread-safe, the bytes returned are formatted in little endian, and the
-     * unsigned 128-bit value always monotonically increasing.
+     * The ID() function is thread-safe, the bytes returned are stored in little endian, and the
+     * unsigned 128-bit value increases monotonically. The algorithm is based on 
+     * <a href="https://github.com/ulid/spec">ULID</a> but is adjusted for u128-LE interpretation.
      *
-     * @throws ArithmeticException if the random monotonic value in the same millisecond overflows.
+     * @throws ArithmeticException if the random monotonic bits in the same millisecond overflows.
      * @return an array of 16 bytes representing an unsigned 128-bit value in little endian.
      */
     public static byte[] ID() {
@@ -209,7 +210,7 @@ public enum UInt128 {
             // If randomLo will overflow from increment, then increment randomHi as carry.
             // If randomHi will overflow on increment, throw error on 80-bit random overflow.
             if (randomLo == 0xFFFFFFFFFFFFFFFFL) {
-                if (randomHi == 0xffff) {
+                if (randomHi == 0xFFFF) {
                     throw new ArithmeticException("random bits overflow on monotonic increment");
                 }
                 randomHi += 1;
