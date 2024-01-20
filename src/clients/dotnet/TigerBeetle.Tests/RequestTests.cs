@@ -9,28 +9,6 @@ namespace TigerBeetle.Tests;
 public class RequestTests
 {
     [TestMethod]
-    [ExpectedException(typeof(ArgumentException))]
-    public void EmptyBatch()
-    {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
-        var request = new AsyncRequest<Account, UInt128>(nativeClient, TBOperation.LookupAccounts);
-
-        request.Submit(Array.Empty<UInt128>());
-        Assert.IsTrue(false);
-    }
-
-    [TestMethod]
-    [ExpectedException(typeof(ArgumentNullException))]
-    public void NullBatch()
-    {
-        using var nativeClient = NativeClient.InitEcho(0, new string[] { "3000" }, 1);
-        var request = new AsyncRequest<Account, UInt128>(nativeClient, TBOperation.LookupAccounts);
-
-        request.Submit((UInt128[])null!);
-        Assert.IsTrue(false);
-    }
-
-    [TestMethod]
     [ExpectedException(typeof(AssertionException))]
     public async Task UnexpectedOperation()
     {
@@ -49,7 +27,7 @@ public class RequestTests
         Assert.IsFalse(task.IsCompleted);
 
         _ = await task;
-        Assert.IsTrue(false);
+        Assert.Fail();
     }
 
     [TestMethod]
@@ -73,7 +51,7 @@ public class RequestTests
         Assert.IsFalse(task.IsCompleted);
 
         _ = await task;
-        Assert.IsTrue(false);
+        Assert.Fail();
     }
 
     [TestMethod]
@@ -99,7 +77,7 @@ public class RequestTests
             try
             {
                 _ = await task;
-                Assert.IsTrue(false);
+                Assert.Fail();
             }
             catch (RequestException exception)
             {

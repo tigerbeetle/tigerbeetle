@@ -30,7 +30,7 @@ public class ExceptionTests
             AssertionException.AssertTrue(false, "hello {0}", "world");
 
             // Should not be reachable:
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (AssertionException exception)
         {
