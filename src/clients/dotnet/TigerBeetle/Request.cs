@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,7 +39,6 @@ internal abstract class Request<TResult, TBody> : IRequest
     private readonly NativeClient nativeClient;
     private readonly TBOperation operation;
     private readonly GCHandle requestGCHandle;
-    private GCHandle bodyGCHandle;
 
     public Request(NativeClient nativeClient, TBOperation operation)
     {
@@ -47,37 +48,23 @@ internal abstract class Request<TResult, TBody> : IRequest
         this.operation = operation;
     }
 
-    private IntPtr Pin(TBody[] body, out uint size)
+    public unsafe void Submit(void* pointer, int len)
     {
-        AssertTrue(body.Length > 0, "Message body cannot be empty");
-        AssertTrue(!bodyGCHandle.IsAllocated, "Request body GCHandle is already allocated");
-        bodyGCHandle = GCHandle.Alloc(body, GCHandleType.Pinned);
-
-        size = (uint)(body.Length * BODY_SIZE);
-        return bodyGCHandle.AddrOfPinnedObject();
-    }
-
-    public void Submit(TBody[] batch)
-    {
-        if (batch == null) throw new ArgumentNullException(nameof(batch));
-        if (batch.Length == 0) throw new ArgumentException("Batch cannot be empty", nameof(batch));
-
+        AssertTrue(pointer != null);
+        AssertTrue(len > 0);
         AssertTrue(requestGCHandle.IsAllocated, "Request GCHandle not allocated");
 
-        unsafe
-        {
-            var packet = this.nativeClient.AcquirePacket();
+        var packet = this.nativeClient.AcquirePacket();
 
-            var ptr = packet.Pointer;
-            ptr->next = null;
-            ptr->userData = (IntPtr)requestGCHandle;
-            ptr->operation = (byte)operation;
-            ptr->data = Pin(batch, out uint size);
-            ptr->dataSize = size;
-            ptr->status = PacketStatus.Ok;
+        var ptr = packet.Pointer;
+        ptr->next = null;
+        ptr->userData = (IntPtr)requestGCHandle;
+        ptr->operation = (byte)operation;
+        ptr->data = new nint(pointer);
+        ptr->dataSize = (uint)(len * BODY_SIZE);
+        ptr->status = PacketStatus.Ok;
 
-            this.nativeClient.Submit(packet);
-        }
+        this.nativeClient.Submit(packet);
     }
 
     public void Complete(Packet packet, ReadOnlySpan<byte> result)
@@ -117,10 +104,9 @@ internal abstract class Request<TResult, TBody> : IRequest
                 finally
                 {
                     nativeClient.ReleasePacket(packet);
-                }
 
-                if (requestGCHandle.IsAllocated) requestGCHandle.Free();
-                if (bodyGCHandle.IsAllocated) bodyGCHandle.Free();
+                    if (requestGCHandle.IsAllocated) requestGCHandle.Free();
+                }
             }
             catch (Exception any)
             {

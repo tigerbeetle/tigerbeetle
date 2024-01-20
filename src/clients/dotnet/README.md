@@ -270,8 +270,7 @@ for (int i = 0; i < transfers.Length; i += BATCH_SIZE)
     {
         batchSize = transfers.Length - i;
     }
-    var segment = new ArraySegment<Transfer>(transfers, i, batchSize);
-    createTransfersError = client.CreateTransfers(segment.Array);
+    createTransfersError = client.CreateTransfers(transfers[i..batchSize]);
     // error handling omitted
 }
 ```
