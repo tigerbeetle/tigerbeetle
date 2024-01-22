@@ -203,7 +203,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     // Linting targets
-    // We currently have: lint_zig_fmt, lint_tigerstyle, lint_shellcheck.
+    // We currently have: lint_zig_fmt, lint_shellcheck.
     // The meta-target lint runs them all
     {
         // lint_zig_fmt
@@ -211,33 +211,13 @@ pub fn build(b: *std.Build) !void {
         const lint_zig_fmt_step = b.step("lint_zig_fmt", "Run zig fmt");
         lint_zig_fmt_step.dependOn(&lint_zig_fmt.step);
 
-        // lint_tigerstyle
-        const lint_tigerstyle = b.addExecutable(.{
-            .name = "lint_tigerstyle",
-            .root_source_file = .{ .path = "scripts/lint_tigerstyle.zig" },
-            .target = target,
-            .optimize = mode,
-        });
-
-        const run_cmd = b.addRunArtifact(lint_tigerstyle);
-        if (b.args) |args| {
-            run_cmd.addArgs(args);
-        } else {
-            run_cmd.addArg("src");
-        }
-
-        const lint_tigerstyle_step = b.step("lint_tigerstyle", "Run the linter on src/");
-        lint_tigerstyle_step.dependOn(&run_cmd.step);
-
         // lint_shellcheck
         const lint_shellcheck = ShellcheckStep.add(b);
         const lint_shellcheck_step = b.step("lint_shellcheck", "Run shellcheck on **.sh");
         lint_shellcheck_step.dependOn(&lint_shellcheck.step);
 
-        // TODO: Iterate above? Make it impossible to neglect to add somehow?
         // lint
         const lint_step = b.step("lint", "Run all defined linters");
-        lint_step.dependOn(lint_tigerstyle_step);
         lint_step.dependOn(lint_zig_fmt_step);
         lint_step.dependOn(lint_shellcheck_step);
     }
