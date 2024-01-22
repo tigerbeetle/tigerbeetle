@@ -27,7 +27,7 @@
   Add ID generation function to the Java client. TigerBeetle doesn't assign any meaning to IDs and
   can use anything as long as it is unique. However, for optimal performance it is best if these
   client-generated IDs are approximately monotonic. This can be achieved by, for example, using
-  client's current time stamp for high order bits of an ID. The new helper does just that.
+  client's current timestamp for high order bits of an ID. The new helper does just that.
 
 ### Internals
 
