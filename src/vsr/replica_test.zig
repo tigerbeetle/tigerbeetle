@@ -891,12 +891,11 @@ test "Cluster: view-change: duel of the primaries" {
 test "Cluster: sync: partition, lag, sync (transition from idle)" {
     for ([_]u64{
         // Normal case: the cluster has committed atop the checkpoint trigger.
-        // The lagging replica can learn the canonical checkpoint from a commit message.
+        // The lagging replica can learn the latest checkpoint from a commit message.
         checkpoint_2_trigger + 1,
         // Idle case: the idle cluster has not committed atop the checkpoint trigger.
-        // The lagging replica uses the sync target candidate quorum (populated by ping messages)
-        // to identify the canonical checkpoint.
-        // TODO Explicit code coverage: "candidate checkpoint is canonical (quorum)"
+        // The lagging replica is far enough behind the cluster that it can sync to the latest
+        // checkpoint anyway, since it cannot possibly recover via WAL repair.
         checkpoint_2_trigger,
     }) |cluster_commit_max| {
         log.info("test cluster_commit_max={}", .{cluster_commit_max});

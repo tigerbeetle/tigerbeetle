@@ -26,8 +26,6 @@ const Version = vsr.Version;
 const VSRState = vsr.VSRState;
 const SyncStage = vsr.SyncStage;
 const SyncTarget = vsr.SyncTarget;
-const SyncTargetCandidate = vsr.SyncTargetCandidate;
-const SyncTargetQuorum = vsr.SyncTargetQuorum;
 const ClientSessions = vsr.ClientSessions;
 
 const log = stdx.log.scoped(.replica);
@@ -234,10 +232,9 @@ pub fn ReplicaType(
         opened: bool,
 
         syncing: SyncStage = .idle,
-        /// The latest discovered *canonical* checkpoint.
+        /// The latest discovered checkpoint that would be safe to sync to.
         /// Kept up-to-date during every status, while syncing or healthy.
         sync_target_max: ?SyncTarget = null,
-        sync_target_quorum: SyncTargetQuorum = .{},
         /// Invariants:
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
@@ -2795,10 +2792,9 @@ pub fn ReplicaType(
             // TODO Test connectivity to cluster to rule out a network partition.
 
             // Even if we want to transition to sync, there is no point if we don't have
-            // a target yet.
+            // a target yet (or if our latest target would not advance our state).
             if (self.sync_target_max == null) return;
-            if (self.sync_target_max.?.checkpoint_op < self.op_checkpoint()) return;
-            if (self.sync_target_max.?.checkpoint_id == self.superblock.working.checkpoint_id()) return;
+            if (self.sync_target_max.?.checkpoint_op <= self.op_checkpoint()) return;
 
             {
                 // commit_max is the highest committed op *within our view*.
@@ -8357,30 +8353,58 @@ pub fn ReplicaType(
         }
 
         fn jump_sync_target(self: *Self, header: *const Header) void {
-            if (!self.standby()) {
-                assert(self.sync_target_quorum.candidates[self.replica] == null);
-            }
-
             if (header.into_const(.commit)) |h| assert(h.commit >= h.checkpoint_op);
 
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
             if (header.replica == self.replica) return; // Ignore messages from self (misdirected).
 
-            const candidate: SyncTargetCandidate = switch (header.into_any()) {
-                inline .commit,
-                .ping,
-                => |h| .{
+            const candidate = switch (header.into_any()) {
+                inline .commit, .ping => |h| .{
                     .checkpoint_id = h.checkpoint_id,
                     .checkpoint_op = h.checkpoint_op,
                 },
                 else => return,
             };
 
-            if (candidate.checkpoint_op == 0) return;
-            if (candidate.checkpoint_op < self.op_checkpoint()) return;
+            if (candidate.checkpoint_op == self.op_checkpoint() and
+                candidate.checkpoint_id != self.superblock.working.checkpoint_id())
+            {
+                log.err("{}: on_{s}: jump_sync_target: checkpoint diverged " ++
+                    "(op={} id_from_superblock={x:0>32} id_from_commit={x:0>32})", .{
+                    self.replica,
+                    @tagName(header.command),
+                    candidate.checkpoint_op,
+                    self.superblock.working.checkpoint_id(),
+                    candidate.checkpoint_id,
+                });
 
-            if (!self.sync_target_quorum.replace(header.replica, &candidate)) {
-                if (header.command == .ping) return;
+                // Either this replica, the header's replica, or both, have diverged.
+                @panic("checkpoint diverged");
+            }
+
+            // Don't sync backwards, or to our current checkpoint.
+            if (candidate.checkpoint_op <= self.op_checkpoint()) return;
+
+            // Don't sync to the immediately-next checkpoint unless it has been committed atop.
+            // - If the checkpoint has been committed atop, that guarantees that at least a
+            //   commit-quorum of replicas has reached that exact checkpoint.
+            // - If the next checkpoint has *not* been committed atop yet, then we can (and should)
+            //   sync via WAL replay instead to maximize durability.
+            //
+            // To understand why this is critical, consider the case (R=3) where:
+            // 1. R₀ is primary.
+            // 2. R₀ prepares and acks all ops.
+            // 3. R₁ prepares and acks odd ops.
+            // 4. R₂ prepares and acks even ops.
+            // 5. R₀ is able to commit an entire checkpoint, but not beyond that.
+            // If R₁/R₂ state-sync to R₀'s latest checkpoint, then a single block corruption on R₀
+            // could lead to permanent unavailability.
+            if (candidate.checkpoint_op == self.op_checkpoint_next()) {
+                if (header.into_const(.commit)) |h| {
+                    if (h.commit <= self.op_checkpoint_next_trigger()) return;
+                } else {
+                    return;
+                }
             }
 
             if (self.sync_target_max != null and
@@ -8388,64 +8412,6 @@ pub fn ReplicaType(
             {
                 return;
             }
-
-            const candidate_canonical = canonical: {
-                const candidate_trigger = vsr.Checkpoint.trigger_for_checkpoint(candidate.checkpoint_op).?;
-
-                if (header.into_const(.commit)) |h| {
-                    // Normal case: The primary has committed atop the checkpoint.
-                    if (h.commit > candidate_trigger) break :canonical true;
-                }
-
-                // TODO(Async checkpoints): Replica this whole candidate quorum. Instead, sync to the
-                // previous checkpoint, which is definitely canonical.
-                const candidates_matching = self.sync_target_quorum.count(&candidate);
-                assert(candidates_matching >= 1);
-                assert(candidates_matching <= self.replica_count);
-
-                const candidates_threshold = threshold: {
-                    if (self.standby() or
-                        self.op_checkpoint() == candidate.checkpoint_op)
-                    {
-                        // Guard against one replica on each side of an evenly-split divergent
-                        // cluster from syncing to the other half.
-                        break :threshold self.quorum_majority;
-                    }
-
-                    // We will be part of the new quorum, so we don't necessarily need a majority.
-                    // (But don't just -1, since e.g. R=3 should still require 2/3 for canonical.
-                    //
-                    // This is necessary to guard against a liveness bug:
-                    // 1. Partition a cluster (R=6, default quorums) exactly in half (3 and 3).
-                    // 2. The half with the primary commits ahead by several checkpoints.
-                    // 3. The half without the primary lags behind.
-                    // 4. Heal the partition.
-                    //
-                    // If at this point the primary-half replicas are either:
-                    // - idle (no more messages being committed) and landed on a checkpoint boundary,
-                    // - or if the lead-half is in view-change status (not sending commit messages)
-                    // then the lagging-half replicas must use incoming ping to determine the
-                    // canonical target.
-                    break :threshold self.quorum_majority - @intFromBool(self.replica_count % 2 == 0);
-                };
-
-                if (candidates_matching >= candidates_threshold) {
-                    // Fallback case:
-                    // In an idle cluster, where the last commit landed on a checkpoint boundary,
-                    // we still want to be able to sync a lagging replica.
-                    log.debug("{}: on_{s}: jump_sync_target: " ++
-                        "candidate checkpoint is canonical (quorum: {}/{})", .{
-                        self.replica,
-                        @tagName(header.command),
-                        candidates_matching,
-                        candidates_threshold,
-                    });
-                    break :canonical true;
-                }
-                break :canonical false;
-            };
-
-            if (!candidate_canonical) return;
 
             log.debug("{}: on_{s}: jump_sync_target: op={} id={x:0>32} (syncing={s})", .{
                 self.replica,
@@ -8455,24 +8421,12 @@ pub fn ReplicaType(
                 @tagName(self.syncing),
             });
 
-            self.sync_target_max = candidate.canonical();
+            self.sync_target_max = .{
+                .checkpoint_id = candidate.checkpoint_id,
+                .checkpoint_op = candidate.checkpoint_op,
+            };
 
-            if (self.syncing == .idle) {
-                if (candidate.checkpoint_op == self.op_checkpoint() and
-                    candidate.checkpoint_id != self.superblock.working.checkpoint_id())
-                {
-                    log.err("{}: on_{s}: jump_sync_target: checkpoint diverged " ++
-                        "(op={} id_local={x:0>32} id_canonical={x:0>32})", .{
-                        self.replica,
-                        @tagName(header.command),
-                        candidate.checkpoint_op,
-                        self.superblock.working.checkpoint_id(),
-                        candidate.checkpoint_id,
-                    });
-
-                    @panic("checkpoint diverged");
-                }
-            } else {
+            if (self.syncing != .idle) {
                 self.sync_start_from_sync();
             }
         }

@@ -62,68 +62,9 @@ pub const Stage = union(enum) {
     }
 };
 
-/// Uses a separate type from Target to make it hard to mix up canonical/candidate targets.
-pub const TargetCandidate = struct {
-    /// The target's checkpoint identifier.
-    checkpoint_id: u128,
-    /// The op_checkpoint() that corresponds to the checkpoint id.
-    checkpoint_op: u64,
-
-    pub fn canonical(target: TargetCandidate) Target {
-        return .{
-            .checkpoint_id = target.checkpoint_id,
-            .checkpoint_op = target.checkpoint_op,
-        };
-    }
-};
-
 pub const Target = struct {
     /// The target's checkpoint identifier.
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     checkpoint_op: u64,
-};
-
-pub const TargetQuorum = struct {
-    /// The latest known checkpoint identifier from every *other* replica.
-    /// Unlike sync_target_max, these Targets are *not* known to be canonical.
-    candidates: [constants.replicas_max]?TargetCandidate =
-        [_]?TargetCandidate{null} ** constants.replicas_max,
-
-    pub fn replace(
-        quorum: *TargetQuorum,
-        replica: u8,
-        candidate: *const TargetCandidate,
-    ) bool {
-        if (quorum.candidates[replica]) |candidate_existing| {
-            // Ignore old candidate.
-            if (candidate.checkpoint_op < candidate_existing.checkpoint_op) {
-                return false;
-            }
-
-            // Ignore repeat candidate.
-            if (candidate.checkpoint_op == candidate_existing.checkpoint_op and
-                candidate.checkpoint_id == candidate_existing.checkpoint_id)
-            {
-                return false;
-            }
-        }
-        quorum.candidates[replica] = candidate.*;
-        return true;
-    }
-
-    pub fn count(quorum: *const TargetQuorum, candidate: *const TargetCandidate) usize {
-        var candidates_matching: usize = 0;
-        for (quorum.candidates) |candidate_target| {
-            if (candidate_target != null and
-                candidate_target.?.checkpoint_op == candidate.checkpoint_op and
-                candidate_target.?.checkpoint_id == candidate.checkpoint_id)
-            {
-                assert(std.meta.eql(candidate_target, candidate.*));
-                candidates_matching += 1;
-            }
-        }
-        assert(candidates_matching > 0);
-        return candidates_matching;
-    }
 };

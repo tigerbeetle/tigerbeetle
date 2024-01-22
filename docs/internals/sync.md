@@ -37,8 +37,7 @@ Replica roles:
 Checkpoints:
 
 - [_checkpoint id_/_checkpoint identifier_](#checkpoint-identifier): Uniquely identifies a particular checkpoint reproducibly across replicas.
-- [_canonical checkpoint_](#canonical-checkpoint): Any checkpoint which either: _A_: has any ops committed atop it by the primary, or _B_: a majority quorum has reached.
-- [_sync target_](#sync-target): The checkpoint identifier of the target of superblock-sync. Every sync target is a canonical checkpoint.
+- [_sync target_](#sync-target): The checkpoint identifier of the target of superblock-sync.
 
 ## Algorithm
 
@@ -143,23 +142,17 @@ A checkpoint identifier is attached to the following message types:
 - `command=request_sync_checkpoint`: Requested checkpoint identifier.
 - `command=sync_checkpoint`: Current checkpoint identifier of sender.
 
-### Canonical Checkpoint
-
-A _canonical_ checkpoint is a checkpoint:
-1. with an op committed atop it by the primary (discovery via `command=commit`), or
-2. that a majority quorum of replicas have reached (discovery via `command=ping`), or
-
 ### Sync Target
 
-A _sync target_ is the [checkpoint identifier](#checkpoint-identifier) of the checkpoint that the superblock-syn is syncing towards.
+A _sync target_ is the [checkpoint identifier](#checkpoint-identifier) of the checkpoint that the superblock-sync is syncing towards.
 
 Not all checkpoint identifiers are valid sync targets.
 
-- Every sync target **must** be a [canonical checkpoint](#canonical-checkpoint).
-  (TODO: Once prepares include the checkpoint identifier, this requirement can be removed.)
-- Every sync target op **must** either:
-  - be greater-than-or-equal-to the replica's current checkpoint op.
-  - be equal to the replica's current checkpoint op, but with a different target id (if our checkpoint diverged).
+Every sync target **must**:
+- have an op greater than the syncing replica's current checkpoint op.
+- either:
+  - be committed atop – i.e. the syncing replica can sync to `healthy_replica.checkpoint_op` when `trigger_for_checkpoint(healthy_replica.checkpoint_op) < healthy_replica.commit_min` – ensuring that the checkpoint has been reached by a quorum of replicas, or
+  - be more than 1 checkpoint ahead of our current checkpoint.
 
 ### Storage Determinism
 

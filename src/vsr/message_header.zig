@@ -291,9 +291,9 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
-        /// Current checkpoint id (possibly uncanonical).
+        /// Current checkpoint id.
         checkpoint_id: u128,
-        /// Current checkpoint op (possibly uncanonical).
+        /// Current checkpoint op.
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
@@ -788,10 +788,10 @@ pub const Header = extern struct {
         commit_checksum: u128,
         commit_checksum_padding: u128 = 0,
 
-        /// Current checkpoint id (possibly uncanonical).
+        /// Current checkpoint id.
         checkpoint_id: u128,
 
-        /// Current checkpoint op (possibly uncanonical).
+        /// Current checkpoint op.
         checkpoint_op: u64,
 
         /// The latest committed prepare's op.
