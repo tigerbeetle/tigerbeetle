@@ -1,7 +1,9 @@
 package com.tigerbeetle;
 
+import java.security.SecureRandom;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -172,5 +174,61 @@ public enum UInt128 {
         return asBytes(bigintLsb.longValueExact(), bigintMsb.longValueExact());
     }
 
+    private static long idLastTimestamp = 0L;
+    private static final byte[] idLastRandom = new byte[80];
+    private static final SecureRandom idSecureRandom = new SecureRandom();
 
+    /**
+     * Generates a Universally Unique Binary Sortable Identifier as 16 bytes of a 128-bit value.
+     *
+     * The ID() function is thread-safe, the bytes returned are stored in little endian, and the
+     * unsigned 128-bit value increases monotonically. The algorithm is based on
+     * <a href="https://github.com/ulid/spec">ULID</a> but is adjusted for u128-LE interpretation.
+     *
+     * @throws ArithmeticException if the random monotonic bits in the same millisecond overflows.
+     * @return an array of 16 bytes representing an unsigned 128-bit value in little endian.
+     */
+    public static byte[] ID() {
+        long randomLo;
+        short randomHi;
+        long timestamp = System.currentTimeMillis();
+
+        // Only modify the static variables in the synchronized block.
+        synchronized (idSecureRandom) {
+            // Ensure timestamp is monotonic. If it advances forward, also generate a new random.
+            if (timestamp <= idLastTimestamp) {
+                timestamp = idLastTimestamp;
+            } else {
+                idLastTimestamp = timestamp;
+                idSecureRandom.nextBytes(idLastRandom);
+            }
+
+            var random = ByteBuffer.wrap(idLastRandom).order(ByteOrder.nativeOrder());
+            randomLo = random.getLong();
+            randomHi = random.getShort();
+
+            // If randomLo will overflow from increment, then increment randomHi as carry.
+            // If randomHi will overflow on increment, throw error on 80-bit random overflow.
+            if (randomLo == 0xFFFFFFFFFFFFFFFFL) {
+                if (randomHi == 0xFFFF) {
+                    throw new ArithmeticException("random bits overflow on monotonic increment");
+                }
+                randomHi += 1;
+            }
+            // Wrapping increment on randomLo. Java allows overflowing arithmetic by default.
+            randomLo += 1;
+
+            // Write back the incremented random.
+            random.flip();
+            random.putLong(randomLo);
+            random.putShort(randomHi);
+        }
+
+        var buffer = ByteBuffer.allocate(UInt128.SIZE).order(Batch.BYTE_ORDER);
+        buffer.putLong(randomLo);
+        buffer.putShort(randomHi);
+        buffer.putShort((short) timestamp); // timestamp lo
+        buffer.putInt((int) (timestamp >> 16)); // timestamp hi
+        return buffer.array();
+    }
 }

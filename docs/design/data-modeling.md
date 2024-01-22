@@ -94,9 +94,10 @@ A ULID ("Universally Unique Lexicographically Sortable identifier") consists of:
 - 80 bits of randomness (low-order bits)
 
 **Important**: When creating multiple objects during the same millisecond, increment the random bytes
-(instead of generating new random bytes). This ensures that a sequence of objects within a
-[batch](./client-requests.md#batching-events) has strictly increasing ids. (Batches of strictly
-increasing ids are amenable to LSM optimizations, leading to higher database throughput).
+(instead of generating new random bytes). Make sure to also store random bytes first, timestamp bytes 
+second, and both in little-endian. These details ensure that a sequence of objects have strictly 
+increasing ids according to the server. (Such ids are amenable to LSM optimizations, 
+leading to higher database throughput).
 
 - ULIDs have an insignificant risk of collision.
 - ULIDs do not require a central oracle.

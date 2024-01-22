@@ -2,8 +2,12 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertSame;
+import java.util.concurrent.CountDownLatch;
 import java.math.BigInteger;
+import java.nio.ByteOrder;
+import java.nio.ByteBuffer;
 import java.util.UUID;
 import org.junit.Test;
 
@@ -164,5 +168,62 @@ public class UInt128Test {
         assertSame(BigInteger.ZERO, UInt128.asBigInteger(0, 0));
         assertSame(BigInteger.ZERO, UInt128.asBigInteger(new byte[16]));
         assertArrayEquals(new byte[16], UInt128.asBytes(BigInteger.ZERO));
+    }
+
+    @Test
+    public void testID() throws Exception {
+        {
+            // Generate IDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
+            var idA = UInt128.asBigInteger(UInt128.ID());
+            for (int i = 0; i < 10_000_000; i++) {
+                if (i % 10_000 == 0) {
+                    Thread.sleep(1);
+                }
+
+                var idB = UInt128.asBigInteger(UInt128.ID());
+                assertTrue(idB.compareTo(idA) > 0);
+
+                // Use the generated ID as the new reference point for the next loop.
+                idA = idB;
+            }
+        }
+
+        final var threadExceptions = new Exception[100];
+        final var latchStart = new CountDownLatch(threadExceptions.length);
+        final var latchFinish = new CountDownLatch(threadExceptions.length);
+
+        for (int i = 0; i < threadExceptions.length; i++) {
+            final int threadIndex = i;
+            new Thread(() -> {
+                try {
+                    // Wait for all threads to spawn before starting.
+                    latchStart.countDown();
+                    latchStart.await();
+
+                    // Same as serial test above, but with smaller bounds.
+                    var idA = UInt128.asBigInteger(UInt128.ID());
+                    for (int j = 0; j < 10_000; j++) {
+                        if (j % 1000 == 0) {
+                            Thread.sleep(1);
+                        }
+
+                        var idB = UInt128.asBigInteger(UInt128.ID());
+                        assertTrue(idB.compareTo(idA) > 0);
+                        idA = idB;
+                    }
+
+                } catch (Exception e) {
+                    threadExceptions[threadIndex] = e; // Propagate exceptions to main thread.
+                } finally {
+                    latchFinish.countDown(); // Make sure to unblock the main thread.
+                }
+            }).start();
+        }
+
+        latchFinish.await();
+        for (var exception : threadExceptions) {
+            if (exception != null)
+                throw exception;
+        }
     }
 }
