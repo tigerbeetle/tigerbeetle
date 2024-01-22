@@ -35,7 +35,7 @@ variable "git_url" {
 
 variable "git_ref" {
   type = string
-  default = "cb22/count-von-count"
+  default = "cb22/scale-tests-2"
 }
 
 job "tigerbeetle-replica" {
