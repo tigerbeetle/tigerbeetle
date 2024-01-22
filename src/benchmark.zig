@@ -409,7 +409,7 @@ const Benchmark = struct {
                 total_ns,
             ),
         }) catch unreachable;
-        print_percentiles_histogram(stdout, "batch", b.batch_latency_histogram, b.batch_index);
+        print_percentiles_histogram(stdout, "batch", b.batch_latency_histogram);
 
         if (b.query_count > 0) {
             b.timer.reset();
@@ -545,25 +545,26 @@ fn print_percentiles_histogram(
     stdout: anytype,
     label: []const u8,
     histogram_buckets: []const u64,
-    histogram_count: u64,
 ) void {
+    var histogram_total: u64 = 0;
+    for (histogram_buckets) |bucket| histogram_total += bucket;
+
     const percentiles = [_]u64{ 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 };
     for (percentiles) |percentile| {
-        var count_for_percentile: usize = @divTrunc(histogram_count * percentile, 100);
-        var count: usize = 0;
-        var bucket: usize = 0;
+        var histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
 
         // Since each bucket in our histogram represents 1ms, the bucket we're in is the ms value.
-        while (bucket < histogram_buckets.len) : (bucket += 1) {
-            count += histogram_buckets[bucket];
-            if (count >= count_for_percentile) break;
-        }
+        var sum: usize = 0;
+        const latency = for (histogram_buckets, 0..) |bucket, bucket_index| {
+            sum += bucket;
+            if (sum >= histogram_percentile) break bucket_index;
+        } else histogram_buckets.len;
 
         stdout.print("{s} latency p{} = {} ms{s}\n", .{
             label,
             percentile,
-            bucket,
-            if (bucket == histogram_buckets.len) "+ (exceeds histogram resolution)" else "",
+            latency,
+            if (latency == histogram_buckets.len) "+ (exceeds histogram resolution)" else "",
         }) catch unreachable;
     }
 }
