@@ -77,22 +77,36 @@ internal sealed class NativeClient : IDisposable
         }
     }
 
-    public TResult[] CallRequest<TResult, TBody>(TBOperation operation, TBody[] batch)
+    public TResult[] CallRequest<TResult, TBody>(TBOperation operation, ReadOnlySpan<TBody> batch)
         where TResult : unmanaged
         where TBody : unmanaged
     {
-        var blockingRequest = new BlockingRequest<TResult, TBody>(this, operation);
-        blockingRequest.Submit(batch);
-        return blockingRequest.Wait();
+        unsafe
+        {
+            fixed (void* pointer = batch)
+            {
+                var blockingRequest = new BlockingRequest<TResult, TBody>(this, operation);
+                blockingRequest.Submit(pointer, batch.Length);
+                return blockingRequest.Wait();
+            }
+        }
     }
 
-    public async Task<TResult[]> CallRequestAsync<TResult, TBody>(TBOperation operation, TBody[] batch)
+    public async Task<TResult[]> CallRequestAsync<TResult, TBody>(TBOperation operation, ReadOnlyMemory<TBody> batch)
         where TResult : unmanaged
         where TBody : unmanaged
     {
-        var asyncRequest = new AsyncRequest<TResult, TBody>(this, operation);
-        asyncRequest.Submit(batch);
-        return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
+        using (var memoryHandler = batch.Pin())
+        {
+            var asyncRequest = new AsyncRequest<TResult, TBody>(this, operation);
+
+            unsafe
+            {
+                asyncRequest.Submit(memoryHandler.Pointer, batch.Length);
+            }
+
+            return await asyncRequest.Wait().ConfigureAwait(continueOnCapturedContext: false);
+        }
     }
 
     public void ReleasePacket(Packet packet)

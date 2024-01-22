@@ -13,22 +13,22 @@ internal sealed class EchoClient : IDisposable
         this.nativeClient = NativeClient.InitEcho(clusterID, addresses, concurrencyMax);
     }
 
-    public Account[] Echo(Account[] batch)
+    public Account[] Echo(ReadOnlySpan<Account> batch)
     {
         return nativeClient.CallRequest<Account, Account>(TBOperation.CreateAccounts, batch);
     }
 
-    public Task<Account[]> EchoAsync(Account[] batch)
+    public Task<Account[]> EchoAsync(ReadOnlyMemory<Account> batch)
     {
         return nativeClient.CallRequestAsync<Account, Account>(TBOperation.CreateAccounts, batch);
     }
 
-    public Transfer[] Echo(Transfer[] batch)
+    public Transfer[] Echo(ReadOnlySpan<Transfer> batch)
     {
         return nativeClient.CallRequest<Transfer, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
-    public Task<Transfer[]> EchoAsync(Transfer[] batch)
+    public Task<Transfer[]> EchoAsync(ReadOnlyMemory<Transfer> batch)
     {
         return nativeClient.CallRequestAsync<Transfer, Transfer>(TBOperation.CreateTransfers, batch);
     }

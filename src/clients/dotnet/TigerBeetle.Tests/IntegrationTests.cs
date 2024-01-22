@@ -54,7 +54,7 @@ public class IntegrationTests
         {
             var addresses = new string?[] { "3000", null };
             _ = new Client(0, addresses!, 1);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (InitializationException exception)
         {
@@ -68,7 +68,7 @@ public class IntegrationTests
         try
         {
             _ = new Client(0, Array.Empty<string>(), 1);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (InitializationException exception)
         {
@@ -82,7 +82,7 @@ public class IntegrationTests
         try
         {
             _ = new Client(0, new string[] { "" }, 1);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (InitializationException exception)
         {
@@ -97,7 +97,7 @@ public class IntegrationTests
         {
             var addresses = Enumerable.Range(3000, 3100).Select(x => x.ToString()).ToArray();
             _ = new Client(0, addresses, 1);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (InitializationException exception)
         {
@@ -125,7 +125,7 @@ public class IntegrationTests
         try
         {
             _ = new Client(0, new string[] { "3000" }, 99_999);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (InitializationException exception)
         {
@@ -740,7 +740,7 @@ public class IntegrationTests
         try
         {
             _ = client.CreateAccounts(accounts);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (RequestException requestException)
         {
@@ -770,7 +770,7 @@ public class IntegrationTests
         try
         {
             _ = await client.CreateAccountsAsync(accounts);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (RequestException requestException)
         {
@@ -800,7 +800,7 @@ public class IntegrationTests
         try
         {
             _ = client.CreateTransfers(transfers);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (RequestException requestException)
         {
@@ -833,7 +833,7 @@ public class IntegrationTests
         try
         {
             _ = await client.CreateTransfersAsync(transfers);
-            Assert.IsTrue(false);
+            Assert.Fail();
         }
         catch (RequestException requestException)
         {
@@ -1303,7 +1303,7 @@ public class IntegrationTests
         };
 
         _ = client.CreateTransfers(new Transfer[] { transfer });
-        Assert.IsTrue(false);
+        Assert.Fail();
     }
 
 
