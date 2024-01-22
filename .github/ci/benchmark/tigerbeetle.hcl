@@ -1,7 +1,3 @@
-variable "instance_id" {
-  type = string
-}
-
 variable "storage_type" {
   type = string
   default = "nvme" # or ram, or ebs
@@ -12,16 +8,14 @@ variable "cluster_id" {
   default = "0"
 }
 
-variable "test_id" {
-  type = string
-}
-
 variable "replica" {
   type = string
+  default = "0"
 }
 
 variable "replica_count" {
   type = string
+  default = "1"
 }
 
 variable "bind_port" {
@@ -31,6 +25,7 @@ variable "bind_port" {
 
 variable "addresses" {
   type = string
+  default = "127.0.0.1:3001"
 }
 
 variable "git_url" {
@@ -40,17 +35,17 @@ variable "git_url" {
 
 variable "git_ref" {
   type = string
-  default = "main"
+  default = "cb22/count-von-count"
 }
 
-job "__JOB_NAME__" {
+job "tigerbeetle-replica" {
   datacenters = ["dc1"]
   type        = "batch"
 
   constraint {
-    attribute = attr.unique.platform.aws.instance-id
+    attribute = attr.unique.hostname
     operator  = "="
-    value     = var.instance_id
+    value     = "Debian-1201-bookworm-amd64-base"
   }
 
   reschedule {
@@ -74,7 +69,6 @@ job "__JOB_NAME__" {
         image = "debian:bullseye"
         entrypoint = ["/local/tigerbeetle.sh"]
         network_mode = "host"
-        memory_hard_limit = 60000
 
         mounts = [
           {
@@ -101,11 +95,10 @@ git checkout ${var.git_ref}
 ./scripts/install_zig.sh
 ./zig/zig build install -Drelease
 
-if ! [ -e "/tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle" ]; then
-  ./tigerbeetle format --cluster=${var.cluster_id} --replica=${var.replica} --replica-count=${var.replica_count} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
-fi
+rm -f "/tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle"
+./tigerbeetle format --cluster=${var.cluster_id} --replica=${var.replica} --replica-count=${var.replica_count} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
 
-exec ./tigerbeetle start --addresses=${var.addresses} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
+exec ./tigerbeetle start --addresses=${var.addresses} --cache-grid=128GB /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
     EOF
 
         destination = "local/tigerbeetle.sh"
@@ -114,7 +107,7 @@ exec ./tigerbeetle start --addresses=${var.addresses} /tank/{{ env "NOMAD_JOB_ID
 
       resources {
         cores = 1
-        memory = 3192
+        memory = 256000
       }
     }
   }
