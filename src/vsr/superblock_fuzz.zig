@@ -118,7 +118,6 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
                 .commit_min = 0,
                 .storage_size = data_file_size_min,
             },
-            .commit_min_canonical = 0,
             .commit_max = 0,
             .sync_op_min = 0,
             .sync_op_max = 0,
@@ -329,7 +328,6 @@ const Environment = struct {
 
         const vsr_state = VSRState{
             .checkpoint = env.superblock.staging.vsr_state.checkpoint,
-            .commit_min_canonical = env.superblock.staging.vsr_state.commit_min_canonical,
             .commit_max = env.superblock.staging.vsr_state.commit_max + 3,
             .sync_op_min = 0,
             .sync_op_max = 0,
@@ -404,7 +402,6 @@ const Environment = struct {
                 .snapshots_block_checksum = 0,
                 .snapshots_block_address = 0,
             },
-            .commit_min_canonical = vsr_state_old.checkpoint.commit_min,
             .commit_max = vsr_state_old.commit_max + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,

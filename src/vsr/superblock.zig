@@ -116,10 +116,6 @@ pub const SuperBlockHeader = extern struct {
 
         members: vsr.Members,
 
-        /// The highest known canonical checkpoint op.
-        /// Usually the previous checkpoint op (i.e. prior to VSRState.commit_min).
-        commit_min_canonical: u64,
-
         /// The highest operation up to which we may commit.
         commit_max: u64,
 
@@ -144,7 +140,7 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [23]u8 = [_]u8{0} ** 23,
+        reserved: [31]u8 = [_]u8{0} ** 31,
 
         comptime {
             assert(@sizeOf(VSRState) == 592);
@@ -183,7 +179,6 @@ pub const SuperBlockHeader = extern struct {
                 .replica_id = options.replica_id,
                 .members = options.members,
                 .replica_count = options.replica_count,
-                .commit_min_canonical = 0,
                 .commit_max = 0,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
@@ -193,7 +188,6 @@ pub const SuperBlockHeader = extern struct {
         }
 
         pub fn assert_internally_consistent(state: VSRState) void {
-            assert(state.commit_min_canonical <= state.checkpoint.commit_min);
             assert(state.commit_max >= state.checkpoint.commit_min);
             assert(state.sync_op_max >= state.sync_op_min);
             assert(state.view >= state.log_view);
@@ -274,7 +268,6 @@ pub const SuperBlockHeader = extern struct {
             if (old.checkpoint.commit_min > new.checkpoint.commit_min) return false;
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
-            if (old.commit_min_canonical > new.commit_min_canonical) return false;
             if (old.commit_max > new.commit_max) return false;
 
             return true;
@@ -737,7 +730,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     },
                     .replica_id = replica_id,
                     .members = members,
-                    .commit_min_canonical = 0,
                     .commit_max = 0,
                     .sync_op_min = 0,
                     .sync_op_max = 0,
@@ -842,8 +834,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .snapshots_block_checksum = vsr_state.checkpoint.snapshots_block_checksum,
                 .snapshots_block_address = vsr_state.checkpoint.snapshots_block_address,
             };
-            vsr_state.commit_min_canonical =
-                superblock.staging.vsr_state.checkpoint.commit_min;
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;

@@ -7961,16 +7961,11 @@ pub fn ReplicaType(
                 const syncing_already = self.superblock.staging.vsr_state.sync_op_max > 0;
                 const sync_min_old = self.superblock.staging.vsr_state.sync_op_min;
 
-                // We must re-sync the tables created between `vsr_state.commit_min_canonical` and
-                // our current (pre-sync) checkpoint, since the current checkpoint might be
-                // divergent, in which case the tables we created during compaction are invalid.
-                // TODO: When we know our checkpoint is canonical (via commit/ping), we don't need
-                // to resync it.
                 const sync_min_new = if (vsr.Checkpoint.trigger_for_checkpoint(
-                    self.superblock.working.vsr_state.commit_min_canonical,
+                    self.op_checkpoint(),
                 )) |trigger|
-                    // +1 because `vsr_state.commit_min_canonical` is definitely canonical, and
-                    // the range is inclusive.
+                    // +1 because sync_op_min is inclusive, but (when !syncing_already)
+                    // `vsr_state.commit_min` itself does not need to be synced.
                     trigger + 1
                 else
                     0;
