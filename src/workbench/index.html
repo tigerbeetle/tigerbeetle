@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TigerBeetle Dev Workbench</title>
+  <script src="./workbench.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/apexcharts/3.45.2/apexcharts.min.js"
+    integrity="sha512-vIqZt7ReO939RQssENNbZ+Iu3j0CSsgk41nP3AYabLiIFajyebORlk7rKPjGddmO1FQkbuOb2EVK6rJkiHsmag=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+
+<body>
+  <h1>TigerBeetle Dev Workbench</h1>
+
+  <section>
+    <h2>Release</h2>
+
+    Release Manager for:
+    <ul>
+      <li>last week: <span id="release-previous">N/A</span> </li>
+      <li><strong>this week: <span id="release-current">N/A</span></strong></li>
+      <li>next week: <span id="release-next">N/A</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Release Metrics</h2>
+    <div id="charts" style="display: flex; flex-direction: column;">
+    </div>
+  </section>
+</body>
+
+</html>

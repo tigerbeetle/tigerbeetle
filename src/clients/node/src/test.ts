@@ -348,7 +348,7 @@ test('can get account transfers', async (): Promise<void> => {
     debits_pending: 0n,
     debits_posted: 0n,
     credits_pending: 0n,
-    credits_posted: 0n,  
+    credits_posted: 0n,
     user_data_128: 0n,
     user_data_64: 0n,
     user_data_32: 0,
@@ -380,7 +380,7 @@ test('can get account transfers', async (): Promise<void> => {
       timestamp: 0n,
     });
   }
-  
+
   const transfers_created_result = await client.createTransfers(transfers_created)
   assert.strictEqual(transfers_created_result.length, 0)
 
@@ -412,7 +412,7 @@ test('can get account transfers', async (): Promise<void> => {
   for (var transfer of transfers) {
     assert.ok(transfer.timestamp < timestamp);
     timestamp = transfer.timestamp;
-  }  
+  }
 
   // Query only the credit transfers for accountC, descending:
   filter = {
@@ -427,7 +427,7 @@ test('can get account transfers', async (): Promise<void> => {
   for (var transfer of transfers) {
     assert.ok(transfer.timestamp < timestamp);
     timestamp = transfer.timestamp;
-  }    
+  }
 
   // Query the first 5 transfers for accountC:
   filter = {
@@ -442,7 +442,7 @@ test('can get account transfers', async (): Promise<void> => {
   for (var transfer of transfers) {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
-  } 
+  }
 
   // Query the next 5 transfers for accountC, with pagination:
   filter = {
@@ -456,7 +456,7 @@ test('can get account transfers', async (): Promise<void> => {
   for (var transfer of transfers) {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
-  } 
+  }
 
   // Query again, no more transfers should be found:
   filter = {
@@ -491,8 +491,8 @@ test('can get account transfers', async (): Promise<void> => {
     timestamp: 0n,
     limit: 0,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
-  })).length, 0) 
-  
+  })).length, 0)
+
   // Empty flags:
   assert.strictEqual((await client.getAccountTransfers({
     account_id: accountC.id,
@@ -507,7 +507,7 @@ test('can get account transfers', async (): Promise<void> => {
     timestamp: 0n,
     limit: 8190,
     flags: 0xFFFF,
-  })).length, 0)     
+  })).length, 0)
 
 })
 
