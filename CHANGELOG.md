@@ -1,5 +1,58 @@
 # TigerBeetle Changelog
 
+## 2024-01-22
+
+### Safety And Performance
+
+- [#1438](https://github.com/tigerbeetle/tigerbeetle/pull/1438)
+
+  Avoid an extra copy of data when encoding the superblock during checkpoint.
+
+- [#1429](https://github.com/tigerbeetle/tigerbeetle/pull/1429)
+
+  Use more precise upper bounds for static memory allocation, reducing memory usage by about 200MiB.
+
+- [#1439](https://github.com/tigerbeetle/tigerbeetle/pull/1439)
+
+  When reading data past the end of the file, defensively zero-out the result buffer.
+
+### Features
+
+- [#1443](https://github.com/tigerbeetle/tigerbeetle/pull/1443)
+
+  Upgrade C# client API to use `Span<T>`.
+
+- [#1347](https://github.com/tigerbeetle/tigerbeetle/pull/1347)
+
+  Add ID generation function to the Java client. TigerBeetle doesn't assign any meaning to IDs and
+  can use anything as long as it is unique. However, for optimal performance it is best if these
+  client-generated IDs are approximately monotonic. This can be achieved by, for example, using
+  client's current timestamp for high order bits of an ID. The new helper does just that.
+
+### Internals
+
+- [#1437](https://github.com/tigerbeetle/tigerbeetle/pull/1437),
+  [#1435](https://github.com/tigerbeetle/tigerbeetle/pull/1435),
+  [d7c3f46](https://github.com/tigerbeetle/tigerbeetle/commit/d7c3f4654ea7c65b6d141be33dadd29e869c3984).
+
+  Rewrite git history to remove large files accidentally added to the repository during early quick
+  prototyping phase. To make this durable, add CI checks for unwanted files. The original history
+  is available at:
+
+  <https://github.com/tigerbeetle/tigerbeetle-history-archive>
+
+- [#1421](https://github.com/tigerbeetle/tigerbeetle/pull/1421),
+  [#1401](https://github.com/tigerbeetle/tigerbeetle/pull/1401).
+
+  New tips for the style guide:
+
+  - [write code top-down](https://www.teamten.com/lawrence/programming/write-code-top-down.html)
+  - [pair up assertions](https://tigerbeetle.com/blog/2023-12-27-it-takes-two-to-contract/)
+
+### TigerTracks 🎧
+
+- [Don't Take No For An Answer](https://youtu.be/BUDe0bJAHjY?si=_rdqeGRgRoA9HQnV)
+
 ## 2024-01-15
 
 Welcome to 2024!
