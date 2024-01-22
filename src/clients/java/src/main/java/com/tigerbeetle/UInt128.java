@@ -182,7 +182,7 @@ public enum UInt128 {
      * Generates a Universally Unique Binary Sortable Identifier as 16 bytes of a 128-bit value.
      *
      * The ID() function is thread-safe, the bytes returned are stored in little endian, and the
-     * unsigned 128-bit value increases monotonically. The algorithm is based on 
+     * unsigned 128-bit value increases monotonically. The algorithm is based on
      * <a href="https://github.com/ulid/spec">ULID</a> but is adjusted for u128-LE interpretation.
      *
      * @throws ArithmeticException if the random monotonic bits in the same millisecond overflows.
