@@ -33,6 +33,9 @@ const CliArgs = union(enum) {
         cache_transfers_posted: flags.ByteSize =
             .{ .bytes = constants.cache_transfers_posted_size_default },
         cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
+        lsm_manifest_memory: flags.ByteSize = .{
+            .bytes = constants.lsm_manifest_memory_size_default
+        },
 
         positional: struct {
             path: [:0]const u8,
@@ -107,6 +110,12 @@ const CliArgs = union(enum) {
         \\        (Total RAM) - 3GB (TigerBeetle) - 1GB (System), eg 12GB for a 16GB machine.
         \\        Defaults to 1GB.
         \\
+        \\  --lsm-manifest-memory=<size><KB|MB|GB>
+        \\        Sets the amount of memory allocated for LSM-tree manifests. When the
+        \\        number or size of LSM-trees would become too large for their manifests to fit
+        \\        into memory, such requests are rejected.
+        \\        Defaults to 64MB.
+        \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
         \\
@@ -143,6 +152,7 @@ pub const Command = union(enum) {
         cache_transfers_posted: u32,
         storage_size_limit: u64,
         cache_grid_blocks: u32,
+        lsm_forest_node_count: u32,
         path: [:0]const u8,
     };
 
@@ -259,6 +269,33 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                 );
             }
 
+            const lsm_manifest_memory = start.lsm_manifest_memory.bytes;
+            const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
+            const lsm_manifest_memory_min = constants.lsm_manifest_node_size;
+            if (lsm_manifest_memory > lsm_manifest_memory_max) {
+                flags.fatal("--lsm-memory: size {} exceeds maximum: {}", .{
+                    lsm_manifest_memory,
+                    lsm_manifest_memory_max,
+                });
+            }
+            if (lsm_manifest_memory < lsm_manifest_memory_min) {
+                flags.fatal("--lsm-memory: size {} is below minimum: {}", .{
+                    lsm_manifest_memory,
+                    lsm_manifest_memory_min,
+                });
+            }
+            if (lsm_manifest_memory % constants.lsm_manifest_node_size != 0) {
+                flags.fatal(
+                    "--lsm-memory: size {} must be a multiple of node size ({})",
+                    .{ lsm_manifest_memory, constants.lsm_manifest_node_size },
+                );
+            }
+
+            const lsm_forest_node_count_u64 =
+                lsm_manifest_memory / constants.lsm_manifest_node_size;
+            assert(lsm_forest_node_count_u64 <= std.math.maxInt(u32));
+            const lsm_forest_node_count: u32 = @intCast(lsm_forest_node_count_u64);
+
             return Command{
                 .start = .{
                     .args_allocated = args,
@@ -284,6 +321,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                         Grid.Cache,
                         start.cache_grid,
                     ),
+                    .lsm_forest_node_count = lsm_forest_node_count,
                     .path = start.positional.path,
                 },
             };
