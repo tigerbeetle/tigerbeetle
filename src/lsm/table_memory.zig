@@ -110,6 +110,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count <= value_count_max);
+            defer assert(table.value_context.sorted);
 
             // Sort all the values. In future, this will be done incrementally, and use
             // k_way_merge, but for now the performance regression was too bad.

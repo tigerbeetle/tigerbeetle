@@ -78,7 +78,6 @@ pub fn CacheMapType(
         // stash_1, with .compact() clearing stash_2 and swapping it.
         cache: Cache,
         stash_1: Map,
-        stash_2: Map,
 
         // Scopes allow you to perform operations on the CacheMap before either persisting or
         // discarding them.
@@ -103,10 +102,6 @@ pub fn CacheMapType(
             try stash_1.ensureTotalCapacity(allocator, options.map_value_count_max);
             errdefer stash_1.deinit(allocator);
 
-            var stash_2: Map = .{};
-            try stash_2.ensureTotalCapacity(allocator, options.map_value_count_max);
-            errdefer stash_2.deinit(allocator);
-
             var scope_rollback_log = try std.ArrayListUnmanaged(Value).initCapacity(
                 allocator,
                 options.scope_value_count_max,
@@ -116,7 +111,6 @@ pub fn CacheMapType(
             return Self{
                 .cache = cache,
                 .stash_1 = stash_1,
-                .stash_2 = stash_2,
                 .scope_rollback_log = scope_rollback_log,
                 .options = options,
             };
@@ -126,10 +120,8 @@ pub fn CacheMapType(
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash_1.count() <= self.options.map_value_count_max);
-            assert(self.stash_2.count() <= self.options.map_value_count_max);
 
             self.scope_rollback_log.deinit(allocator);
-            self.stash_2.deinit(allocator);
             self.stash_1.deinit(allocator);
             self.cache.deinit(allocator);
         }
@@ -138,16 +130,13 @@ pub fn CacheMapType(
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash_1.count() <= self.options.map_value_count_max);
-            assert(self.stash_2.count() <= self.options.map_value_count_max);
 
             self.cache.reset();
             self.stash_1.clearRetainingCapacity();
-            self.stash_2.clearRetainingCapacity();
 
             self.* = .{
                 .cache = self.cache,
                 .stash_1 = self.stash_1,
-                .stash_2 = self.stash_2,
                 .scope_rollback_log = self.scope_rollback_log,
                 .options = self.options,
             };
@@ -155,14 +144,12 @@ pub fn CacheMapType(
 
         pub fn has(self: *const Self, key: Key) bool {
             return self.cache.get_index(key) != null or
-                self.stash_1.getKeyPtr(tombstone_from_key(key)) != null or
-                self.stash_2.getKeyPtr(tombstone_from_key(key)) != null;
+                self.stash_1.getKeyPtr(tombstone_from_key(key)) != null;
         }
 
         pub fn get(self: *const Self, key: Key) ?*Value {
             return self.cache.get(key) orelse
-                self.stash_1.getKeyPtr(tombstone_from_key(key)) orelse
-                self.stash_2.getKeyPtr(tombstone_from_key(key));
+                self.stash_1.getKeyPtr(tombstone_from_key(key));
         }
 
         pub fn upsert(self: *Self, value: *const Value) void {
@@ -246,19 +233,15 @@ pub fn CacheMapType(
 
             if (self.scope_is_active) {
                 // TODO: Actually, does the fuzz catch this...
-                // TODO: So if we delete from stash_2 and put to stash_1, there's a problem;
-                //       because when we undo our scope we insert back to stash_1 :/
                 self.scope_rollback_log.appendAssumeCapacity(
                     maybe_removed orelse
-                        self.stash_1.getKey(tombstone_from_key(key)) orelse
-                        self.stash_2.getKey(tombstone_from_key(key)) orelse return,
+                        self.stash_1.getKey(tombstone_from_key(key)) orelse return,
                 );
             }
 
             // We always need to try remove from the stash; since it could have a stale value.
             // The early return above is OK - if it doesn't exist, there's nothing to remove.
             _ = self.stash_1.remove(tombstone_from_key(key));
-            _ = self.stash_2.remove(tombstone_from_key(key));
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -312,10 +295,8 @@ pub fn CacheMapType(
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash_1.count() <= self.options.map_value_count_max);
-            assert(self.stash_2.count() <= self.options.map_value_count_max);
 
-            self.stash_2.clearRetainingCapacity();
-            std.mem.swap(Map, &self.stash_1, &self.stash_2);
+            self.stash_1.clearRetainingCapacity();
         }
     };
 }
