@@ -891,12 +891,11 @@ test "Cluster: view-change: duel of the primaries" {
 test "Cluster: sync: partition, lag, sync (transition from idle)" {
     for ([_]u64{
         // Normal case: the cluster has committed atop the checkpoint trigger.
-        // The lagging replica can learn the canonical checkpoint from a commit message.
+        // The lagging replica can learn the latest checkpoint from a commit message.
         checkpoint_2_trigger + 1,
         // Idle case: the idle cluster has not committed atop the checkpoint trigger.
-        // The lagging replica uses the sync target candidate quorum (populated by ping messages)
-        // to identify the canonical checkpoint.
-        // TODO Explicit code coverage: "candidate checkpoint is canonical (quorum)"
+        // The lagging replica is far enough behind the cluster that it can sync to the latest
+        // checkpoint anyway, since it cannot possibly recover via WAL repair.
         checkpoint_2_trigger,
     }) |cluster_commit_max| {
         log.info("test cluster_commit_max={}", .{cluster_commit_max});
@@ -1003,59 +1002,6 @@ test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
     try expectEqual(c.replies(), checkpoint_1_trigger + pipeline_prepare_queue_max);
 
     // Neither replica used state sync, but it is "done" since all content is present.
-    try TestReplicas.expect_sync_done(t.replica(.R_));
-}
-
-test "Cluster: sync: checkpoint diverges, sync (primary diverges)" {
-    // Buggify a divergent replica (i.e. a storage determinism bug).
-    const t = try TestContext.init(.{ .replica_count = 3 });
-    defer t.deinit();
-
-    // Pass the first checkpoint to ensure that manifest blocks are required.
-    var c = t.clients(0, t.cluster.clients.len);
-    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
-
-    var a0 = t.replica(.A0);
-    var b1 = t.replica(.B1);
-    var b2 = t.replica(.B2);
-
-    a0.drop(.R_, .bidirectional, .request_sync_checkpoint); // (Prevent sync for now.)
-    a0.diverge();
-
-    // Prior to the checkpoint, the cluster has not realized that A0 diverged.
-    try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger - 1);
-    try expectEqual(a0.role(), .primary);
-
-    // After the checkpoint, A0 must discard all acks from B1/B2, since they are from
-    // a different (i.e. correct) checkpoint.
-    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
-    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
-    // A0 was forced to ignore B1/B2's acks since the checkpoint id didn't match its own.
-    // Unable to commit, it stepped down as primary.
-    try expectEqual(a0.role(), .backup);
-    try expectEqual(b1.commit(), checkpoint_2_trigger);
-    try expectEqual(b2.commit(), checkpoint_2_trigger);
-    // A0 may have committed trigger+1, but its commit_min will backtrack due to sync.
-
-    // A0 has learned about B1/B2's canonical checkpoint — a checkpoint with the same op,
-    // but a different identifier.
-    try expectEqual(a0.sync_status(), .requesting_checkpoint);
-    try expectEqual(a0.sync_target_checkpoint_op(), checkpoint_2);
-    try expectEqual(a0.sync_target_checkpoint_op(), t.replica(.R_).op_checkpoint());
-    try expectEqual(a0.sync_target_checkpoint_id(), b1.op_checkpoint_id());
-    try expectEqual(a0.sync_target_checkpoint_id(), b2.op_checkpoint_id());
-
-    a0.pass(.R_, .bidirectional, .request_sync_checkpoint); // Allow sync again.
-    t.run();
-
-    // After syncing, A0 is back to the correct checkpoint.
-    try expectEqual(t.replica(.R_).sync_status(), .idle);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
-    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
-    try expectEqual(t.replica(.R_).op_checkpoint_id(), a0.op_checkpoint_id());
-
     try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
@@ -1458,14 +1404,6 @@ const TestReplicas = struct {
     pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
         assert(t.replicas.count() == 1);
         return t.cluster.replicas[t.replicas.get(0)].view_headers.array.const_slice();
-    }
-
-    /// Simulate a storage determinism bug.
-    /// (Replicas must be running and between compaction beats for this to run.)
-    pub fn diverge(t: *TestReplicas) void {
-        for (t.replicas.const_slice()) |r| {
-            t.cluster.diverge(r);
-        }
     }
 
     pub fn corrupt(

@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # State Sync
 
-State sync synchronizes the state of a lagging/divergent replica with the healthy cluster.
+State sync synchronizes the state of a lagging replica with the healthy cluster.
 
 State sync is used when when a lagging replica's log no longer intersects with the cluster's current log —
 [WAL repair](./vsr.md#protocol-repair-wal) cannot catch the replica up.
@@ -37,8 +37,7 @@ Replica roles:
 Checkpoints:
 
 - [_checkpoint id_/_checkpoint identifier_](#checkpoint-identifier): Uniquely identifies a particular checkpoint reproducibly across replicas.
-- [_canonical checkpoint_](#canonical-checkpoint): Any checkpoint which either: _A_: has any ops committed atop it by the primary, or _B_: a majority quorum has reached.
-- [_sync target_](#sync-target): The checkpoint identifier of the target of superblock-sync. Every sync target is a canonical checkpoint.
+- [_sync target_](#sync-target): The checkpoint identifier of the target of superblock-sync.
 
 ## Algorithm
 
@@ -73,7 +72,6 @@ Scenarios requiring state sync:
   The lagging replica is too far behind to catch up via WAL repair.
 2. A replica was just formatted and is being added to the cluster (i.e. via [reconfiguration](./vsr.md#protocol-reconfiguration)).
   The new replica is too far behind to catch up via WAL repair.
-3. A replica's state diverged from the cluster ([storage nondeterminism](#storage-determinism)).
 
 Causes of number 3:
 - A storage determinism bug.
@@ -84,7 +82,6 @@ Causes of number 3:
 
 State sync is initially triggered by any of the following:
 
-- The replica discovers the canonical checkpoint for its current wrap, and that it [doesn't match](#storage-determinism) its own current checkpoint.
 - The replica receives a SV which indicates that it has lagged so far behind the cluster that its log cannot possibly intersect.
 - `repair_sync_timeout` fires, and:
     - a WAL or grid repair is in progress and,
@@ -145,57 +142,20 @@ A checkpoint identifier is attached to the following message types:
 - `command=request_sync_checkpoint`: Requested checkpoint identifier.
 - `command=sync_checkpoint`: Current checkpoint identifier of sender.
 
-### Canonical Checkpoint
-
-A _canonical_ checkpoint is a checkpoint:
-1. with an op committed atop it by the primary (discovery via `command=commit`), or
-2. that a majority quorum of replicas have reached (discovery via `command=ping`), or
-
-The primary ignores `command=prepare`s which have a different checkpoint id attached than they expect.
-This means that if a replica's history diverges (due to nondeterminism), the diverging replica is effectively excluded from participating in consensus until it has performed superblock-sync.
-See [Storage Determinism](#storage-determinism).
-
-This bounds the "distance" that a history can diverge by.
-No replica can diverge from the canonical history by more than one checkpoint.
-Every checkpoint's previous (i.e. parent) checkpoint is canonical.
-
 ### Sync Target
 
-A _sync target_ is the [checkpoint identifier](#checkpoint-identifier) of the checkpoint that the superblock-syn is syncing towards.
+A _sync target_ is the [checkpoint identifier](#checkpoint-identifier) of the checkpoint that the superblock-sync is syncing towards.
 
 Not all checkpoint identifiers are valid sync targets.
 
-- Every sync target **must** be a [canonical checkpoint](#canonical-checkpoint).
-  (TODO: Once prepares include the checkpoint identifier, this requirement can be removed.)
-- Every sync target op **must** either:
-  - be greater-than-or-equal-to the replica's current checkpoint op.
-  - be equal to the replica's current checkpoint op, but with a different target id (if our checkpoint diverged).
+Every sync target **must**:
+- have an op greater than the syncing replica's current checkpoint op.
+- either:
+  - be committed atop – i.e. the syncing replica can sync to `healthy_replica.checkpoint_op` when `trigger_for_checkpoint(healthy_replica.checkpoint_op) < healthy_replica.commit_min` – ensuring that the checkpoint has been reached by a quorum of replicas, or
+  - be more than 1 checkpoint ahead of our current checkpoint.
 
 ### Storage Determinism
 
 When everything works, storage is deterministic.
-But we must tolerate non-determinism too, in case of bugs.
-
-At the limit, all 6 replicas could diverge.
-This puts the cluster in a very precarious position:
-All it would take is a single corruption to be permanently unavailable!
-(We need to pick one "winner", and we can't just read all of every single replica's disks to find which (if any) is completely intact).
-
-So we must bound nondeterminism within our fault model.
-
-We require that at least [`quorum_replication`](./vsr.md#quorums) histories are identical.
-[Canonical Checkpoint](#canonical-checkpoint) describes how this can (in part, though not completely) be enforced automatically.
-If more histories diverge, the cluster will be unavailable (unable to commit), and require operator intervention to recover (e.g. by cloning data files).
-
-### Progress Tracking
-
-If a state-syncing replica crashes before completing sync, we don't want to restart from scratch.
-(This is mainly important for tables — the manifest is smaller.)
-
-Progress is tracked implicitly: If a table index block is present on disk, we implicitly assume that all of its data blocks have already been written too.
-That is, "table index block in grid" implies "table's referenced data blocks are in grid".
-
-To enforce this invariant:
-1. When syncing table blocks, don't write an index block until all of its data blocks are written.
-2. A history cannot diverge from the canonical history by more than one checkpoint.
-3. A replica never syncs towards a checkpoint from its past.
+If non-determinism is detected (via checkpoint id mismatches) the replica which detects the mismatch will panic.
+This scenario should prompt operator investigation and manual intervention.

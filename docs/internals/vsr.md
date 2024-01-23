@@ -251,7 +251,7 @@ TODO Describe state sync fallback.
 
 ## Protocol: Sync Superblock
 
-State sync synchronizes the state of a lagging/divergent replica with the healthy cluster.
+State sync synchronizes the state of a lagging replica with the healthy cluster.
 
 State sync is used when when a lagging replica's log no longer intersects with the cluster's current log —
 [WAL repair](#protocol-repair-wal) cannot catch the replica up.
