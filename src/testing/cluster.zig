@@ -19,7 +19,6 @@ const Network = @import("cluster/network.zig").Network;
 const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
 const StorageChecker = @import("cluster/storage_checker.zig").StorageChecker;
-const SyncCheckerType = @import("cluster/sync_checker.zig").SyncCheckerType;
 const GridChecker = @import("cluster/grid_checker.zig").GridChecker;
 const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestCheckerType;
 
@@ -54,7 +53,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
-        pub const SyncChecker = SyncCheckerType(Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
 
         pub const Options = struct {
@@ -97,7 +95,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         state_checker: StateChecker,
         storage_checker: StorageChecker,
-        sync_checker: SyncChecker,
         grid_checker: *GridChecker,
         manifest_checker: ManifestChecker,
 
@@ -230,9 +227,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var storage_checker = try StorageChecker.init(allocator);
             errdefer storage_checker.deinit(allocator);
 
-            var sync_checker = SyncChecker.init(allocator);
-            errdefer sync_checker.deinit();
-
             var manifest_checker = ManifestChecker.init(allocator);
             errdefer manifest_checker.deinit();
 
@@ -280,7 +274,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .client_id_permutation = client_id_permutation,
                 .state_checker = state_checker,
                 .storage_checker = storage_checker,
-                .sync_checker = sync_checker,
                 .grid_checker = grid_checker,
                 .manifest_checker = manifest_checker,
             };
@@ -310,7 +303,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn deinit(cluster: *Self) void {
             cluster.manifest_checker.deinit();
-            cluster.sync_checker.deinit();
             cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
             cluster.network.deinit();
@@ -350,7 +342,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 switch (cluster.replica_health[i]) {
                     .up => {
                         replica.tick();
-                        cluster.sync_checker.check_sync_stage(replica);
                         cluster.state_checker.check_state(replica.replica) catch |err| {
                             fatal(.correctness, "state checker error: {}", .{err});
                         };
@@ -521,14 +512,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     };
                 },
                 .sync_stage_changed => switch (replica.syncing) {
-                    .requesting_checkpoint => {
-                        cluster.log_replica(.sync_commenced, replica.replica);
-                        cluster.sync_checker.replica_sync_start(replica);
-                    },
-                    .idle => {
-                        cluster.log_replica(.sync_completed, replica.replica);
-                        cluster.sync_checker.replica_sync_done(replica);
-                    },
+                    .requesting_checkpoint => cluster.log_replica(.sync_commenced, replica.replica),
+                    .idle => cluster.log_replica(.sync_completed, replica.replica),
                     else => {},
                 },
             }
