@@ -33,9 +33,8 @@ const CliArgs = union(enum) {
         cache_transfers_posted: flags.ByteSize =
             .{ .bytes = constants.cache_transfers_posted_size_default },
         cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
-        lsm_manifest_memory: flags.ByteSize = .{
-            .bytes = constants.lsm_manifest_memory_size_default
-        },
+        lsm_manifest_memory: flags.ByteSize =
+            .{ .bytes = constants.lsm_manifest_memory_size_default },
 
         positional: struct {
             path: [:0]const u8,
