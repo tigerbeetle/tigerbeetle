@@ -33,7 +33,7 @@ const CliArgs = union(enum) {
         cache_transfers_posted: flags.ByteSize =
             .{ .bytes = constants.cache_transfers_posted_size_default },
         cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
-        lsm_manifest_memory: flags.ByteSize =
+        memory_lsm_manifest: flags.ByteSize =
             .{ .bytes = constants.lsm_manifest_memory_size_default },
 
         positional: struct {
@@ -109,7 +109,7 @@ const CliArgs = union(enum) {
         \\        (Total RAM) - 3GB (TigerBeetle) - 1GB (System), eg 12GB for a 16GB machine.
         \\        Defaults to 1GB.
         \\
-        \\  --lsm-manifest-memory=<size><KB|MB|GB>
+        \\  --memory-lsm-manifest=<size><KB|MB|GB>
         \\        Sets the amount of memory allocated for LSM-tree manifests. When the
         \\        number or size of LSM-trees would become too large for their manifests to fit
         \\        into memory, such requests are rejected.
@@ -268,24 +268,24 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                 );
             }
 
-            const lsm_manifest_memory = start.lsm_manifest_memory.bytes;
+            const lsm_manifest_memory = start.memory_lsm_manifest.bytes;
             const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
             const lsm_manifest_memory_min = constants.lsm_manifest_node_size;
             if (lsm_manifest_memory > lsm_manifest_memory_max) {
-                flags.fatal("--lsm-memory: size {} exceeds maximum: {}", .{
+                flags.fatal("--memory-lsm-manifest: size {} exceeds maximum: {}", .{
                     lsm_manifest_memory,
                     lsm_manifest_memory_max,
                 });
             }
             if (lsm_manifest_memory < lsm_manifest_memory_min) {
-                flags.fatal("--lsm-memory: size {} is below minimum: {}", .{
+                flags.fatal("--memory-lsm-manifest: size {} is below minimum: {}", .{
                     lsm_manifest_memory,
                     lsm_manifest_memory_min,
                 });
             }
             if (lsm_manifest_memory % constants.lsm_manifest_node_size != 0) {
                 flags.fatal(
-                    "--lsm-memory: size {} must be a multiple of node size ({})",
+                    "--memory-lsm-manifest: size {} must be a multiple of node size ({})",
                     .{ lsm_manifest_memory, constants.lsm_manifest_node_size },
                 );
             }
