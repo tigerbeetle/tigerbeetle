@@ -52,17 +52,8 @@ pull requests were merged in a week).
 
 ## Release Process
 
-Releases are triggered manually, on Monday. Default release rotation is stateless and determined by
-the following one-liner:
-
-```console
-$ python3 -c "import datetime; print((sorted(['batiati', 'cb22', 'kprotty', 'matklad', 'sentientwaffle']) * 142)[datetime.datetime.utcnow().isocalendar().week:][:3])"
-        current release
-              V
-['batiati', 'cb22', 'kprotty']
-    ^                   ^ release next week
-    + previous release
-```
+Releases are triggered manually, on Monday. Default release rotation is on the workbench:
+<https://tigerbeetle.github.io/tigerbeetle/>. 
 
 The middle name is the default release manager for the _current_ week. After the release, please
 ping the next person to pass the baton.
