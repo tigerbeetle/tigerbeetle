@@ -112,7 +112,7 @@ const CliArgs = union(enum) {
         \\  --memory-lsm-manifest=<size><KB|MB|GB>
         \\        Sets the amount of memory allocated for LSM-tree manifests. When the
         \\        number or size of LSM-trees would become too large for their manifests to fit
-        \\        into memory, such requests are rejected.
+        \\        into memory the server will terminate.
         \\        Defaults to 64MB.
         \\
         \\  --verbose
