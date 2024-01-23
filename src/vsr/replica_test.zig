@@ -1038,6 +1038,44 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
+// TODO: Replicas in recovering_head cannot (currently) participate in view-change, even when
+// they arrived at recovering_head via state sync, not corruption+crash. As a result, it is possible
+// for a 2/3 cluster to get stuck without any corruptions or crashes.
+// See: https://github.com/tigerbeetle/tigerbeetle/pull/933#discussion_r1245440623
+// and `Simulator.core_missing_quorum()`.
+test "Cluster: sync: view-change with lagging replica in recovering_head" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(16, 16);
+    try expectEqual(t.replica(.R_).commit(), 16);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    // Allow B2 to join, but partition A0 to force a view change.
+    // B1 is lagging far enough behind that it must state sync – it will transition to
+    // recovering_head. Despite this, the cluster of B1/B2 should recover to normal status.
+    b2.pass_all(.R_, .bidirectional);
+    a0.drop_all(.R_, .bidirectional);
+    t.run();
+
+    try expectEqual(b1.role(), .primary);
+    try expectEqual(b2.status(), .recovering_head);
+    //try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).sync_status(), .idle);
+    try expectEqual(b2.commit(), checkpoint_2);
+    // try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+
+    // try TestReplicas.expect_sync_done(t.replica(.R_));
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
