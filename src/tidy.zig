@@ -386,7 +386,6 @@ const naughty_list = [_][]const u8{
     "clients/node/src/translate.zig",
     "config.zig",
     "constants.zig",
-    "ewah_benchmark.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
     "io/linux.zig",

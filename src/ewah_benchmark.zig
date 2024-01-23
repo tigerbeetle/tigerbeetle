@@ -43,7 +43,11 @@ pub fn main() !void {
         var bitset_lengths: [samples]usize = undefined;
         while (i < samples) : (i += 1) {
             bitsets[i] = try make_bitset(allocator, config);
-            bitsets_encoded[i] = try allocator.alignedAlloc(u8, @alignOf(usize), ewah.encode_size_max(bitsets[0].len));
+            bitsets_encoded[i] = try allocator.alignedAlloc(
+                u8,
+                @alignOf(usize),
+                ewah.encode_size_max(bitsets[i].len),
+            );
             bitsets_decoded[i] = try allocator.alloc(usize, config.words);
         }
 
@@ -86,7 +90,10 @@ pub fn main() !void {
             total_compressed += @as(f64, @floatFromInt(bitset_lengths[i]));
         }
 
-        try stdout.print("Words={:_>3} E(Run)={:_>3} E(Literal)={:_>3} EncTime={:_>6}ns DecTime={:_>6}ns Ratio={d:_>6.2}\n", .{
+        try stdout.print(
+            \\Words={:_>3} E(Run)={:_>3} E(Literal)={:_>3} EncTime={:_>6}ns DecTime={:_>6}ns Ratio={d:_>6.2}
+            \\
+        , .{
             config.words,
             config.run_length_e,
             config.literals_length_e,
