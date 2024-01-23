@@ -26,3 +26,21 @@ jobs:
       TIGERBEETLE_DOCS_DEPLOY_KEY: ${{secrets.TIGERBEETLE_DOCS_DEPLOY_KEY}}
       TIGERBEETLE_GO_DEPLOY_KEY: ${{ secrets.TIGERBEETLE_GO_DEPLOY_KEY }}
       SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+
+  workbench:
+    runs-on: ubuntu-latest
+    environment: workbench
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v3
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build scripts -- ci-benchmark --sha=${{ github.sha }}
+        env:
+          WORKBENCHDB_PAT: ${{ secrets.WORKBENCHDB_PAT }}
+      - uses: actions/upload-pages-artifact@v1
+        with:
+          path: ./src/workbench
+      - uses: actions/deploy-pages@v1
