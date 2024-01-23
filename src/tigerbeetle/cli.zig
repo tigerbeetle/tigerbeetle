@@ -291,10 +291,8 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                 );
             }
 
-            const lsm_forest_node_count_u64 =
-                @divExact(lsm_manifest_memory, constants.lsm_manifest_node_size);
-            assert(lsm_forest_node_count_u64 <= std.math.maxInt(u32));
-            const lsm_forest_node_count: u32 = @intCast(lsm_forest_node_count_u64);
+            const lsm_forest_node_count: u32 =
+                @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
             return Command{
                 .start = .{
