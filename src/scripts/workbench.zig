@@ -58,6 +58,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     }
 
     try shell.exec("git add ./workbench/data.json", .{});
+    try shell.git_env_setup();
     try shell.exec("git commit -m 📈", .{});
     try shell.exec("git push", .{});
 }
