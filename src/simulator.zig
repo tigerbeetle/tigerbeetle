@@ -424,6 +424,20 @@ pub const Simulator = struct {
             }
         }
 
+        // Expect that all core replicas have arrived at an identical (non-divergent) checkpoint.
+        var checkpoint_id: ?u128 = null;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                const replica_checkpoint_id = replica.superblock.working.checkpoint_id();
+                if (checkpoint_id) |id| {
+                    assert(checkpoint_id == id);
+                } else {
+                    checkpoint_id = replica_checkpoint_id;
+                }
+            }
+        }
+        assert(checkpoint_id != null);
+
         return true;
     }
 
