@@ -528,6 +528,15 @@ pub const Header = extern struct {
         /// The checksum of the client's request.
         request_checksum: u128,
         request_checksum_padding: u128 = 0,
+        /// The id of the checkpoint where:
+        ///
+        ///   prepare.op > trigger_for_checkpoint(checkpoint_op)
+        ///   prepare.op ≤ trigger_for_checkpoint(checkpoint_after(checkpoint_op))
+        ///
+        /// The purpose of including the checkpoint id is to strictly bound the number of commits
+        /// that it may take to discover a divergent replica. If a replica diverges, then that
+        /// divergence will be discovered *at latest* when the divergent replica attempts to commit
+        /// the first op after the next checkpoint trigger.
         checkpoint_id: u128,
         client: u128,
         /// The op number of the latest prepare that may or may not yet be committed. Uncommitted
@@ -666,6 +675,7 @@ pub const Header = extern struct {
         /// The corresponding prepare's checksum.
         prepare_checksum: u128,
         prepare_checksum_padding: u128 = 0,
+        /// The corresponding prepare's checkpoint_id.
         checkpoint_id: u128,
         client: u128,
         op: u64,
