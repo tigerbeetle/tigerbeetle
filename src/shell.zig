@@ -611,6 +611,16 @@ pub fn git_tag(shell: *Shell) ![]const u8 {
     return stdout;
 }
 
+/// On GitHub Actions runners, `git commit` fails with an "Author identity unknown" error.
+///
+/// This function sets up appropriate environmental variables to correct that error.
+pub fn git_env_setup(shell: *Shell) !void {
+    try shell.env.put("GIT_AUTHOR_NAME", "TigerBeetle Bot");
+    try shell.env.put("GIT_AUTHOR_EMAIL", "bot@tigerbeetle.com");
+    try shell.env.put("GIT_COMMITTER_NAME", "TigerBeetle Bot");
+    try shell.env.put("GIT_COMMITTER_EMAIL", "bot@tigerbeetle.com");
+}
+
 const Argv = struct {
     args: std.ArrayList([]const u8),
 
