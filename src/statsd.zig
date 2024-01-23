@@ -51,7 +51,11 @@ pub const StatsD = struct {
 
     pub fn gauge(self: *StatsD, stat: []const u8, value: usize) !void {
         var buffer_completion = self.buffer_completions_fifo.pop() orelse return error.NoSpaceLeft;
-        const statsd_packet = try std.fmt.bufPrint(buffer_completion.buffer[0..], "{s}:{}|g", .{ stat, value });
+        const statsd_packet = try std.fmt.bufPrint(
+            buffer_completion.buffer[0..],
+            "{s}:{}|g",
+            .{ stat, value },
+        );
 
         self.io.send(
             *StatsD,
@@ -65,7 +69,11 @@ pub const StatsD = struct {
 
     pub fn timing(self: *StatsD, stat: []const u8, ms: usize) !void {
         var buffer_completion = self.buffer_completions_fifo.pop() orelse return error.NoSpaceLeft;
-        const statsd_packet = try std.fmt.bufPrint(buffer_completion.buffer[0..], "{s}:{}|ms", .{ stat, ms });
+        const statsd_packet = try std.fmt.bufPrint(
+            buffer_completion.buffer[0..],
+            "{s}:{}|ms",
+            .{ stat, ms },
+        );
 
         self.io.send(
             *StatsD,
@@ -77,7 +85,11 @@ pub const StatsD = struct {
         );
     }
 
-    pub fn send_callback(context: *StatsD, completion: *IO.Completion, result: IO.SendError!usize) void {
+    fn send_callback(
+        context: *StatsD,
+        completion: *IO.Completion,
+        result: IO.SendError!usize,
+    ) void {
         _ = result catch {};
         var buffer_completion = @fieldParentPtr(BufferCompletion, "completion", completion);
         context.buffer_completions_fifo.push(buffer_completion);
