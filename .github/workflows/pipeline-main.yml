@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build scripts -- ci-benchmark --sha=${{ github.sha }}
+      - run: ./zig/zig build scripts -- workbench --sha=${{ github.sha }}
         env:
           WORKBENCHDB_PAT: ${{ secrets.WORKBENCHDB_PAT }}
       - uses: actions/upload-pages-artifact@v1
