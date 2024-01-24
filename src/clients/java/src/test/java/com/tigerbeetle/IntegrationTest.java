@@ -1546,43 +1546,13 @@ public class IntegrationTest {
                 throw new Exception("Format failed. " + error);
             }
 
-            this.process = new ProcessBuilder().command(
-                    new String[] {exe, "start", "--addresses=0", TB_FILE, "--cache-grid=512MB"})
-                    .redirectError(Redirect.PIPE).start();
+            this.process = new ProcessBuilder()
+                    .command(new String[] {exe, "start", "--addresses=0", TB_FILE,
+                            "--cache-grid=512MB"})
+                    .redirectOutput(Redirect.PIPE).redirectError(Redirect.DISCARD).start();
 
-            if (process.waitFor(100, TimeUnit.MILLISECONDS))
-                throw new Exception("Start server failed");
-
-            final var addressLoggedEvent = new CountDownLatch(1);
-            final var stderrLogged = new StringBuilder();
-            final var stderrReader = new Thread(() -> {
-                final var stderr = process.getErrorStream();
-                final var listening = "listening on ";
-                new BufferedReader(new InputStreamReader(stderr)).lines().forEach(line -> {
-                    stderrLogged.append(line);
-                    stderrLogged.append("\n");
-                    final var found = line.indexOf(listening);
-                    if (found != -1) {
-                        address = line.substring(found + listening.length()).trim();
-                        addressLoggedEvent.countDown();
-                    }
-                });
-            });
-            stderrReader.start();
-            process.onExit().whenCompleteAsync((process, exception) -> {
-                // Diagnose cases when the server crashes.
-                System.out.println(stderrLogged);
-
-                System.out.printf("TigerBeetle server exited with code %d\n\n",
-                        process.exitValue());
-            });
-
-            if (!addressLoggedEvent.await(60L, TimeUnit.SECONDS)) {
-                process.destroy();
-                stderrReader.join();
-                throw new Exception("failed to read the port, exitValue=" + process.exitValue()
-                        + " stderr:\n" + stderrLogged.toString());
-            }
+            final var stdout = process.getInputStream();
+            this.address = new BufferedReader(new InputStreamReader(stdout)).readLine().trim();
         }
 
         public String getAddress() {
