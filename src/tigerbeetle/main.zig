@@ -230,15 +230,14 @@ const Command = struct {
                 "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
         }
 
-        // It is possible to start tigerbetele passing `0` as an address:
-        //     $ tigerbeetle start --addresses=0 0_0.tigrebeetle
+        // It is possible to start tigerbeetle passing `0` as an address:
+        //     $ tigerbeetle start --addresses=0 0_0.tigerbeetle
         // This enables a couple of special behaviors, useful in tests:
         // - The operating system picks a free port, avoiding "address already in use" errors.
         // - The port, and only the port, is printed to the stdout, so that the parent process
         //   can learn it.
         // - tigerbeetle process exits when its stdin gets closed.
-        const port_zero = std.net.Address.parseIp(constants.address, 0) catch unreachable;
-        if (args.addresses[replica.replica].eql(port_zero)) {
+        if (args.addresses_zero) {
             const port_actual = replica.message_bus.process.accept_address.getPort();
             const stdout = std.io.getStdOut();
             try stdout.writer().print("{}\n", .{port_actual});

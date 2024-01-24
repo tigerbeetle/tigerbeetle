@@ -137,6 +137,10 @@ const CliArgs = union(enum) {
 pub const Command = union(enum) {
     pub const Start = struct {
         addresses: []net.Address,
+        // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
+        // testing. We check the raw string rather then the parsed address to prevent triggering
+        // this logic by accident.
+        addresses_zero: bool,
         cache_accounts: u32,
         cache_transfers: u32,
         cache_transfers_posted: u32,
@@ -246,6 +250,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             return Command{
                 .start = .{
                     .addresses = addresses,
+                    .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
                     .storage_size_limit = storage_size_limit,
                     .cache_accounts = parse_cache_size_to_count(
                         tigerbeetle.Account,
