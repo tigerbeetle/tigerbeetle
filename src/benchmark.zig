@@ -88,9 +88,6 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // Discard executable name.
-    _ = args.next().?;
-
     const cli_args = flags.parse(&args, CliArgs);
 
     const addresses = try vsr.parse_addresses(allocator, cli_args.addresses, constants.members_max);

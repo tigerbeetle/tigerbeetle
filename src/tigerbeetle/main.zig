@@ -49,9 +49,6 @@ pub fn main() !void {
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
 
-    // Skip argv[0] which is the name of this executable
-    assert(arg_iterator.skip());
-
     var command = try cli.parse_args(allocator, &arg_iterator);
     defer command.deinit(allocator);
 

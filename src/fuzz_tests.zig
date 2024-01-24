@@ -52,7 +52,6 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(fuzz.allocator);
     defer args.deinit();
 
-    assert(args.skip()); // Discard executable name.
     const cli_args = flags.parse(&args, CliArgs);
 
     switch (cli_args.positional.fuzzer) {

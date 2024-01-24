@@ -72,6 +72,8 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 pub fn parse(args: *std.process.ArgIterator, comptime CliArgs: type) CliArgs {
+    assert(args.skip()); // Discard executable name.
+
     return switch (@typeInfo(CliArgs)) {
         .Union => parse_commands(args, CliArgs),
         .Struct => parse_flags(args, CliArgs),
