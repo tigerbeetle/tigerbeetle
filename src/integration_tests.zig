@@ -57,7 +57,7 @@ test "repl integration" {
 
         fn repl_command(context: *Context, command: []const u8) ![]const u8 {
             return try context.shell.exec_stdout(
-                \\{tigerbeetle} client --cluster=0 --addresses={addresses} --command={command}
+                \\{tigerbeetle} repl --cluster=0 --addresses={addresses} --command={command}
             , .{
                 .tigerbeetle = context.tigerbeetle_exe,
                 .addresses = context.tmp_beetle.port_str.slice(),
