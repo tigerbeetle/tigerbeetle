@@ -34,8 +34,10 @@ const Fuzzers = .{
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
-    // Quickly run all fuzzers as a smoke test
+    // Quickly run all fuzzers as a smoke test.
     .smoke = {},
+    // Select a test at random, used by our CFO.
+    .random = {},
 };
 
 const FuzzersEnum = std.meta.FieldEnum(@TypeOf(Fuzzers));
@@ -61,6 +63,11 @@ pub fn main() !void {
             assert(cli_args.events_max == null);
             try main_smoke();
         },
+        .random => {
+            assert(cli_args.seed == null);
+            assert(cli_args.events_max == null);
+            try main_random();
+        },
         else => try main_single(cli_args),
     }
 }
@@ -70,6 +77,7 @@ fn main_smoke() !void {
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
             .smoke => continue,
+            .random => continue,
 
             .lsm_cache_map => 20_000,
             .lsm_forest => 10_000,
@@ -99,6 +107,25 @@ fn main_smoke() !void {
     log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
 }
 
+fn main_random() !void {
+    const fuzzer = blk: while (true) {
+        var prng = std.rand.DefaultPrng.init(std.crypto.random.int(u64));
+        const choice = prng.random().uintLessThan(u64, @typeInfo(FuzzersEnum).Enum.fields.len);
+        var fuzzer: FuzzersEnum = @enumFromInt(choice);
+        switch (fuzzer) {
+            .smoke => continue,
+            .random => continue,
+            else => break :blk fuzzer,
+        }
+    };
+
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Fuzzer = {s}\n", .{@tagName(fuzzer)});
+
+    const single_args = CliArgs{ .positional = .{ .fuzzer = fuzzer } };
+    return main_single(single_args);
+}
+
 fn main_single(cli_args: CliArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
@@ -108,11 +135,13 @@ fn main_single(cli_args: CliArgs) !void {
         try std.os.getrandom(std.mem.asBytes(&seed_random));
         break :seed seed_random;
     };
-    log.info("Fuzz seed = {}", .{seed});
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Fuzz seed = {}\n", .{seed});
 
     var timer = try std.time.Timer.start();
     switch (cli_args.positional.fuzzer) {
         .smoke => unreachable,
+        .random => unreachable,
         inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(
             .{ .seed = seed, .events_max = cli_args.events_max },
         ),

@@ -172,9 +172,11 @@ pub fn main() !void {
         .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
     };
 
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Fuzzer = simulator\n", .{});
+    try stdout.print("Fuzz seed = {}\n", .{seed});
+
     output.info(
-        \\
-        \\          SEED={}
         \\
         \\          replicas={}
         \\          standbys={}
@@ -206,7 +208,6 @@ pub fn main() !void {
         \\          restart_probability={d}%
         \\          restart_stability={} ticks
     , .{
-        seed,
         cluster_options.replica_count,
         cluster_options.standby_count,
         cluster_options.client_count,

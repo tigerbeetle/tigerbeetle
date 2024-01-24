@@ -17,11 +17,13 @@ const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
 
+const cfo = @import("./cfo.zig");
 const ci = @import("./ci.zig");
 const release = @import("./release.zig");
 const workbench = @import("./workbench.zig");
 
 const CliArgs = union(enum) {
+    cfo: cfo.CliArgs,
     ci: ci.CliArgs,
     release: release.CliArgs,
     workbench: workbench.CliArgs,
@@ -48,6 +50,7 @@ pub fn main() !void {
     const cli_args = flags.parse(&args, CliArgs);
 
     switch (cli_args) {
+        .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
         .workbench => |args_workbench| try workbench.main(shell, gpa, args_workbench),

@@ -544,7 +544,7 @@ pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.Chi
     child.cwd = cwd_path;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+    child.stderr_behavior = .Ignore;
 
     try child.spawn();
 
