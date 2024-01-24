@@ -147,6 +147,7 @@ pub const Command = union(enum) {
     };
 
     pub const Repl = struct {
+        args_allocated: std.process.ArgIterator,
         addresses: []net.Address,
         cluster: u128,
         verbose: bool,
@@ -169,11 +170,10 @@ pub const Command = union(enum) {
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
-            .start => |*start| allocator.free(start.addresses),
+            inline .start, .repl => |*cmd| allocator.free(cmd.addresses),
             else => {},
         }
         switch (command.*) {
-            .repl => {},
             inline else => |*cmd| cmd.args_allocated.deinit(),
         }
         command.* = undefined;
@@ -293,6 +293,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .repl = .{
+                    .args_allocated = args,
                     .addresses = addresses,
                     .cluster = repl.cluster,
                     .verbose = repl.verbose,
