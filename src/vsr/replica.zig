@@ -8275,6 +8275,13 @@ pub fn ReplicaType(
                 else => return,
             };
 
+            if (self.standby()) {
+                // Standbys don't participate in view changes, so switching to `.view_change` is
+                // useless. This also prevents an isolated replica from locking a standby into a
+                // view higher than that of the rest of the cluster.
+                if (to != .normal) return;
+            }
+
             // Compare status transitions and decide whether to view jump or ignore:
             switch (self.status) {
                 .normal => switch (to) {
@@ -8335,6 +8342,7 @@ pub fn ReplicaType(
                 .view_change => {
                     assert(self.status == .normal or self.status == .view_change);
                     assert(self.view < header.view);
+                    assert(!self.standby());
 
                     if (header.view == self.view + 1) {
                         log.debug("{}: jump_view: jumping to view change", .{self.replica});
