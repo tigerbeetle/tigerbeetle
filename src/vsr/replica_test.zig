@@ -1041,8 +1041,8 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
 // TODO: Replicas in recovering_head cannot (currently) participate in view-change, even when
 // they arrived at recovering_head via state sync, not corruption+crash. As a result, it is possible
 // for a 2/3 cluster to get stuck without any corruptions or crashes.
-// See: https://github.com/tigerbeetle/tigerbeetle/pull/933#discussion_r1245440623
-// and `Simulator.core_missing_quorum()`.
+// See: https://github.com/tigerbeetle/tigerbeetle/pull/933#discussion_r1245440623,
+// https://github.com/tigerbeetle/tigerbeetle/issues/1376, and `Simulator.core_missing_quorum()`.
 test "Cluster: sync: view-change with lagging replica in recovering_head" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();

@@ -42,6 +42,8 @@ comptime {
     assert(vsr_operations_reserved <= std.math.maxInt(u8));
 }
 
+/// The checkpoint interval is chosen to be the highest possible value that satisfies the
+/// constraints described below.
 pub const vsr_checkpoint_interval = journal_slot_count -
     lsm_batch_multiple -
     lsm_batch_multiple * stdx.div_ceil(pipeline_prepare_queue_max, lsm_batch_multiple);
@@ -53,6 +55,17 @@ comptime {
     // This assert guarantees that when a prepare gets bumped from the log, there is a prepare
     // _committed_ on top of the next checkpoint, which in turn guarantees the existence of a
     // checkpoint quorum.
+    //
+    // More specifically, the checkpoint interval must be less than the WAL length by (at least) the
+    // sum of:
+    // - `lsm_batch_multiple`: Ensure that the final batch of entries immediately preceding a
+    //   checkpoint trigger is not overwritten by the following checkpoint's entries. This final
+    //   batch's updates were not persisted as part of the former checkpoint – they are only in memory
+    //   until they are compacted by the *next* batch of commits (i.e. the first batch of the following
+    //   checkpoint).
+    // - `pipeline_prepare_queue_max` (rounded up to the nearest batch multiple): This margin ensures
+    //   that the entries prepared immediately following a checkpoint trigger never overwrite an entry
+    //   from the previous WAL wrap until a quorum of replicas has reached that checkpoint.
     assert(vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max <=
         journal_slot_count);
     assert(vsr_checkpoint_interval >= lsm_batch_multiple);
