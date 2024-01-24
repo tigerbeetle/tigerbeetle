@@ -531,6 +531,18 @@ pub fn exec_raw(
 /// sadly, child will still be leaked if the parent process is killed itself, because POSIX doesn't
 /// have nice APIs for structured concurrency).
 pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.ChildProcess {
+    return try shell.spawn_options(.{}, cmd, cmd_args);
+}
+
+pub fn spawn_options(
+    shell: Shell,
+    options: struct {
+        stdin_behavior: std.ChildProcess.StdIo = .Ignore,
+        stderr_behavior: std.ChildProcess.StdIo = .Pipe,
+    },
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) !std.ChildProcess {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
@@ -542,9 +554,9 @@ pub fn spawn(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !std.Chi
 
     var child = std.ChildProcess.init(argv.slice(), shell.gpa);
     child.cwd = cwd_path;
-    child.stdin_behavior = .Ignore;
+    child.stdin_behavior = options.stdin_behavior;
     child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+    child.stderr_behavior = options.stderr_behavior;
 
     try child.spawn();
 
