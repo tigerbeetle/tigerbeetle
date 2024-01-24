@@ -17,7 +17,7 @@ First, get TigerBeetle running:
 * Or [run a single-node cluster with Docker](./quick-start/with-docker.md)
 * Or [run a three-node cluster with docker-compose](./quick-start/with-docker-compose.md)
 
-Then, try creating accounts and transfers [using the TigerBeetle CLI client](./quick-start/cli-client.md).
+Then, try creating accounts and transfers [using the TigerBeetle CLI](./quick-start/cli-repl.md).
 
 ## Designing for TigerBeetle
 

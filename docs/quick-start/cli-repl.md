@@ -2,7 +2,7 @@
 sidebar_position: 4
 ---
 
-# Creating accounts and transfers with the CLI client
+# Creating accounts and transfers with the CLI repl
 
 Once you've got some TigerBeetle replicas running, let's connect to the
 replicas and do some accounting!
@@ -11,7 +11,7 @@ First let's create two accounts. (Don't worry about the details, you
 can read about them later.)
 
 ```console
-./tigerbeetle client --cluster=0 --addresses=3000
+./tigerbeetle repl --cluster=0 --addresses=3000
 ```
 ```
 TigerBeetle Client

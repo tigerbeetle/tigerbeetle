@@ -43,7 +43,7 @@ const CliArgs = union(enum) {
         verbose: bool = false,
     },
 
-    client: struct {
+    repl: struct {
         addresses: []const u8,
         cluster: u128,
         verbose: bool = false,
@@ -62,7 +62,7 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle version [--version]
         \\
-        \\  tigerbeetle client --cluster=<integer> --addresses=<addresses>
+        \\  tigerbeetle repl --cluster=<integer> --addresses=<addresses>
         \\
         \\Commands:
         \\
@@ -74,7 +74,7 @@ const CliArgs = union(enum) {
         \\
         \\  version  Print the TigerBeetle build version and the compile-time config values.
         \\
-        \\  client   Enter the TigerBeetle client REPL.
+        \\  repl     Enter the TigerBeetle client REPL.
         \\
         \\Options:
         \\
@@ -126,7 +126,7 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle version --verbose
         \\
-        \\  tigerbeetle client --addresses=3003,3002,3001 --cluster=0
+        \\  tigerbeetle repl --addresses=3003,3002,3001 --cluster=0
         \\
     , .{
         .default_address = constants.address,
@@ -288,7 +288,7 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
                 },
             };
         },
-        .client => |repl| {
+        .repl => |repl| {
             const addresses = parse_addresses(allocator, repl.addresses);
 
             return Command{
