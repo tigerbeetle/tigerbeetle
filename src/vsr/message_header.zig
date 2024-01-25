@@ -530,13 +530,22 @@ pub const Header = extern struct {
         request_checksum_padding: u128 = 0,
         /// The id of the checkpoint where:
         ///
-        ///   prepare.op > trigger_for_checkpoint(checkpoint_op)
-        ///   prepare.op ≤ trigger_for_checkpoint(checkpoint_after(checkpoint_op))
+        ///   prepare.op >
+        ///     pipeline_prepare_queue_max + trigger_for_checkpoint(checkpoint_op)
+        ///   prepare.op ≤
+        ///     pipeline_prepare_queue_max + trigger_for_checkpoint(checkpoint_after(checkpoint_op))
         ///
         /// The purpose of including the checkpoint id is to strictly bound the number of commits
         /// that it may take to discover a divergent replica. If a replica diverges, then that
         /// divergence will be discovered *at latest* when the divergent replica attempts to commit
-        /// the first op after the next checkpoint trigger.
+        /// the first op after the next checkpoint trigger + pipeline_prepare_queue_max.
+        ///
+        /// The first `pipeline_prepare_queue_max` ops immediately after a checkpoint trigger are
+        /// border prepares.
+        ///
+        /// A "border prepare" is a prepare that can be prepared in the *next* checkpoint before our
+        /// previous checkpoint is done. (These prepares' `header.checkpoint_id` will be the id of
+        /// the *previous* checkpoint, since the id of the next checkpoint may not yet be known).
         checkpoint_id: u128,
         client: u128,
         /// The op number of the latest prepare that may or may not yet be committed. Uncommitted

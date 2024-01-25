@@ -1407,8 +1407,11 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.checkpoint_id != self.superblock.working.checkpoint_id()) {
+            if (message.header.checkpoint_id != self.superblock.working.checkpoint_id() and
+                message.header.checkpoint_id != self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id)
+            {
                 // Panic on encountering a prepare which does not match our own checkpoint id.
+                // (Or the previous checkpoint id, for border prepares.)
                 //
                 // If this branch is hit, there is a storage determinism problem. At this point in
                 // the code it is not possible to distinguish whether the problem is with this
@@ -1483,7 +1486,6 @@ pub fn ReplicaType(
             assert(prepare.message.header.op <= self.op);
 
             assert(prepare.message.header.checkpoint_id == message.header.checkpoint_id);
-            assert(prepare.message.header.checkpoint_id == self.superblock.working.checkpoint_id());
             assert(prepare.message.header.checkpoint_id ==
                 self.checkpoint_id_for_op(prepare.message.header.op).?);
 
@@ -5028,8 +5030,11 @@ pub fn ReplicaType(
             if (self.op_checkpoint() > 0) {
                 const op_checkpoint_trigger =
                     vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
-                if (op <= op_checkpoint_trigger) {
-                    if (op + constants.vsr_checkpoint_interval <= op_checkpoint_trigger) {
+                const op_checkpoint_border =
+                    op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
+
+                if (op <= op_checkpoint_border) {
+                    if (op + constants.vsr_checkpoint_interval <= op_checkpoint_border) {
                         // Case 2: op is from a too distant past for us to know its checkpoint id.
                         return null;
                     }
@@ -5037,10 +5042,13 @@ pub fn ReplicaType(
                     return self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
                 }
 
-                assert(op + constants.vsr_checkpoint_interval > self.op_checkpoint_next_trigger());
+                assert(op + constants.vsr_checkpoint_interval >
+                    self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max);
             }
 
-            if (op <= self.op_checkpoint_next_trigger()) {
+            if (op <= self.op_checkpoint_next_trigger() +
+                constants.pipeline_prepare_queue_max)
+            {
                 // Case 4: op uses the current checkpoint id.
                 return self.superblock.working.checkpoint_id();
             }
@@ -5090,8 +5098,14 @@ pub fn ReplicaType(
                     // We know checkpoint ids for the current checkpoint and the one before that.
                     // Don't try repairing ops with older checkpoint_ids which are impossible to
                     // verify.
+                    //
+                    // The "+pipeline_prepare_queue_max" accounts for the border prepares of the
+                    // older checksum have a different (no-longer known) checkpoint id. A replica
+                    // that is that far back can state sync, though.
                     const op_with_checkpoint_id_oldest =
-                        (self.op_checkpoint_next_trigger() + 1) -| constants.vsr_checkpoint_interval * 2;
+                        (self.op_checkpoint_next_trigger() + 1 +
+                         constants.pipeline_prepare_queue_max) -|
+                        constants.vsr_checkpoint_interval * 2;
                     assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest) != null);
 
                     break :op @max(op_wal_oldest, op_with_checkpoint_id_oldest);
@@ -5196,6 +5210,16 @@ pub fn ReplicaType(
             // Copy the header to the stack before overwriting it to avoid UB.
             const request_header: Header.Request = request.message.header.*;
 
+            const checkpoint_id = checkpoint_id: {
+                if (vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint())) |trigger| {
+                    if (self.op + 1 <= trigger + constants.pipeline_prepare_queue_max) {
+                        // Border prepares use the previous checkpoint id.
+                        break :checkpoint_id self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
+                    }
+                }
+                break :checkpoint_id self.superblock.working.checkpoint_id();
+            };
+
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
                 .cluster = self.cluster,
@@ -5206,7 +5230,7 @@ pub fn ReplicaType(
                 .parent = latest_entry.checksum,
                 .client = request_header.client,
                 .request_checksum = request_header.checksum,
-                .checkpoint_id = self.superblock.working.checkpoint_id(),
+                .checkpoint_id = checkpoint_id,
                 .op = self.op + 1,
                 .commit = self.commit_max,
                 .timestamp = timestamp: {
@@ -6236,6 +6260,7 @@ pub fn ReplicaType(
                     log.debug("{}: send_prepare_ok: not sending (old)", .{self.replica});
                     return;
                 };
+                assert(checkpoint_id == header.checkpoint_id);
 
                 // It is crucial that replicas stop accepting prepare messages from earlier views
                 // once they start the view change protocol. Without this constraint, the system
