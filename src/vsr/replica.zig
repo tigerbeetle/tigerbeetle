@@ -3965,6 +3965,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.replica == self.primary_index(self.view));
             assert(self.commit_min == self.commit_max);
+            assert(self.commit_min <= self.op);
             assert(self.view >= self.view_durable());
             assert(self.log_view >= self.log_view_durable());
             assert(self.log_view == self.view);

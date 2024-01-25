@@ -477,6 +477,9 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     try expectEqual(a0.op_checkpoint(), checkpoint_1);
     try expectEqual(b1.op_checkpoint(), 0);
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
+    try expectEqual(a0.commit(), checkpoint_1_trigger + 1);
+    try expectEqual(b1.commit(), 20);
+    try expectEqual(b2.commit(), checkpoint_1_trigger);
 
     // Partition the primary, but restore B1. B1 will attempt to become the primary next,
     // but it is too far behind, so B2 becomes the new primary instead.
