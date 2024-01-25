@@ -574,7 +574,8 @@ reverse-chronological order.
 ```javascript
 let filter = {
   account_id: 2n,
-  timestamp: 0n, // No filter by Timestamp.
+  timestamp_min: 0n, // No filter by Timestamp.
+  timestamp_max: 0n, // No filter by Timestamp.
   limit: 10, // Limit to ten transfers at most.
   flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
     GetAccountTransfersFlags.credits | // Include transfer from the credit side.

@@ -251,19 +251,20 @@ pub const CreateTransfersResult = extern struct {
 pub const GetAccountTransfers = extern struct {
     /// The account id.
     account_id: u128,
-
-    /// Use this field for pagination, transfers will be returned from this timestamp
-    /// depending on the sort order.
-    timestamp: u64,
-
+    /// The initial timestamp (inclusive).
+    /// Use ZERO for no filter.
+    timestamp_min: u64,
+    /// The final timestamp (inclusive).
+    /// Use ZERO for no filter.
+    timestamp_max: u64,
     /// Maximum number of transfers that can be returned by this query.
     limit: u32,
-
     /// Query flags.
     flags: GetAccountTransfersFlags,
+    reserved: [24]u8 = [_]u8{0} ** 24,
 
     comptime {
-        assert(@sizeOf(GetAccountTransfers) == 32);
+        assert(@sizeOf(GetAccountTransfers) == 64);
         assert(stdx.no_padding(GetAccountTransfers));
     }
 };

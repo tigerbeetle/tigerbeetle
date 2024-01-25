@@ -103,6 +103,7 @@ const type_mappings = .{
     .{ tb.GetAccountTransfers, TypeMapping{
         .name = "GetAccountTransfersBatch",
         .visibility = .internal,
+        .private_fields = &.{"reserved"},
     } },
     .{ tb_client.tb_status_t, TypeMapping{
         .name = "InitializationStatus",

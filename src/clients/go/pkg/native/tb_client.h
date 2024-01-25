@@ -180,9 +180,11 @@ typedef enum TB_PACKET_ACQUIRE_STATUS {
 
 typedef struct tb_get_account_transfers_t {
     tb_uint128_t account_id;
-    uint64_t timestamp;
+    uint64_t timestamp_min;
+    uint64_t timestamp_max;
     uint32_t limit;
     uint32_t flags;
+    uint8_t reserved[24];
 } tb_get_account_transfers_t;
 
 typedef enum TB_GET_ACCOUNT_TRANSFERS_FLAGS {

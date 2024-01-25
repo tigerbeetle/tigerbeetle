@@ -998,7 +998,8 @@ public class IntegrationTests
             var filter = new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 8190,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits
             };
@@ -1019,7 +1020,8 @@ public class IntegrationTests
             var filter = new GetAccountTransfers
             {
                 AccountId = accounts[1].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 8190,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits | GetAccountTransfersFlags.Reversed
             };
@@ -1040,7 +1042,8 @@ public class IntegrationTests
             var filter = new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 8190,
                 Flags = GetAccountTransfersFlags.Debits
             };
@@ -1061,7 +1064,8 @@ public class IntegrationTests
             var filter = new GetAccountTransfers
             {
                 AccountId = accounts[1].Id,
-                Timestamp = 0,
+                TimestampMin = 1,
+                TimestampMax = ulong.MaxValue - 1,
                 Limit = 8190,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Reversed
             };
@@ -1082,7 +1086,8 @@ public class IntegrationTests
             var filter = new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 5,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits
             };
@@ -1098,7 +1103,7 @@ public class IntegrationTests
             }
 
             // Next 5 items from this timestamp:
-            filter.Timestamp = timestamp;
+            filter.TimestampMin = timestamp + 1;
             account_transfers = client.GetAccountTransfers(filter);
             Assert.IsTrue(account_transfers.Length == 5);
             foreach (var transfer in account_transfers)
@@ -1108,7 +1113,7 @@ public class IntegrationTests
             }
 
             // No more pages after that:
-            filter.Timestamp = timestamp;
+            filter.TimestampMin = timestamp + 1;
             account_transfers = client.GetAccountTransfers(filter);
             Assert.IsTrue(account_transfers.Length == 0);
         }
@@ -1120,7 +1125,8 @@ public class IntegrationTests
             var filter = new GetAccountTransfers
             {
                 AccountId = accounts[1].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 5,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits | GetAccountTransfersFlags.Reversed
             };
@@ -1136,7 +1142,7 @@ public class IntegrationTests
             }
 
             // Next 5 items from this timestamp:
-            filter.Timestamp = timestamp;
+            filter.TimestampMax = timestamp - 1;
             account_transfers = client.GetAccountTransfers(filter);
             Assert.IsTrue(account_transfers.Length == 5);
             foreach (var transfer in account_transfers)
@@ -1146,7 +1152,7 @@ public class IntegrationTests
             }
 
             // No more pages after that:
-            filter.Timestamp = timestamp;
+            filter.TimestampMax = timestamp - 1;
             account_transfers = client.GetAccountTransfers(filter);
             Assert.IsTrue(account_transfers.Length == 0);
         }
@@ -1159,16 +1165,38 @@ public class IntegrationTests
             Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
             {
                 AccountId = 0,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 8190,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
             }).Length == 0);
 
-            // Invalid timestamp
+            // Invalid timestamp min
             Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = ulong.MaxValue,
+                TimestampMin = ulong.MaxValue,
+                TimestampMax = 0,
+                Limit = 8190,
+                Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
+            }).Length == 0);
+
+            // Invalid timestamp max
+            Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+            {
+                AccountId = accounts[0].Id,
+                TimestampMin = 0,
+                TimestampMax = ulong.MaxValue,
+                Limit = 8190,
+                Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
+            }).Length == 0);
+
+            // Invalid timestamp range
+            Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
+            {
+                AccountId = accounts[0].Id,
+                TimestampMin = ulong.MaxValue - 1,
+                TimestampMax = 1,
                 Limit = 8190,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
             }).Length == 0);
@@ -1177,7 +1205,8 @@ public class IntegrationTests
             Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 0,
                 Flags = GetAccountTransfersFlags.Credits | GetAccountTransfersFlags.Debits,
             }).Length == 0);
@@ -1186,7 +1215,8 @@ public class IntegrationTests
             Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 8190,
                 Flags = (GetAccountTransfersFlags)0,
             }).Length == 0);
@@ -1195,7 +1225,8 @@ public class IntegrationTests
             Assert.IsTrue(client.GetAccountTransfers(new GetAccountTransfers
             {
                 AccountId = accounts[0].Id,
-                Timestamp = 0,
+                TimestampMin = 0,
+                TimestampMax = 0,
                 Limit = 8190,
                 Flags = (GetAccountTransfersFlags)0xFFFF,
             }).Length == 0);

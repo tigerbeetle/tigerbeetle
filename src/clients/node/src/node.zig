@@ -371,7 +371,10 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                 inline for (std.meta.fields(Event)) |field| {
                     const FieldInt = switch (@typeInfo(field.type)) {
                         .Struct => |info| info.backing_integer.?,
-                        else => field.type,
+                        .Int => field.type,
+                        // Skip arrays, as it's only used for padding/reserved fields.
+                        .Array => continue,
+                        else => unreachable,
                     };
 
                     const value = try @field(translate, @typeName(FieldInt) ++ "_from_object")(

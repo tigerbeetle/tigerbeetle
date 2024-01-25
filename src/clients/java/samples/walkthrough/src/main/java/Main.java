@@ -184,7 +184,8 @@ public final class Main {
             // section:get-account-transfers
             AccountTransfers filter = new AccountTransfers();
             filter.setAccountId(2);
-            filter.setTimestamp(0); // No filter by Timestamp.
+            filter.setTimestampMin(0); // No filter by Timestamp.
+            filter.setTimestampMax(0); // No filter by Timestamp.
             filter.setLimit(10); // Limit to ten transfers at most.
             filter.setDebits(true); // Include transfer from the debit side.
             filter.setCredits(true); // Include transfer from the credit side.

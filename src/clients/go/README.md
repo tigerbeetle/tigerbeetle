@@ -51,6 +51,7 @@ import (
 func main() {
 	fmt.Println("Import ok!")
 }
+
 ```
 
 Finally, build and run:
@@ -431,9 +432,10 @@ reverse-chronological order.
 
 ```go
 filter := GetAccountTransfers{
-	AccountID: ToUint128(2),
-	Timestamp: 0,  // No filter by Timestamp.
-	Limit:     10, // Limit to ten transfers at most.
+	AccountID:    ToUint128(2),
+	TimestampMin: 0,  // No filter by Timestamp.
+	TimestampMax: 0,  // No filter by Timestamp.
+	Limit:        10, // Limit to ten transfers at most.
 	Flags: GetAccountTransfersFlags{
 		Debits:   true, // Include transfer from the debit side.
 		Credits:  true, // Include transfer from the credit side.

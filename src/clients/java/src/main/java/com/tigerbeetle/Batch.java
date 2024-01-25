@@ -284,4 +284,16 @@ public abstract class Batch {
             throw new IllegalArgumentException("Value must be a 16-bit unsigned integer");
         buffer.putShort(index, (short) value);
     }
+
+    protected final byte[] getArray(final int index, final int len) {
+        final byte[] array = new byte[len];
+        buffer.get(index, array);
+        return array;
+    }
+
+    protected final void putArray(final int index, final byte[] array) {
+        Objects.requireNonNull(array, "Array cannot be null");
+
+        buffer.put(index, array);
+    }
 }

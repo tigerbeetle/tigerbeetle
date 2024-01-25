@@ -416,10 +416,12 @@ type TransferEventResult struct {
 }
 
 type GetAccountTransfers struct {
-	AccountID Uint128
-	Timestamp uint64
-	Limit     uint32
-	Flags     uint32
+	AccountID    Uint128
+	TimestampMin uint64
+	TimestampMax uint64
+	Limit        uint32
+	Flags        uint32
+	Reserved     [24]uint8
 }
 
 func (o GetAccountTransfers) GetAccountTransfersFlags() GetAccountTransfersFlags {

@@ -657,9 +657,14 @@ export type GetAccountTransfers = {
   account_id: bigint
 
   /**
-  * See [timestamp](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp)
+  * See [timestamp_min](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min)
   */
-  timestamp: bigint
+  timestamp_min: bigint
+
+  /**
+  * See [timestamp_max](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max)
+  */
+  timestamp_max: bigint
 
   /**
   * See [limit](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit)

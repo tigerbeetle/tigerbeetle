@@ -84,6 +84,7 @@ const type_mappings = .{
     .{ tb.GetAccountTransfers, TypeMapping{
         .name = "GetAccountTransfers",
         .visibility = .public,
+        .private_fields = &.{"reserved"},
         .docs_link = "reference/operations/get_account_transfers#",
     } },
     .{ tb_client.tb_status_t, TypeMapping{
@@ -277,7 +278,7 @@ fn emit_struct(
                     \\                value.CopyTo(new Span<byte>(ptr, SIZE));
                     \\            }}
                     \\        }}
-                    \\     }}
+                    \\    }}
                     \\
                     \\
                 , .{

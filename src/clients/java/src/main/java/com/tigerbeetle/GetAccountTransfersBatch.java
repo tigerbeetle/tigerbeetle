@@ -11,12 +11,14 @@ import java.nio.ByteBuffer;
 final class GetAccountTransfersBatch extends Batch {
 
     interface Struct {
-        int SIZE = 32;
+        int SIZE = 64;
 
         int AccountId = 0;
-        int Timestamp = 16;
-        int Limit = 24;
-        int Flags = 28;
+        int TimestampMin = 16;
+        int TimestampMax = 24;
+        int Limit = 32;
+        int Flags = 36;
+        int Reserved = 40;
     }
 
     static final GetAccountTransfersBatch EMPTY = new GetAccountTransfersBatch(0);
@@ -89,18 +91,35 @@ final class GetAccountTransfersBatch extends Batch {
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      */
-    public long getTimestamp() {
-        final var value = getUInt64(at(Struct.Timestamp));
+    public long getTimestampMin() {
+        final var value = getUInt64(at(Struct.TimestampMin));
         return value;
     }
 
     /**
-     * @param timestamp
+     * @param timestampMin
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
      */
-    public void setTimestamp(final long timestamp) {
-        putUInt64(at(Struct.Timestamp), timestamp);
+    public void setTimestampMin(final long timestampMin) {
+        putUInt64(at(Struct.TimestampMin), timestampMin);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    public long getTimestampMax() {
+        final var value = getUInt64(at(Struct.TimestampMax));
+        return value;
+    }
+
+    /**
+     * @param timestampMax
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    public void setTimestampMax(final long timestampMax) {
+        putUInt64(at(Struct.TimestampMax), timestampMax);
     }
 
     /**
@@ -135,6 +154,26 @@ final class GetAccountTransfersBatch extends Batch {
      */
     public void setFlags(final int flags) {
         putUInt32(at(Struct.Flags), flags);
+    }
+
+    /**
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     */
+    byte[] getReserved() {
+        return getArray(at(Struct.Reserved), 24);
+    }
+
+    /**
+     * @param reserved
+     * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
+     * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
+     */
+    void setReserved(byte[] reserved) {
+        if (reserved == null)
+            reserved = new byte[24];
+        if (reserved.length != 24)
+            throw new IllegalArgumentException("Reserved must be 24 bytes long");
+        putArray(at(Struct.Reserved), reserved);
     }
 
 }
