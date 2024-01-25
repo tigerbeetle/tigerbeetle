@@ -201,8 +201,10 @@ pub fn RingBuffer(
             const pre_wrap_count = @min(items.len, self.buffer.len - pre_wrap_start);
             const post_wrap_count = items.len - pre_wrap_count;
 
-            stdx.copy_disjoint(.inexact, T, self.buffer[pre_wrap_start..], items[0..pre_wrap_count]);
-            stdx.copy_disjoint(.exact, T, self.buffer[0..post_wrap_count], items[pre_wrap_count..]);
+            const pre_wrap_items = items[0..pre_wrap_count];
+            const post_wrap_items = items[pre_wrap_count..];
+            stdx.copy_disjoint(.inexact, T, self.buffer[pre_wrap_start..], pre_wrap_items);
+            stdx.copy_disjoint(.exact, T, self.buffer[0..post_wrap_count], post_wrap_items);
 
             self.count += items.len;
         }
