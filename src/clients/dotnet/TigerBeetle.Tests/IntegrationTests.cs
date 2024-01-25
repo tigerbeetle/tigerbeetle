@@ -611,6 +611,121 @@ public class IntegrationTests
 
     [TestMethod]
     [DoNotParallelize]
+    public void CreatePendingTransfersAndVoidExpired()
+    {
+        using var server = new TBServer();
+        using var client = GetClient(server.Address);
+
+        var results = client.CreateAccounts(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var transfer = new Transfer
+        {
+            Id = 1,
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            Timeout = 1,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.Pending,
+        };
+
+        var result = client.CreateTransfer(transfer);
+        Assert.IsTrue(result == CreateTransferResult.Ok);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(lookupAccounts);
+
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
+
+        // Waiting for the transfer to expire:
+        Thread.Sleep(1000);
+
+        var postTransfer = new Transfer
+        {
+            Id = 2,
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.VoidPendingTransfer,
+            PendingId = transfer.Id,
+        };
+
+        var postResult = client.CreateTransfer(postTransfer);
+        Assert.IsTrue(postResult == CreateTransferResult.PendingTransferExpired);
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task CreatePendingTransfersAndVoidExpiredAsync()
+    {
+        using var server = new TBServer();
+        using var client = GetClient(server.Address);
+
+        var results = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(results.Length == 0);
+
+        var transfer = new Transfer
+        {
+            Id = 1,
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            Timeout = 1,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.Pending,
+        };
+
+        var result = await client.CreateTransferAsync(transfer);
+        Assert.IsTrue(result == CreateTransferResult.Ok);
+
+        var lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(lookupAccounts);
+
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, transfer.Amount);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, transfer.Amount);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
+
+        // Waiting for the transfer to expire:
+        await Task.Delay(1000);
+
+        var postTransfer = new Transfer
+        {
+            Id = 2,
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            PendingId = transfer.Id,
+            Ledger = 1,
+            Code = 1,
+            Flags = TransferFlags.VoidPendingTransfer,
+        };
+
+        var postResult = await client.CreateTransferAsync(postTransfer);
+        Assert.IsTrue(postResult == CreateTransferResult.PendingTransferExpired);
+    }
+
+
+    [TestMethod]
+    [DoNotParallelize]
     public void CreateLinkedTransfers()
     {
         using var server = new TBServer();
