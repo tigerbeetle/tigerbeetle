@@ -80,9 +80,12 @@ test('can return error on account', async (): Promise<void> => {
   assert.deepStrictEqual(errors[0], { index: 0, result: CreateAccountError.exists })
 })
 
-test('throws error if timestamp is not set to 0n on account', async (): Promise<void> => {
+test('error if timestamp is not set to 0n on account', async (): Promise<void> => {
   const account = { ...accountA, timestamp: 2n, id: 3n }
-  await assert.rejects(client.createAccounts([account]))
+  const errors = await client.createAccounts([account])
+
+  assert.strictEqual(errors.length, 1)
+  assert.deepStrictEqual(errors[0], { index: 0, result: CreateAccountError.timestamp_must_be_zero })  
 })
 
 test('can lookup accounts', async (): Promise<void> => {
@@ -342,6 +345,52 @@ test('can link transfers', async (): Promise<void> => {
   assert.strictEqual(accounts[1].debits_pending, 0n)
 })
 
+test('cannot void an expired transfer', async (): Promise<void> => {
+  // Create a two-phase transfer:
+  const transfer: Transfer = {
+    id: 6n,
+    debit_account_id: accountB.id,
+    credit_account_id: accountA.id,
+    amount: 50n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 1,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.pending,
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
+  }
+  const transferErrors = await client.createTransfers([transfer])
+  assert.strictEqual(transferErrors.length, 0)
+
+  // Wait for the transfer to expire.
+  // TODO: Use `await setTimeout(1000)` when upgrade to Node > 15.
+  await new Promise(_ => setTimeout(_, 1000));
+  
+  // send in the reject
+  const reject: Transfer = {
+    id: 7n,
+    debit_account_id: BigInt(0),
+    credit_account_id: BigInt(0),
+    amount: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 6n, // must match the id of the pending transfer
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: TransferFlags.void_pending_transfer,
+    timestamp: 0n, // this will be set correctly by the TigerBeetle server
+  }
+
+  const errors = await client.createTransfers([reject])
+  assert.strictEqual(errors.length, 1)
+  assert.deepStrictEqual(errors[0], { index: 0, result: CreateTransferError.pending_transfer_expired }) 
+})
+
 test('can get account transfers', async (): Promise<void> => {
   const accountC: Account = {
     id: 21n,
@@ -388,7 +437,7 @@ test('can get account transfers', async (): Promise<void> => {
   var filter: GetAccountTransfers = {
     account_id: accountC.id,
     timestamp: 0n,
-    limit: 0,
+    limit: 8190,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   }
   var transfers = await client.getAccountTransfers(filter)
@@ -532,4 +581,5 @@ async function main () {
 main().catch((error: AssertionError) => {
   console.log('operator:', error.operator)
   console.log('stack:', error.stack)
+  process.exit(-1);
 })
