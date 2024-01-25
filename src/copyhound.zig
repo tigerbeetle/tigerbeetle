@@ -52,7 +52,6 @@ pub fn main() !void {
     const allocator = arena.allocator();
 
     var args = try std.process.argsWithAllocator(allocator);
-    assert(args.skip());
 
     const cli_args = flags.parse(&args, CliArgs);
 

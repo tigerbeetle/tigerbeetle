@@ -275,6 +275,7 @@ pub fn build(b: *std.Build) !void {
         unit_tests_exe_step.dependOn(&install_unit_tests_exe.step);
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
+        run_unit_tests.setEnvironmentVariable("ZIG_EXE", b.zig_exe);
         const unit_tests_step = b.step("test:unit", "Run the unit tests");
         unit_tests_step.dependOn(&run_unit_tests.step);
 

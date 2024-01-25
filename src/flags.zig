@@ -72,6 +72,8 @@ pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
 ///
 /// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
 pub fn parse(args: *std.process.ArgIterator, comptime CliArgs: type) CliArgs {
+    assert(args.skip()); // Discard executable name.
+
     return switch (@typeInfo(CliArgs)) {
         .Union => parse_commands(args, CliArgs),
         .Struct => parse_flags(args, CliArgs),
@@ -457,7 +459,7 @@ fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
 }
 
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
-// test it our of process by:
+// test it out of process by:
 //   - using Zig compiler to build this vey file as an executable in a temporary directory,
 //   - running the following main with various args and capturing stdout, stderr, and the exit code.
 //   - asserting that the captured values are correct.
@@ -503,9 +505,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
         var args = try std.process.argsWithAllocator(gpa);
         defer args.deinit();
 
-        assert(args.skip());
-
-        const cli_args = parse_commands(&args, CliArgs);
+        const cli_args = parse(&args, CliArgs);
 
         const stdout = std.io.getStdOut();
         const out_stream = stdout.writer();
@@ -554,11 +554,7 @@ test "flags" {
         fn init(gpa: std.mem.Allocator) !T {
             // TODO: Avoid std.os.getenv() as it currently causes a linker error on windows.
             // See: https://github.com/ziglang/zig/issues/8456
-            const zig_exe = std.process.getEnvVarOwned(gpa, "ZIG_EXE") catch |e| switch (e) {
-                error.EnvironmentVariableNotFound => return error.SkipZigTest,
-                error.InvalidUtf8 => unreachable,
-                error.OutOfMemory => return error.OutOfMemory,
-            };
+            const zig_exe = try std.process.getEnvVarOwned(gpa, "ZIG_EXE"); // Set by build.zig
             defer gpa.free(zig_exe);
 
             var tmp_dir = std.testing.tmpDir(.{});
@@ -570,22 +566,25 @@ test "flags" {
             const flags_exe_buf = try gpa.create([std.fs.MAX_PATH_BYTES]u8);
             errdefer gpa.destroy(flags_exe_buf);
 
-            const argv = [_][]const u8{ zig_exe, "build-exe", @src().file };
-            const exec_result = try std.ChildProcess.exec(.{
-                .allocator = gpa,
-                .argv = &argv,
-                .cwd_dir = tmp_dir.dir,
-            });
-            defer gpa.free(exec_result.stdout);
-            defer gpa.free(exec_result.stderr);
+            { // Compile this file as an executable!
+                const this_file = try std.fs.cwd().realpath(@src().file, flags_exe_buf);
+                const argv = [_][]const u8{ zig_exe, "build-exe", this_file };
+                const exec_result = try std.ChildProcess.exec(.{
+                    .allocator = gpa,
+                    .argv = &argv,
+                    .cwd_dir = tmp_dir.dir,
+                });
+                defer gpa.free(exec_result.stdout);
+                defer gpa.free(exec_result.stderr);
 
-            if (exec_result.term.Exited != 0) {
-                std.debug.print("{s}{s}", .{ exec_result.stdout, exec_result.stderr });
-                return error.FailedToCompile;
+                if (exec_result.term.Exited != 0) {
+                    std.debug.print("{s}{s}", .{ exec_result.stdout, exec_result.stderr });
+                    return error.FailedToCompile;
+                }
             }
 
             const flags_exe = try tmp_dir.dir.realpath(
-                "flags" ++ if (builtin.os.tag == .windows) ".exe" else "",
+                "flags" ++ comptime builtin.target.exeFileExt(),
                 flags_exe_buf,
             );
 

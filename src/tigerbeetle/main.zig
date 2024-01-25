@@ -46,10 +46,13 @@ pub fn main() !void {
     try tracer.init(allocator);
     defer tracer.deinit(allocator);
 
-    var parse_args = try cli.parse_args(allocator);
-    defer parse_args.deinit(allocator);
+    var arg_iterator = try std.process.argsWithAllocator(allocator);
+    defer arg_iterator.deinit();
 
-    switch (parse_args) {
+    var command = try cli.parse_args(allocator, &arg_iterator);
+    defer command.deinit(allocator);
+
+    switch (command) {
         .format => |*args| try Command.format(allocator, .{
             .cluster = args.cluster,
             .replica = args.replica,

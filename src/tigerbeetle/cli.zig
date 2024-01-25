@@ -136,7 +136,6 @@ const CliArgs = union(enum) {
 
 pub const Command = union(enum) {
     pub const Start = struct {
-        args_allocated: std.process.ArgIterator,
         addresses: []net.Address,
         cache_accounts: u32,
         cache_transfers: u32,
@@ -154,7 +153,6 @@ pub const Command = union(enum) {
     };
 
     format: struct {
-        args_allocated: std.process.ArgIterator,
         cluster: u128,
         replica: u8,
         replica_count: u8,
@@ -162,19 +160,14 @@ pub const Command = union(enum) {
     },
     start: Start,
     version: struct {
-        args_allocated: std.process.ArgIterator,
         verbose: bool,
     },
     repl: Repl,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
-            .start => |*start| allocator.free(start.addresses),
+            inline .start, .repl => |*cmd| allocator.free(cmd.addresses),
             else => {},
-        }
-        switch (command.*) {
-            .repl => {},
-            inline else => |*cmd| cmd.args_allocated.deinit(),
         }
         command.* = undefined;
     }
@@ -182,21 +175,13 @@ pub const Command = union(enum) {
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
-pub fn parse_args(allocator: std.mem.Allocator) !Command {
-    // This iterator owns the arguments and is passed to the caller as a part of `Command`.
-    var args = try std.process.argsWithAllocator(allocator);
-    errdefer args.deinit(allocator);
-
-    // Skip argv[0] which is the name of this executable
-    assert(args.skip());
-
-    const cli_args = flags.parse(&args, CliArgs);
+pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgIterator) !Command {
+    const cli_args = flags.parse(args_iterator, CliArgs);
 
     switch (cli_args) {
         .version => |version| {
             return Command{
                 .version = .{
-                    .args_allocated = args,
                     .verbose = version.verbose,
                 },
             };
@@ -221,7 +206,6 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .format = .{
-                    .args_allocated = args,
                     .cluster = format.cluster, // just an ID, any value is allowed
                     .replica = format.replica,
                     .replica_count = format.replica_count,
@@ -261,7 +245,6 @@ pub fn parse_args(allocator: std.mem.Allocator) !Command {
 
             return Command{
                 .start = .{
-                    .args_allocated = args,
                     .addresses = addresses,
                     .storage_size_limit = storage_size_limit,
                     .cache_accounts = parse_cache_size_to_count(
