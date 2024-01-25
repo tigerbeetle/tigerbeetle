@@ -1047,6 +1047,39 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
     // try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
+test "Cluster: async-checkpoints: prepare beyond checkpoint trigger" {
+    const pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max;
+
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
+
+    // Temporarily drop acks so that requests may prepare but not commit.
+    // (And to make sure we don't start checkpointing until we have had a chance to assert the
+    // cluster's state.)
+    t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
+
+    // Prepare ops beyond the checkpoint.
+    try c.request(checkpoint_1_trigger - 1 + pipeline_prepare_queue_max, checkpoint_1_trigger - 1);
+    try expectEqual(t.replica(.R_).op_checkpoint(), 0);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger);
+    // TODO Allow a pipeline of entries to prepare beyond the checkpoint trigger.
+    // try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+
+    t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
+    t.run();
+    try expectEqual(c.replies(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
