@@ -287,13 +287,14 @@ public abstract class Batch {
 
     protected final byte[] getArray(final int index, final int len) {
         final byte[] array = new byte[len];
-        buffer.get(index, array);
+        buffer.position(index);
+        buffer.get(array);
         return array;
     }
 
     protected final void putArray(final int index, final byte[] array) {
         Objects.requireNonNull(array, "Array cannot be null");
-
-        buffer.put(index, array);
+        buffer.position(index);
+        buffer.put(array);
     }
 }
