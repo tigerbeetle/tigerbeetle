@@ -3769,7 +3769,14 @@ pub fn ReplicaType(
 
             self.commit_min += 1;
             assert(self.commit_min == prepare.header.op);
-            if (self.commit_min > self.commit_max) self.commit_max = self.commit_min;
+            if (self.commit_min > self.commit_max) {
+                log.debug("{}: commit_op: advancing commit_max={}..{}", .{
+                    self.replica,
+                    self.commit_max,
+                    self.commit_min,
+                });
+                self.commit_max = self.commit_min;
+            }
 
             if (self.event_callback) |hook| hook(self, .committed);
 
