@@ -700,6 +700,104 @@ public class IntegrationTest {
     }
 
     @Test
+    public void testCreatePendingTransfersAndVoidExpired() throws Throwable {
+
+        try (var server = new Server()) {
+            try (var client = new Client(clusterId, new String[] {server.getAddress()})) {
+
+                // Creating the accounts.
+                var errors = client.createAccounts(accounts);
+                assertTrue(errors.getLength() == 0);
+
+                // Creating a pending transfer.
+                var transfers = new TransferBatch(1);
+                transfers.add();
+
+                transfers.setId(transfer1Id);
+                transfers.setCreditAccountId(account1Id);
+                transfers.setDebitAccountId(account2Id);
+                transfers.setLedger(720);
+                transfers.setCode((short) 1);
+                transfers.setAmount(100);
+                transfers.setFlags(TransferFlags.PENDING);
+                transfers.setTimeout(1);
+
+                var transferResults = client.createTransfers(transfers);
+                assertTrue(transferResults.getLength() == 0);
+
+                // Looking up the accounts.
+                var lookupAccounts = client.lookupAccounts(accountIds);
+                assertTrue(lookupAccounts.getLength() == 2);
+
+                accounts.beforeFirst();
+
+                // Asserting the first account for the pending credit.
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+
+                // Asserting the second account for the pending credit.
+                assertTrue(accounts.next());
+                assertTrue(lookupAccounts.next());
+                assertAccounts(accounts, lookupAccounts);
+
+                assertEquals(BigInteger.valueOf(100), lookupAccounts.getDebitsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+                assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+
+                // Looking up and asserting the pending transfer.
+                var ids = new IdBatch(1);
+                ids.add(transfer1Id);
+                var lookupTransfers = client.lookupTransfers(ids);
+                assertEquals(1, lookupTransfers.getLength());
+
+                transfers.beforeFirst();
+
+                assertTrue(transfers.next());
+                assertTrue(lookupTransfers.next());
+                assertTransfers(transfers, lookupTransfers);
+                assertNotEquals(0L, lookupTransfers.getTimestamp());
+
+                // Waiting 1s for the timeout to expire:
+                Thread.sleep(1000);
+
+                // Creating a void_pending transfer.
+                var voidTransfers = new TransferBatch(2);
+                voidTransfers.add();
+                voidTransfers.setId(transfer2Id);
+                voidTransfers.setCreditAccountId(account1Id);
+                voidTransfers.setDebitAccountId(account2Id);
+                voidTransfers.setLedger(720);
+                voidTransfers.setCode((short) 1);
+                voidTransfers.setAmount(100);
+                voidTransfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
+                voidTransfers.setPendingId(transfer1Id);
+
+                var voidResults = client.createTransfers(voidTransfers);
+                assertEquals(1, voidResults.getLength());
+                assertTrue(voidResults.next());
+                assertEquals(CreateTransferResult.PendingTransferExpired, voidResults.getResult());
+
+                // TODO(batiati)
+                // Check the accounts again for the updated balance when we implement transfers
+                // expiration.
+
+            } catch (Throwable any) {
+                throw any;
+            }
+
+        } catch (Throwable any) {
+            throw any;
+        }
+    }
+
+    @Test
     public void testCreateLinkedTransfers() throws Throwable {
 
         try (var server = new Server()) {
