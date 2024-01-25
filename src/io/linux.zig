@@ -177,7 +177,7 @@ pub const IO = struct {
                     if (-cqe.res == @intFromEnum(os.E.TIME)) etime.* = true;
                     continue;
                 }
-                const completion = @as(*Completion, @ptrFromInt(@as(usize, @intCast(cqe.user_data))));
+                const completion = @as(*Completion, @ptrFromInt(cqe.user_data));
                 completion.result = cqe.res;
                 // We do not run the completion here (instead appending to a linked list) to avoid:
                 // * recursion through `flush_submissions()` and `flush_completions()`,
@@ -902,7 +902,7 @@ pub const IO = struct {
 
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
-            completion.result = -@as(i32, @intCast(@intFromEnum(std.os.E.TIME)));
+            completion.result = -@as(i32, @intFromEnum(std.os.E.TIME));
             self.completed.push(completion);
             return;
         }
