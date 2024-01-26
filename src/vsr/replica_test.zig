@@ -498,8 +498,10 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     // Thanks to the new primary, the lagging backup is able to catch up to the latest
     // checkpoint/commit.
     try expectEqual(b1.role(), .backup);
-    try expectEqual(b1.commit(), checkpoint_1_trigger);
+    try expectEqual(b1.commit(), checkpoint_1_trigger + 1);
     try expectEqual(b1.op_checkpoint(), checkpoint_1);
+
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 1);
 }
 
 // TODO: Re-enable when the op_checkpoint hack is removed from ignore_request_message().
