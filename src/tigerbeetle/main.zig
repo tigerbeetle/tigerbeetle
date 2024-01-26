@@ -77,6 +77,9 @@ const Command = struct {
         path: [:0]const u8,
         must_create: bool,
     ) !void {
+        command.io = try IO.init(128, 0);
+        errdefer command.io.deinit();
+
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
@@ -84,11 +87,14 @@ const Command = struct {
         errdefer os.close(command.dir_fd);
 
         const basename = std.fs.path.basename(path);
-        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, if (must_create) .create else .open);
+        command.fd = try IO.open_file(
+            &command.io,
+            command.dir_fd,
+            basename,
+            data_file_size_min,
+            if (must_create) .create else .open,
+        );
         errdefer os.close(command.fd);
-
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
 
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
