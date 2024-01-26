@@ -716,15 +716,46 @@ public struct CreateTransfersResult
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct GetAccountTransfers
 {
-    public const int SIZE = 32;
+    public const int SIZE = 64;
+
+    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 24;
+
+        private fixed byte raw[SIZE];
+
+        public byte[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+            }
+        }
+
+        public void SetData(byte[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<byte>(ptr, SIZE));
+            }
+        }
+    }
 
     private UInt128 accountId;
 
-    private ulong timestamp;
+    private ulong timestampMin;
+
+    private ulong timestampMax;
 
     private uint limit;
 
     private GetAccountTransfersFlags flags;
+
+    private ReservedData reserved;
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id
@@ -732,9 +763,14 @@ public struct GetAccountTransfers
     public UInt128 AccountId { get => accountId; set => accountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min
     /// </summary>
-    public ulong Timestamp { get => timestamp; set => timestamp = value; }
+    public ulong TimestampMin { get => timestampMin; set => timestampMin = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max
+    /// </summary>
+    public ulong TimestampMax { get => timestampMax; set => timestampMax = value; }
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit
@@ -745,6 +781,11 @@ public struct GetAccountTransfers
     /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags
     /// </summary>
     public GetAccountTransfersFlags Flags { get => flags; set => flags = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#reserved
+    /// </summary>
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 
 }
 

@@ -11,7 +11,8 @@ public class AccountTransfersTest {
         var accountTransfers = new AccountTransfers();
         assertEquals(0L, accountTransfers.getAccountId(UInt128.LeastSignificant));
         assertEquals(0L, accountTransfers.getAccountId(UInt128.MostSignificant));
-        assertEquals(0L, accountTransfers.getTimestamp());
+        assertEquals(0L, accountTransfers.getTimestampMin());
+        assertEquals(0L, accountTransfers.getTimestampMax());
         assertEquals(0, accountTransfers.getLimit());
         assertEquals(false, accountTransfers.getDebits());
         assertEquals(false, accountTransfers.getCredits());
@@ -65,11 +66,19 @@ public class AccountTransfersTest {
     }
 
     @Test
-    public void testTimestamp() {
+    public void testTimestampMin() {
         var accountTransfers = new AccountTransfers();
 
-        accountTransfers.setTimestamp(100L);
-        assertEquals(100, accountTransfers.getTimestamp());
+        accountTransfers.setTimestampMin(100L);
+        assertEquals(100, accountTransfers.getTimestampMin());
+    }
+
+    @Test
+    public void testTimestampMax() {
+        var accountTransfers = new AccountTransfers();
+
+        accountTransfers.setTimestampMax(100L);
+        assertEquals(100, accountTransfers.getTimestampMax());
     }
 
     @Test

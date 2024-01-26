@@ -613,10 +613,13 @@ pub fn StateMachineType(
 
             const filter_valid =
                 filter.account_id != 0 and filter.account_id != std.math.maxInt(u128) and
-                filter.timestamp != std.math.maxInt(u64) and
+                filter.timestamp_min != std.math.maxInt(u64) and
+                filter.timestamp_max != std.math.maxInt(u64) and
+                (filter.timestamp_max == 0 or filter.timestamp_min <= filter.timestamp_max) and
                 filter.limit != 0 and
                 (filter.flags.credits or filter.flags.debits) and
-                filter.flags.padding == 0;
+                filter.flags.padding == 0 and
+                stdx.zeroed(&filter.reserved);
 
             if (!filter_valid) {
                 // TODO(batiati): Improve the way we do validations on the state machine.
@@ -632,20 +635,22 @@ pub fn StateMachineType(
             const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
 
             var scan = scan: {
-                // Getting the timestamp range according to the direction:
-                const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
-                const timestamp_range = if (filter.timestamp == 0)
-                    TimestampRange.all()
-                else switch (direction) {
-                    // The `timestamp` filter is an exclusive range,
-                    // so the user can use the last seen timestamp to get the next block of results:
-                    .ascending => TimestampRange.gte(filter.timestamp + 1),
-                    .descending => TimestampRange.lte(filter.timestamp - 1),
+                const timestamp_range: TimestampRange = .{
+                    .min = if (filter.timestamp_min == 0)
+                        TimestampRange.timestamp_min
+                    else
+                        filter.timestamp_min,
+
+                    .max = if (filter.timestamp_max == 0)
+                        TimestampRange.timestamp_max
+                    else
+                        filter.timestamp_max,
                 };
 
                 // This query may have 2 conditions:
                 // `WHERE debit_account_id = $account_id OR credit_account_id = $account_id`.
                 var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 2) = .{};
+                const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
 
                 // Adding the condition for `debit_account_id = $account_id`.
                 if (filter.flags.debits) {

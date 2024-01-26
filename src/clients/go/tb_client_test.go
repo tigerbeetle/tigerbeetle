@@ -279,9 +279,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Query all transfers for accountC:
 		filter := types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     8190,
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -302,9 +303,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Query only the debit transfers for accountC, descending:
 		filter = types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     8190,
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  false,
@@ -325,9 +327,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Query only the credit transfers for accountC, descending:
 		filter = types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     8190,
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   false,
 				Credits:  true,
@@ -348,9 +351,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Query the first 5 transfers for accountC:
 		filter = types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     uint32(len(transfers_created) / 2),
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        uint32(len(transfers_created) / 2),
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -371,9 +375,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Query the next 5 transfers for accountC, with pagination:
 		filter = types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: timestamp,
-			Limit:     uint32(len(transfers_created) / 2),
+			AccountID:    accountC.ID,
+			TimestampMin: timestamp + 1,
+			TimestampMax: 0,
+			Limit:        uint32(len(transfers_created) / 2),
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -393,9 +398,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Query again, no more transfers should be found:
 		filter = types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: timestamp,
-			Limit:     uint32(len(transfers_created) / 2),
+			AccountID:    accountC.ID,
+			TimestampMin: timestamp + 1,
+			TimestampMax: 0,
+			Limit:        uint32(len(transfers_created) / 2),
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -408,11 +414,77 @@ func doTestClient(s *testing.T, client Client) {
 		}
 		assert.Len(t, transfers_retrieved, 0)
 
+		// Query the first 5 transfers for accountC order by DESC:
+		filter = types.GetAccountTransfers{
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        uint32(len(transfers_created) / 2),
+			Flags: types.GetAccountTransfersFlags{
+				Debits:   true,
+				Credits:  true,
+				Reversed: true,
+			}.ToUint32(),
+		}
+		transfers_retrieved, err = client.GetAccountTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
+
+		timestamp = ^uint64(0)
+		for _, transfer := range transfers_retrieved {
+			assert.True(t, timestamp > transfer.Timestamp)
+			timestamp = transfer.Timestamp
+		}
+
+		// Query the next 5 transfers for accountC, with pagination:
+		filter = types.GetAccountTransfers{
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: timestamp - 1,
+			Limit:        uint32(len(transfers_created) / 2),
+			Flags: types.GetAccountTransfersFlags{
+				Debits:   true,
+				Credits:  true,
+				Reversed: true,
+			}.ToUint32(),
+		}
+		transfers_retrieved, err = client.GetAccountTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
+
+		for _, transfer := range transfers_retrieved {
+			assert.True(t, timestamp > transfer.Timestamp)
+			timestamp = transfer.Timestamp
+		}
+
+		// Query again, no more transfers should be found:
+		filter = types.GetAccountTransfers{
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: timestamp - 1,
+			Limit:        uint32(len(transfers_created) / 2),
+			Flags: types.GetAccountTransfersFlags{
+				Debits:   true,
+				Credits:  true,
+				Reversed: true,
+			}.ToUint32(),
+		}
+		transfers_retrieved, err = client.GetAccountTransfers(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers_retrieved, 0)
+
 		// Invalid account:
 		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
-			AccountID: types.ToUint128(0),
-			Timestamp: 0,
-			Limit:     8190,
+			AccountID:    types.ToUint128(0),
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -424,11 +496,46 @@ func doTestClient(s *testing.T, client Client) {
 		}
 		assert.Len(t, transfers_retrieved, 0)
 
-		// Invalid timestamp:
+		// Invalid timestamp min:
 		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: (1 << 64) - 1,
-			Limit:     8190,
+			AccountID:    accountC.ID,
+			TimestampMin: ^uint64(0), // ulong max value
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags: types.GetAccountTransfersFlags{
+				Debits:   true,
+				Credits:  true,
+				Reversed: false,
+			}.ToUint32(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers_retrieved, 0)
+
+		// Invalid timestamp max:
+		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: ^uint64(0), // ulong max value
+			Limit:        8190,
+			Flags: types.GetAccountTransfersFlags{
+				Debits:   true,
+				Credits:  true,
+				Reversed: false,
+			}.ToUint32(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers_retrieved, 0)
+
+		// Invalid timestamps:
+		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
+			AccountID:    accountC.ID,
+			TimestampMin: (^uint64(0)) - 1, // ulong max - 1
+			TimestampMax: 1,
+			Limit:        8190,
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -442,9 +549,10 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Zero limit:
 		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     0,
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        0,
 			Flags: types.GetAccountTransfersFlags{
 				Debits:   true,
 				Credits:  true,
@@ -458,10 +566,11 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Empty flags:
 		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     8190,
-			Flags:     0,
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags:        0,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -470,10 +579,11 @@ func doTestClient(s *testing.T, client Client) {
 
 		// Invalid flags:
 		transfers_retrieved, err = client.GetAccountTransfers(types.GetAccountTransfers{
-			AccountID: accountC.ID,
-			Timestamp: 0,
-			Limit:     8190,
-			Flags:     0xFFFF,
+			AccountID:    accountC.ID,
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        8190,
+			Flags:        0xFFFF,
 		})
 		if err != nil {
 			t.Fatal(err)

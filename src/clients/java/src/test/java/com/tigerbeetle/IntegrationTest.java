@@ -1239,7 +1239,8 @@ public class IntegrationTest {
                 // ORDER BY timestamp ASC`.
                 var filter = new AccountTransfers();
                 filter.setAccountId(account1Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(8190);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1260,7 +1261,8 @@ public class IntegrationTest {
                 // ORDER BY timestamp DESC`.
                 var filter = new AccountTransfers();
                 filter.setAccountId(account2Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(8190);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1282,7 +1284,8 @@ public class IntegrationTest {
                 // ORDER BY timestamp ASC`.
                 var filter = new AccountTransfers();
                 filter.setAccountId(account1Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(8190);
                 filter.setDebits(true);
                 filter.setCredits(false);
@@ -1303,7 +1306,8 @@ public class IntegrationTest {
                 // ORDER BY timestamp DESC`.
                 var filter = new AccountTransfers();
                 filter.setAccountId(account2Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(1);
+                filter.setTimestampMax(-2L); // -2L == ulong max - 1
                 filter.setLimit(8190);
                 filter.setDebits(false);
                 filter.setCredits(true);
@@ -1324,7 +1328,8 @@ public class IntegrationTest {
                 // ORDER BY timestamp ASC LIMIT 5`.
                 var filter = new AccountTransfers();
                 filter.setAccountId(account1Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(5);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1341,7 +1346,7 @@ public class IntegrationTest {
                 }
 
                 // Next 5 items from this timestamp:
-                filter.setTimestamp(timestamp);
+                filter.setTimestampMin(timestamp + 1);
                 account_transfers = client.getAccountTransfers(filter);
                 assertTrue(account_transfers.getLength() == 5);
                 while (account_transfers.next()) {
@@ -1350,8 +1355,8 @@ public class IntegrationTest {
                     timestamp = account_transfers.getTimestamp();
                 }
 
-                // No more pages after that:
-                filter.setTimestamp(timestamp);
+                // No more results after that timestamp:
+                filter.setTimestampMin(timestamp + 1);
                 account_transfers = client.getAccountTransfers(filter);
                 assertTrue(account_transfers.getLength() == 0);
             }
@@ -1362,7 +1367,8 @@ public class IntegrationTest {
                 // ORDER BY timestamp DESC LIMIT 5`.
                 var filter = new AccountTransfers();
                 filter.setAccountId(account2Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(5);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1379,7 +1385,7 @@ public class IntegrationTest {
                 }
 
                 // Next 5 items from this timestamp:
-                filter.setTimestamp(timestamp);
+                filter.setTimestampMax(timestamp - 1);
                 account_transfers = client.getAccountTransfers(filter);
                 assertTrue(account_transfers.getLength() == 5);
                 while (account_transfers.next()) {
@@ -1388,8 +1394,8 @@ public class IntegrationTest {
                     timestamp = account_transfers.getTimestamp();
                 }
 
-                // No more pages after that:
-                filter.setTimestamp(timestamp);
+                // No more results before that timestamp:
+                filter.setTimestampMax(timestamp - 1);
                 account_transfers = client.getAccountTransfers(filter);
                 assertTrue(account_transfers.getLength() == 0);
             }
@@ -1404,7 +1410,8 @@ public class IntegrationTest {
                 // Invalid account:
                 var filter = new AccountTransfers();
                 filter.setAccountId(0);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(8190);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1413,10 +1420,37 @@ public class IntegrationTest {
             }
 
             {
-                // Invalid timestamp:
+                // Invalid timestamp min:
                 var filter = new AccountTransfers();
                 filter.setAccountId(account2Id);
-                filter.setTimestamp(-1L); // -1L == ulong max value
+                filter.setTimestampMin(-1L); // -1L == ulong max value
+                filter.setTimestampMax(0);
+                filter.setLimit(8190);
+                filter.setDebits(true);
+                filter.setCredits(true);
+                filter.setReversed(false);
+                assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            }
+
+            {
+                // Invalid timestamp max:
+                var filter = new AccountTransfers();
+                filter.setAccountId(account2Id);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(-1L); // -1L == ulong max value
+                filter.setLimit(8190);
+                filter.setDebits(true);
+                filter.setCredits(true);
+                filter.setReversed(false);
+                assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+            }
+
+            {
+                // Invalid timestamp min > max:
+                var filter = new AccountTransfers();
+                filter.setAccountId(account2Id);
+                filter.setTimestampMin(-2L); // -2L == ulong max - 1
+                filter.setTimestampMax(1);
                 filter.setLimit(8190);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1428,7 +1462,8 @@ public class IntegrationTest {
                 // Zero limit:
                 var filter = new AccountTransfers();
                 filter.setAccountId(account2Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(0);
                 filter.setDebits(true);
                 filter.setCredits(true);
@@ -1440,7 +1475,8 @@ public class IntegrationTest {
                 // Zero flags:
                 var filter = new AccountTransfers();
                 filter.setAccountId(account2Id);
-                filter.setTimestamp(0);
+                filter.setTimestampMin(0);
+                filter.setTimestampMax(0);
                 filter.setLimit(0);
                 filter.setDebits(false);
                 filter.setCredits(false);

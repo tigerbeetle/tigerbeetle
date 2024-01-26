@@ -15,18 +15,20 @@ Constraints:
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1`
 
-### `timestamp`
+### `timestamp_min`
 
-The [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, exclusive range
-applied as:
+The minimum [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, inclusive range.
+Optional; set to zero to disable the lower-bound filter.
 
-- Greater than `>` when [reversed](#flagsreversed) is `false`.
-- Less than `<` when [reversed](#flagsreversed) is `true`.
+Constraints:
 
-This parameter together with [`limit`](#limit) can be used for pagination, passing the last
-timestamp seen from the previous results.
+* Type is 64-bit unsigned integer (8 bytes)
+* Must not be `2^64 - 1`
 
-Optional, use zero for no filter by timestamp.
+### `timestamp_max`
+
+The maximum [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, inclusive range.
+Optional; set to zero to disable the upper-bound filter.
 
 Constraints:
 
@@ -65,6 +67,15 @@ matches the parameter [`account_id`](#account_id).
 #### `flags.reversed`
 
 Whether the results are sorted by timestamp in chronological or reverse-chronological order.
+
+### `reserved`
+
+This space may be used for additional data in the future.
+
+Constraints:
+
+* Type is 24 bytes
+* Must be zero
 
 ## Result
 

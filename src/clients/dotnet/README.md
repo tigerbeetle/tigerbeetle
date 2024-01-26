@@ -387,7 +387,8 @@ reverse-chronological order.
 var filter = new GetAccountTransfers
 {
     AccountId = 2,
-    Timestamp = 0, // No filter by Timestamp.
+    TimestampMin = 0, // No filter by Timestamp.
+    TimestampMax = 0, // No filter by Timestamp.
     Limit = 10, // Limit to ten transfers at most.
     Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
         GetAccountTransfersFlags.Credits | // Include transfer from the credit side.

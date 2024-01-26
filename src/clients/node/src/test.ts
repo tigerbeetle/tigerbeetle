@@ -436,7 +436,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Query all transfers for accountC:
   var filter: GetAccountTransfers = {
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 8190,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   }
@@ -451,7 +452,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Query only the debit transfers for accountC, descending:
   filter = {
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 8190,
     flags: GetAccountTransfersFlags.debits |  GetAccountTransfersFlags.reversed,
   }
@@ -466,7 +468,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Query only the credit transfers for accountC, descending:
   filter = {
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 8190,
     flags: GetAccountTransfersFlags.credits |  GetAccountTransfersFlags.reversed,
   }
@@ -481,7 +484,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the first 5 transfers for accountC:
   filter = {
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: transfers_created.length / 2,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   }
@@ -496,7 +500,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Query the next 5 transfers for accountC, with pagination:
   filter = {
     account_id: accountC.id,
-    timestamp: timestamp,
+    timestamp_min: timestamp + 1n,
+    timestamp_max: 0n,
     limit: transfers_created.length / 2,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   }
@@ -510,26 +515,88 @@ test('can get account transfers', async (): Promise<void> => {
   // Query again, no more transfers should be found:
   filter = {
     account_id: accountC.id,
-    timestamp: timestamp,
+    timestamp_min: timestamp + 1n,
+    timestamp_max: 0n,
     limit: transfers_created.length / 2,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   }
   transfers = await client.getAccountTransfers(filter)
   assert.strictEqual(transfers.length, 0)
 
+  // Query the first 5 transfers for accountC ORDER BY DESC:
+  filter = {
+    account_id: accountC.id,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
+    limit: transfers_created.length / 2,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits | GetAccountTransfersFlags.reversed,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length / 2)
+  timestamp = 1n << 64n;
+  for (var transfer of transfers) {
+    assert.ok(timestamp > transfer.timestamp);
+    timestamp = transfer.timestamp;
+  }
+
+  // Query the next 5 transfers for accountC, with pagination:
+  filter = {
+    account_id: accountC.id,
+    timestamp_min: 0n,
+    timestamp_max: timestamp - 1n,
+    limit: transfers_created.length / 2,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits | GetAccountTransfersFlags.reversed,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, transfers_created.length / 2)
+  for (var transfer of transfers) {
+    assert.ok(timestamp > transfer.timestamp);
+    timestamp = transfer.timestamp;
+  }
+
+  // Query again, no more transfers should be found:
+  filter = {
+    account_id: accountC.id,
+    timestamp_min: 0n,
+    timestamp_max: timestamp - 1n,
+    limit: transfers_created.length / 2,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits | GetAccountTransfersFlags.reversed,
+  }
+  transfers = await client.getAccountTransfers(filter)
+  assert.strictEqual(transfers.length, 0)  
 
   // Invalid account:
   assert.strictEqual((await client.getAccountTransfers({
     account_id: 0n,
-    timestamp: timestamp,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 8190,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   })).length, 0)
 
-  // Invalid timestamp:
+  // Invalid timestamp min:
   assert.strictEqual((await client.getAccountTransfers({
     account_id: accountC.id,
-    timestamp: (1n << 64n) - 1n,
+    timestamp_min: (1n << 64n) - 1n, // ulong max value
+    timestamp_max: 0n,
+    limit: 8190,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  })).length, 0)
+
+  // Invalid timestamp max:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: accountC.id,
+    timestamp_min: 0n,
+    timestamp_max: (1n << 64n) - 1n, // ulong max value
+    limit: 8190,
+    flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
+  })).length, 0)
+
+  // Invalid timestamp range:
+  assert.strictEqual((await client.getAccountTransfers({
+    account_id: accountC.id,
+    timestamp_min: (1n << 64n) - 2n, // ulong max - 1
+    timestamp_max: 1n,
     limit: 8190,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   })).length, 0)
@@ -537,7 +604,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Zero limit:
   assert.strictEqual((await client.getAccountTransfers({
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 0,
     flags: GetAccountTransfersFlags.credits | GetAccountTransfersFlags.debits,
   })).length, 0)
@@ -545,7 +613,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Empty flags:
   assert.strictEqual((await client.getAccountTransfers({
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 8190,
     flags: GetAccountTransfersFlags.none,
   })).length, 0)
@@ -553,7 +622,8 @@ test('can get account transfers', async (): Promise<void> => {
   // Invalid flags:
   assert.strictEqual((await client.getAccountTransfers({
     account_id: accountC.id,
-    timestamp: 0n,
+    timestamp_min: 0n,
+    timestamp_max: 0n,
     limit: 8190,
     flags: 0xFFFF,
   })).length, 0)

@@ -75,19 +75,36 @@ public final class AccountTransfers {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp">timestamp</a>
+     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min">timestamp_min</a>
      */
-    public long getTimestamp() {
-        return batch.getTimestamp();
+    public long getTimestampMin() {
+        return batch.getTimestampMin();
     }
 
     /**
      * @param timestamp
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp">timestamp</a>
+     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min">timestamp_min</a>
      */
-    public void setTimestamp(final long timestamp) {
-        batch.setTimestamp(timestamp);
+    public void setTimestampMin(final long timestamp) {
+        batch.setTimestampMin(timestamp);
+    }
+
+    /**
+     * @see <a href=
+     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max">timestamp_max</a>
+     */
+    public long getTimestampMax() {
+        return batch.getTimestampMax();
+    }
+
+    /**
+     * @param timestamp
+     * @see <a href=
+     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max">timestamp_max</a>
+     */
+    public void setTimestampMax(final long timestamp) {
+        batch.setTimestampMax(timestamp);
     }
 
     /**

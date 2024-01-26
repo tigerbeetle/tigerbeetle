@@ -369,21 +369,28 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
         switch (Event) {
             Account, Transfer, GetAccountTransfers => {
                 inline for (std.meta.fields(Event)) |field| {
-                    const FieldInt = switch (@typeInfo(field.type)) {
-                        .Struct => |info| info.backing_integer.?,
-                        else => field.type,
+                    const value: field.type = switch (@typeInfo(field.type)) {
+                        .Struct => |info| @bitCast(try @field(
+                            translate,
+                            @typeName(info.backing_integer.?) ++ "_from_object",
+                        )(
+                            env,
+                            object,
+                            add_trailing_null(field.name),
+                        )),
+                        .Int => try @field(translate, @typeName(field.type) ++ "_from_object")(
+                            env,
+                            object,
+                            add_trailing_null(field.name),
+                        ),
+                        // Arrays are only used for padding/reserved fields,
+                        // instead of requiring the user to explicitly set an empty buffer,
+                        // we just hide those fields and preserve their default value.
+                        .Array => @as(*const field.type, @ptrCast(field.default_value.?)).*,
+                        else => unreachable,
                     };
 
-                    const value = try @field(translate, @typeName(FieldInt) ++ "_from_object")(
-                        env,
-                        object,
-                        add_trailing_null(field.name),
-                    );
-
-                    @field(event, field.name) = switch (@typeInfo(field.type)) {
-                        .Struct => @as(field.type, @bitCast(value)),
-                        else => value,
-                    };
+                    @field(event, field.name) = value;
                 }
             },
             u128 => event.* = try translate.u128_from_value(env, object, "lookup"),

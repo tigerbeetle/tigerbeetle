@@ -60,6 +60,7 @@ const type_mappings = .{
     } },
     .{ tb.GetAccountTransfers, TypeMapping{
         .name = "GetAccountTransfers",
+        .hidden_fields = &.{"reserved"},
         .docs_link = "reference/operations/get_account_transfers#",
     } },
     .{ tb_client.tb_operation_t, TypeMapping{
