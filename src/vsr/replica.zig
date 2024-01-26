@@ -5015,6 +5015,11 @@ pub fn ReplicaType(
             return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
+        /// Returns the highest op that this replica can safely prepare to its WAL.
+        fn op_checkpoint_next_border(self: *const Self) u64 {
+            return vsr.Checkpoint.border_for_checkpoint(self.op_checkpoint_next()).?;
+        }
+
         /// Returns checkpoint id associated with the op.
         ///
         /// Normally, this is just the id of the checkpoint the op builds on top. However, ops
@@ -5028,10 +5033,8 @@ pub fn ReplicaType(
             if (op == 0) return Header.Prepare.root(self.cluster).checkpoint_id;
 
             if (self.op_checkpoint() > 0) {
-                const op_checkpoint_trigger =
-                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
                 const op_checkpoint_border =
-                    op_checkpoint_trigger + constants.pipeline_prepare_queue_max;
+                    vsr.Checkpoint.border_for_checkpoint(self.op_checkpoint()).?;
 
                 if (op <= op_checkpoint_border) {
                     if (op + constants.vsr_checkpoint_interval <= op_checkpoint_border) {
@@ -5042,13 +5045,10 @@ pub fn ReplicaType(
                     return self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
                 }
 
-                assert(op + constants.vsr_checkpoint_interval >
-                    self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max);
+                assert(op + constants.vsr_checkpoint_interval > self.op_checkpoint_next_border());
             }
 
-            if (op <= self.op_checkpoint_next_trigger() +
-                constants.pipeline_prepare_queue_max)
-            {
+            if (op <= self.op_checkpoint_next_border()) {
                 // Case 4: op uses the current checkpoint id.
                 return self.superblock.working.checkpoint_id();
             }
@@ -5104,7 +5104,7 @@ pub fn ReplicaType(
                     // that is that far back can state sync, though.
                     const op_with_checkpoint_id_oldest =
                         (self.op_checkpoint_next_trigger() + 1 +
-                         constants.pipeline_prepare_queue_max) -|
+                        constants.pipeline_prepare_queue_max) -|
                         constants.vsr_checkpoint_interval * 2;
                     assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest) != null);
 
@@ -5211,8 +5211,8 @@ pub fn ReplicaType(
             const request_header: Header.Request = request.message.header.*;
 
             const checkpoint_id = checkpoint_id: {
-                if (vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint())) |trigger| {
-                    if (self.op + 1 <= trigger + constants.pipeline_prepare_queue_max) {
+                if (vsr.Checkpoint.border_for_checkpoint(self.op_checkpoint())) |op_border| {
+                    if (self.op + 1 <= op_border) {
                         // Border prepares use the previous checkpoint id.
                         break :checkpoint_id self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
                     }
@@ -7068,8 +7068,7 @@ pub fn ReplicaType(
             assert(dvcs_all.count() >= self.quorum_view_change);
 
             for (dvcs_all.const_slice()) |message| {
-                assert(message.header.op <=
-                    self.op_checkpoint_next_trigger() + constants.pipeline_prepare_queue_max);
+                assert(message.header.op <= self.op_checkpoint_next_border());
             }
 
             // The `prepare_timestamp` prevents a primary's own clock from running backwards.

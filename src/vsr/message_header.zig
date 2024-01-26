@@ -530,10 +530,8 @@ pub const Header = extern struct {
         request_checksum_padding: u128 = 0,
         /// The id of the checkpoint where:
         ///
-        ///   prepare.op >
-        ///     pipeline_prepare_queue_max + trigger_for_checkpoint(checkpoint_op)
-        ///   prepare.op ≤
-        ///     pipeline_prepare_queue_max + trigger_for_checkpoint(checkpoint_after(checkpoint_op))
+        ///   prepare.op > border_for_checkpoint(checkpoint_op)
+        ///   prepare.op ≤ border_for_checkpoint(checkpoint_after(checkpoint_op))
         ///
         /// The purpose of including the checkpoint id is to strictly bound the number of commits
         /// that it may take to discover a divergent replica. If a replica diverges, then that
