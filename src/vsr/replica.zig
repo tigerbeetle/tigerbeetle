@@ -5336,23 +5336,28 @@ pub fn ReplicaType(
 
             self.sync_reclaim_tables();
 
-            // Request outstanding committed headers to advance our op number:
+            // Request outstanding possibly committed headers to advance our op number:
             // This handles the case of an idle cluster, where a backup will not otherwise advance.
             // This is not required for correctness, but for durability.
-            if (self.op < self.op_repair_max()) {
+            if (self.op < self.op_repair_max() or
+                (self.status == .normal and self.op < self.view_headers.array.get(0).op))
+            {
                 assert(!self.solo());
                 assert(self.replica != self.primary_index(self.view));
 
                 log.debug(
-                    "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
+                    "{}: repair: break: view={} break={}..{} " ++
+                        "(commit={}..{} op={} view_headers_op={})",
                     .{
                         self.replica,
                         self.view,
                         self.op + 1,
                         self.op_repair_max(),
+
                         self.commit_min,
                         self.commit_max,
                         self.op,
+                        self.view_headers.array.get(0).op,
                     },
                 );
 
@@ -5366,8 +5371,9 @@ pub fn ReplicaType(
                         .nonce = self.nonce,
                     }),
                 );
-                return;
             }
+
+            if (self.op < self.op_repair_max()) return;
 
             // Request any missing or disconnected headers:
             if (self.journal.find_latest_headers_break_between(
