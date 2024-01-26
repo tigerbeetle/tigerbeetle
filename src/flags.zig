@@ -165,6 +165,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         }
     }
 
+    var parsed_positional = false;
     next_arg: while (args.next()) |arg| {
         comptime var field_len_prev = std.math.maxInt(usize);
         inline for (fields[0..field_count]) |field| {
@@ -173,6 +174,10 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             comptime assert(field_len_prev >= field.name.len);
             field_len_prev = field.name.len;
             if (std.mem.startsWith(u8, arg, flag)) {
+                if (parsed_positional) {
+                    fatal("unexpected trailing option: '{s}'", .{arg});
+                }
+
                 @field(counts, field.name) += 1;
                 const flag_value = parse_flag(field.type, flag, arg);
                 @field(result, field.name) = flag_value;
@@ -190,6 +195,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 // support for bare ` -- ` as a disambiguation mechanism once we have a real
                 // use-case.
                 if (arg[0] == '-') fatal("unexpected argument: '{s}'", .{arg});
+                parsed_positional = true;
 
                 @field(result.positional, positional_field.name) =
                     parse_value(positional_field.type, flag, arg);
@@ -460,7 +466,7 @@ fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
 
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
 // test it out of process by:
-//   - using Zig compiler to build this vey file as an executable in a temporary directory,
+//   - using Zig compiler to build this very file as an executable in a temporary directory,
 //   - running the following main with various args and capturing stdout, stderr, and the exit code.
 //   - asserting that the captured values are correct.
 pub usingnamespace if (@import("root") != @This()) struct {
@@ -783,6 +789,20 @@ test "flags" {
         \\status: 1
         \\stderr:
         \\error: <p1>: empty argument
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "--flag" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected trailing option: '--flag'
+        \\
+    ));
+
+    try t.check(&.{ "pos", "x", "--flag", "y" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: unexpected trailing option: '--flag'
         \\
     ));
 
