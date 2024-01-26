@@ -550,7 +550,7 @@ test('can get account transfers', async (): Promise<void> => {
   transfers = await client.getAccountTransfers(filter)
   assert.strictEqual(transfers.length, transfers_created.length / 2)
   for (var transfer of transfers) {
-    assert.ok(timestamp < transfer.timestamp);
+    assert.ok(timestamp > transfer.timestamp);
     timestamp = transfer.timestamp;
   }
 
