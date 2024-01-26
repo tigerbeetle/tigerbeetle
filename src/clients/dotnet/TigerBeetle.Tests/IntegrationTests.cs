@@ -705,7 +705,8 @@ public class IntegrationTests
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
         // Waiting for the transfer to expire:
-        await Task.Delay(1000);
+        // Do not use Task.Delay here as it seems to be less precise.
+        Thread.Sleep(1000);
 
         var postTransfer = new Transfer
         {
