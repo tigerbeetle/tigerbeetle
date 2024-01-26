@@ -12,8 +12,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -28,14 +27,13 @@ jobs:
           dotnet-version:
             7.0.x
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=dotnet
 
   client-go:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
         os: [ubuntu-latest]
 
     runs-on: ${{ matrix.os }}
@@ -47,14 +45,13 @@ jobs:
         with:
           go-version: '1.18'
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=go
 
   client-java:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
         os: [ubuntu-latest]
         java-version: ['11', '21']
 
@@ -73,19 +70,18 @@ jobs:
       - run: |
           curl -o maven.zip https://archive.apache.org/dist/maven/maven-3/3.9.3/binaries/apache-maven-3.9.3-bin.zip
           unzip maven.zip
-      -  if: matrix.os != 'windows-latest-large'
+      -  if: matrix.os != 'windows-latest'
          run: echo "$GITHUB_WORKSPACE/apache-maven-3.9.3/bin" >> $GITHUB_PATH
-      -  if: matrix.os == 'windows-latest-large'
+      -  if: matrix.os == 'windows-latest'
          run: '"$env:GITHUB_WORKSPACE/apache-maven-3.9.3/bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=java
 
   client-node:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
         os: [ubuntu-latest]
         node-version: ['18.x', '20.x']
         exclude:
@@ -103,7 +99,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=node
 
   clients-pipeline:
