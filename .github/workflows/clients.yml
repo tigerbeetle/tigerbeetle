@@ -87,12 +87,12 @@ jobs:
       matrix:
         # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
         os: [ubuntu-latest]
-        node-version: ['14.x', '18.x']
+        node-version: ['18.x', '20.x']
         exclude:
           - os: macos-13
-            node-version: '14.x'
+            node-version: '18.x'
           - os: macos-13-xlarge
-            node-version: '14.x'
+            node-version: '18.x'
 
     runs-on: ${{ matrix.os }}
     permissions:
