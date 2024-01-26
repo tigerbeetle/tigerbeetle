@@ -230,6 +230,33 @@ const Command = struct {
                 "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
         }
 
+        // It is possible to start tigerbeetle passing `0` as an address:
+        //     $ tigerbeetle start --addresses=0 0_0.tigerbeetle
+        // This enables a couple of special behaviors, useful in tests:
+        // - The operating system picks a free port, avoiding "address already in use" errors.
+        // - The port, and only the port, is printed to the stdout, so that the parent process
+        //   can learn it.
+        // - tigerbeetle process exits when its stdin gets closed.
+        if (args.addresses_zero) {
+            const port_actual = replica.message_bus.process.accept_address.getPort();
+            const stdout = std.io.getStdOut();
+            try stdout.writer().print("{}\n", .{port_actual});
+            stdout.close();
+
+            // While it is possible to integrate stdin with our io_uring loop, using a dedicated
+            // thread is simpler, and gives us _un_graceful shutdown, which is exactly what we want
+            // to keep behavior close to the normal case.
+            const watchdog = try std.Thread.spawn(.{}, struct {
+                fn thread_main() void {
+                    var buf: [1]u8 = .{0};
+                    _ = std.io.getStdIn().read(&buf) catch {};
+                    log_main.info("stdin closed, exiting", .{});
+                    std.process.exit(0);
+                }
+            }.thread_main, .{});
+            watchdog.detach();
+        }
+
         while (true) {
             replica.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
