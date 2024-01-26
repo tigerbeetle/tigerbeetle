@@ -18,7 +18,7 @@ Constraints:
 ### `timestamp_min`
 
 The minimum [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, inclusive range.
-Optional, use zero for no lower bound filter by timestamp.
+Optional; set to zero to disable the lower-bound filter.
 
 Constraints:
 
@@ -28,7 +28,7 @@ Constraints:
 ### `timestamp_max`
 
 The maximum [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, inclusive range.
-Optional, use zero for no upper bound filter by timestamp.
+Optional; set to zero to disable the upper-bound filter.
 
 Constraints:
 
