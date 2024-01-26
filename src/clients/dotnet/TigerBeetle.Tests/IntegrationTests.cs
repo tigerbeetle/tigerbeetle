@@ -1507,7 +1507,7 @@ internal class TBServer : IDisposable
         process.StartInfo.RedirectStandardOutput = true;
         process.Start();
 
-        Address = process.StandardOutput.ReadLine().Trim();
+        Address = process.StandardOutput.ReadLine()!.Trim();
     }
 
     public void Dispose()
