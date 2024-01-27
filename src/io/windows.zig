@@ -773,7 +773,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @intCast(buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
@@ -817,7 +817,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @intCast(buffer_limit(buffer.len)),
+                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
             },
             struct {
