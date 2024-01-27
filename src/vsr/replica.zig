@@ -9213,6 +9213,8 @@ const PipelineQueue = struct {
         // ordered and consecutive.
         const head_op = pipeline.prepare_queue.head_ptr().?.message.header.op;
         const tail_op = pipeline.prepare_queue.tail_ptr().?.message.header.op;
+        assert(tail_op == head_op + pipeline.prepare_queue.count - 1);
+
         if (op < head_op) return null;
         if (op > tail_op) return null;
 
