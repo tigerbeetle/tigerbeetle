@@ -235,7 +235,6 @@ pub fn StateMachineType(
                 .ids = constants.tree_ids.posted,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .fulfillment = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{ "fulfillment", "padding" },
                 .derived = .{},
@@ -300,6 +299,8 @@ pub fn StateMachineType(
                 comptime field: Field,
                 completion: *FieldType(field),
             ) *StateMachine {
+                comptime assert(field != .null);
+
                 const context = @fieldParentPtr(PrefetchContext, @tagName(field), completion);
                 return @fieldParentPtr(StateMachine, "prefetch_context", context);
             }
@@ -819,7 +820,7 @@ pub fn StateMachineType(
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
+            comptime assert(operation == .create_accounts or operation == .create_transfers);
 
             const events = mem.bytesAsSlice(Event(operation), input);
             var results = mem.bytesAsSlice(Result(operation), output);
