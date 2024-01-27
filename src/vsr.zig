@@ -1,6 +1,5 @@
 const std = @import("std");
 const math = std.math;
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
@@ -701,30 +700,30 @@ test "exponential_backoff_with_jitter" {
     }
 }
 
-/// Returns An array containing the remote or local addresses of each of the 2f + 1 replicas:
+/// Returns An array containing the remote or local addresses of each of the replicas:
 /// Unlike the VRR paper, we do not sort the array but leave the order explicitly to the user.
 /// There are several advantages to this:
 /// * The operator may deploy a cluster with proximity in mind since replication follows order.
 /// * A replica's IP address may be changed without reconfiguration.
 /// This does require that the user specify the same order to all replicas.
 /// The caller owns the memory of the returned slice of addresses.
-pub fn parse_addresses(allocator: std.mem.Allocator, raw: []const u8, address_limit: usize) ![]std.net.Address {
+pub fn parse_addresses(
+    raw: []const u8,
+    result_buffer: *[constants.members_max]std.net.Address,
+) ![]std.net.Address {
     const address_count = std.mem.count(u8, raw, ",") + 1;
-    if (address_count > address_limit) return error.AddressLimitExceeded;
-
-    const addresses = try allocator.alloc(std.net.Address, address_count);
-    errdefer allocator.free(addresses);
+    if (address_count > result_buffer.len) return error.AddressLimitExceeded;
 
     var index: usize = 0;
     var comma_iterator = std.mem.split(u8, raw, ",");
     while (comma_iterator.next()) |raw_address| : (index += 1) {
-        assert(index < address_limit);
+        assert(index < result_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        addresses[index] = try parse_address_and_port(raw_address);
+        result_buffer[index] = try parse_address_and_port(raw_address);
     }
     assert(index == address_count);
 
-    return addresses;
+    return result_buffer[0..address_count];
 }
 
 pub fn parse_address_and_port(string: []const u8) !std.net.Address {
@@ -766,7 +765,7 @@ fn parse_address(string: []const u8, port: u16) !std.net.Address {
     }
 }
 
-test "parse_addresses" {
+test parse_addresses {
     const vectors_positive = &[_]struct {
         raw: []const u8,
         addresses: []const std.net.Address,
@@ -840,7 +839,7 @@ test "parse_addresses" {
         .{ .raw = ".", .err = error.AddressInvalid },
         .{ .raw = ":", .err = error.PortInvalid },
         .{ .raw = ":92", .err = error.AddressInvalid },
-        .{ .raw = "1.2.3.4:5,2.3.4.5:6,4.5.6.7:8", .err = error.AddressLimitExceeded },
+        .{ .raw = "1.2.3.4:5" ++ ",2.3.4.5:6,4.5.6.7:8" ** 10, .err = error.AddressLimitExceeded },
         .{ .raw = "1.2.3.4:7777,", .err = error.AddressHasTrailingComma },
         .{ .raw = "1.2.3.4:7777,2.3.4.5::8888", .err = error.AddressHasMoreThanOneColon },
         .{ .raw = "1.2.3.4:5,A", .err = error.AddressInvalid }, // default port
@@ -852,13 +851,12 @@ test "parse_addresses" {
         .{ .raw = "1.2.3.4:5,2.3.4.5:65536", .err = error.PortOverflow },
     };
 
+    var buffer: [constants.members_max]std.net.Address = undefined;
     for (vectors_positive) |vector| {
-        const addresses_actual = try parse_addresses(std.testing.allocator, vector.raw, 3);
-        defer std.testing.allocator.free(addresses_actual);
+        const addresses_actual = try parse_addresses(vector.raw, &buffer);
 
         try std.testing.expectEqual(addresses_actual.len, vector.addresses.len);
-        for (vector.addresses, 0..) |address_expect, i| {
-            const address_actual = addresses_actual[i];
+        for (vector.addresses, addresses_actual) |address_expect, address_actual| {
             try std.testing.expectEqual(address_expect.in.sa.family, address_actual.in.sa.family);
             try std.testing.expectEqual(address_expect.in.sa.port, address_actual.in.sa.port);
             try std.testing.expectEqual(address_expect.in.sa.addr, address_actual.in.sa.addr);
@@ -867,7 +865,7 @@ test "parse_addresses" {
     }
 
     for (vectors_negative) |vector| {
-        try std.testing.expectEqual(vector.err, parse_addresses(std.testing.allocator, vector.raw, 2));
+        try std.testing.expectEqual(vector.err, parse_addresses(vector.raw, &buffer));
     }
 }
 
@@ -881,6 +879,7 @@ test "parse_addresses: fuzz" {
     var prng = std.rand.DefaultPrng.init(seed);
     const random = prng.random();
 
+    var buffer: [constants.members_max]std.net.Address = undefined;
     var input_max: [len_max]u8 = .{0} ** len_max;
     for (0..test_count) |_| {
         const len = random.uintAtMost(usize, len_max);
@@ -888,9 +887,7 @@ test "parse_addresses: fuzz" {
         for (input) |*c| {
             c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
         }
-        if (parse_addresses(std.testing.allocator, input, 3)) |addresses| {
-            std.testing.allocator.free(addresses);
-        } else |_| {}
+        _ = parse_addresses(input, &buffer) catch {};
     }
 }
 
