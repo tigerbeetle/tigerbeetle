@@ -93,7 +93,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
 }
 
 fn eat(tokens: *std.mem.TokenIterator(u8, .any), token: []const u8) bool {
-    var index_before = tokens.index;
+    const index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
     tokens.index = index_before;
     return false;

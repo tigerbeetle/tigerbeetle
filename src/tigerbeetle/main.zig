@@ -145,7 +145,7 @@ const Command = struct {
 
         var aof: AOFType = undefined;
         if (constants.aof_record) {
-            var aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
+            const aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
             defer allocator.free(aof_path);
 
             aof = try AOF.from_absolute_path(aof_path);

@@ -309,7 +309,7 @@ test "ewah encode→decode cycle" {
         for ([_]usize{ 1, 2, 4, 5, 8, 16, 17, 32 }) |chunk_count| {
             var decoded: [4096]Word = undefined;
 
-            var fuzz_options = .{
+            const fuzz_options = .{
                 .encode_chunk_words_count = @divFloor(decoded.len, chunk_count),
                 .decode_chunk_words_count = @divFloor(decoded.len, chunk_count),
             };

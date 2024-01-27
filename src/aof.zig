@@ -198,7 +198,7 @@ pub const AOF = struct {
 
                 try it.file.seekTo(it.offset);
 
-                var buf = std.mem.asBytes(target);
+                const buf = std.mem.asBytes(target);
                 const bytes_read = try it.file.readAll(buf);
 
                 if (bytes_read < target.calculate_disk_size()) {
@@ -293,7 +293,7 @@ pub const AOFReplayClient = struct {
     inflight_message: ?*Message.Request = null,
 
     pub fn init(allocator: std.mem.Allocator, raw_addresses: []const u8) !Self {
-        var addresses = try vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max);
+        const addresses = try vsr.parse_addresses(allocator, raw_addresses, constants.replicas_max);
 
         var io = try allocator.create(IO);
         errdefer allocator.destroy(io);
@@ -518,14 +518,14 @@ pub fn aof_merge(
     // Next, start from our root checksum, walk down the hash chain until there's nothing left. We
     // currently take the root checksum as the first entry in the first AOF.
     while (entries_by_parent.count() > 0) {
-        var message = message_pool.get_message(.prepare);
+        const message = message_pool.get_message(.prepare);
         defer message_pool.unref(message);
 
         assert(current_parent != null);
         const entry = entries_by_parent.getPtr(current_parent.?) orelse unreachable;
 
         try entry.aof.file.seekTo(entry.index);
-        var buf = std.mem.asBytes(target)[0..entry.size];
+        const buf = std.mem.asBytes(target)[0..entry.size];
         const bytes_read = try entry.aof.file.readAll(buf);
 
         // None of these conditions should happen, but double check them to prevent any TOCTOUs
@@ -595,7 +595,7 @@ test "aof write / read" {
     const demo_message = message_pool.get_message(.prepare);
     defer message_pool.unref(demo_message);
 
-    var target = try allocator.create(AOFEntry);
+    const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
     const demo_payload = "hello world";
@@ -727,7 +727,7 @@ pub fn main() !void {
         count += 1;
     }
 
-    var target = try allocator.create(AOFEntry);
+    const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
     if (action != null and std.mem.eql(u8, action.?, "recover") and count == 4) {

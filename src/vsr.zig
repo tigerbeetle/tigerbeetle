@@ -884,7 +884,7 @@ test "parse_addresses: fuzz" {
     var input_max: [len_max]u8 = .{0} ** len_max;
     for (0..test_count) |_| {
         const len = random.uintAtMost(usize, len_max);
-        var input = input_max[0..len];
+        const input = input_max[0..len];
         for (input) |*c| {
             c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
         }

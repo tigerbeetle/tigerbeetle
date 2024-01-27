@@ -973,7 +973,7 @@ pub const IO = struct {
         }
 
         // O_EXCL
-        var shared_mode: os.windows.DWORD = 0;
+        const shared_mode: os.windows.DWORD = 0;
 
         // O_RDWR
         var access_mask: os.windows.DWORD = 0;

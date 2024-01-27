@@ -42,11 +42,11 @@ pub fn ScanBuilderType(
         merge_slots: *MergeSlots,
 
         pub fn init(allocator: Allocator) !ScanBuilder {
-            var scan_slots = try allocator.create(ScanSlots);
+            const scan_slots = try allocator.create(ScanSlots);
             errdefer allocator.destroy(scan_slots);
             scan_slots.* = .{};
 
-            var merge_slots = try allocator.create(MergeSlots);
+            const merge_slots = try allocator.create(MergeSlots);
             errdefer allocator.destroy(merge_slots);
             merge_slots.* = .{};
 

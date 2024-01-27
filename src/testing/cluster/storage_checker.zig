@@ -72,14 +72,14 @@ pub const StorageChecker = struct {
         var client_sessions = try vsr.ClientSessions.init(allocator);
         errdefer client_sessions.deinit(allocator);
 
-        var free_set_buffer = try allocator.alignedAlloc(
+        const free_set_buffer = try allocator.alignedAlloc(
             u8,
             @alignOf(u64),
             vsr.FreeSet.encode_size_max(Storage.grid_blocks_max),
         );
         errdefer allocator.free(free_set_buffer);
 
-        var client_sessions_buffer =
+        const client_sessions_buffer =
             try allocator.alignedAlloc(u8, @sizeOf(u256), vsr.ClientSessions.encode_size);
         errdefer allocator.free(client_sessions_buffer);
 

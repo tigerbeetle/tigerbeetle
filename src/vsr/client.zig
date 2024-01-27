@@ -82,7 +82,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             /// (spread across all requests).
             const batch_logical_max = blk: {
                 var max: usize = 1;
-                inline for (std.enums.values(StateMachine.Operation)) |operation| {
+                for (std.enums.values(StateMachine.Operation)) |operation| {
                     if (@intFromEnum(operation) < constants.vsr_operations_reserved) continue;
                     if (!StateMachine.batch_logical_allowed.get(operation)) continue;
                     max = @max(max, @sizeOf(StateMachine.Result(operation)));

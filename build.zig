@@ -1022,7 +1022,7 @@ const FailStep = struct {
     message: []const u8,
 
     fn add(b: *std.Build, message: []const u8) *FailStep {
-        var result = b.allocator.create(FailStep) catch unreachable;
+        const result = b.allocator.create(FailStep) catch unreachable;
         result.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
@@ -1047,7 +1047,7 @@ const ShellcheckStep = struct {
     gpa: std.mem.Allocator,
 
     fn add(b: *std.Build) *ShellcheckStep {
-        var result = b.allocator.create(ShellcheckStep) catch unreachable;
+        const result = b.allocator.create(ShellcheckStep) catch unreachable;
         result.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
@@ -1098,7 +1098,7 @@ const GitCloneStep = struct {
     };
 
     fn add(b: *std.Build, options: Options) *GitCloneStep {
-        var result = b.allocator.create(GitCloneStep) catch unreachable;
+        const result = b.allocator.create(GitCloneStep) catch unreachable;
         result.* = .{
             .step = std.Build.Step.init(.{
                 .id = .custom,
@@ -1130,13 +1130,13 @@ fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
         pub extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
     }.SetDllDirectoryA;
 
-    var java_bin_path = std.fs.path.joinZ(
+    const java_bin_path = std.fs.path.joinZ(
         allocator,
         &.{ java_home, "\\bin" },
     ) catch unreachable;
     _ = set_dll_directory(java_bin_path);
 
-    var java_bin_server_path = std.fs.path.joinZ(
+    const java_bin_server_path = std.fs.path.joinZ(
         allocator,
         &.{ java_home, "\\bin\\server" },
     ) catch unreachable;

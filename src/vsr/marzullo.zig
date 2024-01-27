@@ -145,7 +145,7 @@ fn test_smallest_interval(bounds: []const i64, smallest_interval: Marzullo.Inter
         };
     }
 
-    var interval = Marzullo.smallest_interval(tuples);
+    const interval = Marzullo.smallest_interval(tuples);
     try std.testing.expectEqual(smallest_interval, interval);
 }
 

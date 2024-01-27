@@ -193,7 +193,7 @@ pub const Parser = struct {
     ) !void {
         inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_syntax_tree_field| {
             if (std.mem.eql(u8, @tagName(out.*), object_syntax_tree_field.name)) {
-                var active_value = @field(out, object_syntax_tree_field.name);
+                const active_value = @field(out, object_syntax_tree_field.name);
                 const ActiveValue = @TypeOf(active_value);
 
                 inline for (@typeInfo(ActiveValue).Struct.fields) |active_value_field| {
@@ -597,7 +597,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     // Release allocation after every execution.
                     var execution_arena = std.heap.ArenaAllocator.init(allocator);
                     defer execution_arena.deinit();
-                    var statement = Parser.parse_statement(
+                    const statement = Parser.parse_statement(
                         &execution_arena,
                         statement_string,
                         repl.printer,
@@ -876,7 +876,7 @@ const null_printer = Printer{
 };
 
 test "repl.zig: Parser single transfer successfully" {
-    var tests = [_]struct {
+    const tests = [_]struct {
         in: []const u8 = "",
         want: tb.Transfer,
     }{
@@ -959,7 +959,7 @@ test "repl.zig: Parser single transfer successfully" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        var statement = try Parser.parse_statement(
+        const statement = try Parser.parse_statement(
             &arena,
             t.in,
             null_printer,
@@ -971,7 +971,7 @@ test "repl.zig: Parser single transfer successfully" {
 }
 
 test "repl.zig: Parser multiple transfers successfully" {
-    var tests = [_]struct {
+    const tests = [_]struct {
         in: []const u8 = "",
         want: [2]tb.Transfer,
     }{
@@ -1016,7 +1016,7 @@ test "repl.zig: Parser multiple transfers successfully" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        var statement = try Parser.parse_statement(
+        const statement = try Parser.parse_statement(
             &arena,
             t.in,
             null_printer,
@@ -1028,7 +1028,7 @@ test "repl.zig: Parser multiple transfers successfully" {
 }
 
 test "repl.zig: Parser single account successfully" {
-    var tests = [_]struct {
+    const tests = [_]struct {
         in: []const u8,
         want: tb.Account,
     }{
@@ -1100,7 +1100,7 @@ test "repl.zig: Parser single account successfully" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        var statement = try Parser.parse_statement(
+        const statement = try Parser.parse_statement(
             &arena,
             t.in,
             null_printer,
@@ -1112,7 +1112,7 @@ test "repl.zig: Parser single account successfully" {
 }
 
 test "repl.zig: Parser multiple accounts successfully" {
-    var tests = [_]struct {
+    const tests = [_]struct {
         in: []const u8,
         want: [2]tb.Account,
     }{
@@ -1155,7 +1155,7 @@ test "repl.zig: Parser multiple accounts successfully" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        var statement = try Parser.parse_statement(
+        const statement = try Parser.parse_statement(
             &arena,
             t.in,
             null_printer,
@@ -1167,7 +1167,7 @@ test "repl.zig: Parser multiple accounts successfully" {
 }
 
 test "repl.zig: Parser odd but correct formatting" {
-    var tests = [_]struct {
+    const tests = [_]struct {
         in: []const u8 = "",
         want: tb.Transfer,
     }{
@@ -1282,7 +1282,7 @@ test "repl.zig: Parser odd but correct formatting" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        var statement = try Parser.parse_statement(
+        const statement = try Parser.parse_statement(
             &arena,
             t.in,
             null_printer,
@@ -1294,7 +1294,7 @@ test "repl.zig: Parser odd but correct formatting" {
 }
 
 test "repl.zig: Handle parsing errors" {
-    var tests = [_]struct {
+    const tests = [_]struct {
         in: []const u8 = "",
         err: anyerror,
     }{
@@ -1348,7 +1348,7 @@ test "repl.zig: Handle parsing errors" {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer arena.deinit();
 
-        var result = Parser.parse_statement(
+        const result = Parser.parse_statement(
             &arena,
             t.in,
             null_printer,

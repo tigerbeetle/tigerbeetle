@@ -141,11 +141,11 @@ pub const AccountingAuditor = struct {
         errdefer in_flight.deinit(allocator);
         try in_flight.ensureTotalCapacity(allocator, @intCast(options.in_flight_max));
 
-        var creates_sent = try allocator.alloc(usize, options.client_count);
+        const creates_sent = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_sent);
         @memset(creates_sent, 0);
 
-        var creates_delivered = try allocator.alloc(usize, options.client_count);
+        const creates_delivered = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_delivered);
         @memset(creates_delivered, 0);
 

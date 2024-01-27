@@ -66,7 +66,7 @@ pub fn create(gpa: std.mem.Allocator) !*Shell {
 
     const ci = env.get("CI") != null;
 
-    var result = try gpa.create(Shell);
+    const result = try gpa.create(Shell);
     errdefer gpa.destroy(result);
 
     result.* = Shell{

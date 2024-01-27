@@ -399,7 +399,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
-            var queue_length = queue.count();
+            const queue_length = queue.count();
             if (queue_length + 1 > self.options.path_maximum_capacity) {
                 const index = self.prng.random().uintLessThanBiased(u64, queue_length);
                 const link_packet = queue.removeIndex(index);

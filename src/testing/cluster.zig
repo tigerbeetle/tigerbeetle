@@ -135,7 +135,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             );
             errdefer network.deinit();
 
-            var storage_fault_atlas = try allocator.create(StorageFaultAtlas);
+            const storage_fault_atlas = try allocator.create(StorageFaultAtlas);
             errdefer allocator.destroy(storage_fault_atlas);
 
             storage_fault_atlas.* = StorageFaultAtlas.init(
@@ -358,10 +358,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .down);
 
-            var nonce = cluster.replicas[replica_index].nonce + 1;
+            const nonce = cluster.replicas[replica_index].nonce + 1;
             // Pass the old replica's Time through to the new replica. It will continue to tick while
             // the replica is crashed, to ensure the clocks don't desynchronize too far to recover.
-            var time = cluster.replicas[replica_index].time;
+            const time = cluster.replicas[replica_index].time;
             try cluster.open_replica(replica_index, nonce, time);
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;

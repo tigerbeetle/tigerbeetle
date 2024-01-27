@@ -1006,7 +1006,7 @@ pub const IO = struct {
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
-        var dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
+        const dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
 
         if (dir_on_tmpfs) {
             log.warn("tmpfs is not durable, and your data will be lost on reboot", .{});

@@ -880,7 +880,7 @@ fn sample_distribution(
     const SampleSpace = std.meta.FieldEnum(@TypeOf(distribution));
     const Indexer = std.enums.EnumIndexer(SampleSpace);
 
-    var sum = sum: {
+    const sum = sum: {
         var sum: usize = 0;
         comptime var i: usize = 0;
         inline while (i < Indexer.count) : (i += 1) {

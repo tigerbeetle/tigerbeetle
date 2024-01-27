@@ -635,7 +635,7 @@ pub fn StateMachineType(
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
             const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
 
-            var scan = scan: {
+            const scan = scan: {
                 const timestamp_range: TimestampRange = .{
                     .min = if (filter.timestamp_min == 0)
                         TimestampRange.timestamp_min
@@ -1628,7 +1628,7 @@ fn check(test_table: []const u8) !void {
             .setup => |b| {
                 assert(operation == null);
 
-                var account = context.state_machine.forest.grooves.accounts.get(b.account).?;
+                const account = context.state_machine.forest.grooves.accounts.get(b.account).?;
                 var account_new = account.*;
 
                 account_new.debits_pending = b.debits_pending;
@@ -1732,7 +1732,7 @@ fn check(test_table: []const u8) !void {
                     request.items,
                     reply_actual_buffer[0..TestContext.message_body_size_max],
                 );
-                var reply_actual = reply_actual_buffer[0..reply_actual_size];
+                const reply_actual = reply_actual_buffer[0..reply_actual_size];
 
                 if (commit_operation == .lookup_accounts) {
                     for (std.mem.bytesAsSlice(Account, reply_actual)) |*a| a.timestamp = 0;

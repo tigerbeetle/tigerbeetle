@@ -54,7 +54,7 @@ pub const ClientSessions = struct {
         try entries_by_client.ensureTotalCapacity(allocator, @intCast(constants.clients_max));
         assert(entries_by_client.capacity() >= constants.clients_max);
 
-        var entries = try allocator.alloc(Entry, constants.clients_max);
+        const entries = try allocator.alloc(Entry, constants.clients_max);
         errdefer allocator.free(entries);
         @memset(entries, std.mem.zeroes(Entry));
 

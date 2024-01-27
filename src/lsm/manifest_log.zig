@@ -187,7 +187,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             }
             errdefer for (blocks.buffer) |b| allocator.free(b);
 
-            var writes = try allocator.alloc(Write, half_bar_buffer_blocks_max);
+            const writes = try allocator.alloc(Write, half_bar_buffer_blocks_max);
             errdefer allocator.free(writes);
             @memset(writes, undefined);
 
@@ -379,7 +379,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                             assert(manifest_log.tables_removed.remove(table.address));
                         }
                     } else {
-                        var extent =
+                        const extent =
                             manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                         if (!extent.found_existing) {
                             extent.value_ptr.* = .{ .block = block_address, .entry = entry };
@@ -517,7 +517,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .insert,
                 .update,
                 => {
-                    var extent = manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
+                    const extent = manifest_log.table_extents.getOrPutAssumeCapacity(table.address);
                     if (extent.found_existing) {
                         maybe(table.label.event == .insert); // (Compaction.)
                     } else {
@@ -1118,7 +1118,7 @@ const Pace = struct {
                 .compact_extra_blocks = constants.lsm_manifest_compact_extra_blocks,
             });
 
-            inline for (std.meta.fields(Pace)) |pace_field| {
+            for (std.meta.fields(Pace)) |pace_field| {
                 @compileLog(std.fmt.comptimePrint("ManifestLog.Pace.{s} = {d}", .{
                     pace_field.name,
                     @field(pace, pace_field.name),

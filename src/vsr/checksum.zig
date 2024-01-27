@@ -120,7 +120,7 @@ test "checksum simple fuzzing" {
     var msg_buf = try testing.allocator.alloc(u8, msg_max);
     defer testing.allocator.free(msg_buf);
 
-    var cipher_buf = try testing.allocator.alloc(u8, msg_max);
+    const cipher_buf = try testing.allocator.alloc(u8, msg_max);
     defer testing.allocator.free(cipher_buf);
 
     var i: usize = 0;
