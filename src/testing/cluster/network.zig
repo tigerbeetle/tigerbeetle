@@ -148,8 +148,8 @@ pub const Network = struct {
             while (it_target.next()) |replica_target| {
                 if (replica_target != replica_source) {
                     network.link_filter(.{
-                        .source = .{ .replica = @as(u8, @intCast(replica_source)) },
-                        .target = .{ .replica = @as(u8, @intCast(replica_target)) },
+                        .source = .{ .replica = @intCast(replica_source) },
+                        .target = .{ .replica = @intCast(replica_target) },
                     }).* = LinkFilter.initFull();
                 }
             }
@@ -243,7 +243,7 @@ pub const Network = struct {
                     .replica => assert(i < network.options.node_count),
                     .client => assert(i >= network.options.node_count),
                 }
-                return @as(u8, @intCast(i));
+                return @intCast(i);
             }
         }
         log.err("no such process: {} (have {any})", .{ process, network.processes.items });
@@ -298,7 +298,7 @@ pub const Network = struct {
 
     fn raw_process_to_process(raw: u128) Process {
         switch (raw) {
-            0...(constants.members_max - 1) => return .{ .replica = @as(u8, @intCast(raw)) },
+            0...(constants.members_max - 1) => return .{ .replica = @intCast(raw) },
             else => {
                 assert(raw >= constants.members_max);
                 return .{ .client = raw };

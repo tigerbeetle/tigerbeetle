@@ -872,7 +872,7 @@ pub fn StateMachineType(
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
                                 results[count] = .{
-                                    .index = @as(u32, @intCast(chain_index)),
+                                    .index = @intCast(chain_index),
                                     .result = .linked_event_failed,
                                 };
                                 count += 1;
@@ -881,7 +881,7 @@ pub fn StateMachineType(
                             assert(result == .linked_event_failed or result == .linked_event_chain_open);
                         }
                     }
-                    results[count] = .{ .index = @as(u32, @intCast(index)), .result = result };
+                    results[count] = .{ .index = @intCast(index), .result = result };
                     count += 1;
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
@@ -1313,8 +1313,8 @@ pub fn StateMachineType(
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
-            const batch_accounts_max = @as(u32, @intCast(constants.batch_max.create_accounts));
-            const batch_transfers_max = @as(u32, @intCast(constants.batch_max.create_transfers));
+            const batch_accounts_max: u32 = @intCast(constants.batch_max.create_accounts);
+            const batch_transfers_max: u32 = @intCast(constants.batch_max.create_transfers);
             assert(batch_accounts_max == constants.batch_max.lookup_accounts);
             assert(batch_transfers_max == constants.batch_max.lookup_transfers);
 
@@ -1657,7 +1657,7 @@ fn check(test_table: []const u8) !void {
                     try accounts.put(a.id, event);
                 } else {
                     const result = CreateAccountsResult{
-                        .index = @as(u32, @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1)),
+                        .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
                         .result = a.result,
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));
@@ -1673,7 +1673,7 @@ fn check(test_table: []const u8) !void {
                     try transfers.put(t.id, event);
                 } else {
                     const result = CreateTransfersResult{
-                        .index = @as(u32, @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1)),
+                        .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
                         .result = t.result,
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));

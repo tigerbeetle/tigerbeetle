@@ -49,7 +49,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
                     // Copy the message's body to the context buffer:
                     assert(result_len <= request_size_max);
                     var writable: [request_size_max]u8 = undefined;
-                    const readable = @as([*]const u8, @ptrCast(result_ptr.?));
+                    const readable: [*]const u8 = @ptrCast(result_ptr.?);
                     stdx.copy_disjoint(.inexact, u8, &writable, readable[0..result_len]);
                     break :blk writable;
                 } else null,
@@ -111,7 +111,7 @@ test "c_client echo" {
         &tb_client,
         cluster_id,
         address,
-        @as(u32, @intCast(address.len)),
+        @intCast(address.len),
         concurrency_max,
         tb_context,
         RequestContext.on_complete,
@@ -197,7 +197,7 @@ test "c_client tb_status" {
                 &tb_client,
                 cluster_id,
                 addresses.ptr,
-                @as(u32, @intCast(addresses.len)),
+                @intCast(addresses.len),
                 concurrency_max,
                 tb_context,
                 RequestContextType(0).on_complete,
@@ -248,7 +248,7 @@ test "c_client tb_packet_status" {
         &tb_client,
         cluster_id,
         address,
-        @as(u32, @intCast(address.len)),
+        @intCast(address.len),
         concurrency_max,
         tb_context,
         RequestContext.on_complete,

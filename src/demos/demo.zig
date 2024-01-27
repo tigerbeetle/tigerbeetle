@@ -57,7 +57,7 @@ pub fn request(
         allocator,
         client_id,
         cluster_id,
-        @as(u8, @intCast(addresses.len)),
+        @intCast(addresses.len),
         &message_pool,
         .{
             .configuration = &addresses,

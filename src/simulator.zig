@@ -462,7 +462,7 @@ pub const Simulator = struct {
         while (it.next()) |replica_index| {
             const fault = false;
             if (simulator.cluster.replica_health[replica_index] == .down) {
-                simulator.restart_replica(@as(u8, @intCast(replica_index)), fault);
+                simulator.restart_replica(@intCast(replica_index), fault);
             }
         }
 

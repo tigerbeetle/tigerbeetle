@@ -131,7 +131,7 @@ pub const AccountingAuditor = struct {
 
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
         errdefer pending_transfers.deinit(allocator);
-        try pending_transfers.ensureTotalCapacity(allocator, @as(u32, @intCast(options.transfers_pending_max)));
+        try pending_transfers.ensureTotalCapacity(allocator, @intCast(options.transfers_pending_max));
 
         var pending_expiries = PendingExpiryQueue.init(allocator, {});
         errdefer pending_expiries.deinit();
@@ -139,7 +139,7 @@ pub const AccountingAuditor = struct {
 
         var in_flight = InFlightQueue{};
         errdefer in_flight.deinit(allocator);
-        try in_flight.ensureTotalCapacity(allocator, @as(u32, @intCast(options.in_flight_max)));
+        try in_flight.ensureTotalCapacity(allocator, @intCast(options.in_flight_max));
 
         var creates_sent = try allocator.alloc(usize, options.client_count);
         errdefer allocator.free(creates_sent);

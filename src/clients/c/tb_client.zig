@@ -46,7 +46,7 @@ const TestingContext = blk: {
 };
 
 pub fn context_to_client(implementation: *ContextImplementation) tb_client_t {
-    return @as(tb_client_t, @ptrCast(implementation));
+    return @ptrCast(implementation);
 }
 
 fn client_to_context(tb_client: tb_client_t) *ContextImplementation {

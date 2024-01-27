@@ -582,7 +582,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 allocator,
                 client_id,
                 cluster_id,
-                @as(u8, @intCast(addresses.len)),
+                @intCast(addresses.len),
                 &message_pool,
                 .{
                     .configuration = addresses,
@@ -698,7 +698,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl.request_done = false;
             try repl.debug("Sending command: {}.\n", .{operation});
             repl.client.batch_submit(
-                @as(u128, @intCast(@intFromPtr(repl))),
+                @intCast(@intFromPtr(repl)),
                 client_request_callback,
                 batch,
             );
@@ -752,7 +752,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             operation: StateMachine.Operation,
             result: []const u8,
         ) !void {
-            const repl = @as(*Repl, @ptrFromInt(@as(usize, @intCast(user_data))));
+            const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(repl.request_done == false);
             try repl.debug("Operation completed: {}.\n", .{operation});
 
@@ -843,7 +843,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 operation,
                 result,
             ) catch |err| {
-                const repl = @as(*Repl, @ptrFromInt(@as(u64, @intCast(user_data))));
+                const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
                 repl.fail("Error in callback: {any}", .{err}) catch return;
             };
         }

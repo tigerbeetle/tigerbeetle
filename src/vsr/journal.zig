@@ -1156,7 +1156,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count <= journal.faulty.count);
             assert(read.destination_replica == null);
 
-            const slot = Slot{ .index = @as(u64, @intCast(read.op)) };
+            const slot = Slot{ .index = @intCast(read.op) };
             assert(slot.index < slot_count);
             assert(!journal.dirty.bit(slot));
             assert(journal.faulty.bit(slot));

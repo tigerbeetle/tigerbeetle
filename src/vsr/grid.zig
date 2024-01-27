@@ -209,10 +209,10 @@ pub fn GridType(comptime Storage: type) type {
             missing_blocks_max: usize,
             missing_tables_max: usize,
         }) !Grid {
-            const shard_count_limit = @as(usize, @intCast(@divFloor(
+            const shard_count_limit: usize = @intCast(@divFloor(
                 options.superblock.storage_size_limit - vsr.superblock.data_file_size_min,
                 constants.block_size * FreeSet.shard_bits,
-            )));
+            ));
             const block_count_limit = shard_count_limit * FreeSet.shard_bits;
 
             var free_set = try FreeSet.init(allocator, block_count_limit);

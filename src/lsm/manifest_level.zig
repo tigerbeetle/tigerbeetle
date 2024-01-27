@@ -1002,7 +1002,7 @@ pub fn TestContext(
         }
 
         fn delete_tables(context: *Self) !void {
-            const reference_len = @as(u32, @intCast(context.reference.items.len));
+            const reference_len: u32 = @intCast(context.reference.items.len);
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, 13);
@@ -1165,7 +1165,7 @@ pub fn TestContext(
             }
 
             if (reference.len > 0) {
-                const reference_len = @as(u32, @intCast(reference.len));
+                const reference_len: u32 = @intCast(reference.len);
                 const start = context.random.uintLessThanBiased(u32, reference_len);
                 const end = context.random.uintLessThanBiased(u32, reference_len - start) + start;
 

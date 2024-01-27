@@ -314,7 +314,7 @@ pub const AOFReplayClient = struct {
             allocator,
             std.crypto.random.int(u128),
             0,
-            @as(u8, @intCast(addresses.len)),
+            @intCast(addresses.len),
             message_pool,
             .{
                 .configuration = addresses,
@@ -387,7 +387,7 @@ pub const AOFReplayClient = struct {
         _ = operation;
         _ = result;
 
-        const self = @as(*AOFReplayClient, @ptrFromInt(@as(u64, @intCast(user_data))));
+        const self: *AOFReplayClient = @ptrFromInt(@as(usize, @intCast(user_data)));
         assert(self.inflight_message != null);
         self.inflight_message = null;
     }
@@ -613,8 +613,8 @@ test "aof write / read" {
         .timestamp = 0,
         .checkpoint_id = 0,
         .command = .prepare,
-        .operation = @as(vsr.Operation, @enumFromInt(4)),
-        .size = @as(u32, @intCast(@sizeOf(Header) + demo_payload.len)),
+        .operation = @enumFromInt(4),
+        .size = @intCast(@sizeOf(Header) + demo_payload.len),
     };
 
     stdx.copy_disjoint(.exact, u8, demo_message.body(), demo_payload);

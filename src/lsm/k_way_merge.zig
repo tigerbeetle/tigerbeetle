@@ -269,14 +269,14 @@ fn TestContext(comptime k_max: u32) type {
                 for (stream_keys, 0..) |key, j| {
                     streams[i][j] = .{
                         .key = key,
-                        .version = @as(u32, @intCast(i)),
+                        .version = @intCast(i),
                     };
                 }
             }
             defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
             var context: Self = .{ .streams = streams };
-            var kway = KWay.init(&context, @as(u32, @intCast(streams_keys.len)), direction);
+            var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
 
             while (try kway.pop()) |value| {
                 try actual.append(value);
@@ -320,7 +320,7 @@ fn TestContext(comptime k_max: u32) type {
                     for (stream) |key| {
                         expect_buffer[expect_buffer_len] = .{
                             .key = key,
-                            .version = @as(u32, @intCast(version)),
+                            .version = @intCast(version),
                         };
                         expect_buffer_len += 1;
                     }

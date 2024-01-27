@@ -161,7 +161,7 @@ pub fn u128_from_value(env: c.napi_env, value: c.napi_value, comptime name: [:0]
     // we would need to convert, but big endian is not supported by tigerbeetle.
     var result: u128 = 0;
     var sign_bit: c_int = undefined;
-    const words = @as(*[2]u64, @ptrCast(&result));
+    const words: *[2]u64 = @ptrCast(&result);
     var word_count: usize = 2;
     switch (c.napi_get_value_bigint_words(env, value, &sign_bit, &word_count, words)) {
         c.napi_ok => {},

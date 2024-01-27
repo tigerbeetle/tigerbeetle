@@ -51,7 +51,7 @@ pub const ClientSessions = struct {
         var entries_by_client: EntriesByClient = .{};
         errdefer entries_by_client.deinit(allocator);
 
-        try entries_by_client.ensureTotalCapacity(allocator, @as(u32, @intCast(constants.clients_max)));
+        try entries_by_client.ensureTotalCapacity(allocator, @intCast(constants.clients_max));
         assert(entries_by_client.capacity() >= constants.clients_max);
 
         var entries = try allocator.alloc(Entry, constants.clients_max);

@@ -386,7 +386,10 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                         // Arrays are only used for padding/reserved fields,
                         // instead of requiring the user to explicitly set an empty buffer,
                         // we just hide those fields and preserve their default value.
-                        .Array => @as(*const field.type, @ptrCast(field.default_value.?)).*,
+                        .Array => @as(
+                            *const field.type,
+                            @ptrCast(@alignCast(field.default_value.?)),
+                        ).*,
                         else => unreachable,
                     };
 

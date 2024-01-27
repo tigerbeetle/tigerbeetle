@@ -118,7 +118,7 @@ pub const IO = struct {
             self.io_inflight -= new_events;
 
             for (events[0..new_events]) |event| {
-                const completion = @as(*Completion, @ptrFromInt(event.udata));
+                const completion: *Completion = @ptrFromInt(event.udata);
                 completion.next = null;
                 self.completed.push(completion);
             }
@@ -455,7 +455,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @intCast(buffer_limit(buffer.len)),
                 .offset = offset,
             },
             struct {
@@ -465,10 +465,10 @@ pub const IO = struct {
                             op.fd,
                             op.buf,
                             op.len,
-                            @as(isize, @bitCast(op.offset)),
+                            @bitCast(op.offset),
                         );
                         return switch (os.errno(rc)) {
-                            .SUCCESS => @as(usize, @intCast(rc)),
+                            .SUCCESS => @intCast(rc),
                             .INTR => continue,
                             .AGAIN => error.WouldBlock,
                             .BADF => error.NotOpenForReading,
@@ -514,7 +514,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @intCast(buffer_limit(buffer.len)),
             },
             struct {
                 fn do_operation(op: anytype) RecvError!usize {
@@ -547,7 +547,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @intCast(buffer_limit(buffer.len)),
             },
             struct {
                 fn do_operation(op: anytype) SendError!usize {
@@ -630,7 +630,7 @@ pub const IO = struct {
             .{
                 .fd = fd,
                 .buf = buffer.ptr,
-                .len = @as(u32, @intCast(buffer_limit(buffer.len))),
+                .len = @intCast(buffer_limit(buffer.len)),
                 .offset = offset,
             },
             struct {
@@ -786,7 +786,7 @@ pub const IO = struct {
             .fst_flags = F_ALLOCATECONTIG | F_ALLOCATEALL,
             .fst_posmode = F_PEOFPOSMODE,
             .fst_offset = 0,
-            .fst_length = @as(os.off_t, @intCast(size)),
+            .fst_length = @intCast(size),
             .fst_bytesalloc = 0,
         };
 

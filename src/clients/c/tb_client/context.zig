@@ -172,7 +172,7 @@ pub fn ContextType(
                 allocator,
                 context.client_id,
                 cluster_id,
-                @as(u8, @intCast(context.addresses.len)),
+                @intCast(context.addresses.len),
                 &context.message_pool,
                 .{
                     .configuration = context.addresses,
@@ -268,10 +268,10 @@ pub fn ContextType(
 
             // Submit the message for processing:
             self.client.batch_submit(
-                @as(u128, @bitCast(UserData{
+                @bitCast(UserData{
                     .self = self,
                     .packet = packet,
-                })),
+                }),
                 Context.on_result,
                 batch,
             );
@@ -282,7 +282,7 @@ pub fn ContextType(
             op: Client.StateMachine.Operation,
             results: []const u8,
         ) void {
-            const user_data = @as(UserData, @bitCast(raw_user_data));
+            const user_data: UserData = @bitCast(raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
 
@@ -313,7 +313,7 @@ pub fn ContextType(
 
             // The packet completed normally.
             packet.status = .ok;
-            (self.completion_fn)(completion_ctx, tb_client, packet, bytes.ptr, @as(u32, @intCast(bytes.len)));
+            (self.completion_fn)(completion_ctx, tb_client, packet, bytes.ptr, @intCast(bytes.len));
         }
 
         inline fn get_context(implementation: *ContextImplementation) *Context {

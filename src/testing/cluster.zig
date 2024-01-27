@@ -156,7 +156,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (storages, 0..) |*storage, replica_index| {
                 errdefer for (storages[0..replica_index]) |*s| s.deinit(allocator);
                 var storage_options = options.storage;
-                storage_options.replica_index = @as(u8, @intCast(replica_index));
+                storage_options.replica_index = @intCast(replica_index);
                 storage_options.fault_atlas = storage_fault_atlas;
                 storage_options.grid_checker = grid_checker;
                 storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
@@ -243,6 +243,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     allocator,
                     .{
                         .cluster = options.cluster_id,
+                        // TODO(zig) It should be possible to remove the `@as(u8,...)`.
                         .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
                     },
@@ -283,7 +284,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
                 const nonce = 1 + @as(u128, replica_index) << 64;
-                try cluster.open_replica(@as(u8, @intCast(replica_index)), nonce, .{
+                try cluster.open_replica(@intCast(replica_index), nonce, .{
                     .resolution = constants.tick_ms * std.time.ns_per_ms,
                     .offset_type = .linear,
                     .offset_coefficient_A = 0,
