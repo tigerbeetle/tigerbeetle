@@ -34,20 +34,20 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         },
     };
 
-    const token = try shell.env_get("WORKBENCHDB_PAT");
+    const token = try shell.env_get("DEVHUBDB_PAT");
     try shell.exec(
         \\git clone --depth 1
-        \\  https://oauth2:{token}@github.com/tigerbeetle/workbenchdb.git
-        \\  workbenchdb
+        \\  https://oauth2:{token}@github.com/tigerbeetle/devhubdb.git
+        \\  devhubdb
     , .{
         .token = token,
     });
 
-    try shell.pushd("./workbenchdb");
+    try shell.pushd("./devhubdb");
     defer shell.popd();
 
     {
-        const file = try shell.cwd.openFile("./workbench/data.json", .{
+        const file = try shell.cwd.openFile("./devhub/data.json", .{
             .mode = .write_only,
         });
         defer file.close();
@@ -57,7 +57,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
         try file.writeAll("\n");
     }
 
-    try shell.exec("git add ./workbench/data.json", .{});
+    try shell.exec("git add ./devhub/data.json", .{});
     try shell.git_env_setup();
     try shell.exec("git commit -m 📈", .{});
     try shell.exec("git push", .{});

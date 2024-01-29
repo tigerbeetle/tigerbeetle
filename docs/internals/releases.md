@@ -52,8 +52,8 @@ pull requests were merged in a week).
 
 ## Release Process
 
-Releases are triggered manually, on Monday. Default release rotation is on the workbench:
-<https://tigerbeetle.github.io/tigerbeetle/>. 
+Releases are triggered manually, on Monday. Default release rotation is on the devhub:
+<https://tigerbeetle.github.io/tigerbeetle/>.
 
 The middle name is the default release manager for the _current_ week. After the release, please
 ping the next person to pass the baton.

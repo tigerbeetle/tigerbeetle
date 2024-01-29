@@ -1,4 +1,4 @@
-// Code powering "developer dashboard" aka workbench, at <https://tigerbeetle.github.io>.
+// Code powering "developer dashboard" aka devhub, at <https://tigerbeetle.github.io/tigerbeetle>.
 //
 // At the moment, it isn't clear what's the right style for this kind of non-Zig developer facing
 // code, so the following is somewhat arbitrary:
@@ -47,7 +47,7 @@ function getReleaseManager() {
 }
 
 const dataUrl =
-  "https://raw.githubusercontent.com/tigerbeetle/workbenchdb/main/workbench/data.json";
+  "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
 
 async function fetchData() {
   const data = await (await fetch(dataUrl)).text();
