@@ -1509,21 +1509,20 @@ internal class TBServer : IDisposable
     private const string TB_EXE = "tigerbeetle";
     private const string TB_FILE = "dotnet-tests.tigerbeetle";
     private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
-    private const string FORMAT = $"format --cluster=0 --replica=0 --replica-count=1 ./" + TB_FILE;
-    private const string START = $"start --addresses=0 --cache-grid=512MB ./" + TB_FILE;
 
     private readonly Process process;
+    private readonly String dataFile;
 
     public string Address { get; }
 
     public TBServer()
     {
-        CleanUp();
+        dataFile = Path.GetRandomFileName();
 
         {
             var format = new Process();
             format.StartInfo.FileName = TB_SERVER;
-            format.StartInfo.Arguments = FORMAT;
+            format.StartInfo.Arguments = $"format --cluster=0 --replica=0 --replica-count=1 ./{dataFile}";
             format.StartInfo.RedirectStandardError = true;
             format.Start();
             var formatStderr = format.StandardError.ReadToEnd();
@@ -1533,7 +1532,7 @@ internal class TBServer : IDisposable
 
         process = new Process();
         process.StartInfo.FileName = TB_SERVER;
-        process.StartInfo.Arguments = START;
+        process.StartInfo.Arguments = $"start --addresses=0 --cache-grid=512MB ./{dataFile}";
         process.StartInfo.RedirectStandardInput = true;
         process.StartInfo.RedirectStandardOutput = true;
         process.Start();
@@ -1543,11 +1542,6 @@ internal class TBServer : IDisposable
 
     public void Dispose()
     {
-        CleanUp();
-    }
-
-    private void CleanUp()
-    {
         try
         {
             if (process != null && !process.HasExited)
@@ -1556,7 +1550,7 @@ internal class TBServer : IDisposable
                 process.Dispose();
             }
 
-            File.Delete($"./{TB_FILE}");
+            File.Delete($"./{dataFile}");
         }
         catch { }
     }
