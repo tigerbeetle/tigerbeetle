@@ -731,8 +731,24 @@ pub fn ReplicaType(
                 assert(trailer_chunks.len == 1);
                 assert(trailer_size == ClientSessions.encode_size);
                 assert(trailer_size == trailer_chunks[0].len);
-
                 self.client_sessions.decode(trailer_chunks[0]);
+            }
+
+            if (self.superblock.working.vsr_state.sync_op_max > 0) {
+                maybe(self.client_replies.writing.count() > 0);
+                for (0..constants.clients_max) |entry_slot| {
+                    if (self.client_sessions.entries_free.isSet(entry_slot)) {
+                        assert(!self.client_replies.faulty.isSet(entry_slot));
+                    } else {
+                        const entry = &self.client_sessions.entries[entry_slot];
+                        if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                            entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
+                        {
+                            const entry_faulty = entry.header.size > @sizeOf(Header);
+                            self.client_replies.faulty.setValue(entry_slot, entry_faulty);
+                        }
+                    }
+                }
             }
 
             self.state_machine.open(state_machine_open_callback);
@@ -8038,8 +8054,7 @@ pub fn ReplicaType(
         /// - repaired the manifest blocks,
         /// - and opened the state machine.
         /// Now we sync:
-        /// - the missed LSM table blocks (index/data), and
-        /// - client reply messages.
+        /// - the missed LSM table blocks (index/data).
         fn sync_content(self: *Self) void {
             assert(self.syncing == .idle);
             assert(self.state_machine_opened);
@@ -8051,20 +8066,8 @@ pub fn ReplicaType(
             if (self.grid_repair_tables.available() > 0) {
                 self.sync_enqueue_tables();
             }
-
-            for (0..constants.clients_max) |entry_slot| {
-                if (self.client_sessions.entries_free.isSet(entry_slot)) {
-                    assert(!self.client_replies.faulty.isSet(entry_slot));
-                } else {
-                    const entry = &self.client_sessions.entries[entry_slot];
-                    if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
-                        entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
-                    {
-                        const entry_faulty = entry.header.size > @sizeOf(Header);
-                        self.client_replies.faulty.setValue(entry_slot, entry_faulty);
-                    }
-                }
-            }
+            // Client replies are synced in lockstep with client sessions in
+            // `client_sessions_open_callback`.
         }
 
         pub fn sync_content_done(self: *const Self) bool {
