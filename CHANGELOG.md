@@ -1,5 +1,70 @@
 # TigerBeetle Changelog
 
+## 2024-01-29
+
+### Safety And Performance
+
+- [#1446](https://github.com/tigerbeetle/tigerbeetle/pull/1446)
+
+  Panic on checkpoint divergence. Previously, if a replica's state on disk diverged, we'd
+  use state sync to bring it in line. Now, we don't allow any storage engine nondeterminism
+  (mixed version clusters are forbidden) and panic if we encounter any.
+
+- [#1476](https://github.com/tigerbeetle/tigerbeetle/pull/1476)
+
+  Fix a liveness issues when starting a view across checkpoints in an idle cluster.
+
+- [#1460](https://github.com/tigerbeetle/tigerbeetle/pull/1460)
+
+  Stop an isolated replica from locking a standby out of a cluster.
+
+### Features
+
+- [#1470](https://github.com/tigerbeetle/tigerbeetle/pull/1470)
+
+  Change `get_account_transfers` to use `timestamp_min` and `timestamp_max` to allow filtering by
+  timestamp ranges.
+
+- [#1463](https://github.com/tigerbeetle/tigerbeetle/pull/1463)
+
+  Allow setting `--addresses=0` when starting TigerBeetle to enable a mode helpful for integration
+  tests:
+  * A free port will be picked automatically.
+  * The port, and only the port, will be printed to stdout which will then be closed.
+  * TigerBeetle will [exit when its stdin is closed](https://matklad.github.io/2023/10/11/unix-structured-concurrency.html).
+
+- [#1402](https://github.com/tigerbeetle/tigerbeetle/pull/1402)
+
+  TigerBeetle now has a [dev workbench](https://tigerbeetle.github.io/tigerbeetle/)! Currently we
+  track our build times and executable size over time.
+
+- [#1461](https://github.com/tigerbeetle/tigerbeetle/pull/1461)
+
+  `tigerbeetle client ...` is now `tigerbeetle repl ...`.
+
+### Internals
+
+- [#1480](https://github.com/tigerbeetle/tigerbeetle/pull/1480)
+
+  Deprecate support and testing for Node 16, which is EOL.
+
+- [#1477](https://github.com/tigerbeetle/tigerbeetle/pull/1477),
+  [#1469](https://github.com/tigerbeetle/tigerbeetle/pull/1469),
+  [#1475](https://github.com/tigerbeetle/tigerbeetle/pull/1475),
+  [#1457](https://github.com/tigerbeetle/tigerbeetle/pull/1457),
+  [#1452](https://github.com/tigerbeetle/tigerbeetle/pull/1452).
+
+  Improve VOPR & VSR logging, docs, assertions and tests.
+
+- [#1474](https://github.com/tigerbeetle/tigerbeetle/pull/1474)
+
+  Improve integration tests around Node and `pending_transfer_expired` - thanks to our friends at
+  Rafiki for reporting!
+
+### TigerTracks 🎧
+
+- [Paint It, Black](https://www.youtube.com/watch?v=170sceOWWXc)
+
 ## 2024-01-22
 
 ### Safety And Performance
