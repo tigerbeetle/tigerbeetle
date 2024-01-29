@@ -104,13 +104,31 @@ function plotSeries(seriesList, rootNode) {
       chart: {
         type: "bar",
         height: "400px",
+        events: {
+          dataPointSelection: (event, chartContext, { dataPointIndex }) => {
+            window.open(
+              "https://github.com/tigerbeetle/tigerbeetle/commits/" +
+                series.revision[dataPointIndex],
+            );
+          },
+        },
       },
       series: [{
         name: series.label,
-        data: series.timestamp.map((t, i) => [t * 1000, series.value[i]]),
+        data: series.value,
       }],
       xaxis: {
-        type: "datetime",
+        categories: series.revision.map((sha) => sha.substring(0, 6)),
+      },
+      tooltip: {
+        enabled: true,
+        x: {
+          formatter: function (val, { dataPointIndex }) {
+            const timestamp = new Date(series.timestamp[dataPointIndex] * 1000);
+            const formattedDate = timestamp.toISOString();
+            return `<div>${val}</div><div>${formattedDate}</div>`;
+          },
+        },
       },
     };
 
