@@ -208,7 +208,7 @@ pub fn GrooveType(
         const derive_func_info = @typeInfo(@TypeOf(derive_func)).Fn;
 
         // Make sure it has only one argument.
-        if (derive_func_info.args.len != 1) {
+        if (derive_func_info.params.len != 1) {
             @compileError("expected derive fn to take in *const " ++ @typeName(Object));
         }
 
@@ -224,12 +224,14 @@ pub fn GrooveType(
             @compileError("expected derive fn to return valid tree index type");
         };
 
-        // Create an IndexTree for the DerivedType:
-        const tree_name = @typeName(Object) ++ "." ++ field.name;
         const DerivedType = @typeInfo(derive_return_type).Optional.child;
-        const IndexTree = IndexTreeType(Storage, DerivedType, tree_name);
+        const IndexTree = IndexTreeType(
+            Storage,
+            DerivedType,
+            @field(groove_options.value_count_max, field.name),
+        );
 
-        index_fields = index_fields ++ &.{
+        index_fields = index_fields ++ [_]std.builtin.Type.StructField{
             .{
                 .name = field.name,
                 .type = IndexTree,
@@ -330,7 +332,7 @@ pub fn GrooveType(
             }
 
             const derived_fn = @TypeOf(@field(groove_options.derived, field_name));
-            return @typeInfo(derived_fn).Fn.return_type.?.Optional.child;
+            return std.meta.Child(@typeInfo(derived_fn).Fn.return_type.?);
         }
 
         fn HelperType(comptime field_name: []const u8) type {

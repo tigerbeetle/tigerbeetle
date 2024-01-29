@@ -116,7 +116,7 @@ pub fn main() !void {
         allocator,
         client_id,
         cluster_id,
-        @as(u8, @intCast(addresses.len)),
+        @intCast(addresses.len),
         &message_pool,
         .{
             .configuration = addresses,
@@ -512,7 +512,7 @@ const Benchmark = struct {
         operation: StateMachine.Operation,
         result: []const u8,
     ) void {
-        const b: *Benchmark = @ptrFromInt(@as(u64, @intCast(user_data)));
+        const b: *Benchmark = @ptrFromInt(@as(usize, @intCast(user_data)));
         const callback = b.callback.?;
         b.callback = null;
 

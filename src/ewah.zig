@@ -61,7 +61,7 @@ pub fn ewah(comptime Word: type) type {
         }
 
         inline fn marker_word(mark: Marker) Word {
-            return @as(Word, @bitCast(mark));
+            return @bitCast(mark);
         }
 
         pub const Decoder = struct {
@@ -225,8 +225,8 @@ pub fn ewah(comptime Word: type) type {
                     };
                     source_index += uniform_word_count;
                     // For consistent encoding, set the run/uniform bit to 0 when there is no run.
-                    const uniform_bit =
-                        if (uniform_word_count == 0) 0 else @as(u1, @intCast(word & 1));
+                    const uniform_bit: u1 =
+                        if (uniform_word_count == 0) 0 else @intCast(word & 1);
 
                     const literal_word_count = count: {
                         // Count sequential literals that immediately follow the run.
@@ -242,8 +242,8 @@ pub fn ewah(comptime Word: type) type {
 
                     target_words[target_index] = marker_word(.{
                         .uniform_bit = uniform_bit,
-                        .uniform_word_count = @as(MarkerUniformCount, @intCast(uniform_word_count)),
-                        .literal_word_count = @as(MarkerLiteralCount, @intCast(literal_word_count)),
+                        .uniform_word_count = @intCast(uniform_word_count),
+                        .literal_word_count = @intCast(literal_word_count),
                     });
                     target_index += 1;
 
@@ -309,7 +309,7 @@ test "ewah encode→decode cycle" {
         for ([_]usize{ 1, 2, 4, 5, 8, 16, 17, 32 }) |chunk_count| {
             var decoded: [4096]Word = undefined;
 
-            var fuzz_options = .{
+            const fuzz_options = .{
                 .encode_chunk_words_count = @divFloor(decoded.len, chunk_count),
                 .decode_chunk_words_count = @divFloor(decoded.len, chunk_count),
             };
@@ -334,7 +334,7 @@ test "ewah Word=u8" {
         try test_decode(u8, &.{
             codec.marker_word(.{
                 .uniform_bit = 0,
-                .uniform_word_count = @as(codec.MarkerUniformCount, @intCast(uniform_word_count)),
+                .uniform_word_count = @intCast(uniform_word_count),
                 .literal_word_count = 3,
             }),
             12,

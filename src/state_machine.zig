@@ -235,7 +235,6 @@ pub fn StateMachineType(
                 .ids = constants.tree_ids.posted,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .fulfillment = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{ "fulfillment", "padding" },
                 .derived = .{},
@@ -300,6 +299,8 @@ pub fn StateMachineType(
                 comptime field: Field,
                 completion: *FieldType(field),
             ) *StateMachine {
+                comptime assert(field != .null);
+
                 const context = @fieldParentPtr(PrefetchContext, @tagName(field), completion);
                 return @fieldParentPtr(StateMachine, "prefetch_context", context);
             }
@@ -634,7 +635,7 @@ pub fn StateMachineType(
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
             const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
 
-            var scan = scan: {
+            const scan = scan: {
                 const timestamp_range: TimestampRange = .{
                     .min = if (filter.timestamp_min == 0)
                         TimestampRange.timestamp_min
@@ -819,7 +820,7 @@ pub fn StateMachineType(
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(operation != .lookup_accounts and operation != .lookup_transfers);
+            comptime assert(operation == .create_accounts or operation == .create_transfers);
 
             const events = mem.bytesAsSlice(Event(operation), input);
             var results = mem.bytesAsSlice(Result(operation), output);
@@ -872,7 +873,7 @@ pub fn StateMachineType(
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
                                 results[count] = .{
-                                    .index = @as(u32, @intCast(chain_index)),
+                                    .index = @intCast(chain_index),
                                     .result = .linked_event_failed,
                                 };
                                 count += 1;
@@ -881,7 +882,7 @@ pub fn StateMachineType(
                             assert(result == .linked_event_failed or result == .linked_event_chain_open);
                         }
                     }
-                    results[count] = .{ .index = @as(u32, @intCast(index)), .result = result };
+                    results[count] = .{ .index = @intCast(index), .result = result };
                     count += 1;
                 }
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
@@ -1313,8 +1314,8 @@ pub fn StateMachineType(
         }
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
-            const batch_accounts_max = @as(u32, @intCast(constants.batch_max.create_accounts));
-            const batch_transfers_max = @as(u32, @intCast(constants.batch_max.create_transfers));
+            const batch_accounts_max: u32 = @intCast(constants.batch_max.create_accounts);
+            const batch_transfers_max: u32 = @intCast(constants.batch_max.create_transfers);
             assert(batch_accounts_max == constants.batch_max.lookup_accounts);
             assert(batch_transfers_max == constants.batch_max.lookup_transfers);
 
@@ -1627,7 +1628,7 @@ fn check(test_table: []const u8) !void {
             .setup => |b| {
                 assert(operation == null);
 
-                var account = context.state_machine.forest.grooves.accounts.get(b.account).?;
+                const account = context.state_machine.forest.grooves.accounts.get(b.account).?;
                 var account_new = account.*;
 
                 account_new.debits_pending = b.debits_pending;
@@ -1657,7 +1658,7 @@ fn check(test_table: []const u8) !void {
                     try accounts.put(a.id, event);
                 } else {
                     const result = CreateAccountsResult{
-                        .index = @as(u32, @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1)),
+                        .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
                         .result = a.result,
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));
@@ -1673,7 +1674,7 @@ fn check(test_table: []const u8) !void {
                     try transfers.put(t.id, event);
                 } else {
                     const result = CreateTransfersResult{
-                        .index = @as(u32, @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1)),
+                        .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
                         .result = t.result,
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));
@@ -1731,7 +1732,7 @@ fn check(test_table: []const u8) !void {
                     request.items,
                     reply_actual_buffer[0..TestContext.message_body_size_max],
                 );
-                var reply_actual = reply_actual_buffer[0..reply_actual_size];
+                const reply_actual = reply_actual_buffer[0..reply_actual_size];
 
                 if (commit_operation == .lookup_accounts) {
                     for (std.mem.bytesAsSlice(Account, reply_actual)) |*a| a.timestamp = 0;

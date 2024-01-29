@@ -58,12 +58,12 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .replicas = commit_replicas,
             });
 
-            var replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
+            const replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
             return Self{
-                .node_count = @as(u8, @intCast(options.replicas.len)),
+                .node_count = @intCast(options.replicas.len),
                 .replica_count = options.replica_count,
                 .commits = commits,
                 .replicas = options.replicas,

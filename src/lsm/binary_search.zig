@@ -142,7 +142,7 @@ pub fn binary_search_values_upsert_index(
             key <= key_from_value(&values[offset]));
     }
 
-    return @as(u32, @intCast(offset));
+    return @intCast(offset);
 }
 
 pub inline fn binary_search_keys_upsert_index(
@@ -365,16 +365,16 @@ const test_binary_search = struct {
         const keys = try gpa.alloc(u32, keys_count);
         defer gpa.free(keys);
 
-        for (keys, 0..) |*key, i| key.* = @as(u32, @intCast(7 * i + 3));
+        for (keys, 0..) |*key, i| key.* = @intCast(7 * i + 3);
 
         var target_key: u32 = 0;
         while (target_key < keys_count + 13) : (target_key += 1) {
             var expect: BinarySearchResult = .{ .index = 0, .exact = false };
             for (keys, 0..) |key, i| {
                 switch (std.math.order(key, target_key)) {
-                    .lt => expect.index = @as(u32, @intCast(i)) + 1,
+                    .lt => expect.index = @intCast(i + 1),
                     .eq => {
-                        expect.index = @as(u32, @intCast(i));
+                        expect.index = @intCast(i);
                         expect.exact = true;
                         if (mode == .lower_bound) break;
                     },
@@ -451,9 +451,9 @@ const test_binary_search = struct {
         var expect: BinarySearchResult = .{ .index = 0, .exact = false };
         for (keys, 0..) |key, i| {
             switch (std.math.order(key, target_key)) {
-                .lt => expect.index = @as(u32, @intCast(i)) + 1,
+                .lt => expect.index = @intCast(i + 1),
                 .eq => {
-                    expect.index = @as(u32, @intCast(i));
+                    expect.index = @intCast(i);
                     expect.exact = true;
                     if (mode == .lower_bound) break;
                 },

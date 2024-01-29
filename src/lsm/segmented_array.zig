@@ -180,7 +180,7 @@ fn SegmentedArrayType(
                 }
             }
             for (array.nodes[0..array.node_count], 0..) |_, node_index| {
-                const c = array.count(@as(u32, @intCast(node_index)));
+                const c = array.count(@intCast(node_index));
                 // Every node is at most full.
                 assert(c <= node_capacity);
                 // Every node is at least half-full, except the last.
@@ -192,7 +192,7 @@ fn SegmentedArrayType(
                 // If Key is not null then the elements must be sorted by key_from_value (but not necessarily unique).
                 var key_prior_or_null: ?K = null;
                 for (array.nodes[0..array.node_count], 0..) |_, node_index| {
-                    for (array.node_elements(@as(u32, @intCast(node_index)))) |*value| {
+                    for (array.node_elements(@intCast(node_index))) |*value| {
                         const key = key_from_value(value);
                         if (key_prior_or_null) |key_prior| {
                             assert(key_prior <= key);
@@ -309,7 +309,7 @@ fn SegmentedArrayType(
                 );
                 stdx.copy_disjoint(.inexact, T, a_pointer[cursor.relative_index..], elements);
 
-                array.increment_indexes_after(a, @as(u32, @intCast(elements.len)));
+                array.increment_indexes_after(a, @intCast(elements.len));
                 return;
             }
 
@@ -386,7 +386,7 @@ fn SegmentedArrayType(
             );
 
             array.indexes[b] = array.indexes[a] + a_half;
-            array.increment_indexes_after(b, @as(u32, @intCast(elements.len)));
+            array.increment_indexes_after(b, @intCast(elements.len));
         }
 
         /// Behaves like mem.copyBackwards, but as if `a` and `b` were a single contiguous slice.
@@ -436,7 +436,7 @@ fn SegmentedArrayType(
                 assert(std.meta.alignment(@TypeOf(node_pointer)) >= @alignOf(T));
                 assert(@sizeOf(@TypeOf(node_pointer.*)) >= @sizeOf([node_capacity]T));
             }
-            array.nodes[node] = @as(*[node_capacity]T, @ptrCast(node_pointer));
+            array.nodes[node] = @ptrCast(@alignCast(node_pointer));
             assert(array.indexes[node] == array.indexes[node + 1]);
         }
 
@@ -911,7 +911,7 @@ fn SegmentedArrayType(
                 //
                 // (If there are two adjacent nodes starting with keys A and C, and we search B,
                 // we want to pick the A node.)
-                const node = @as(u32, @intCast(offset));
+                const node: u32 = @intCast(offset);
                 assert(node < array.node_count);
 
                 const relative_index = binary_search_values_upsert_index(
@@ -1057,7 +1057,7 @@ fn FuzzContextType(
         }
 
         fn insert(context: *Self) !void {
-            const reference_len = @as(u32, @intCast(context.reference.items.len));
+            const reference_len: u32 = @intCast(context.reference.items.len);
             const count_free = element_count_max - reference_len;
 
             if (count_free == 0) return;
@@ -1092,7 +1092,7 @@ fn FuzzContextType(
         }
 
         fn remove(context: *Self) !void {
-            const reference_len = @as(u32, @intCast(context.reference.items.len));
+            const reference_len: u32 = @intCast(context.reference.items.len);
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, TestArray.node_capacity * 3);
@@ -1201,7 +1201,7 @@ fn FuzzContextType(
                     try testing.expect(std.meta.eql(
                         i,
                         context.array.absolute_index_for_cursor(
-                            context.array.cursor_for_absolute_index(@as(u32, @intCast(i))),
+                            context.array.cursor_for_absolute_index(@intCast(i)),
                         ),
                     ));
                 }

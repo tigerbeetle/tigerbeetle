@@ -242,7 +242,7 @@ pub const FreeSet = struct {
         assert(set.reservation_state == .reserving);
         assert(reserve_count > 0);
 
-        var shard_start = find_bit(
+        const shard_start = find_bit(
             set.index,
             @divFloor(set.reservation_blocks, shard_bits),
             set.index.bit_length,
@@ -1000,7 +1000,7 @@ test "FreeSet encode/decode manual" {
     try std.testing.expectEqualSlices(usize, &decoded_expect, bit_set_masks(decoded_actual.blocks));
 
     // Test encode.
-    var encoded_actual = try std.testing.allocator.alignedAlloc(
+    const encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
         FreeSet.encode_size_max(decoded_actual.blocks.bit_length),
@@ -1095,10 +1095,10 @@ test "FreeSet.acquire part-way through a shard" {
     var set = try FreeSet.open_empty(std.testing.allocator, FreeSet.shard_bits * 3);
     defer set.deinit(std.testing.allocator);
 
-    var reservation_a = set.reserve(1).?;
+    const reservation_a = set.reserve(1).?;
     defer set.forfeit(reservation_a);
 
-    var reservation_b = set.reserve(2 * FreeSet.shard_bits).?;
+    const reservation_b = set.reserve(2 * FreeSet.shard_bits).?;
     defer set.forfeit(reservation_b);
 
     // Acquire all of reservation B.

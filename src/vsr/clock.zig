@@ -115,7 +115,7 @@ pub fn ClockType(comptime Time: type) type {
             errdefer allocator.free(window.sources);
 
             // There are two Marzullo tuple bounds (lower and upper) per source clock offset sample:
-            var marzullo_tuples = try allocator.alloc(Marzullo.Tuple, replica_count * 2);
+            const marzullo_tuples = try allocator.alloc(Marzullo.Tuple, replica_count * 2);
             errdefer allocator.free(marzullo_tuples);
 
             var self = Self{
@@ -382,7 +382,7 @@ pub fn ClockType(comptime Time: type) type {
                 fmt.fmtDurationSigned(new_interval.upper_bound - new_interval.lower_bound),
             });
 
-            const elapsed = @as(i64, @intCast(self.epoch.elapsed(self)));
+            const elapsed: i64 = @intCast(self.epoch.elapsed(self));
             const system = self.realtime();
             const lower = self.epoch.realtime + elapsed + new_interval.lower_bound;
             const upper = self.epoch.realtime + elapsed + new_interval.upper_bound;
@@ -424,13 +424,13 @@ pub fn ClockType(comptime Time: type) type {
             for (self.window.sources, 0..) |sampled, source| {
                 if (sampled) |sample| {
                     self.marzullo_tuples[count] = Marzullo.Tuple{
-                        .source = @as(u8, @intCast(source)),
+                        .source = @intCast(source),
                         .offset = sample.clock_offset - @as(i64, @intCast(sample.one_way_delay + tolerance)),
                         .bound = .lower,
                     };
                     count += 1;
                     self.marzullo_tuples[count] = Marzullo.Tuple{
-                        .source = @as(u8, @intCast(source)),
+                        .source = @intCast(source),
                         .offset = sample.clock_offset + @as(i64, @intCast(sample.one_way_delay + tolerance)),
                         .bound = .upper,
                     };
@@ -489,7 +489,7 @@ const ClockUnitTestContainer = struct {
             if (@mod(self.clock.time.ticks, self.learn_interval) == 0) {
                 const on_pong_time = self.clock.monotonic();
                 const m0 = on_pong_time - self.rtt;
-                const t1 = @as(i64, @intCast(on_pong_time - self.owd));
+                const t1: i64 = @intCast(on_pong_time - self.owd);
 
                 self.clock.learn(1, m0, t1, on_pong_time);
                 self.clock.learn(2, m0, t1, on_pong_time);
@@ -514,45 +514,45 @@ const ClockUnitTestContainer = struct {
                 // Beyond this, the offset > OWD and the Marzullo interval will be from replica 1 and
                 // replica 2. The `clock.realtime_synchronized` will be clamped to the lower bound.
                 // Therefore the `clock.realtime_synchronized` will be offset by the OWD.
-                var threshold = self.owd / @as(u64, @intCast(self.clock.time.offset_coefficient_A));
+                const threshold = self.owd / @as(u64, @intCast(self.clock.time.offset_coefficient_A));
                 ret[0] = .{
                     .tick = threshold,
                     .expected_offset = self.clock.time.offset(threshold - self.learn_interval),
                 };
                 ret[1] = .{
                     .tick = threshold + 100,
-                    .expected_offset = @as(i64, @intCast(self.owd)),
+                    .expected_offset = @intCast(self.owd),
                 };
                 ret[2] = .{
                     .tick = threshold + 200,
-                    .expected_offset = @as(i64, @intCast(self.owd)),
+                    .expected_offset = @intCast(self.owd),
                 };
             },
             .periodic => {
                 ret[0] = .{
-                    .tick = @as(u64, @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 4))),
-                    .expected_offset = @as(i64, @intCast(self.owd)),
+                    .tick = @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 4)),
+                    .expected_offset = @intCast(self.owd),
                 };
                 ret[1] = .{
-                    .tick = @as(u64, @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 2))),
+                    .tick = @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 2)),
                     .expected_offset = 0,
                 };
                 ret[2] = .{
-                    .tick = @as(u64, @intCast(@divTrunc(self.clock.time.offset_coefficient_B * 3, 4))),
+                    .tick = @intCast(@divTrunc(self.clock.time.offset_coefficient_B * 3, 4)),
                     .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
             },
             .step => {
                 ret[0] = .{
-                    .tick = @as(u64, @intCast(self.clock.time.offset_coefficient_B - 10)),
+                    .tick = @intCast(self.clock.time.offset_coefficient_B - 10),
                     .expected_offset = 0,
                 };
                 ret[1] = .{
-                    .tick = @as(u64, @intCast(self.clock.time.offset_coefficient_B + 10)),
+                    .tick = @intCast(self.clock.time.offset_coefficient_B + 10),
                     .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
                 ret[2] = .{
-                    .tick = @as(u64, @intCast(self.clock.time.offset_coefficient_B + 10)),
+                    .tick = @intCast(self.clock.time.offset_coefficient_B + 10),
                     .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
             },
@@ -580,7 +580,7 @@ test "ideal clocks get clamped to cluster time" {
         std.time.ns_per_ms, // loses 1ms per tick
         0,
     );
-    var linear_clock_assertion_points = ideal_constant_drift_clock.ticks_to_perform_assertions();
+    const linear_clock_assertion_points = ideal_constant_drift_clock.ticks_to_perform_assertions();
     for (linear_clock_assertion_points) |point| {
         ideal_constant_drift_clock.run_till_tick(point.tick);
         try testing.expectEqual(
@@ -597,7 +597,7 @@ test "ideal clocks get clamped to cluster time" {
         std.time.ns_per_s, // loses up to 1s
         200, // period of 200 ticks
     );
-    var ideal_periodic_drift_clock_assertion_points =
+    const ideal_periodic_drift_clock_assertion_points =
         ideal_periodic_drift_clock.ticks_to_perform_assertions();
     for (ideal_periodic_drift_clock_assertion_points) |point| {
         ideal_periodic_drift_clock.run_till_tick(point.tick);
@@ -615,7 +615,7 @@ test "ideal clocks get clamped to cluster time" {
         -5 * std.time.ns_per_day, // jumps 5 days ahead.
         49, // after 49 ticks
     );
-    var ideal_jumping_clock_assertion_points = ideal_jumping_clock.ticks_to_perform_assertions();
+    const ideal_jumping_clock_assertion_points = ideal_jumping_clock.ticks_to_perform_assertions();
     for (ideal_jumping_clock_assertion_points) |point| {
         ideal_jumping_clock.run_till_tick(point.tick);
         try testing.expectEqual(
@@ -738,7 +738,7 @@ const ClockSimulator = struct {
                             ClockSimulator.handle_packet,
                             .{
                                 .source = clock.replica,
-                                .target = @as(u8, @intCast(target)),
+                                .target = @intCast(target),
                             },
                         );
                     }
@@ -791,7 +791,7 @@ test "clock: fuzz test" {
         .offset_coefficient_A = 0,
         .offset_coefficient_B = 0,
     };
-    var seed = @as(u64, @intCast(system_time.realtime()));
+    const seed: u64 = @intCast(system_time.realtime());
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;
@@ -826,23 +826,23 @@ test "clock: fuzz test" {
         simulator.tick();
 
         for (simulator.clocks, 0..) |*clock, index| {
-            var offset = clock.time.offset(simulator.ticks);
-            var abs_offset = if (offset >= 0) @as(u64, @intCast(offset)) else @as(u64, @intCast(-offset));
+            const offset = clock.time.offset(simulator.ticks);
+            const abs_offset: u64 = if (offset >= 0) @intCast(offset) else @intCast(-offset);
             max_clock_offset = if (abs_offset > max_clock_offset) abs_offset else max_clock_offset;
             min_clock_offset = if (abs_offset < min_clock_offset) abs_offset else min_clock_offset;
 
-            var synced_time = clock.realtime_synchronized() orelse {
+            const synced_time = clock.realtime_synchronized() orelse {
                 clock_ticks_without_synchronization[index] += 1;
                 continue;
             };
 
             for (simulator.clocks, 0..) |*other_clock, other_clock_index| {
                 if (index == other_clock_index) continue;
-                var other_clock_sync_time = other_clock.realtime_synchronized() orelse {
+                const other_clock_sync_time = other_clock.realtime_synchronized() orelse {
                     continue;
                 };
-                var err: i64 = synced_time - other_clock_sync_time;
-                var abs_err: u64 = if (err >= 0) @as(u64, @intCast(err)) else @as(u64, @intCast(-err));
+                const err: i64 = synced_time - other_clock_sync_time;
+                const abs_err: u64 = if (err >= 0) @intCast(err) else @intCast(-err);
                 max_sync_error = if (abs_err > max_sync_error) abs_err else max_sync_error;
                 min_sync_error = if (abs_err < min_sync_error) abs_err else min_sync_error;
             }

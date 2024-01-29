@@ -1249,21 +1249,21 @@ const TestContext = struct {
             .S3 => array.append_assume_capacity(.{ .replica = replica_count + 3 }),
             .S4 => array.append_assume_capacity(.{ .replica = replica_count + 4 }),
             .S5 => array.append_assume_capacity(.{ .replica = replica_count + 5 }),
-            .A0 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 0) % replica_count)) }),
-            .B1 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 1) % replica_count)) }),
-            .B2 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 2) % replica_count)) }),
-            .B3 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 3) % replica_count)) }),
-            .B4 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 4) % replica_count)) }),
-            .B5 => array.append_assume_capacity(.{ .replica = @as(u8, @intCast((view + 5) % replica_count)) }),
+            .A0 => array.append_assume_capacity(.{ .replica = @intCast((view + 0) % replica_count) }),
+            .B1 => array.append_assume_capacity(.{ .replica = @intCast((view + 1) % replica_count) }),
+            .B2 => array.append_assume_capacity(.{ .replica = @intCast((view + 2) % replica_count) }),
+            .B3 => array.append_assume_capacity(.{ .replica = @intCast((view + 3) % replica_count) }),
+            .B4 => array.append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
+            .B5 => array.append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
-                        array.append_assume_capacity(.{ .replica = @as(u8, @intCast(i)) });
+                        array.append_assume_capacity(.{ .replica = @intCast(i) });
                     }
                 }
                 if (selector == .__ or selector == .S_) {
                     for (t.cluster.replicas[replica_count..], 0..) |_, i| {
-                        array.append_assume_capacity(.{ .replica = @as(u8, @intCast(replica_count + i)) });
+                        array.append_assume_capacity(.{ .replica = @intCast(replica_count + i) });
                     }
                 }
                 if (selector == .__ or selector == .C_) {

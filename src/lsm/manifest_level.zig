@@ -714,7 +714,7 @@ pub fn ManifestLevelType(
                 // This const cast is safe as we know that the memory pointed to is in fact
                 // mutable. That is, the table is not in the .text or .rodata section.
                 if (range.tables.count() < max_overlapping_tables) {
-                    var table_info_reference = TableInfoReference{
+                    const table_info_reference = TableInfoReference{
                         .table_info = @constCast(table),
                         .generation = level.generation,
                     };
@@ -911,7 +911,7 @@ pub fn TestContext(
 
             assert(new_key_min > key);
 
-            var i = binary_search.binary_search_values_upsert_index(
+            const i = binary_search.binary_search_values_upsert_index(
                 Key,
                 TableInfo,
                 key_min_from_table,
@@ -1002,7 +1002,7 @@ pub fn TestContext(
         }
 
         fn delete_tables(context: *Self) !void {
-            const reference_len = @as(u32, @intCast(context.reference.items.len));
+            const reference_len: u32 = @intCast(context.reference.items.len);
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, 13);
@@ -1019,7 +1019,7 @@ pub fn TestContext(
                     table.key_min,
                     .ascending,
                 ).?;
-                var absolute_index = context.level.keys.absolute_index_for_cursor(cursor_start);
+                const absolute_index = context.level.keys.absolute_index_for_cursor(cursor_start);
 
                 var it = context.level.tables.iterator_from_index(absolute_index, .ascending);
                 while (it.next()) |level_table| {
@@ -1165,7 +1165,7 @@ pub fn TestContext(
             }
 
             if (reference.len > 0) {
-                const reference_len = @as(u32, @intCast(reference.len));
+                const reference_len: u32 = @intCast(reference.len);
                 const start = context.random.uintLessThanBiased(u32, reference_len);
                 const end = context.random.uintLessThanBiased(u32, reference_len - start) + start;
 

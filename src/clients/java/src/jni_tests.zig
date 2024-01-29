@@ -18,7 +18,7 @@ test "JNI: check jvm" {
     var vm_len: jni.JSize = 0;
     const get_created_java_vm_result = JavaVM.get_created_java_vm(
         &vm_buf,
-        @as(jni.JSize, @intCast(vm_buf.len)),
+        @intCast(vm_buf.len),
         &vm_len,
     );
 
@@ -630,7 +630,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
 
     const element: u8 = 42;
     var native_buffer = [_]u8{element} ** 256;
-    const buffer = env.new_direct_byte_buffer(&native_buffer, @as(jni.JSize, @intCast(native_buffer.len)));
+    const buffer = env.new_direct_byte_buffer(&native_buffer, @intCast(native_buffer.len));
     try testing.expect(buffer != null);
     defer env.delete_local_ref(buffer);
 
@@ -642,7 +642,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         const non_virtual_method_id = env.get_method_id(direct_buffer_class, "get", "()B");
         try testing.expect(non_virtual_method_id != null);
 
-        const expected = @as(jni.JByte, @bitCast(element));
+        const expected: jni.JByte = @bitCast(element);
 
         const read = env.call_byte_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -663,10 +663,10 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(non_virtual_method_id != null);
 
         const Packed = packed struct { a: u8, b: u8 };
-        const expected = @as(jni.JShort, @bitCast(Packed{
+        const expected: jni.JShort = @bitCast(Packed{
             .a = element,
             .b = element,
-        }));
+        });
 
         const read = env.call_short_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -687,10 +687,10 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(non_virtual_method_id != null);
 
         const Packed = packed struct { a: u8, b: u8 };
-        const expected = @as(jni.JChar, @bitCast(Packed{
+        const expected: jni.JChar = @bitCast(Packed{
             .a = element,
             .b = element,
-        }));
+        });
 
         const read = env.call_char_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -711,12 +711,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(non_virtual_method_id != null);
 
         const Packed = packed struct { a: u8, b: u8, c: u8, d: u8 };
-        const expected = @as(jni.JInt, @bitCast(Packed{
+        const expected: jni.JInt = @bitCast(Packed{
             .a = element,
             .b = element,
             .c = element,
             .d = element,
-        }));
+        });
 
         const read = env.call_int_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -737,7 +737,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(non_virtual_method_id != null);
 
         const Packed = packed struct { a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8 };
-        const expected = @as(jni.JLong, @bitCast(Packed{
+        const expected: jni.JLong = @bitCast(Packed{
             .a = element,
             .b = element,
             .c = element,
@@ -746,7 +746,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
             .f = element,
             .g = element,
             .h = element,
-        }));
+        });
 
         const read = env.call_long_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -767,12 +767,12 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(non_virtual_method_id != null);
 
         const Packed = packed struct { a: u8, b: u8, c: u8, d: u8 };
-        const expected = @as(jni.JFloat, @bitCast(Packed{
+        const expected: jni.JFloat = @bitCast(Packed{
             .a = element,
             .b = element,
             .c = element,
             .d = element,
-        }));
+        });
 
         const read = env.call_float_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -793,7 +793,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
         try testing.expect(non_virtual_method_id != null);
 
         const Packed = packed struct { a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8 };
-        const expected = @as(jni.JDouble, @bitCast(Packed{
+        const expected: jni.JDouble = @bitCast(Packed{
             .a = element,
             .b = element,
             .c = element,
@@ -802,7 +802,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
             .f = element,
             .g = element,
             .h = element,
-        }));
+        });
 
         const read = env.call_double_method(buffer, method_id, null);
         try testing.expect(env.exception_check() == .jni_false);
@@ -1178,7 +1178,7 @@ test "JNI: strings" {
     const content: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("Hello utf16")[0..];
     const string = env.new_string(
         content.ptr,
-        @as(jni.JSize, @intCast(content.len)),
+        @intCast(content.len),
     );
     try testing.expect(string != null);
     defer env.delete_local_ref(string);
@@ -1221,7 +1221,7 @@ test "JNI: GetStringRegion" {
     const content: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("ABCDEFGHIJKLMNOPQRSTUVXYZ")[0..];
     const string = env.new_string(
         content.ptr,
-        @as(jni.JSize, @intCast(content.len)),
+        @intCast(content.len),
     );
     try testing.expect(string != null);
     defer env.delete_local_ref(string);
@@ -1255,7 +1255,7 @@ test "JNI: GetStringCritical" {
     const env: *JNIEnv = get_testing_env();
 
     const content: []const u16 = std.unicode.utf8ToUtf16LeStringLiteral("ABCDEFGHIJKLMNOPQRSTUVXYZ")[0..];
-    const str = env.new_string(content.ptr, @as(jni.JSize, @intCast(content.len)));
+    const str = env.new_string(content.ptr, @intCast(content.len));
     try testing.expect(str != null);
     defer env.delete_local_ref(str);
 
@@ -1350,8 +1350,8 @@ test "JNI: primitive arrays" {
                             0 => jni.JBoolean.jni_false,
                             else => jni.JBoolean.jni_true,
                         },
-                        jni.JFloat, jni.JDouble => @as(PrimitiveType, @floatFromInt(value)),
-                        else => @as(PrimitiveType, @intCast(value)),
+                        jni.JFloat, jni.JDouble => @floatFromInt(value),
+                        else => @intCast(value),
                     };
                 }
 

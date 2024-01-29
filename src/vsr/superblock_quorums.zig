@@ -251,12 +251,12 @@ pub fn QuorumsType(comptime options: Options) type {
                 // for certain which copy this was supposed to be.
                 // We make the assumption that this was not a double-fault (corrupt + misdirect) —
                 // that is, the copy is in the correct slot, and its copy index is simply corrupt.
-                quorum.slots[slot] = @as(u8, @intCast(slot));
+                quorum.slots[slot] = @intCast(slot);
                 quorum.copies.set(slot);
             } else if (quorum.copies.isSet(copy.copy)) {
                 // Ignore the duplicate copy.
             } else {
-                quorum.slots[slot] = @as(u8, @intCast(copy.copy));
+                quorum.slots[slot] = @intCast(copy.copy);
                 quorum.copies.set(copy.copy);
             }
 
@@ -350,10 +350,10 @@ pub fn QuorumsType(comptime options: Options) type {
                 var b: ?u8 = null;
                 var c: ?u8 = null;
                 for (iterator.slots, 0..) |slot, i| {
-                    if (slot == null and !copies_any.isSet(i)) a = @as(u8, @intCast(i));
-                    if (slot == null and copies_any.isSet(i)) b = @as(u8, @intCast(i));
+                    if (slot == null and !copies_any.isSet(i)) a = @intCast(i);
+                    if (slot == null and copies_any.isSet(i)) b = @intCast(i);
                     if (slot) |slot_copy| {
-                        if (slot_copy != i and copies_duplicate.isSet(slot_copy)) c = @as(u8, @intCast(i));
+                        if (slot_copy != i and copies_duplicate.isSet(slot_copy)) c = @intCast(i);
                     }
                 }
 

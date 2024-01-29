@@ -177,7 +177,7 @@ pub const IO = struct {
                     if (-cqe.res == @intFromEnum(os.E.TIME)) etime.* = true;
                     continue;
                 }
-                const completion = @as(*Completion, @ptrFromInt(cqe.user_data));
+                const completion: *Completion = @ptrFromInt(cqe.user_data);
                 completion.result = cqe.res;
                 // We do not run the completion here (instead appending to a linked list) to avoid:
                 // * recursion through `flush_submissions()` and `flush_completions()`,
@@ -328,7 +328,7 @@ pub const IO = struct {
                             };
                             break :blk err;
                         } else {
-                            break :blk @as(os.socket_t, @intCast(completion.result));
+                            break :blk @intCast(completion.result);
                         }
                     };
                     call_callback(completion, &result, callback_tracer_slot);
@@ -410,7 +410,7 @@ pub const IO = struct {
                             };
                             break :blk err;
                         } else {
-                            break :blk @as(usize, @intCast(completion.result));
+                            break :blk @intCast(completion.result);
                         }
                     };
                     call_callback(completion, &result, callback_tracer_slot);
@@ -438,7 +438,7 @@ pub const IO = struct {
                             };
                             break :blk err;
                         } else {
-                            break :blk @as(usize, @intCast(completion.result));
+                            break :blk @intCast(completion.result);
                         }
                     };
                     call_callback(completion, &result, callback_tracer_slot);
@@ -473,7 +473,7 @@ pub const IO = struct {
                             };
                             break :blk err;
                         } else {
-                            break :blk @as(usize, @intCast(completion.result));
+                            break :blk @intCast(completion.result);
                         }
                     };
                     call_callback(completion, &result, callback_tracer_slot);
@@ -517,7 +517,7 @@ pub const IO = struct {
                             };
                             break :blk err;
                         } else {
-                            break :blk @as(usize, @intCast(completion.result));
+                            break :blk @intCast(completion.result);
                         }
                     };
                     call_callback(completion, &result, callback_tracer_slot);
@@ -1006,7 +1006,7 @@ pub const IO = struct {
         if (@hasDecl(os.O, "LARGEFILE")) flags |= os.O.LARGEFILE;
 
         var direct_io_supported = false;
-        var dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
+        const dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
 
         if (dir_on_tmpfs) {
             log.warn("tmpfs is not durable, and your data will be lost on reboot", .{});
@@ -1136,7 +1136,7 @@ pub const IO = struct {
             const res = os.linux.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 .SUCCESS => {
-                    os.close(@as(os.fd_t, @intCast(res)));
+                    os.close(@intCast(res));
                     return true;
                 },
                 .INTR => continue,
@@ -1151,7 +1151,7 @@ pub const IO = struct {
     fn fs_allocate(fd: os.fd_t, size: u64) !void {
         const mode: i32 = 0;
         const offset: i64 = 0;
-        const length = @as(i64, @intCast(size));
+        const length: i64 = @intCast(size);
 
         while (true) {
             const rc = os.linux.fallocate(fd, mode, offset, length);

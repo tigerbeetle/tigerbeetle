@@ -145,7 +145,7 @@ const Command = struct {
 
         var aof: AOFType = undefined;
         if (constants.aof_record) {
-            var aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
+            const aof_path = try std.fmt.allocPrint(allocator, "{s}.aof", .{args.path});
             defer allocator.free(aof_path);
 
             aof = try AOF.from_absolute_path(aof_path);
@@ -176,7 +176,7 @@ const Command = struct {
 
         var replica: Replica = undefined;
         replica.open(allocator, .{
-            .node_count = @as(u8, @intCast(args.addresses.len)),
+            .node_count = @intCast(args.addresses.len),
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,

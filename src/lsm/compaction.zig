@@ -692,7 +692,7 @@ pub fn CompactionType(
 
             const values_in = compaction.values_in[@intFromEnum(input_level)];
             const values_out = compaction.table_builder.data_block_values();
-            var values_out_index = compaction.table_builder.value_count;
+            const values_out_index = compaction.table_builder.value_count;
 
             assert(values_in.len > 0);
 

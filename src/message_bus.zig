@@ -493,7 +493,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(bus.replicas[replica] == null);
                 bus.replicas[replica] = connection;
 
-                var attempts = &bus.replicas_connect_attempts[replica];
+                const attempts = &bus.replicas_connect_attempts[replica];
                 const ms = vsr.exponential_backoff_with_jitter(
                     bus.prng.random(),
                     constants.connection_delay_min_ms,

@@ -50,7 +50,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         const Self = @This();
 
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
-        pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
+        pub const Replica = vsr.ReplicaType(
+            StateMachine,
+            MessageBus,
+            Storage,
+            Time,
+            AOF,
+        );
         pub const Client = vsr.Client(StateMachine, MessageBus);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
@@ -124,8 +130,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var prng = std.rand.DefaultPrng.init(options.seed);
             const random = prng.random();
 
-            // TODO(Zig) Client.init()'s MessagePool.Options require a reference to the network — use
-            // @returnAddress() instead.
+            // TODO(Zig) Client.init()'s MessagePool.Options require a reference to the network.
+            // Use @returnAddress() instead.
             var network = try allocator.create(Network);
             errdefer allocator.destroy(network);
 
@@ -135,7 +141,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             );
             errdefer network.deinit();
 
-            var storage_fault_atlas = try allocator.create(StorageFaultAtlas);
+            const storage_fault_atlas = try allocator.create(StorageFaultAtlas);
             errdefer allocator.destroy(storage_fault_atlas);
 
             storage_fault_atlas.* = StorageFaultAtlas.init(
@@ -156,11 +162,16 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (storages, 0..) |*storage, replica_index| {
                 errdefer for (storages[0..replica_index]) |*s| s.deinit(allocator);
                 var storage_options = options.storage;
-                storage_options.replica_index = @as(u8, @intCast(replica_index));
+                storage_options.replica_index = @intCast(replica_index);
                 storage_options.fault_atlas = storage_fault_atlas;
                 storage_options.grid_checker = grid_checker;
-                storage.* = try Storage.init(allocator, options.storage_size_limit, storage_options);
-                // Disable most faults at startup, so that the replicas don't get stuck recovering_head.
+                storage.* = try Storage.init(
+                    allocator,
+                    options.storage_size_limit,
+                    storage_options,
+                );
+                // Disable most faults at startup,
+                // so that the replicas don't get stuck recovering_head.
                 storage.faulty = replica_index >= vsr.quorums(options.replica_count).view_change;
             }
             errdefer for (storages) |*storage| storage.deinit(allocator);
@@ -243,6 +254,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     allocator,
                     .{
                         .cluster = options.cluster_id,
+                        // TODO(zig) It should be possible to remove the `@as(u8,...)`.
                         .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
                     },
@@ -283,7 +295,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
                 const nonce = 1 + @as(u128, replica_index) << 64;
-                try cluster.open_replica(@as(u8, @intCast(replica_index)), nonce, .{
+                try cluster.open_replica(@intCast(replica_index), nonce, .{
                     .resolution = constants.tick_ms * std.time.ns_per_ms,
                     .offset_type = .linear,
                     .offset_coefficient_A = 0,
@@ -357,10 +369,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
             assert(cluster.replica_health[replica_index] == .down);
 
-            var nonce = cluster.replicas[replica_index].nonce + 1;
-            // Pass the old replica's Time through to the new replica. It will continue to tick while
-            // the replica is crashed, to ensure the clocks don't desynchronize too far to recover.
-            var time = cluster.replicas[replica_index].time;
+            const nonce = cluster.replicas[replica_index].nonce + 1;
+            // Pass the old replica's Time through to the new replica.
+            // It will continue to tick while the replica is crashed, to ensure the clocks don't
+            // desynchronize too far to recover.
+            // Intentionally use `var` to force the compiler to make a copy here and not do a
+            // pass-by-reference.
+            var time: Time = undefined;
+            time = cluster.replicas[replica_index].time;
             try cluster.open_replica(replica_index, nonce, time);
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
@@ -512,7 +528,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     };
                 },
                 .sync_stage_changed => switch (replica.syncing) {
-                    .requesting_checkpoint => cluster.log_replica(.sync_commenced, replica.replica),
+                    .requesting_checkpoint => cluster.log_replica(
+                        .sync_commenced,
+                        replica.replica,
+                    ),
                     .idle => cluster.log_replica(.sync_completed, replica.replica),
                     else => {},
                 },

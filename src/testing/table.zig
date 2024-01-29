@@ -52,19 +52,19 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
         .Struct => {
             var data: Data = undefined;
             inline for (std.meta.fields(Data)) |value_field| {
-                // The repeated else branch seems to be necessary to keep Zig from complaining:
-                //   control flow attempts to use compile-time variable at runtime
                 const Field = value_field.type;
-                if (value_field.default_value) |ptr| {
-                    if (eat(tokens, "_")) {
-                        const value_ptr: *const Field = @ptrCast(@alignCast(ptr));
-                        @field(data, value_field.name) = value_ptr.*;
-                    } else {
-                        @field(data, value_field.name) = parse_data(Field, tokens);
+                const value: Field = value: {
+                    if (comptime value_field.default_value) |ptr| {
+                        if (eat(tokens, "_")) {
+                            const value_ptr: *const Field = @ptrCast(@alignCast(ptr));
+                            break :value value_ptr.*;
+                        }
                     }
-                } else {
-                    @field(data, value_field.name) = parse_data(Field, tokens);
-                }
+
+                    break :value parse_data(Field, tokens);
+                };
+
+                @field(data, value_field.name) = value;
             }
             return data;
         },
@@ -93,7 +93,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
 }
 
 fn eat(tokens: *std.mem.TokenIterator(u8, .any), token: []const u8) bool {
-    var index_before = tokens.index;
+    const index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
     tokens.index = index_before;
     return false;

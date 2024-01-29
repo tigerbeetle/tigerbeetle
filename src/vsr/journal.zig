@@ -287,7 +287,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             // TODO Fix this assertion:
             // assert(write_ahead_log_zone_size <= storage.size);
 
-            var headers = try allocator.alignedAlloc(
+            const headers = try allocator.alignedAlloc(
                 Header.Prepare,
                 constants.sector_size,
                 slot_count,
@@ -295,7 +295,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             errdefer allocator.free(headers);
             for (headers) |*header| header.* = undefined;
 
-            var headers_redundant = try allocator.alignedAlloc(
+            const headers_redundant = try allocator.alignedAlloc(
                 Header.Prepare,
                 constants.sector_size,
                 slot_count,
@@ -309,11 +309,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var faulty = try BitSet.init_full(allocator, slot_count);
             errdefer faulty.deinit(allocator);
 
-            var prepare_checksums = try allocator.alloc(u128, slot_count);
+            const prepare_checksums = try allocator.alloc(u128, slot_count);
             errdefer allocator.free(prepare_checksums);
             @memset(prepare_checksums, 0);
 
-            var prepare_inhabited = try allocator.alloc(bool, slot_count);
+            const prepare_inhabited = try allocator.alloc(bool, slot_count);
             errdefer allocator.free(prepare_inhabited);
             @memset(prepare_inhabited, false);
 
@@ -630,7 +630,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 op -= 1;
 
                 // Get the entry at @mod(op) location, but only if entry.op == op, else null:
-                var A = journal.header_with_op(op);
+                const A = journal.header_with_op(op);
                 if (A) |a| {
                     if (B) |b| {
                         // If A was reordered then A may have a newer op than B (but an older view).
@@ -1156,7 +1156,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count <= journal.faulty.count);
             assert(read.destination_replica == null);
 
-            const slot = Slot{ .index = @as(u64, @intCast(read.op)) };
+            const slot = Slot{ .index = @intCast(read.op) };
             assert(slot.index < slot_count);
             assert(!journal.dirty.bit(slot));
             assert(journal.faulty.bit(slot));
@@ -2513,7 +2513,7 @@ pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usi
     const sectors_per_message = @divExact(constants.message_size_max, constants.sector_size);
     const sector_max = @divExact(constants.journal_size_prepares, constants.sector_size);
 
-    var sectors = std.mem.bytesAsSlice([constants.sector_size]u8, target);
+    const sectors = std.mem.bytesAsSlice([constants.sector_size]u8, target);
     for (sectors, 0..) |*sector_data, i| {
         const sector = @divExact(offset_logical, constants.sector_size) + i;
         if (sector == sector_max) {
@@ -2528,7 +2528,7 @@ pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usi
             @memset(sector_data, 0);
             if (sector % sectors_per_message == 0) {
                 // The header goes in the first sector of the message.
-                var sector_header =
+                const sector_header =
                     std.mem.bytesAsValue(Header.Prepare, sector_data[0..@sizeOf(Header)]);
                 if (message_slot == 0) {
                     sector_header.* = Header.Prepare.root(cluster);

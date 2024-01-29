@@ -473,7 +473,7 @@ test "tick to wait" {
                     else => |err| return os.windows.unexpectedWSAError(err),
                 }
             } else {
-                return @as(usize, @intCast(rc));
+                return @intCast(rc);
             }
         }
     }.run_test();

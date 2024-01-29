@@ -55,7 +55,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn reset(table: *TableMemory) void {
-            var mutability: Mutability = switch (table.mutability) {
+            const mutability: Mutability = switch (table.mutability) {
                 .immutable => .{ .immutable = .{} },
                 .mutable => .mutable,
             };

@@ -488,8 +488,8 @@ pub fn ReplicaType(
             self.superblock.working.vsr_state.assert_internally_consistent();
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
-            const replica = for (self.superblock.working.vsr_state.members, 0..) |member, index| {
-                if (member == replica_id) break @as(u8, @intCast(index));
+            const replica: u8 = for (self.superblock.working.vsr_state.members, 0..) |member, index| {
+                if (member == replica_id) break @intCast(index);
             } else unreachable;
             const replica_count = self.superblock.working.vsr_state.replica_count;
             if (replica >= options.node_count or replica_count > options.node_count) {
@@ -1236,7 +1236,7 @@ pub fn ReplicaType(
                 .view = self.view_durable(), // Don't drop pongs while the view is being updated.
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 .ping_timestamp_monotonic = message.header.ping_timestamp_monotonic,
-                .pong_timestamp_wall = @as(u64, @bitCast(self.clock.realtime())),
+                .pong_timestamp_wall = @bitCast(self.clock.realtime()),
             }));
         }
 
@@ -1251,7 +1251,7 @@ pub fn ReplicaType(
             if (message.header.replica >= self.replica_count) return;
 
             const m0 = message.header.ping_timestamp_monotonic;
-            const t1 = @as(i64, @bitCast(message.header.pong_timestamp_wall));
+            const t1: i64 = @bitCast(message.header.pong_timestamp_wall);
             const m2 = self.clock.monotonic();
 
             self.clock.learn(message.header.replica, m0, t1, m2);
@@ -2163,7 +2163,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            response.header.size = @as(u32, @intCast(@sizeOf(Header) * (1 + count)));
+            response.header.size = @intCast(@sizeOf(Header) * (1 + count));
             response.header.set_checksum_body(response.body());
             response.header.set_checksum();
 
@@ -2577,7 +2577,7 @@ pub fn ReplicaType(
                 assert(replica < self.replica_count);
 
                 if (replica != self.replica) {
-                    waiting[waiting_len] = @as(u8, @intCast(replica));
+                    waiting[waiting_len] = @intCast(replica);
                     waiting_len += 1;
                 }
             } else {
@@ -4854,7 +4854,7 @@ pub fn ReplicaType(
 
         /// Returns the index into the configuration of the primary for a given view.
         pub fn primary_index(self: *const Self, view: u32) u8 {
-            return @as(u8, @intCast(@mod(view, self.replica_count)));
+            return @intCast(@mod(view, self.replica_count));
         }
 
         /// Returns whether the replica is the primary for the current view.
@@ -9213,6 +9213,8 @@ const PipelineQueue = struct {
         // ordered and consecutive.
         const head_op = pipeline.prepare_queue.head_ptr().?.message.header.op;
         const tail_op = pipeline.prepare_queue.tail_ptr().?.message.header.op;
+        assert(tail_op == head_op + pipeline.prepare_queue.count - 1);
+
         if (op < head_op) return null;
         if (op > tail_op) return null;
 

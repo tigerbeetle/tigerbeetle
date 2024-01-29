@@ -434,7 +434,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
             for (&manifest.levels, 0..) |*manifest_level, index| {
-                const level = @as(u8, @intCast(index));
+                const level: u8 = @intCast(index);
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);
             }
@@ -442,7 +442,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshots: []const u64) void {
             for (manifest.levels, 0..) |_, level| {
-                manifest.assert_no_invisible_tables_at_level(@as(u8, @intCast(level)), snapshots);
+                manifest.assert_no_invisible_tables_at_level(@intCast(level), snapshots);
             }
         }
 

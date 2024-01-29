@@ -662,7 +662,7 @@ pub fn exponential_backoff_with_jitter(
 
     // Do not use `@truncate(u6, attempt)` since that only discards the high bits:
     // We want a saturating exponent here instead.
-    const exponent = @as(u6, @intCast(@min(std.math.maxInt(u6), attempt)));
+    const exponent: u6 = @intCast(@min(std.math.maxInt(u6), attempt));
 
     // A "1" shifted left gives any power of two:
     // 1<<0 = 1, 1<<1 = 2, 1<<2 = 4, 1<<3 = 8
@@ -678,7 +678,7 @@ pub fn exponential_backoff_with_jitter(
     const backoff = @min(range, min_non_zero * power);
     const jitter = random.uintAtMostBiased(u64, backoff);
 
-    const result = @as(u64, @intCast(min + jitter));
+    const result: u64 = @intCast(min + jitter);
     assert(result >= min);
     assert(result <= max);
 
@@ -884,7 +884,7 @@ test "parse_addresses: fuzz" {
     var input_max: [len_max]u8 = .{0} ** len_max;
     for (0..test_count) |_| {
         const len = random.uintAtMost(usize, len_max);
-        var input = input_max[0..len];
+        const input = input_max[0..len];
         for (input) |*c| {
             c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
         }
@@ -1028,7 +1028,7 @@ pub fn valid_members(members: *const Members) bool {
 
 fn member_count(members: *const Members) u8 {
     for (members, 0..) |member, index| {
-        if (member == 0) return @as(u8, @intCast(index));
+        if (member == 0) return @intCast(index);
     }
     return constants.members_max;
 }

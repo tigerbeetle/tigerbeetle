@@ -123,7 +123,7 @@ const NativeClient = struct {
             packet.operation = operation;
             packet.user_data = global_ref;
             packet.data = send_buffer.ptr;
-            packet.data_size = @as(u32, @intCast(send_buffer.len));
+            packet.data_size = @intCast(send_buffer.len);
             packet.next = null;
             packet.status = .ok;
             tb.submit(context.client, packet);
@@ -143,12 +143,12 @@ const NativeClient = struct {
         result_len: u32,
     ) callconv(.C) void {
         _ = client;
-        var context = @as(*Context, @ptrFromInt(context_ptr));
+        var context: *Context = @ptrFromInt(context_ptr);
         var env = JNIHelper.attach_current_thread(context.jvm);
 
         // Retrieves the request instance, and drops the GC reference.
         assert(packet.user_data != null);
-        var request_obj = @as(jni.JObject, @ptrCast(packet.user_data));
+        var request_obj: jni.JObject = @ptrCast(packet.user_data);
         defer env.delete_global_ref(request_obj);
 
         const packet_operation = packet.operation;
@@ -207,11 +207,11 @@ comptime {
             var context = NativeClient.client_init(
                 false,
                 env,
-                @as(u128, @bitCast(cluster_id_elements[0..16].*)),
+                @bitCast(cluster_id_elements[0..16].*),
                 addresses,
-                @as(u32, @bitCast(max_concurrency)),
+                @bitCast(max_concurrency),
             );
-            return @as(jni.JLong, @bitCast(@intFromPtr(context)));
+            return @bitCast(@intFromPtr(context));
         }
 
         fn client_init_echo(
@@ -232,9 +232,9 @@ comptime {
                 env,
                 @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
-                @as(u32, @bitCast(max_concurrency)),
+                @bitCast(max_concurrency),
             );
-            return @as(jni.JLong, @bitCast(@intFromPtr(context)));
+            return @bitCast(@intFromPtr(context));
         }
 
         fn client_deinit(
@@ -244,7 +244,7 @@ comptime {
         ) callconv(jni.JNICALL) void {
             _ = env;
             _ = class;
-            NativeClient.client_deinit(@as(*Context, @ptrFromInt(@as(usize, @bitCast(context_handle)))));
+            NativeClient.client_deinit(@ptrFromInt(@as(usize, @bitCast(context_handle))));
         }
 
         fn submit(
@@ -257,11 +257,11 @@ comptime {
             assert(context_handle != 0);
             const packet_acquire_status = NativeClient.submit(
                 env,
-                @as(*Context, @ptrFromInt(@as(usize, @bitCast(context_handle)))),
+                @ptrFromInt(@as(usize, @bitCast(context_handle))),
                 request_obj,
             );
 
-            return @as(jni.JInt, @intCast(@intFromEnum(packet_acquire_status)));
+            return @intCast(@intFromEnum(packet_acquire_status));
         }
     };
 
@@ -441,7 +441,7 @@ const ReflectionHelper = struct {
         assert(reply.len > 0);
 
         var reply_buffer_obj = env.new_byte_array(
-            @as(jni.JInt, @intCast(reply.len)),
+            @intCast(reply.len),
         ) orelse {
             // Cannot allocate an array, it's likely the JVM has run out of resources.
             // Printing the buffer size here just to help diagnosing how much memory was required.
@@ -456,8 +456,8 @@ const ReflectionHelper = struct {
         env.set_byte_array_region(
             reply_buffer_obj,
             0,
-            @as(jni.JInt, @intCast(reply.len)),
-            @as([*]const jni.JByte, @ptrCast(reply.ptr)),
+            @intCast(reply.len),
+            @ptrCast(reply.ptr),
         );
 
         if (env.exception_check() == .jni_true) {
@@ -497,7 +497,7 @@ const ReflectionHelper = struct {
                 .{},
             );
         }
-        return @as(u8, @bitCast(value));
+        return @bitCast(value);
     }
 
     pub fn end_request(
@@ -586,10 +586,10 @@ const JNIHelper = struct {
         log.err(fmt, args);
 
         var buf: [256]u8 = undefined;
-        const message = std.fmt.bufPrintZ(&buf, fmt, args) catch |err| switch (err) {
+        const message: [:0]const u8 = std.fmt.bufPrintZ(&buf, fmt, args) catch |err| switch (err) {
             error.NoSpaceLeft => blk: {
                 buf[255] = 0;
-                break :blk @as([:0]const u8, @ptrCast(buf[0..255]));
+                break :blk @ptrCast(buf[0..255]);
             },
         };
 

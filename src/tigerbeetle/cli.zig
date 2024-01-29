@@ -329,7 +329,7 @@ fn parse_cache_size_to_count(
         value_count_max_multiple,
     ) * value_count_max_multiple;
 
-    const result = @as(u32, @intCast(count_rounded)); // TODO: better error message on overflow
+    const result: u32 = @intCast(count_rounded); // TODO: better error message on overflow
     assert(@as(u64, result) * @sizeOf(T) <= size.bytes);
 
     return result;

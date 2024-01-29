@@ -41,7 +41,7 @@ pub const Marzullo = struct {
     /// Returns the smallest interval consistent with the largest number of sources.
     pub fn smallest_interval(tuples: []Tuple) Interval {
         // There are two bounds (lower and upper) per source clock offset sample.
-        const sources = @as(u8, @intCast(@divExact(tuples.len, 2)));
+        const sources: u8 = @intCast(@divExact(tuples.len, 2));
 
         if (sources == 0) {
             return Interval{
@@ -102,7 +102,7 @@ pub const Marzullo = struct {
         // The number of false sources (ones which do not overlap the optimal interval) is the
         // number of sources minus the value of `best`:
         assert(best <= sources);
-        interval.sources_true = @as(u8, @intCast(best));
+        interval.sources_true = @intCast(best);
         interval.sources_false = @as(u8, @intCast(sources - @as(u8, @intCast(best))));
         assert(interval.sources_true + interval.sources_false == sources);
 
@@ -139,13 +139,13 @@ fn test_smallest_interval(bounds: []const i64, smallest_interval: Marzullo.Inter
     var tuples = try allocator.alloc(Marzullo.Tuple, bounds.len);
     for (bounds, 0..) |bound, i| {
         tuples[i] = .{
-            .source = @as(u8, @intCast(@divTrunc(i, 2))),
+            .source = @intCast(@divTrunc(i, 2)),
             .offset = bound,
             .bound = if (i % 2 == 0) .lower else .upper,
         };
     }
 
-    var interval = Marzullo.smallest_interval(tuples);
+    const interval = Marzullo.smallest_interval(tuples);
     try std.testing.expectEqual(smallest_interval, interval);
 }
 

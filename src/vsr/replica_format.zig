@@ -145,7 +145,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             assert(!self.formatting);
 
             // Direct I/O requires the buffer to be sector-aligned.
-            var message_buffer =
+            const message_buffer =
                 try allocator.alignedAlloc(u8, constants.sector_size, constants.message_size_max);
             defer allocator.free(message_buffer);
             @memset(message_buffer, 0);
@@ -175,7 +175,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
 
             if (padding_size > 0) {
                 // Direct I/O requires the buffer to be sector-aligned.
-                var padding_buffer = try allocator.alignedAlloc(
+                const padding_buffer = try allocator.alignedAlloc(
                     u8,
                     constants.sector_size,
                     vsr.Zone.size(.grid_padding).?,

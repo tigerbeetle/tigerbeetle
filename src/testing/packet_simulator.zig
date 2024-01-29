@@ -148,7 +148,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             const auto_partition_nodes = try allocator.alloc(u8, @as(usize, options.node_count));
             errdefer allocator.free(auto_partition_nodes);
-            for (auto_partition_nodes, 0..) |*node, i| node.* = @as(u8, @intCast(i));
+            for (auto_partition_nodes, 0..) |*node, i| node.* = @intCast(i);
 
             return Self{
                 .options = options,
@@ -399,7 +399,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
-            var queue_length = queue.count();
+            const queue_length = queue.count();
             if (queue_length + 1 > self.options.path_maximum_capacity) {
                 const index = self.prng.random().uintLessThanBiased(u64, queue_length);
                 const link_packet = queue.removeIndex(index);
