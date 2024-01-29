@@ -71,7 +71,7 @@ pub fn init(
 
     // Pass `--addresses=0` to let the OS pick a port for us.
     var process = try shell.spawn_options(
-        .{ .stdin_behavior = .Pipe, .stderr_behavior = .Ignore },
+        .{ .stdin_behavior = .Pipe, .stderr_behavior = .Inherit },
         "{tigerbeetle} start --cache-grid=512MB --addresses=0 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );
@@ -85,6 +85,7 @@ pub fn init(
         const port_bun_len = try process.stdout.?.readAll(&port_buf);
         break :port try std.fmt.parseInt(u16, port_buf[0 .. port_bun_len - 1], 10);
     };
+    log.info("tigerbeetle listening on port {}", .{port});
 
     var port_str: stdx.BoundedArray(u8, 8) = .{};
     std.fmt.formatInt(port, 10, .lower, .{}, port_str.writer()) catch unreachable;
