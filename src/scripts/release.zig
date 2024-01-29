@@ -374,11 +374,13 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
         try shell.exec(
             \\gh release create --draft
+            \\  --target {sha}
             \\  --notes {notes}
             \\  {tag}
         , .{
-            .tag = info.version,
+            .sha = info.sha,
             .notes = notes,
+            .tag = info.version,
         });
 
         // Here and elsewhere for publishing we explicitly spell out the files we are uploading
