@@ -129,6 +129,18 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // Don't unref `write_queue`'s Writes — they are a subset of `writes`.
         }
 
+        /// Returns true if the reply at the given slot is  durably persisted to disk. The
+        /// difference with `faulty` bit set is that `faulty` is cleared at the start of a write
+        /// when the reply is still in RAM. In contrast, `reply_durable` checks that the
+        /// corresponding reply hit the disk.
+        pub fn reply_durable(
+            client_replies: *const ClientReplies,
+            slot: Slot,
+        ) bool {
+            return !client_replies.faulty.isSet(slot.index) and
+                !client_replies.writing.isSet(slot.index);
+        }
+
         pub fn read_reply_sync(
             client_replies: *ClientReplies,
             slot: Slot,
