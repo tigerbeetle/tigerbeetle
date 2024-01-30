@@ -136,26 +136,30 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         ) ?*Message.Reply {
             const client = session.header.client;
 
-            if (client_replies.writing.isSet(slot.index)) {
-                assert(!client_replies.faulty.isSet(slot.index));
+            if (!client_replies.writing.isSet(slot.index)) return null;
 
-                var writes = client_replies.writes.iterate();
-                var write_latest: ?*const Write = null;
-                while (writes.next()) |write| {
-                    if (write.message.header.client == client) {
-                        if (write_latest == null or
-                            write_latest.?.message.header.request < write.message.header.request)
-                        {
-                            write_latest = write;
-                        }
+            var writes = client_replies.writes.iterate();
+            var write_latest: ?*const Write = null;
+            while (writes.next()) |write| {
+                if (write.message.header.client == client) {
+                    if (write_latest == null or
+                        write_latest.?.message.header.request < write.message.header.request)
+                    {
+                        write_latest = write;
                     }
                 }
-                assert(write_latest.?.message.header.checksum == session.header.checksum);
-
-                return write_latest.?.message;
             }
 
-            return null;
+            if (write_latest.?.message.header.checksum != session.header.checksum) {
+                // We are writing a reply, but that's a wrong reply according to `client_sessions`.
+                // This happens after state sync, where we update `client_sessions` without
+                // waiting for the in-flight write requests to complete.
+                assert(client_replies.faulty.isSet(slot.index));
+                return null;
+            }
+
+            assert(!client_replies.faulty.isSet(slot.index));
+            return write_latest.?.message;
         }
 
         /// Caller must check read_reply_sync() first.
