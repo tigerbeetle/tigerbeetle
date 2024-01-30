@@ -490,6 +490,8 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     b2.pass_all(.__, .bidirectional);
     b1.pass_all(.__, .bidirectional);
     a0.drop_all(.__, .bidirectional);
+    // Block state sync to prove that B1 recovers via WAL repair.
+    b1.drop(.__, .bidirectional, .sync_checkpoint);
     // TODO: Explicit coverage marks: This should hit the
     // "on_do_view_change: lagging primary; forfeiting" log line.
     t.run();
