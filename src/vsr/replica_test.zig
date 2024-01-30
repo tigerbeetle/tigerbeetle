@@ -807,6 +807,54 @@ test "Cluster: view-change: duel of the primaries" {
     try expectEqual(t.replica(.R2).commit(), 21);
 }
 
+test "Cluster: view-change: primary with dirty log" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(16, 16);
+    try expectEqual(t.replica(.R_).commit(), 16);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    // Commit past the checkpoint_2_trigger to ensure that the op we will corrupt won't be found in
+    // B1's pipeline cache.
+    const commit_max = checkpoint_2_trigger +
+        constants.pipeline_prepare_queue_max +
+        constants.pipeline_request_queue_max;
+
+    // Partition B2 so that it falls behind the cluster.
+    b2.drop_all(.R_, .bidirectional);
+    try c.request(commit_max, commit_max);
+
+    // Allow B2 to join the cluster and complete state sync.
+    b2.pass_all(.R_, .bidirectional);
+    t.run();
+
+    try expectEqual(t.replica(.R_).commit(), commit_max);
+    try TestReplicas.expect_sync_done(t.replica(.R_));
+
+    // Crash A0, and force B2 to become the primary.
+    a0.stop();
+    b1.drop(.__, .incoming, .do_view_change);
+
+    // B2 tries to become primary. (Don't let B1 become primary – it would not realize its
+    // checkpoint entry is corrupt, which would defeat the purpose of this test).
+    // B2 tries to repair (request_prepare) this corrupt op, even though it is before its
+    // checkpoint. B1 discovers that this op is corrupt, and marks it as faulty.
+    b1.corrupt(.{ .wal_prepare = checkpoint_2 % slot_count });
+    t.run();
+
+    // TODO Fix https://github.com/tigerbeetle/tigerbeetle/issues/1378
+    // B1 and B2 are stuck, endlessly trying to (unnecessarily) prepare the corrupt entry.
+    try expectEqual(b1.status(), .view_change);
+    try expectEqual(b2.status(), .view_change);
+    // try expectEqual(b1.status(), .normal);
+    // try expectEqual(b2.status(), .normal);
+}
+
 test "Cluster: sync: partition, lag, sync (transition from idle)" {
     for ([_]u64{
         // Normal case: the cluster has committed atop the checkpoint trigger.
