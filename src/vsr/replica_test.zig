@@ -504,92 +504,6 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 1);
 }
 
-// TODO: Re-enable when the op_checkpoint hack is removed from ignore_request_message().
-// (This test relies on preparing on the primary before the backups commit, which is presently
-// impossible.)
-// test "Cluster: repair: view-change, new-primary lagging behind checkpoint, truncate all post-checkpoint ops" {
-//     const t = try TestContext.init(.{
-//         .replica_count = 3,
-//         .client_count = constants.pipeline_prepare_queue_max,
-//     });
-//     defer t.deinit();
-//
-//     var c = t.clients(0, t.cluster.clients.len);
-//     try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
-//
-//     var a0 = t.replica(.A0);
-//     var b1 = t.replica(.B1);
-//     var b2 = t.replica(.B2);
-//
-//     // Drop SVCs to ensure A0 cannot abdicate (yet).
-//     t.replica(.R_).drop(.__, .bidirectional, .start_view_change);
-//     // B1 can see and ack the checkpoint-trigger prepare, but not its commit, so it cannot checkpoint.
-//     b1.drop(.__, .incoming, .commit);
-//     // B2 can see that the checkpoint-trigger prepare commits, but cannot receive the message itself.
-//     // It will try RSV to advances its head, but don't let it just yet.
-//     b2.drop(.__, .incoming, .prepare);
-//     b2.drop(.__, .incoming, .start_view);
-//
-//     try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
-//     try expectEqual(a0.op_checkpoint(), checkpoint_1);
-//     try expectEqual(b1.op_checkpoint(), 0);
-//     try expectEqual(b2.op_checkpoint(), 0);
-//
-//     // B1 wouldn't prepare these anyway, but we prevent it from learning that the checkpoint
-//     // trigger is committed.
-//     b1.drop(.__, .incoming, .prepare);
-//
-//     try c.request(checkpoint_1_trigger + constants.pipeline_prepare_queue_max, checkpoint_1_trigger);
-//     try expectEqual(a0.op_head(), checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
-//     try expectEqual(b1.op_head(), checkpoint_1_trigger);
-//     try expectEqual(b2.op_head(), checkpoint_1_trigger - 1);
-//
-//     {
-//         // Now that A0 has a full pipeline past the checkpoint, allow B2 to advance its head via the
-//         // hook. But first kick it into recovering_head to force it to load the SV's headers into
-//         // its view_headers. Those SV headers have an op-max past the next checkpoint, so our
-//         // op_head does not increase beyond the checkpoint trigger.
-//         b2.pass(.__, .incoming, .start_view);
-//         b2.corrupt(.{ .wal_prepare = checkpoint_1_trigger - 1 });
-//
-//         // We must receive a prepare to trigger a view_jump, which is what will trigger the RSV.
-//         // But don't send an ack, since that would allow A0 to send us the next prepare,
-//         // which would cause us to learn that the trigger is committed,
-//         // which would cause us to checkpoint.
-//         b2.pass(.__, .incoming, .prepare);
-//         b2.drop(.__, .outgoing, .prepare_ok);
-//
-//         // Corrupt headers & prevent header repair so that we can't commit.
-//         b2.corrupt(.{ .wal_header = 5 });
-//         b2.drop(.__, .incoming, .headers);
-//
-//         b2.stop();
-//         try b2.open();
-//         try expectEqual(b2.status(), .recovering_head);
-//         t.run();
-//
-//         try expectEqual(b2.status(), .normal);
-//         try expectEqual(b2.op_checkpoint(), 0);
-//         try expectEqual(b2.op_head(), checkpoint_1_trigger);
-//         try expectEqual(b2.view_headers()[0].op, checkpoint_1_trigger + constants.pipeline_prepare_queue_max);
-//     }
-//
-//     // Take down A0 and allow a view-change.
-//     // B2 has not repaired yet, so it reuses the view_headers that it got from the SV (with headers
-//     // from the next wrap).
-//     // TODO Explicit code coverage marks: This hits the "discarded uncommitted ops after trigger"
-//     // log line in on_do_view_change().
-//     a0.stop();
-//     b1.pass_all(.__, .incoming);
-//     b2.pass_all(.__, .incoming);
-//     t.run();
-//
-//     try expectEqual(b1.status(), .normal);
-//     try expectEqual(b2.status(), .normal);
-//     try expectEqual(b1.op_checkpoint(), checkpoint_1);
-//     try expectEqual(b2.op_checkpoint(), checkpoint_1);
-// }
-
 test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-change; dont nack" {
     // This scenario is also applicable when any op within the pipeline suffix is corrupted.
     // But we test by corrupting the last op to take advantage of recovering_head to learn the last
@@ -1442,11 +1356,6 @@ const TestReplicas = struct {
             checkpoint_all = replica.op_checkpoint();
         }
         return checkpoint_all.?;
-    }
-
-    pub fn view_headers(t: *const TestReplicas) []const vsr.Header {
-        assert(t.replicas.count() == 1);
-        return t.cluster.replicas[t.replicas.get(0)].view_headers.array.const_slice();
     }
 
     pub fn corrupt(

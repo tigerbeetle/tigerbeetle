@@ -1856,25 +1856,10 @@ pub fn ReplicaType(
                 // identify an unambiguous set of canonical headers.
                 self.log_view = self.view;
 
+                assert(self.op == op_head);
                 assert(self.op >= self.commit_max);
                 assert(self.state_machine.prepare_timestamp >=
                     self.journal.header_with_op(self.op).?.timestamp);
-
-                if (op_head > self.op_checkpoint_next_trigger()) {
-                    assert(self.op == self.commit_max);
-                    assert(self.op == self.op_checkpoint_next_trigger());
-                    assert(op_head - self.op_checkpoint_next_trigger() <=
-                        constants.pipeline_prepare_queue_max);
-
-                    log.debug("{}: on_do_view_change: discarded uncommitted ops after trigger" ++
-                        " (op={}..{})", .{
-                        self.replica,
-                        self.op_checkpoint_next_trigger() + 1,
-                        op_head,
-                    });
-                } else {
-                    assert(self.op == op_head);
-                }
 
                 // Start repairs according to the CTRL protocol:
                 assert(!self.repair_timeout.ticking);
@@ -7064,20 +7049,8 @@ pub fn ReplicaType(
                     .replica_count = self.replica_count,
                 },
             ).complete_valid;
-            const header_head = while (quorum_headers.next()) |header| {
-                if (header.op > self.op_checkpoint_next_trigger()) {
-                    // Any ops in the next checkpoint are definitely uncommitted — otherwise,
-                    // we would have forfeited to favor a different primary.
-                    for (dvcs_all.const_slice()) |dvc| {
-                        assert(dvc.header.checkpoint_op <= self.op_checkpoint());
-                    }
-                } else {
-                    break header;
-                }
-            } else {
-                @panic("on_do_view_change: missing checkpoint trigger");
-            };
 
+            const header_head = quorum_headers.next().?;
             assert(header_head.op >= self.op_checkpoint());
             assert(header_head.op >= self.commit_min);
             assert(header_head.op >= self.commit_max);
@@ -7601,14 +7574,6 @@ pub fn ReplicaType(
 
                 assert(op <= self.commit_max);
                 assert(op == self.commit_max or self.commit_max > self.op);
-                // If we only recently checkpointed, it is possible that all of the ops in the new
-                // WAL wrap are uncommitted. If so, and the new primary can discern this, it may
-                // start the view despite itself being one checkpoint behind us, by truncating all
-                // of these next-wrap ops.
-                //
-                // The primary's new head would match its op_checkpoint_next_trigger.
-                // But we need not explicitly include this header in our DVC — it is automatically
-                // included if necessary thanks to the "DVC connects to commit_max" invariant.
             }
 
             self.view_headers.verify();
