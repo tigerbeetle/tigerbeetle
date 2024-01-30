@@ -1045,7 +1045,7 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
     // try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
-test "Cluster: async-checkpoints: prepare beyond checkpoint trigger" {
+test "Cluster: border-prepare: prepare beyond checkpoint trigger" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -1064,9 +1064,7 @@ test "Cluster: async-checkpoints: prepare beyond checkpoint trigger" {
     try c.request(checkpoint_1_border - 1, checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).op_checkpoint(), 0);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
-    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger);
-    // TODO Allow a pipeline of entries to prepare beyond the checkpoint trigger.
-    // try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_border - 1);
 
     t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
     t.run();
