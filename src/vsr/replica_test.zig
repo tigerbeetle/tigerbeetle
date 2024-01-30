@@ -467,10 +467,10 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
 
     b1.drop_all(.__, .bidirectional);
 
-    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
-    try expectEqual(a0.commit(), checkpoint_1_trigger - 1);
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(a0.commit(), checkpoint_1_trigger);
     try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), checkpoint_1_trigger - 1);
+    try expectEqual(b2.commit(), checkpoint_1_trigger);
 
     b2.drop(.__, .incoming, .commit);
     try c.request(checkpoint_1_trigger + 1, checkpoint_1_trigger + 1);
