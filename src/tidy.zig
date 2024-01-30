@@ -189,9 +189,7 @@ test "tidy changelog" {
             return error.TrailingWhitespace;
         }
         const line_length = try std.unicode.utf8CountCodepoints(line);
-        const has_link = std.mem.indexOf(u8, line, "http://") orelse
-            std.mem.indexOf(u8, line, "https://");
-        if (line_length > 100 and has_link == null) {
+        if (line_length > 100 and !has_link(line)) {
             std.debug.print("CHANGELOG.md:{d} line exceeds 100 columns\n", .{line_index + 1});
             return error.LineTooLong;
         }
@@ -339,7 +337,7 @@ fn find_long_line(file_text: []const u8) !?usize {
     while (line_iterator.next()) |line| : (line_index += 1) {
         const line_length = try std.unicode.utf8CountCodepoints(line);
         if (line_length > 100) {
-            if (is_url(line)) continue;
+            if (has_link(line)) continue;
             // For multiline strings, we care that the _result_ fits 100 characters,
             // but we don't mind indentation in the source.
             if (parse_multiline_string(line)) |string_value| {
@@ -352,12 +350,9 @@ fn find_long_line(file_text: []const u8) !?usize {
     return null;
 }
 
-/// Heuristically checks if a `line` is a comment with an URL.
-fn is_url(line: []const u8) bool {
-    const cut = stdx.cut(line, "// https://") orelse return false;
-    for (cut.prefix) |c| if (!(c == ' ' or c == '/')) return false;
-    for (cut.suffix) |c| if (c == ' ') return false;
-    return true;
+/// Heuristically checks if a `line` contains an URL.
+fn has_link(line: []const u8) bool {
+    return std.mem.indexOf(u8, line, "https://") != null;
 }
 
 /// If a line is a `\\` string literal, extract its value.
@@ -375,7 +370,6 @@ const naughty_list = [_][]const u8{
     "clients/c/test.zig",
     "clients/dotnet/docs.zig",
     "clients/dotnet/dotnet_bindings.zig",
-    "clients/go/docs.zig",
     "clients/go/go_bindings.zig",
     "clients/java/docs.zig",
     "clients/java/java_bindings.zig",
@@ -388,7 +382,6 @@ const naughty_list = [_][]const u8{
     "constants.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
-    "io/linux.zig",
     "io/test.zig",
     "io/windows.zig",
     "lsm/binary_search.zig",

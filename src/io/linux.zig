@@ -248,7 +248,11 @@ pub const IO = struct {
         next: ?*Completion = null,
         operation: Operation,
         context: ?*anyopaque,
-        callback: *const fn (context: ?*anyopaque, completion: *Completion, result: *const anyopaque) void,
+        callback: *const fn (
+            context: ?*anyopaque,
+            completion: *Completion,
+            result: *const anyopaque,
+        ) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
             switch (completion.operation) {
@@ -337,7 +341,8 @@ pub const IO = struct {
                     const result: anyerror!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
-                                .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                                // A success, see https://github.com/ziglang/zig/issues/2425
+                                .INTR => {},
                                 .BADF => error.FileDescriptorInvalid,
                                 .DQUOT => error.DiskQuota,
                                 .IO => error.InputOutput,
@@ -480,7 +485,7 @@ pub const IO = struct {
                 },
                 .timeout => {
                     assert(completion.result < 0);
-                    const result: anyerror!void = switch (@as(os.E, @enumFromInt(-completion.result))) {
+                    const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
                         .INTR => {
                             completion.io.enqueue(completion);
                             return;
@@ -489,6 +494,7 @@ pub const IO = struct {
                         .TIME => {}, // A success.
                         else => |errno| os.unexpectedErrno(errno),
                     };
+                    const result: anyerror!void = err;
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .write => {
@@ -1071,12 +1077,14 @@ pub const IO = struct {
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {
                     log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
-                    log.info("allocating by writing to the last sector of the file instead...", .{});
+                    log.info("allocating by writing to the last sector " ++
+                        "of the file instead...", .{});
 
                     const sector_size = constants.sector_size;
                     const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
 
-                    // Handle partial writes where the physical sector is less than a logical sector:
+                    // Handle partial writes where the physical sector is
+                    // less than a logical sector:
                     const write_offset = size - sector.len;
                     var written: usize = 0;
                     while (written < sector.len) {
