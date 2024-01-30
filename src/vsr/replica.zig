@@ -8046,7 +8046,9 @@ pub fn ReplicaType(
                     if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
                         entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
                     {
-                        if (self.client_replies.faulty.isSet(entry_slot)) return false;
+                        if (!self.client_replies.reply_durable(.{ .index = entry_slot })) {
+                            return false;
+                        }
                     }
                 }
                 return self.sync_tables == null and self.grid_repair_tables.executing() == 0;
