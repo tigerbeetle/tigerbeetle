@@ -9,15 +9,6 @@
 //! less than this rate since it will wait at least as long as it takes
 //! for the cluster to respond before creating more transfers. It does not
 //! validate that the transfers succeed.
-//!
-//! `./scripts/benchmark.sh` (and `.\scripts\benchmark.bat` on Windows)
-//! are helpers that spin up a single TigerBeetle replica on a free port
-//! and run the benchmark `./zig/zig build benchmark` (and
-//! `.\zig\zig build benchmark` on Windows) against the replica. To
-//! run against a cluster of TigerBeetle replicas, use `./zig/zig build
-//! benchmark --addresses=X` where `X` is the list of replica
-//! addresses. It is the same format for the `--addresses=X` flag on the
-//! `tigerbeetle start` command.
 
 const account_count_default: usize = 10_000;
 const transfer_count_default: usize = 10_000_000;
@@ -32,6 +23,8 @@ const log = std.log;
 pub const std_options = struct {
     pub const log_level: std.log.Level = .info;
 };
+
+const build_options = @import("vsr_options");
 
 const vsr = @import("vsr");
 const constants = vsr.constants;
@@ -67,7 +60,14 @@ pub fn main(
     const stderr = std.io.getStdErr().writer();
 
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
-        try stderr.print("Benchmark must be built as ReleaseSafe for reasonable results.\n", .{});
+        try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
+    }
+    if (build_options.config_base != .production) {
+        try stderr.print(
+            \\Benchmark must be built with '-Dconfig=production' for reasonable results.
+            \\Benchmark was built with -Dconfig={s} instead.
+            \\
+        , .{@tagName(build_options.config_base)});
     }
 
     if (cli_args.account_count < 2) flags.fatal(

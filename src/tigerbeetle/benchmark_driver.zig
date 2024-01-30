@@ -1,3 +1,17 @@
+//! Driver script behind `tigerbeetle benchmark` command.
+//!
+//! During benchmarking, there are three entities to keep track of:
+//! - the "load" process generating requests,
+//! - the cluster of `tigerbeetle`s processing requests,
+//! - the orchestrating script coordinating the two.
+//!
+//! This here is the orchestrator. If no `--addresses` is passed on the command line, it spins up a
+//! temporary single-node `tigerbeetle` cluster. Otherwise, an existing cluster is re-used for the
+//! benchmarking.
+//!
+//! The cluster address is then passed onto `benchmark_load.zig`, which deals with both offering
+//! the load and measuring response latencies and throughput. The load runs in-process.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const ChildProcess = std.ChildProcess;
