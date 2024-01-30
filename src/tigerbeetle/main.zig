@@ -184,8 +184,7 @@ const Command = struct {
             .nonce = nonce,
             .time = .{},
             .state_machine_options = .{
-                // TODO Tune lsm_forest_node_count better.
-                .lsm_forest_node_count = 4096,
+                .lsm_forest_node_count = args.lsm_forest_node_count,
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,
                 .cache_entries_posted = args.cache_transfers_posted,
@@ -212,11 +211,15 @@ const Command = struct {
                 node_maybe = node.next;
             }
         }
-        log_main.info("{}: Allocated {}MB in {} regions during replica init (Grid Cache: {}MB)", .{
+        log_main.info("{}: Allocated {}MB in {} regions during replica init", .{
             replica.replica,
             @divFloor(allocation_size, 1024 * 1024),
             allocation_count,
+        });
+        log_main.info("{}: Grid cache: {}MB, LSM-tree manifests: {}MB", .{
+            replica.replica,
             @divFloor(grid_cache_size, 1024 * 1024),
+            @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, 1024 * 1024),
         });
 
         log_main.info("{}: cluster={}: listening on {}", .{

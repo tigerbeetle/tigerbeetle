@@ -568,6 +568,31 @@ pub const lsm_table_data_blocks_max = table_blocks_max: {
     );
 };
 
+/// The default size in bytes of the NodePool used for the LSM forest's manifests.
+pub const lsm_manifest_memory_size_default = lsm_manifest_memory: {
+    // TODO Tune this better.
+    const lsm_forest_node_count: u32 = 4096;
+    break :lsm_manifest_memory lsm_forest_node_count * lsm_manifest_node_size;
+};
+
+/// The maximum size in bytes of the NodePool used for the LSM forest's manifests.
+pub const lsm_manifest_memory_size_max =
+    @divFloor(std.math.maxInt(u32), lsm_manifest_memory_size_multiplier) *
+    lsm_manifest_memory_size_multiplier;
+
+/// The minimum size in bytes of the NodePool used for the LSM forest's manifests.
+pub const lsm_manifest_memory_size_min = lsm_manifest_memory_size_multiplier;
+
+/// The lsm memory size must be a multiple of this value.
+///
+/// While technically this could be equal to lsm_manifest_node_size, we set it
+/// to 1MB so it is a more obvious increment for users.
+pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: {
+    const lsm_manifest_memory_multiplier = 64 * lsm_manifest_node_size;
+    assert(lsm_manifest_memory_multiplier == 1024 * 1024);
+    break :lsm_manifest_memory_multiplier lsm_manifest_memory_multiplier;
+};
+
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = config.process.tick_ms;

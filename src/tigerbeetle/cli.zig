@@ -33,6 +33,8 @@ const CliArgs = union(enum) {
         cache_transfers_posted: flags.ByteSize =
             .{ .bytes = constants.cache_transfers_posted_size_default },
         cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
+        memory_lsm_manifest: flags.ByteSize =
+            .{ .bytes = constants.lsm_manifest_memory_size_default },
 
         positional: struct {
             path: [:0]const u8,
@@ -107,6 +109,12 @@ const CliArgs = union(enum) {
         \\        (Total RAM) - 3GB (TigerBeetle) - 1GB (System), eg 12GB for a 16GB machine.
         \\        Defaults to 1GB.
         \\
+        \\  --memory-lsm-manifest=<size><KB|MB|GB>
+        \\        Sets the amount of memory allocated for LSM-tree manifests. When the
+        \\        number or size of LSM-trees would become too large for their manifests to fit
+        \\        into memory the server will terminate.
+        \\        Defaults to 64MB.
+        \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
         \\
@@ -146,6 +154,7 @@ pub const Command = union(enum) {
         cache_transfers_posted: u32,
         storage_size_limit: u64,
         cache_grid_blocks: u32,
+        lsm_forest_node_count: u32,
         path: [:0]const u8,
     };
 
@@ -247,6 +256,32 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 );
             }
 
+            const lsm_manifest_memory = start.memory_lsm_manifest.bytes;
+            const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
+            const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
+            const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
+            if (lsm_manifest_memory > lsm_manifest_memory_max) {
+                flags.fatal("--memory-lsm-manifest: size {} exceeds maximum: {}", .{
+                    lsm_manifest_memory,
+                    lsm_manifest_memory_max,
+                });
+            }
+            if (lsm_manifest_memory < lsm_manifest_memory_min) {
+                flags.fatal("--memory-lsm-manifest: size {} is below minimum: {}", .{
+                    lsm_manifest_memory,
+                    lsm_manifest_memory_min,
+                });
+            }
+            if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
+                flags.fatal(
+                    "--memory-lsm-manifest: size {} must be a multiple of size ({})",
+                    .{ lsm_manifest_memory, lsm_manifest_memory_multiplier },
+                );
+            }
+
+            const lsm_forest_node_count: u32 =
+                @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
+
             return Command{
                 .start = .{
                     .addresses = addresses,
@@ -272,6 +307,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         Grid.Cache,
                         start.cache_grid,
                     ),
+                    .lsm_forest_node_count = lsm_forest_node_count,
                     .path = start.positional.path,
                 },
             };
