@@ -52,6 +52,17 @@ const CliArgs = union(enum) {
         command: []const u8 = "",
     },
 
+    benchmark: struct {
+        account_count: usize = 10_000,
+        transfer_count: usize = 10_000_000,
+        query_count: usize = 100,
+        transfer_count_per_second: usize = 1_000_000,
+        print_batch_timings: bool = false,
+        id_order: Command.Benchmark.IdOrder = .reversed,
+        statsd: bool = false,
+        addresses: ?[]const u8 = null,
+    },
+
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
     pub const help = fmt.comptimePrint(
         \\Usage:
@@ -66,17 +77,22 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle repl --cluster=<integer> --addresses=<addresses>
         \\
+        \\  tigerbeetle benchmark [<args>]
+        \\
         \\Commands:
         \\
-        \\  format   Create a TigerBeetle replica data file at <path>.
-        \\           The --cluster and --replica arguments are required.
-        \\           Each TigerBeetle replica must have its own data file.
+        \\  format     Create a TigerBeetle replica data file at <path>.
+        \\             The --cluster and --replica arguments are required.
+        \\             Each TigerBeetle replica must have its own data file.
         \\
-        \\  start    Run a TigerBeetle replica from the data file at <path>.
+        \\  start      Run a TigerBeetle replica from the data file at <path>.
         \\
-        \\  version  Print the TigerBeetle build version and the compile-time config values.
+        \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
-        \\  repl     Enter the TigerBeetle client REPL.
+        \\  repl       Enter the TigerBeetle client REPL.
+        \\
+        \\  benchmark  Measure performance of TigerBeetle on the current hardware.
+        \\             Benchmark options and output format are subject to change.
         \\
         \\Options:
         \\
@@ -144,7 +160,7 @@ const CliArgs = union(enum) {
 
 pub const Command = union(enum) {
     pub const Start = struct {
-        addresses: []net.Address,
+        addresses: []const net.Address,
         // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
         // testing. We check the raw string rather then the parsed address to prevent triggering
         // this logic by accident.
@@ -159,10 +175,26 @@ pub const Command = union(enum) {
     };
 
     pub const Repl = struct {
-        addresses: []net.Address,
+        addresses: []const net.Address,
         cluster: u128,
         verbose: bool,
         statements: []const u8,
+    };
+
+    pub const Benchmark = struct {
+        /// The ID order can affect the results of a benchmark significantly. Specifically,
+        /// sequential is expected to be the best (since it can take advantage of various
+        /// optimizations such as avoiding negative prefetch) while random/reversed can't.
+        pub const IdOrder = enum { sequential, random, reversed };
+
+        account_count: usize = 10_000,
+        transfer_count: usize = 10_000_000,
+        query_count: usize = 100,
+        transfer_count_per_second: usize = 1_000_000,
+        print_batch_timings: bool = false,
+        id_order: IdOrder = .reversed,
+        statsd: bool = false,
+        addresses: ?[]const net.Address = null,
     };
 
     format: struct {
@@ -176,10 +208,14 @@ pub const Command = union(enum) {
         verbose: bool,
     },
     repl: Repl,
+    benchmark: Benchmark,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
             inline .start, .repl => |*cmd| allocator.free(cmd.addresses),
+            .benchmark => |*cmd| {
+                if (cmd.addresses) |addresses| allocator.free(addresses);
+            },
             else => {},
         }
         command.* = undefined;
@@ -321,6 +357,25 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cluster = repl.cluster,
                     .verbose = repl.verbose,
                     .statements = repl.command,
+                },
+            };
+        },
+        .benchmark => |benchmark| {
+            const addresses = if (benchmark.addresses) |addresses|
+                parse_addresses(allocator, addresses)
+            else
+                null;
+
+            return Command{
+                .benchmark = .{
+                    .account_count = benchmark.account_count,
+                    .transfer_count = benchmark.transfer_count,
+                    .query_count = benchmark.query_count,
+                    .transfer_count_per_second = benchmark.transfer_count_per_second,
+                    .print_batch_timings = benchmark.print_batch_timings,
+                    .id_order = benchmark.id_order,
+                    .statsd = benchmark.statsd,
+                    .addresses = addresses,
                 },
             };
         },

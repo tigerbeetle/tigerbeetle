@@ -22,6 +22,7 @@ pub const flags = @import("flags.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const repl = @import("repl.zig");
+pub const statsd = @import("statsd.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .groove = @import("lsm/groove.zig"),
@@ -29,6 +30,8 @@ pub const lsm = .{
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
+    .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
+    .IdPermutation = @import("testing/id.zig").IdPermutation,
 };
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;

@@ -33,20 +33,22 @@ pub const std_options = struct {
     pub const log_level: std.log.Level = .info;
 };
 
-const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
-const flags = @import("./flags.zig");
-const random_int_exponential = @import("testing/fuzz.zig").random_int_exponential;
-const vsr = @import("vsr.zig");
+const vsr = @import("vsr");
+const constants = vsr.constants;
+const stdx = vsr.stdx;
+const flags = vsr.flags;
+const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
 const Storage = vsr.storage.Storage;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Client = vsr.Client(StateMachine, MessageBus);
-const tb = @import("tigerbeetle.zig");
-const StatsD = @import("statsd.zig").StatsD;
-const IdPermutation = @import("testing/id.zig").IdPermutation;
+const tb = vsr.tigerbeetle;
+const StatsD = vsr.statsd.StatsD;
+const IdPermutation = vsr.testing.IdPermutation;
+
+const cli = @import("./cli.zig");
 
 const account_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
@@ -57,41 +59,16 @@ const transfer_count_per_batch = @divExact(
     @sizeOf(tb.Transfer),
 );
 
-/// The ID order can affect the results of a benchmark significantly. Specifically, sequential is
-/// expected to be the best (since it can take advantage of various optimizations such as avoiding
-/// negative prefetch) while random / reversed can't.
-const IdOrder = enum { sequential, random, reversed };
-
-const CliArgs = struct {
-    account_count: usize = account_count_default,
-    transfer_count: usize = transfer_count_default,
-    query_count: usize = query_count_default,
-    transfer_count_per_second: usize = transfer_count_per_second_default,
-    print_batch_timings: bool = false,
-    id_order: IdOrder = .reversed,
-    statsd: bool = false,
-    addresses: []const u8 = "127.0.0.1:" ++ std.fmt.comptimePrint("{}", .{constants.port}),
-};
-
-pub fn main() !void {
+pub fn main(
+    allocator: std.mem.Allocator,
+    addresses: []const std.net.Address,
+    cli_args: *const cli.Command.Benchmark,
+) !void {
     const stderr = std.io.getStdErr().writer();
 
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
         try stderr.print("Benchmark must be built as ReleaseSafe for reasonable results.\n", .{});
     }
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
-
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
-
-    const cli_args = flags.parse(&args, CliArgs);
-
-    const addresses = try vsr.parse_addresses(allocator, cli_args.addresses, constants.members_max);
-    defer allocator.free(addresses);
 
     if (cli_args.account_count < 2) flags.fatal(
         "--account-count: need at least two accounts, got {}",
@@ -225,7 +202,7 @@ const Benchmark = struct {
     done: bool,
     statsd: ?*StatsD,
     print_batch_timings: bool,
-    id_order: IdOrder,
+    id_order: cli.Command.Benchmark.IdOrder,
 
     fn create_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {

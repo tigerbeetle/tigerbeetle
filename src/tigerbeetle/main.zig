@@ -13,6 +13,7 @@ const constants = vsr.constants;
 const config = constants.config;
 const tracer = vsr.tracer;
 
+const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
 const fatal = vsr.flags.fatal;
 
@@ -61,6 +62,7 @@ pub fn main() !void {
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
+        .benchmark => |*args| try benchmark_driver.main(allocator, args),
     }
 }
 
