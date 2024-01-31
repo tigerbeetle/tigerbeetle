@@ -1814,11 +1814,8 @@ pub fn ReplicaType(
 
             const op_checkpoint_max =
                 DVCQuorum.op_checkpoint_max(self.do_view_change_from_all_replicas);
-            // This *could* be ≤border instead of ≤trigger, but that is hard to test in
-            // "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfeit"
-            // because prepares carry commit numbers:
             if (op_checkpoint_max > self.op_checkpoint() and
-                op_head > self.op_checkpoint_next_trigger())
+                op_head > self.op_checkpoint_next_border())
             {
                 // When:
                 // 1. the cluster is at a checkpoint ahead of the local checkpoint,
@@ -7674,7 +7671,7 @@ pub fn ReplicaType(
 
             // We learned that we are lagging behind the cluster, so we know we shouldn't actually
             // be the primary. But we can't join a new view until the view's headers are within our
-            // `op_checkpoint_next_trigger`. We need to bump our `op_checkpoint` first – but that is
+            // `op_checkpoint_next_border`. We need to bump our `op_checkpoint` first – but that is
             // async. So even if we are arriving at `sync_start_from_committing` via
             // `on_start_view`, `on_start_view` leaves us as the "primary" for now.
             if (self.status == .normal and self.primary()) {

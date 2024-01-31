@@ -470,16 +470,16 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
 
     b1.drop_all(.__, .bidirectional);
 
-    try c.request(checkpoint_1_trigger + 1, checkpoint_1_trigger + 1);
+    try c.request(checkpoint_1_border + 1, checkpoint_1_border + 1);
     try expectEqual(a0.op_checkpoint(), checkpoint_1);
     try expectEqual(b1.op_checkpoint(), 0);
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
-    try expectEqual(a0.commit(), checkpoint_1_trigger + 1);
+    try expectEqual(a0.commit(), checkpoint_1_border + 1);
     try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), checkpoint_1_trigger + 1);
-    try expectEqual(a0.op_head(), checkpoint_1_trigger + 1);
+    try expectEqual(b2.commit(), checkpoint_1_border + 1);
+    try expectEqual(a0.op_head(), checkpoint_1_border + 1);
     try expectEqual(b1.op_head(), 20);
-    try expectEqual(b2.op_head(), checkpoint_1_trigger + 1);
+    try expectEqual(b2.op_head(), checkpoint_1_border + 1);
 
     // Partition the primary, but restore B1. B1 will attempt to become the primary next,
     // but it is too far behind, so B2 becomes the new primary instead.
@@ -488,7 +488,7 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     a0.drop_all(.__, .bidirectional);
     // Block state sync to prove that B1 recovers via WAL repair.
     b1.drop(.__, .bidirectional, .sync_checkpoint);
-    // TODO: Explicit coverage marks: This should hit the
+    // TODO: Explicit coverage marks: B1 should hit the
     // "on_do_view_change: lagging primary; forfeiting" log line.
     t.run();
 
@@ -500,10 +500,10 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     // Thanks to the new primary, the lagging backup is able to catch up to the latest
     // checkpoint/commit.
     try expectEqual(b1.role(), .backup);
-    try expectEqual(b1.commit(), checkpoint_1_trigger + 1);
+    try expectEqual(b1.commit(), checkpoint_1_border + 1);
     try expectEqual(b1.op_checkpoint(), checkpoint_1);
 
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_border + 1);
 }
 
 test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-change; dont nack" {
