@@ -9,15 +9,6 @@
 //! less than this rate since it will wait at least as long as it takes
 //! for the cluster to respond before creating more transfers. It does not
 //! validate that the transfers succeed.
-//!
-//! `./scripts/benchmark.sh` (and `.\scripts\benchmark.bat` on Windows)
-//! are helpers that spin up a single TigerBeetle replica on a free port
-//! and run the benchmark `./zig/zig build benchmark` (and
-//! `.\zig\zig build benchmark` on Windows) against the replica. To
-//! run against a cluster of TigerBeetle replicas, use `./zig/zig build
-//! benchmark --addresses=X` where `X` is the list of replica
-//! addresses. It is the same format for the `--addresses=X` flag on the
-//! `tigerbeetle start` command.
 
 const account_count_default: usize = 10_000;
 const transfer_count_default: usize = 10_000_000;
@@ -33,20 +24,24 @@ pub const std_options = struct {
     pub const log_level: std.log.Level = .info;
 };
 
-const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
-const flags = @import("./flags.zig");
-const random_int_exponential = @import("testing/fuzz.zig").random_int_exponential;
-const vsr = @import("vsr.zig");
+const build_options = @import("vsr_options");
+
+const vsr = @import("vsr");
+const constants = vsr.constants;
+const stdx = vsr.stdx;
+const flags = vsr.flags;
+const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
 const Storage = vsr.storage.Storage;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Client = vsr.Client(StateMachine, MessageBus);
-const tb = @import("tigerbeetle.zig");
-const StatsD = @import("statsd.zig").StatsD;
-const IdPermutation = @import("testing/id.zig").IdPermutation;
+const tb = vsr.tigerbeetle;
+const StatsD = vsr.statsd.StatsD;
+const IdPermutation = vsr.testing.IdPermutation;
+
+const cli = @import("./cli.zig");
 
 const account_count_per_batch = @divExact(
     constants.message_size_max - @sizeOf(vsr.Header),
@@ -57,41 +52,23 @@ const transfer_count_per_batch = @divExact(
     @sizeOf(tb.Transfer),
 );
 
-/// The ID order can affect the results of a benchmark significantly. Specifically, sequential is
-/// expected to be the best (since it can take advantage of various optimizations such as avoiding
-/// negative prefetch) while random / reversed can't.
-const IdOrder = enum { sequential, random, reversed };
-
-const CliArgs = struct {
-    account_count: usize = account_count_default,
-    transfer_count: usize = transfer_count_default,
-    query_count: usize = query_count_default,
-    transfer_count_per_second: usize = transfer_count_per_second_default,
-    print_batch_timings: bool = false,
-    id_order: IdOrder = .reversed,
-    statsd: bool = false,
-    addresses: []const u8 = "127.0.0.1:" ++ std.fmt.comptimePrint("{}", .{constants.port}),
-};
-
-pub fn main() !void {
+pub fn main(
+    allocator: std.mem.Allocator,
+    addresses: []const std.net.Address,
+    cli_args: *const cli.Command.Benchmark,
+) !void {
     const stderr = std.io.getStdErr().writer();
 
     if (builtin.mode != .ReleaseSafe and builtin.mode != .ReleaseFast) {
-        try stderr.print("Benchmark must be built as ReleaseSafe for reasonable results.\n", .{});
+        try stderr.print("Benchmark must be built with '-Drelease' for reasonable results.\n", .{});
     }
-
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
-
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
-
-    const cli_args = flags.parse(&args, CliArgs);
-
-    const addresses = try vsr.parse_addresses(allocator, cli_args.addresses, constants.members_max);
-    defer allocator.free(addresses);
+    if (build_options.config_base != .production) {
+        try stderr.print(
+            \\Benchmark must be built with '-Dconfig=production' for reasonable results.
+            \\Benchmark was built with -Dconfig={s} instead.
+            \\
+        , .{@tagName(build_options.config_base)});
+    }
 
     if (cli_args.account_count < 2) flags.fatal(
         "--account-count: need at least two accounts, got {}",
@@ -225,7 +202,7 @@ const Benchmark = struct {
     done: bool,
     statsd: ?*StatsD,
     print_batch_timings: bool,
-    id_order: IdOrder,
+    id_order: cli.Command.Benchmark.IdOrder,
 
     fn create_accounts(b: *Benchmark) void {
         if (b.account_index >= b.account_count) {

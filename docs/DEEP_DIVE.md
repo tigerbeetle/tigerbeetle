@@ -34,7 +34,7 @@ Be aware that super non-pristine lab conditions such as an active video call mig
 With TigerBeetle installed, you are ready to benchmark!
 
 ```bash
-scripts/benchmark.sh
+./tigerbeetle benchmark
 ```
 
 ## Explore the API through six demos

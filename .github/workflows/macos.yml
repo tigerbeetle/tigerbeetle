@@ -26,7 +26,8 @@ jobs:
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/benchmark.sh --transfer-count=4000
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build -Drelease -Dconfig=production run -- benchmark --transfer-count=4000
 
   c_sample:
     strategy:

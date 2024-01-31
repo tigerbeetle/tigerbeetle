@@ -133,7 +133,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: ./scripts/benchmark.sh --transfer-count=4000
+      - run: ./scripts/install_zig.sh
+      - run: ./zig/zig build -Drelease -Dconfig=production run -- benchmark --transfer-count=4000
 
   aof:
     runs-on: ubuntu-latest

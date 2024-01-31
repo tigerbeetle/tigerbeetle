@@ -161,31 +161,6 @@ pub fn build(b: *std.Build) !void {
     }
 
     {
-        const benchmark = b.addExecutable(.{
-            .name = "benchmark",
-            .root_source_file = .{ .path = "src/benchmark.zig" },
-            .target = target,
-            .optimize = mode,
-        });
-        benchmark.addModule("vsr", vsr_module);
-        benchmark.addModule("vsr_options", vsr_options_module);
-        link_tracer_backend(benchmark, git_clone_tracy, tracer_backend, target);
-
-        const install_step = b.addInstallArtifact(benchmark, .{});
-        const build_step = b.step(
-            "build_benchmark",
-            "Build TigerBeetle benchmark",
-        );
-        build_step.dependOn(&install_step.step);
-
-        const run_cmd = b.addRunArtifact(benchmark);
-        if (b.args) |args| run_cmd.addArgs(args);
-
-        const run_step = b.step("benchmark", "Run TigerBeetle benchmark");
-        run_step.dependOn(&run_cmd.step);
-    }
-
-    {
         const aof = b.addExecutable(.{
             .name = "aof",
             .root_source_file = .{ .path = "src/aof.zig" },
