@@ -20,7 +20,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     _ = gpa;
 
     var timer = try std.time.Timer.start();
-    try shell.zig("build install -Drelease", .{});
+    try shell.zig("build -Drelease -Dconfig=production install", .{});
     const build_time_ms = timer.lap() / std.time.ns_per_ms;
 
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
