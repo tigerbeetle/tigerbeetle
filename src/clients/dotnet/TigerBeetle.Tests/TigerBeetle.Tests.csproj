@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <UseCurrentRuntimeIdentifier>true</UseCurrentRuntimeIdentifier>
+    <SelfContained>false</SelfContained>
     <RollForward>LatestMajor</RollForward>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
