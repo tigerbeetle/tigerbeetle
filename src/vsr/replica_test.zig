@@ -467,20 +467,13 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
 
     b1.drop_all(.__, .bidirectional);
 
-    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
-    try expectEqual(a0.commit(), checkpoint_1_trigger);
-    try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), checkpoint_1_trigger);
-
-    // Ensure that B2 does not commit op=trigger+1.
-    b2.drop(.__, .incoming, .commit);
     try c.request(checkpoint_1_trigger + 1, checkpoint_1_trigger + 1);
     try expectEqual(a0.op_checkpoint(), checkpoint_1);
     try expectEqual(b1.op_checkpoint(), 0);
     try expectEqual(b2.op_checkpoint(), checkpoint_1);
     try expectEqual(a0.commit(), checkpoint_1_trigger + 1);
     try expectEqual(b1.commit(), 20);
-    try expectEqual(b2.commit(), checkpoint_1_trigger);
+    try expectEqual(b2.commit(), checkpoint_1_trigger + 1);
     try expectEqual(a0.op_head(), checkpoint_1_trigger + 1);
     try expectEqual(b1.op_head(), 20);
     try expectEqual(b2.op_head(), checkpoint_1_trigger + 1);
@@ -490,6 +483,8 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     b2.pass_all(.__, .bidirectional);
     b1.pass_all(.__, .bidirectional);
     a0.drop_all(.__, .bidirectional);
+    // Block state sync to prove that B1 recovers via WAL repair.
+    b1.drop(.__, .bidirectional, .sync_checkpoint);
     // TODO: Explicit coverage marks: This should hit the
     // "on_do_view_change: lagging primary; forfeiting" log line.
     t.run();
