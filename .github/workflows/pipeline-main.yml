@@ -11,9 +11,9 @@ jobs:
   other:
     uses: ./.github/workflows/pipeline-other.yml
 
-  workbench:
+  devhub:
     runs-on: ubuntu-latest
-    environment: workbench
+    environment: devhub
     permissions:
       pages: write
       id-token: write
@@ -21,10 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build scripts -- workbench --sha=${{ github.sha }}
+      - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
-          WORKBENCHDB_PAT: ${{ secrets.WORKBENCHDB_PAT }}
+          DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
       - uses: actions/upload-pages-artifact@v1
         with:
-          path: ./src/workbench
+          path: ./src/devhub
       - uses: actions/deploy-pages@v1

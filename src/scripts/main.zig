@@ -19,12 +19,12 @@ const Shell = @import("../shell.zig");
 
 const ci = @import("./ci.zig");
 const release = @import("./release.zig");
-const workbench = @import("./workbench.zig");
+const devhub = @import("./devhub.zig");
 
 const CliArgs = union(enum) {
     ci: ci.CliArgs,
     release: release.CliArgs,
-    workbench: workbench.CliArgs,
+    devhub: devhub.CliArgs,
 };
 
 pub fn main() !void {
@@ -49,6 +49,6 @@ pub fn main() !void {
     switch (cli_args) {
         .ci => |args_ci| try ci.main(shell, gpa, args_ci),
         .release => |args_release| try release.main(shell, gpa, args_release),
-        .workbench => |args_workbench| try workbench.main(shell, gpa, args_workbench),
+        .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
     }
 }
