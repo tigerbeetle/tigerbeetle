@@ -10,6 +10,7 @@
 ///   front-end to pick up. This "database" is just a newline-delimited JSON file in a git repo
 const std = @import("std");
 
+const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
 
 pub const CliArgs = struct {
@@ -25,15 +26,39 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
 
-    const run = Run{
+    const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark", .{});
+    const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
+    const batch_p90_ms = try get_measurement(benchmark_result, "batch latency p90", "ms");
+    const query_p90_ms = try get_measurement(benchmark_result, "query latency p90", "ms");
+    const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
+
+    try upload_run(shell, Run{
         .timestamp = std.time.timestamp(),
         .revision = cli_args.sha,
         .measurements = &[_]Measurement{
             .{ .label = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .label = "executable size", .value = executable_size_bytes, .unit = "bytes" },
+            .{ .label = "TPS", .value = tps, .unit = "count" },
+            .{ .label = "batch p90", .value = batch_p90_ms, .unit = "ms" },
+            .{ .label = "query p90", .value = query_p90_ms, .unit = "ms" },
+            .{ .label = "RSS", .value = rss_bytes, .unit = "bytes" },
         },
-    };
+    });
+}
 
+const Measurement = struct {
+    label: []const u8,
+    value: u64,
+    unit: []const u8,
+};
+
+const Run = struct {
+    timestamp: i64,
+    revision: []const u8,
+    measurements: []const Measurement,
+};
+
+fn upload_run(shell: *Shell, run: Run) !void {
     const token = try shell.env_get("DEVHUBDB_PAT");
     try shell.exec(
         \\git clone --depth 1
@@ -63,14 +88,17 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     try shell.exec("git push", .{});
 }
 
-const Measurement = struct {
-    label: []const u8,
-    value: u64,
-    unit: []const u8,
-};
+fn get_measurement(
+    benchmark_stdout: []const u8,
+    comptime label: []const u8,
+    comptime unit: []const u8,
+) !u64 {
+    errdefer {
+        std.log.err("can't extract '" ++ label ++ "' measurement", .{});
+    }
 
-const Run = struct {
-    timestamp: i64,
-    revision: []const u8,
-    measurements: []const Measurement,
-};
+    var cut = stdx.cut(benchmark_stdout, label ++ " = ") orelse return error.BadMeasurement;
+    cut = stdx.cut(cut.suffix, " " ++ unit) orelse return error.BadMeasurement;
+
+    return try std.fmt.parseInt(u64, cut.prefix, 10);
+}
