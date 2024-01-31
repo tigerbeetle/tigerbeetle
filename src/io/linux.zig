@@ -1012,12 +1012,12 @@ pub const IO = struct {
             ) catch |err| switch (err) {
                 error.FileNotFound => {
                     if (method == .create or method == .create_or_open) {
-                        // It's impossible to distinguish creating a new file and opening a new block
-                        // device with the current API. So if it's possible that we should create a file
-                        // we try that instead of failing here.
+                        // It's impossible to distinguish creating a new file and opening a new
+                        // block device with the current API. So if it's possible that we should
+                        // create a file we try that instead of failing here.
                         break :blk .file;
                     } else {
-                        @panic("Block device not found.");
+                        @panic("Path does not exist.");
                     }
                 },
                 else => |err_| return err_,
@@ -1026,7 +1026,7 @@ pub const IO = struct {
                 break :blk .block_device;
             } else {
                 if (!os.S.ISREG(stat.mode)) {
-                    @panic("Datafile path does not point to block device or regular file.");
+                    @panic("file path does not point to block device or regular file.");
                 }
                 break :blk .file;
             }
@@ -1043,9 +1043,9 @@ pub const IO = struct {
                 if (constants.direct_io) {
                     // Block devices should always support Direct IO.
                     flags |= os.O.DIRECT;
-                    // Use O_EXCL when opening as a block device to obtain an advisory exclusive lock.
-                    // Normally, you can't do this for files you don't create, but for block devices this
-                    // guarantees:
+                    // Use O_EXCL when opening as a block device to obtain an advisory exclusive
+                    // lock. Normally, you can't do this for files you don't create, but for
+                    // block devices this guarantees:
                     //     - that there are no mounts using this block device
                     //     - that no new mounts can use this block device while we have it open
                     //
@@ -1070,8 +1070,9 @@ pub const IO = struct {
                     );
                 }
 
-                // Special case. tmpfs doesn't support Direct I/O. Normally we would panic here (see below)
-                // but being able to benchmark production workloads on tmpfs is very useful for removing
+                // Special case. tmpfs doesn't support Direct I/O. Normally we would panic
+                // here (see below) but being able to benchmark production workloads
+                // on tmpfs is very useful for removing
                 // disk speed from the equation.
                 if (constants.direct_io and !dir_on_tmpfs) {
                     direct_io_supported = try fs_supports_direct_io(dir_fd);
@@ -1080,8 +1081,8 @@ pub const IO = struct {
                     } else if (!constants.direct_io_required) {
                         log.warn("file system does not support Direct I/O", .{});
                     } else {
-                        // We require Direct I/O for safety to handle fsync failure correctly, and therefore
-                        // panic in production if it is not supported.
+                        // We require Direct I/O for safety to handle fsync failure correctly, and
+                        // therefore panic in production if it is not supported.
                         @panic("file system does not support Direct I/O");
                     }
                 }
@@ -1191,10 +1192,10 @@ pub const IO = struct {
 
                 if (block_device_size < size) {
                     std.debug.panic(
-                        "The block device used is too small ({} needed/{} available).",
+                        "The block device used is too small ({} available/{} needed).",
                         .{
-                            std.fmt.fmtIntSizeBin(size),
                             std.fmt.fmtIntSizeBin(block_device_size),
+                            std.fmt.fmtIntSizeBin(size),
                         },
                     );
                 }
@@ -1208,15 +1209,20 @@ pub const IO = struct {
                     //   one starting at 0MB, one at 1024MB) and the operator tries to format
                     //   the raw disk (/dev/sda) while a partition later is
                     //   TigerBeetle (/dev/sda2) it'll be blocked by the MBR/GPT existing.
-                    const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_size;
+                    const superblock_zone_size =
+                        @import("../vsr/superblock.zig").superblock_zone_size;
                     var read_buf: [superblock_zone_size]u8 align(constants.sector_size) = undefined;
 
-                    // We can do this without worrying about retrying partial reads because on linux,
-                    // read(2) on block devices can not be interrupted by signals. See signal(7).
+                    // We can do this without worrying about retrying partial reads because on
+                    // linux, read(2) on block devices can not be interrupted by signals.
+                    // See signal(7).
                     assert(superblock_zone_size == try os.read(fd, &read_buf));
                     if (!std.mem.allEqual(u8, &read_buf, 0)) {
-                        @panic(
-                            "Superblock on block device not empty. If this is the correct block device to use, please format it first.",
+                        std.debug.panic(
+                            "Superblock on block device not empty. " ++
+                                "If this is the correct block device to use, " ++
+                                "please zero the first {} using a tool like dd.",
+                            .{std.fmt.fmtIntSizeBin(superblock_zone_size)},
                         );
                     }
                     // Reset position in the block device to compensate for read(2).
