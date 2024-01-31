@@ -7687,6 +7687,7 @@ pub fn ReplicaType(
                 // Uninterruptible states:
                 .next_journal,
                 .setup_client_replies,
+                .checkpoint_state_machine,
                 .checkpoint_client_replies,
                 .checkpoint_client_sessions,
                 .checkpoint_grid,
@@ -7696,7 +7697,6 @@ pub fn ReplicaType(
                 .idle, // (StateMachine.open() may be running.)
                 .prefetch_state_machine,
                 .compact_state_machine,
-                .checkpoint_state_machine,
                 => self.sync_dispatch(.canceling_grid),
             }
         }
@@ -7831,11 +7831,11 @@ pub fn ReplicaType(
                 .cleanup,
                 .prefetch_state_machine,
                 .compact_state_machine,
-                .checkpoint_state_machine,
                 => unreachable,
 
                 .next_journal,
                 .setup_client_replies,
+                .checkpoint_state_machine,
                 .checkpoint_client_replies,
                 .checkpoint_client_sessions,
                 .checkpoint_grid,
