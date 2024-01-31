@@ -1408,7 +1408,7 @@ pub fn ReplicaType(
             }
 
             if (message.header.checkpoint_id != self.superblock.working.checkpoint_id() and
-                message.header.checkpoint_id != self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id)
+                message.header.checkpoint_id != self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id)
             {
                 // Panic on encountering a prepare which does not match our own checkpoint id.
                 // (Or the previous checkpoint id, for border prepares.)
@@ -5042,7 +5042,7 @@ pub fn ReplicaType(
                         return null;
                     }
                     // Case 3: op is from the previous checkpoint whose id we still remember.
-                    return self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
+                    return self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
                 }
 
                 assert(op + constants.vsr_checkpoint_interval > self.op_checkpoint_next_border());
@@ -5214,7 +5214,7 @@ pub fn ReplicaType(
                 if (vsr.Checkpoint.border_for_checkpoint(self.op_checkpoint())) |op_border| {
                     if (self.op + 1 <= op_border) {
                         // Border prepares use the previous checkpoint id.
-                        break :checkpoint_id self.superblock.working.vsr_state.checkpoint.previous_checkpoint_id;
+                        break :checkpoint_id self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
                     }
                 }
                 break :checkpoint_id self.superblock.working.checkpoint_id();

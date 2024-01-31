@@ -156,7 +156,7 @@ pub const SuperBlockHeader = extern struct {
         }) VSRState {
             return .{
                 .checkpoint = .{
-                    .previous_checkpoint_id = 0,
+                    .parent_checkpoint_id = 0,
                     .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
                     .commit_min = 0,
                     .free_set_checksum = comptime vsr.checksum(&.{}),
@@ -258,8 +258,8 @@ pub const SuperBlockHeader = extern struct {
                 }
             } else {
                 assert(old.checkpoint.commit_min_checksum != new.checkpoint.commit_min_checksum);
-                assert(old.checkpoint.previous_checkpoint_id !=
-                    new.checkpoint.previous_checkpoint_id);
+                assert(old.checkpoint.parent_checkpoint_id !=
+                    new.checkpoint.parent_checkpoint_id);
             }
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
@@ -321,7 +321,7 @@ pub const SuperBlockHeader = extern struct {
 
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
-        previous_checkpoint_id: u128,
+        parent_checkpoint_id: u128,
 
         free_set_last_block_address: u64,
         client_sessions_last_block_address: u64,
@@ -708,7 +708,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .parent = 0,
                 .vsr_state = .{
                     .checkpoint = .{
-                        .previous_checkpoint_id = 0,
+                        .parent_checkpoint_id = 0,
                         .commit_min_checksum = 0,
                         .commit_min = 0,
                         .manifest_oldest_checksum = 0,
@@ -814,7 +814,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
-                .previous_checkpoint_id = superblock.staging.checkpoint_id(),
+                .parent_checkpoint_id = superblock.staging.checkpoint_id(),
                 .commit_min = update.commit_min,
                 .commit_min_checksum = update.commit_min_checksum,
                 .free_set_checksum = update.free_set_reference.checksum,
