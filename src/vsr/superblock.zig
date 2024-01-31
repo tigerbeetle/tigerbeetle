@@ -324,6 +324,8 @@ pub const SuperBlockHeader = extern struct {
         /// Following state sync, this is set to the last checkpoint that we skipped.
         parent_checkpoint_id: u128,
         /// The parent_checkpoint_id of the parent checkpoint.
+        /// TODO We might be able to remove this when
+        /// https://github.com/tigerbeetle/tigerbeetle/issues/1378 is fixed.
         grandparent_checkpoint_id: u128,
 
         free_set_last_block_address: u64,
@@ -816,10 +818,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert((update.storage_size == data_file_size_min) ==
                 update.free_set_reference.empty());
 
+            // NOTE: Within the vsr_state.checkpoint assignment below, do not read from vsr_state
+            // directly. A miscompilation bug (as of Zig 0.11.0) causes fields to receive the
+            // incorrect values.
+            const vsr_state_staging = superblock.staging.vsr_state;
+
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
                 .parent_checkpoint_id = superblock.staging.checkpoint_id(),
-                .grandparent_checkpoint_id = vsr_state.checkpoint.parent_checkpoint_id,
+                .grandparent_checkpoint_id = vsr_state_staging.checkpoint.parent_checkpoint_id,
                 .commit_min = update.commit_min,
                 .commit_min_checksum = update.commit_min_checksum,
                 .free_set_checksum = update.free_set_reference.checksum,
@@ -836,8 +843,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .manifest_newest_address = update.manifest_references.newest_address,
                 .manifest_block_count = update.manifest_references.block_count,
                 .storage_size = update.storage_size,
-                .snapshots_block_checksum = vsr_state.checkpoint.snapshots_block_checksum,
-                .snapshots_block_address = vsr_state.checkpoint.snapshots_block_address,
+                .snapshots_block_checksum = vsr_state_staging.checkpoint.snapshots_block_checksum,
+                .snapshots_block_address = vsr_state_staging.checkpoint.snapshots_block_address,
             };
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;

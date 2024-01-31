@@ -1410,8 +1410,7 @@ pub fn ReplicaType(
             if (message.header.checkpoint_id != self.superblock.working.checkpoint_id() and
                 message.header.checkpoint_id != self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id)
             {
-                // Panic on encountering a prepare which does not match our own checkpoint id.
-                // (Or the previous checkpoint id, for border prepares.)
+                // Panic on encountering a prepare which does not match an expected checkpoint id.
                 //
                 // If this branch is hit, there is a storage determinism problem. At this point in
                 // the code it is not possible to distinguish whether the problem is with this
@@ -5022,34 +5021,34 @@ pub fn ReplicaType(
 
         /// Returns checkpoint id associated with the op.
         ///
-        /// Normally, this is just the id of the checkpoint the op builds on top. However, ops
+        /// Normally, this is just the id of the op's previous checkpoint. However, ops
         /// between a checkpoint and its trigger can't know checkpoint's id yet, and instead use
-        /// the id of the previous checkpoint.
+        /// the id of the grandparent checkpoint.
         ///
         /// Returns `null` for ops which are too far in the past/future to know their checkpoint
         /// ids.
         fn checkpoint_id_for_op(self: *const Self, op: u64) ?u128 {
-            // Case 1: for the root op, checkpoint id is zero.
-            if (op == 0) return Header.Prepare.root(self.cluster).checkpoint_id;
+            const checkpoint_now = self.op_checkpoint();
+            const checkpoint_next_1 = vsr.Checkpoint.checkpoint_after(checkpoint_now);
+            const checkpoint_next_2 = vsr.Checkpoint.checkpoint_after(checkpoint_next_1);
 
-            if (self.op_checkpoint() > 0) {
-                const op_checkpoint_border =
-                    vsr.Checkpoint.border_for_checkpoint(self.op_checkpoint()).?;
-
-                if (op <= op_checkpoint_border) {
-                    if (op + constants.vsr_checkpoint_interval <= op_checkpoint_border) {
-                        // Case 2: op is from a too distant past for us to know its checkpoint id.
-                        return null;
-                    }
-                    // Case 3: op is from the previous checkpoint whose id we still remember.
-                    return self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
-                }
-
-                assert(op + constants.vsr_checkpoint_interval > self.op_checkpoint_next_border());
+            if (op + constants.vsr_checkpoint_interval <= checkpoint_now) {
+                // Case 1: op is from a too distant past for us to know its checkpoint id.
+                return null;
             }
 
-            if (op <= self.op_checkpoint_next_border()) {
-                // Case 4: op uses the current checkpoint id.
+            if (op <= checkpoint_now) {
+                // Case 2: op is from the previous checkpoint whose id we still remember.
+                return self.superblock.working.vsr_state.checkpoint.grandparent_checkpoint_id;
+            }
+
+            if (op <= checkpoint_next_1) {
+                // Case 3: op is in the current checkpoint.
+                return self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
+            }
+
+            if (op <= checkpoint_next_2) {
+                // Case 4: op is in the next checkpoint (which we have not checkpointed).
                 return self.superblock.working.checkpoint_id();
             }
 
@@ -5095,18 +5094,16 @@ pub fn ReplicaType(
                         self.op_checkpoint_next_trigger(),
                     ) -| (constants.journal_slot_count - 1);
 
-                    // We know checkpoint ids for the current checkpoint and the one before that.
+                    // We know checkpoint ids for the previous checkpoint and the one before that.
                     // Don't try repairing ops with older checkpoint_ids which are impossible to
                     // verify.
-                    //
-                    // The "+pipeline_prepare_queue_max" accounts for the border prepares of the
-                    // older checksum have a different (no-longer known) checkpoint id. A replica
-                    // that is that far back can state sync, though.
                     const op_with_checkpoint_id_oldest =
-                        (self.op_checkpoint_next_trigger() + 1 +
-                        constants.pipeline_prepare_queue_max) -|
-                        constants.vsr_checkpoint_interval * 2;
+                        (self.op_checkpoint() + 1) -| constants.vsr_checkpoint_interval;
                     assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest) != null);
+
+                    if (op_with_checkpoint_id_oldest > 0) {
+                        assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest - 1) == null);
+                    }
 
                     break :op @max(op_wal_oldest, op_with_checkpoint_id_oldest);
                 } else {
@@ -5211,13 +5208,11 @@ pub fn ReplicaType(
             const request_header: Header.Request = request.message.header.*;
 
             const checkpoint_id = checkpoint_id: {
-                if (vsr.Checkpoint.border_for_checkpoint(self.op_checkpoint())) |op_border| {
-                    if (self.op + 1 <= op_border) {
-                        // Border prepares use the previous checkpoint id.
-                        break :checkpoint_id self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
-                    }
+                if (self.op + 1 <= self.op_checkpoint_next()) {
+                    break :checkpoint_id self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
+                } else {
+                    break :checkpoint_id self.superblock.working.checkpoint_id();
                 }
-                break :checkpoint_id self.superblock.working.checkpoint_id();
             };
 
             const latest_entry = self.journal.header_with_op(self.op).?;
