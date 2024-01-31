@@ -99,6 +99,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .latest_vsr_state = SuperBlockHeader.VSRState{
             .checkpoint = .{
                 .parent_checkpoint_id = 0,
+                .grandparent_checkpoint_id = 0,
                 .commit_min_checksum = 0,
                 .free_set_checksum = vsr.checksum(&.{}),
                 .free_set_last_block_checksum = 0,
@@ -383,6 +384,7 @@ const Environment = struct {
         const vsr_state = VSRState{
             .checkpoint = .{
                 .parent_checkpoint_id = env.superblock.staging.checkpoint_id(),
+                .grandparent_checkpoint_id = vsr_state_old.checkpoint.parent_checkpoint_id,
                 .commit_min_checksum = vsr_state_old.checkpoint.commit_min_checksum + 1,
                 .commit_min = vsr_state_old.checkpoint.commit_min + 1,
                 .free_set_checksum = vsr.checksum(&.{}),

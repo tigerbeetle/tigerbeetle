@@ -140,7 +140,7 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [31]u8 = [_]u8{0} ** 31,
+        reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
             assert(@sizeOf(VSRState) == 592);
@@ -157,6 +157,7 @@ pub const SuperBlockHeader = extern struct {
             return .{
                 .checkpoint = .{
                     .parent_checkpoint_id = 0,
+                    .grandparent_checkpoint_id = 0,
                     .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
                     .commit_min = 0,
                     .free_set_checksum = comptime vsr.checksum(&.{}),
@@ -322,6 +323,8 @@ pub const SuperBlockHeader = extern struct {
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
         parent_checkpoint_id: u128,
+        /// The parent_checkpoint_id of the parent checkpoint.
+        grandparent_checkpoint_id: u128,
 
         free_set_last_block_address: u64,
         client_sessions_last_block_address: u64,
@@ -353,7 +356,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [4]u8 = [_]u8{0} ** 4,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 320);
+            assert(@sizeOf(CheckpointState) == 336);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(stdx.no_padding(CheckpointState));
         }
@@ -709,6 +712,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .vsr_state = .{
                     .checkpoint = .{
                         .parent_checkpoint_id = 0,
+                        .grandparent_checkpoint_id = 0,
                         .commit_min_checksum = 0,
                         .commit_min = 0,
                         .manifest_oldest_checksum = 0,
@@ -815,6 +819,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
                 .parent_checkpoint_id = superblock.staging.checkpoint_id(),
+                .grandparent_checkpoint_id = vsr_state.checkpoint.parent_checkpoint_id,
                 .commit_min = update.commit_min,
                 .commit_min_checksum = update.commit_min_checksum,
                 .free_set_checksum = update.free_set_reference.checksum,
