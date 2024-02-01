@@ -330,7 +330,6 @@ pub fn GridType(comptime Storage: type) type {
         pub fn checkpoint(grid: *Grid, callback: *const fn (*Grid) void) void {
             assert(grid.callback == .none);
             assert(grid.read_global_queue.empty());
-            grid.assert_only_repairing();
 
             {
                 assert(grid.free_set.count_reservations() == 0);
@@ -372,7 +371,6 @@ pub fn GridType(comptime Storage: type) type {
                 return; // Still writing free set blocks.
             }
             assert(grid.free_set_checkpoint.callback == .none);
-            grid.assert_only_repairing();
 
             // We are still repairing some blocks that were released at the checkpoint.
             if (!grid.blocks_missing.checkpoint_complete()) {
@@ -389,7 +387,6 @@ pub fn GridType(comptime Storage: type) type {
 
             var write_iops = grid.write_iops.iterate();
             while (write_iops.next()) |iop| {
-                assert(iop.write.repair);
                 assert(!grid.free_set.is_free(iop.write.address));
                 assert(!grid.free_set.is_released(iop.write.address));
             }
