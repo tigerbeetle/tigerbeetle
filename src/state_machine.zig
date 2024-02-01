@@ -75,35 +75,31 @@ pub fn StateMachineType(
             pub const tree_ids = struct {
                 pub const accounts = .{
                     .id = 1,
-                    .debits_pending = 2,
-                    .debits_posted = 3,
-                    .credits_pending = 4,
-                    .credits_posted = 5,
-                    .user_data_128 = 6,
-                    .user_data_64 = 7,
-                    .user_data_32 = 8,
-                    .ledger = 9,
-                    .code = 10,
-                    .timestamp = 11,
+                    .user_data_128 = 2,
+                    .user_data_64 = 3,
+                    .user_data_32 = 4,
+                    .ledger = 5,
+                    .code = 6,
+                    .timestamp = 7,
                 };
 
                 pub const transfers = .{
-                    .id = 12,
-                    .debit_account_id = 13,
-                    .credit_account_id = 14,
-                    .amount = 15,
-                    .pending_id = 16,
-                    .user_data_128 = 17,
-                    .user_data_64 = 18,
-                    .user_data_32 = 19,
-                    .timeout = 20,
-                    .ledger = 21,
-                    .code = 22,
-                    .timestamp = 23,
+                    .id = 8,
+                    .debit_account_id = 9,
+                    .credit_account_id = 10,
+                    .amount = 11,
+                    .pending_id = 12,
+                    .user_data_128 = 13,
+                    .user_data_64 = 14,
+                    .user_data_32 = 15,
+                    .timeout = 16,
+                    .ledger = 17,
+                    .code = 18,
+                    .timestamp = 19,
                 };
 
                 pub const posted = .{
-                    .timestamp = 24,
+                    .timestamp = 20,
                 };
             };
         };
@@ -167,39 +163,26 @@ pub fn StateMachineType(
                 .ids = constants.tree_ids.accounts,
                 .value_count_max = .{
                     .id = config.lsm_batch_multiple * constants.batch_max.create_accounts,
-                    // Transfers mutate the secondary indices for debits/credits pending/posted.
-                    //
-                    // * Each mutation results in a remove and an insert: the ×2 multiplier.
-                    // * Each transfer modifies two accounts. However, this does not
-                    //   necessitate an additional ×2 multiplier — the credits of the debit
-                    //   account and the debits of the credit account are not modified.
-                    .debits_pending = config.lsm_batch_multiple * @as(usize, @max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
-                    )),
-                    .debits_posted = config.lsm_batch_multiple * @as(usize, @max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
-                    )),
-                    .credits_pending = config.lsm_batch_multiple * @as(usize, @max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
-                    )),
-                    .credits_posted = config.lsm_batch_multiple * @as(usize, @max(
-                        constants.batch_max.create_accounts,
-                        2 * constants.batch_max.create_transfers,
-                    )),
                     .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_accounts,
                     .code = config.lsm_batch_multiple * constants.batch_max.create_accounts,
+                    // Transfers mutate the account balance for debits/credits pending/posted.
+                    // Each transfer modifies two accounts.
                     .timestamp = config.lsm_batch_multiple * @as(usize, @max(
                         constants.batch_max.create_accounts,
                         2 * constants.batch_max.create_transfers,
                     )),
                 },
-                .ignored = &[_][]const u8{ "flags", "reserved" },
+                .ignored = &[_][]const u8{
+                    "debits_posted",
+                    "debits_pending",
+                    "credits_posted",
+                    "credits_pending",
+                    "flags",
+                    "reserved",
+                },
                 .derived = .{},
             },
         );
@@ -1336,10 +1319,6 @@ pub fn StateMachineType(
                         .user_data_32 = .{},
                         .ledger = .{},
                         .code = .{},
-                        .debits_pending = .{},
-                        .debits_posted = .{},
-                        .credits_pending = .{},
-                        .credits_posted = .{},
                     },
                 },
                 .transfers = .{
