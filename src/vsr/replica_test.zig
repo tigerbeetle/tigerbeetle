@@ -24,6 +24,9 @@ const checkpoint_3 = vsr.Checkpoint.checkpoint_after(checkpoint_2);
 const checkpoint_1_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_1).?;
 const checkpoint_2_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_2).?;
 const checkpoint_3_trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint_3).?;
+const checkpoint_1_border = vsr.Checkpoint.border_for_checkpoint(checkpoint_1).?;
+const checkpoint_2_border = vsr.Checkpoint.border_for_checkpoint(checkpoint_2).?;
+const checkpoint_3_border = vsr.Checkpoint.border_for_checkpoint(checkpoint_3).?;
 const log_level = std.log.Level.err;
 
 // TODO Test client eviction once it no longer triggers a client panic.
@@ -1043,8 +1046,6 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
 }
 
 test "Cluster: async-checkpoints: prepare beyond checkpoint trigger" {
-    const pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max;
-
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
@@ -1060,7 +1061,7 @@ test "Cluster: async-checkpoints: prepare beyond checkpoint trigger" {
     t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
 
     // Prepare ops beyond the checkpoint.
-    try c.request(checkpoint_1_trigger - 1 + pipeline_prepare_queue_max, checkpoint_1_trigger - 1);
+    try c.request(checkpoint_1_border - 1, checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).op_checkpoint(), 0);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger);
@@ -1069,10 +1070,10 @@ test "Cluster: async-checkpoints: prepare beyond checkpoint trigger" {
 
     t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
     t.run();
-    try expectEqual(c.replies(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+    try expectEqual(c.replies(), checkpoint_1_border - 1);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_1);
-    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
-    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger - 1 + pipeline_prepare_queue_max);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_border - 1);
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_border - 1);
 }
 
 const ProcessSelector = enum {

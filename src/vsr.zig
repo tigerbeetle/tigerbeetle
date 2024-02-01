@@ -1400,6 +1400,16 @@ pub const Checkpoint = struct {
         }
     }
 
+    pub fn border_for_checkpoint(checkpoint: u64) ?u64 {
+        assert(valid(checkpoint));
+
+        if (trigger_for_checkpoint(checkpoint)) |trigger| {
+            return trigger + constants.pipeline_prepare_queue_max;
+        } else {
+            return null;
+        }
+    }
+
     pub fn valid(op: u64) bool {
         // Divide by `lsm_batch_multiple` instead of `vsr_checkpoint_interval`:
         // although today in practice checkpoints are evenly spaced, the LSM layer doesn't assume

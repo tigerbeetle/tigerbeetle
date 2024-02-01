@@ -140,7 +140,7 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [31]u8 = [_]u8{0} ** 31,
+        reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
             assert(@sizeOf(VSRState) == 592);
@@ -156,7 +156,8 @@ pub const SuperBlockHeader = extern struct {
         }) VSRState {
             return .{
                 .checkpoint = .{
-                    .previous_checkpoint_id = 0,
+                    .parent_checkpoint_id = 0,
+                    .grandparent_checkpoint_id = 0,
                     .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
                     .commit_min = 0,
                     .free_set_checksum = comptime vsr.checksum(&.{}),
@@ -258,8 +259,8 @@ pub const SuperBlockHeader = extern struct {
                 }
             } else {
                 assert(old.checkpoint.commit_min_checksum != new.checkpoint.commit_min_checksum);
-                assert(old.checkpoint.previous_checkpoint_id !=
-                    new.checkpoint.previous_checkpoint_id);
+                assert(old.checkpoint.parent_checkpoint_id !=
+                    new.checkpoint.parent_checkpoint_id);
             }
             assert(old.replica_id == new.replica_id);
             assert(old.replica_count == new.replica_count);
@@ -321,7 +322,11 @@ pub const SuperBlockHeader = extern struct {
 
         /// The checkpoint_id() of the checkpoint which last updated our commit_min.
         /// Following state sync, this is set to the last checkpoint that we skipped.
-        previous_checkpoint_id: u128,
+        parent_checkpoint_id: u128,
+        /// The parent_checkpoint_id of the parent checkpoint.
+        /// TODO We might be able to remove this when
+        /// https://github.com/tigerbeetle/tigerbeetle/issues/1378 is fixed.
+        grandparent_checkpoint_id: u128,
 
         free_set_last_block_address: u64,
         client_sessions_last_block_address: u64,
@@ -353,7 +358,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [4]u8 = [_]u8{0} ** 4,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 320);
+            assert(@sizeOf(CheckpointState) == 336);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(stdx.no_padding(CheckpointState));
         }
@@ -708,7 +713,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .parent = 0,
                 .vsr_state = .{
                     .checkpoint = .{
-                        .previous_checkpoint_id = 0,
+                        .parent_checkpoint_id = 0,
+                        .grandparent_checkpoint_id = 0,
                         .commit_min_checksum = 0,
                         .commit_min = 0,
                         .manifest_oldest_checksum = 0,
@@ -812,9 +818,15 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert((update.storage_size == data_file_size_min) ==
                 update.free_set_reference.empty());
 
+            // NOTE: Within the vsr_state.checkpoint assignment below, do not read from vsr_state
+            // directly. A miscompilation bug (as of Zig 0.11.0) causes fields to receive the
+            // incorrect values.
+            const vsr_state_staging = superblock.staging.vsr_state;
+
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
-                .previous_checkpoint_id = superblock.staging.checkpoint_id(),
+                .parent_checkpoint_id = superblock.staging.checkpoint_id(),
+                .grandparent_checkpoint_id = vsr_state_staging.checkpoint.parent_checkpoint_id,
                 .commit_min = update.commit_min,
                 .commit_min_checksum = update.commit_min_checksum,
                 .free_set_checksum = update.free_set_reference.checksum,
@@ -831,8 +843,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .manifest_newest_address = update.manifest_references.newest_address,
                 .manifest_block_count = update.manifest_references.block_count,
                 .storage_size = update.storage_size,
-                .snapshots_block_checksum = vsr_state.checkpoint.snapshots_block_checksum,
-                .snapshots_block_address = vsr_state.checkpoint.snapshots_block_address,
+                .snapshots_block_checksum = vsr_state_staging.checkpoint.snapshots_block_checksum,
+                .snapshots_block_address = vsr_state_staging.checkpoint.snapshots_block_address,
             };
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
