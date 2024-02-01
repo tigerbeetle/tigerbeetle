@@ -5021,9 +5021,10 @@ pub fn ReplicaType(
 
         /// Returns checkpoint id associated with the op.
         ///
-        /// Normally, this is just the id of the op's previous checkpoint. However, ops
-        /// between a checkpoint and its trigger can't know checkpoint's id yet, and instead use
-        /// the id of the grandparent checkpoint.
+        /// Specifically, returns the checkpoint id corresponding to the checkpoint with:
+        ///
+        ///   prepare.op > checkpoint_op
+        ///   prepare.op ≤ checkpoint_after(checkpoint_op)
         ///
         /// Returns `null` for ops which are too far in the past/future to know their checkpoint
         /// ids.
