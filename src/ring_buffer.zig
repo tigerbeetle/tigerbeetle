@@ -281,15 +281,30 @@ fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
                 .mutable => ring.iterator_mutable(),
                 else => unreachable,
             };
-            var index: usize = 0;
+            var index: u32 = 0;
             switch (mutability) {
                 .immutable => while (iterator.next()) |item| {
                     try testing.expectEqual(values[index], item);
                     index += 1;
                 },
-                .mutable => while (iterator.next_ptr()) |item| {
-                    try testing.expectEqual(values[index], item.*);
-                    index += 1;
+                .mutable => {
+                    const permutation = @divFloor(std.math.maxInt(u32), 2);
+                    while (iterator.next_ptr()) |item| {
+                        try testing.expectEqual(values[index], item.*);
+                        item.* += permutation + index;
+                        index += 1;
+                    }
+                    iterator = ring.iterator_mutable();
+                    var check_index: u32 = 0;
+                    while (iterator.next_ptr()) |item| {
+                        try testing.expectEqual(
+                            values[check_index] + permutation + check_index,
+                            item.*,
+                        );
+                        item.* -= permutation + check_index;
+                        check_index += 1;
+                    }
+                    try testing.expectEqual(index, check_index);
                 },
                 else => unreachable,
             }
