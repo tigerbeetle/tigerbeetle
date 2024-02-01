@@ -12,6 +12,7 @@
 //! The cluster address is then passed onto `benchmark_load.zig`, which deals with both offering
 //! the load and measuring response latencies and throughput. The load runs in-process.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const ChildProcess = std.ChildProcess;
@@ -34,7 +35,12 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
     }
 
     var tigerbeetle_process: ?TigerBeetleProcess = null;
-    defer if (tigerbeetle_process) |*p| p.deinit();
+    defer if (tigerbeetle_process) |*p| {
+        const rusage = p.deinit();
+        if (rusage.getMaxRss()) |max_rss_bytes| {
+            std.io.getStdOut().writer().print("\nrss = {} bytes\n", .{max_rss_bytes}) catch {};
+        }
+    };
 
     if (args.addresses == null) {
         const me = try std.fs.selfExePathAlloc(allocator);
@@ -81,14 +87,16 @@ const TigerBeetleProcess = struct {
     child: std.ChildProcess,
     address: std.net.Address,
 
-    fn deinit(self: *TigerBeetleProcess) void {
+    fn deinit(self: *TigerBeetleProcess) std.ChildProcess.ResourceUsageStatistics {
         // Although we could just kill the child here, let's exercise the "normal" termination logic
         // through stdin closure, such that, from the perspective of the child, there's no
         // difference between the parent process exiting normally or just crashing.
         self.child.stdin.?.close();
         self.child.stdin = null;
         _ = self.child.wait() catch {};
-        self.* = undefined;
+
+        defer self.* = undefined;
+        return self.child.resource_usage_statistics;
     }
 };
 
@@ -105,6 +113,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
         },
         allocator,
     );
+    child.request_resource_usage_statistics = true;
     child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Ignore;
