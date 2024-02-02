@@ -129,6 +129,15 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             // Don't unref `write_queue`'s Writes — they are a subset of `writes`.
         }
 
+        pub fn writing_or_queued(client_replies: *const ClientReplies, slot: Slot) bool {
+            var writes = client_replies.writes.iterate_const();
+            while (writes.next()) |write| {
+                if (write.slot.index == slot.index) return true;
+            }
+            assert(!client_replies.writing.isSet(slot.index));
+            return false;
+        }
+
         /// Returns true if the reply at the given slot is  durably persisted to disk. The
         /// difference with `faulty` bit set is that `faulty` is cleared at the start of a write
         /// when the reply is still in RAM. In contrast, `reply_durable` checks that the
@@ -138,7 +147,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             slot: Slot,
         ) bool {
             return !client_replies.faulty.isSet(slot.index) and
-                !client_replies.writing.isSet(slot.index);
+                !client_replies.writing_or_queued(slot);
         }
 
         pub fn read_reply_sync(
@@ -147,8 +156,6 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             session: *const ClientSessions.Entry,
         ) ?*Message.Reply {
             const client = session.header.client;
-
-            if (!client_replies.writing.isSet(slot.index)) return null;
 
             var writes = client_replies.writes.iterate();
             var write_latest: ?*const Write = null;
@@ -161,6 +168,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                     }
                 }
             }
+
+            if (write_latest == null) return null;
 
             if (write_latest.?.message.header.checksum != session.header.checksum) {
                 // We are writing a reply, but that's a wrong reply according to `client_sessions`.

@@ -2237,7 +2237,9 @@ pub fn ReplicaType(
                 });
 
                 if (self.client_sessions.get_slot_for_header(reply_header)) |slot| {
-                    self.client_replies.faulty.set(slot.index);
+                    if (!self.client_replies.writing_or_queued(slot)) {
+                        self.client_replies.faulty.set(slot.index);
+                    }
                 }
                 return;
             };
@@ -4490,7 +4492,9 @@ pub fn ReplicaType(
 
             const reply = reply_ orelse {
                 if (self.client_sessions.get_slot_for_header(reply_header)) |slot| {
-                    self.client_replies.faulty.set(slot.index);
+                    if (!self.client_replies.writing_or_queued(slot)) {
+                        self.client_replies.faulty.set(slot.index);
+                    }
                 } else {
                     // The read may have been a repair for an older op,
                     // or a newer op that we haven't seen yet.
