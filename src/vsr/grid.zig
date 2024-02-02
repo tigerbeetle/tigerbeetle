@@ -685,6 +685,9 @@ pub fn GridType(comptime Storage: type) type {
                 }
             }
 
+            // Zero sector padding.
+            @memset(block.*[header.size..vsr.sector_ceil(header.size)], 0);
+
             write.* = .{
                 .callback = callback,
                 .address = header.address,
@@ -720,6 +723,9 @@ pub fn GridType(comptime Storage: type) type {
             const write_header = schema.header_from_block(write.block.*);
             assert(write_header.size > @sizeOf(vsr.Header));
             assert(write_header.size <= constants.block_size);
+            assert(stdx.zeroed(
+                write.block.*[write_header.size..vsr.sector_ceil(write_header.size)],
+            ));
 
             grid.superblock.storage.write_sectors(
                 write_block_callback,
@@ -750,7 +756,9 @@ pub fn GridType(comptime Storage: type) type {
             const cache_index = grid.cache.upsert(&completed_write.address).index;
             const cache_block = &grid.cache_blocks[cache_index];
             std.mem.swap(BlockPtr, cache_block, completed_write.block);
-            @memset(completed_write.block.*, 0);
+            // This block content won't be used again. We could overwrite the entire thing, but that
+            // would be more expensive.
+            @memset(completed_write.block.*[0..@sizeOf(vsr.Header)], 0);
 
             const cache_block_header = schema.header_from_block(cache_block.*);
             assert(cache_block_header.address == completed_write.address);
@@ -995,7 +1003,9 @@ pub fn GridType(comptime Storage: type) type {
                 if (read.cache_write) {
                     const cache_block = &grid.cache_blocks[cache_index.?];
                     std.mem.swap(BlockPtr, iop_block, cache_block);
-                    @memset(iop_block.*, 0);
+                    // This block content won't be used again. We could overwrite the entire thing,
+                    // but that would be more expensive.
+                    @memset(iop_block.*[0..@sizeOf(vsr.Header)], 0);
                     break :block cache_block;
                 } else {
                     break :block iop_block;

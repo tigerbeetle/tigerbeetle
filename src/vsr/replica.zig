@@ -2452,7 +2452,6 @@ pub fn ReplicaType(
                         write_block.*,
                         message.buffer[0..message.header.size],
                     );
-                    assert(stdx.zeroed(write_block.*[message.header.size..]));
 
                     write.* = .{ .replica = self };
                     self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
