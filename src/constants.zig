@@ -68,6 +68,7 @@ comptime {
     //   from the previous WAL wrap until a quorum of replicas has reached that checkpoint.
     assert(vsr_checkpoint_interval + lsm_batch_multiple + pipeline_prepare_queue_max <=
         journal_slot_count);
+    assert(vsr_checkpoint_interval >= pipeline_prepare_queue_max);
     assert(vsr_checkpoint_interval >= lsm_batch_multiple);
     assert(vsr_checkpoint_interval % lsm_batch_multiple == 0);
 }
