@@ -1400,7 +1400,7 @@ pub const Checkpoint = struct {
         }
     }
 
-    pub fn border_for_checkpoint(checkpoint: u64) ?u64 {
+    pub fn prepare_max_for_checkpoint(checkpoint: u64) ?u64 {
         assert(valid(checkpoint));
 
         if (trigger_for_checkpoint(checkpoint)) |trigger| {
