@@ -1822,8 +1822,8 @@ pub fn ReplicaType(
                 //
                 // - If 1 and ¬2, then the ops in the next checkpoint are uncommitted and our
                 //   current checkpoint is sufficient.
-                // - If 2 and ¬1, then the ops past the checkpoint-trigger must be uncommitted
-                //   because no replica in the DVC quorum even prepared them.
+                // - If 2 and ¬1, then the ops past the checkpoint's op-prepare-max must be
+                //   uncommitted because no replica in the DVC quorum even prepared them.
                 //   (They are present anyway because the origin of the DVC is reusing its SV
                 //   headers as a DVC since it has not completed repair.)
                 //
