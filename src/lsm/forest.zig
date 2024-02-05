@@ -438,7 +438,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
             assert(forest.manifest_log_progress == .idle);
-            forest.grid.assert_only_repairing();
             forest.verify_table_extents();
             forest.verify_tables_recovered();
 

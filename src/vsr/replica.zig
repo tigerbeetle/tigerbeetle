@@ -47,7 +47,7 @@ pub const Status = enum {
     recovering_head,
 };
 
-const CommitStage = enum {
+const CommitStage = union(enum) {
     /// Not committing.
     idle,
     /// About to start committing.
@@ -58,14 +58,20 @@ const CommitStage = enum {
     /// Ensure that the ClientReplies has at least one Write available.
     setup_client_replies,
     compact_state_machine,
-    checkpoint_state_machine,
-    checkpoint_client_replies,
-    checkpoint_client_sessions,
+    checkpoint_data: CheckpointDataProgress,
     checkpoint_grid,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
 };
+
+const CheckpointData = enum {
+    state_machine,
+    client_replies,
+    client_sessions,
+};
+
+const CheckpointDataProgress = std.enums.EnumSet(CheckpointData);
 
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
@@ -3089,7 +3095,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
 
             const stage_old = self.commit_stage;
-            assert(stage_old != stage_new);
+            assert(stage_old != @as(std.meta.Tag(CommitStage), stage_new));
 
             self.commit_stage = switch (stage_new) {
                 .next => if (self.status == .normal and self.primary())
@@ -3130,13 +3136,7 @@ pub fn ReplicaType(
                     commit_op_compact_callback,
                     self.commit_prepare.?.header.op,
                 ),
-                .checkpoint_state_machine => {
-                    self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
-                },
-                .checkpoint_client_replies => {
-                    self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
-                },
-                .checkpoint_client_sessions => {
+                .checkpoint_data => {
                     // For encoding/decoding simplicity, require that the entire ClientSessions fits
                     // in a single block.
                     const chunks = self.client_sessions_checkpoint.encode_chunks();
@@ -3145,7 +3145,9 @@ pub fn ReplicaType(
                     self.client_sessions_checkpoint.size = self.client_sessions.encode(chunks[0]);
                     assert(self.client_sessions_checkpoint.size == ClientSessions.encode_size);
 
+                    self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
                     self.client_sessions_checkpoint.checkpoint(commit_op_checkpoint_client_sessions_callback);
+                    self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
                 },
                 .checkpoint_grid => self.commit_op_checkpoint_grid(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
@@ -3504,7 +3506,7 @@ pub fn ReplicaType(
                 // between beats.
                 self.grid.assert_only_repairing();
 
-                self.commit_dispatch(.checkpoint_state_machine);
+                self.commit_dispatch(.{ .checkpoint_data = CheckpointDataProgress.initEmpty() });
             } else {
                 self.commit_dispatch(.cleanup);
             }
@@ -3512,27 +3514,37 @@ pub fn ReplicaType(
 
         fn commit_op_checkpoint_state_machine_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
-            assert(self.commit_stage == .checkpoint_state_machine);
-            assert(self.commit_prepare.?.header.op <= self.op);
-            assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert(self.commit_prepare.?.header.op == self.op_checkpoint_next_trigger());
-            self.grid.assert_only_repairing();
-
-            self.commit_dispatch(.checkpoint_client_replies);
+            self.commit_op_checkpoint_data_callback(.state_machine);
         }
 
         fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
-            assert(self.commit_stage == .checkpoint_client_replies);
-
-            self.commit_dispatch(.checkpoint_client_sessions);
+            self.commit_op_checkpoint_data_callback(.client_replies);
         }
 
         fn commit_op_checkpoint_client_sessions_callback(client_sessions_checkpoint: *CheckpointTrailer) void {
             const self = @fieldParentPtr(Self, "client_sessions_checkpoint", client_sessions_checkpoint);
-            assert(self.commit_stage == .checkpoint_client_sessions);
+            assert(self.commit_stage == .checkpoint_data);
+            self.commit_op_checkpoint_data_callback(.client_sessions);
+        }
 
-            self.commit_dispatch(.checkpoint_grid);
+        fn commit_op_checkpoint_data_callback(
+            self: *Self,
+            checkpoint_data: CheckpointData,
+        ) void {
+            assert(self.commit_stage == .checkpoint_data);
+            assert(self.commit_prepare.?.header.op <= self.op);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert(self.commit_prepare.?.header.op == self.op_checkpoint_next_trigger());
+
+            assert(!self.commit_stage.checkpoint_data.contains(checkpoint_data));
+            self.commit_stage.checkpoint_data.insert(checkpoint_data);
+
+            if (self.commit_stage.checkpoint_data.count() == CheckpointDataProgress.len) {
+                self.grid.assert_only_repairing();
+
+                self.commit_dispatch(.checkpoint_grid);
+            }
         }
 
         fn commit_op_checkpoint_grid(self: *Self) void {
@@ -7687,8 +7699,7 @@ pub fn ReplicaType(
                 // Uninterruptible states:
                 .next_journal,
                 .setup_client_replies,
-                .checkpoint_client_replies,
-                .checkpoint_client_sessions,
+                .checkpoint_data,
                 .checkpoint_grid,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
@@ -7696,7 +7707,6 @@ pub fn ReplicaType(
                 .idle, // (StateMachine.open() may be running.)
                 .prefetch_state_machine,
                 .compact_state_machine,
-                .checkpoint_state_machine,
                 => self.sync_dispatch(.canceling_grid),
             }
         }
@@ -7831,13 +7841,11 @@ pub fn ReplicaType(
                 .cleanup,
                 .prefetch_state_machine,
                 .compact_state_machine,
-                .checkpoint_state_machine,
                 => unreachable,
 
                 .next_journal,
                 .setup_client_replies,
-                .checkpoint_client_replies,
-                .checkpoint_client_sessions,
+                .checkpoint_data,
                 .checkpoint_grid,
                 .checkpoint_superblock,
                 => {},
