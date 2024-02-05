@@ -344,8 +344,6 @@ pub fn TableType(
                     assert(builder.value_count == values.len);
                     assert(block_size - header.size ==
                         (data.value_count_max - values.len) * @sizeOf(Value) + data.padding_size);
-                    // Padding is short on average, so assert unconditionally.
-                    assert(stdx.zeroed(block[header.size..]));
                 }
 
                 const key_min = key_from_value(&values[0]);
@@ -428,6 +426,11 @@ pub fn TableType(
                     .command = .block,
                     .block_type = .index,
                 };
+
+                for (index.padding(index_block)) |padding| {
+                    @memset(index_block[padding.start..padding.end], 0);
+                }
+
                 header.set_checksum_body(index_block[@sizeOf(vsr.Header)..header.size]);
                 header.set_checksum();
 

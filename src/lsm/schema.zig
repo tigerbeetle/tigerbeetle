@@ -164,11 +164,16 @@ pub const TableIndex = struct {
         assert(header.snapshot > 0);
 
         const header_metadata = metadata(index_block);
-
-        return TableIndex.init(.{
+        const index = TableIndex.init(.{
             .key_size = header_metadata.key_size,
             .data_block_count_max = header_metadata.data_block_count_max,
         });
+
+        for (index.padding(index_block)) |padding_area| {
+            assert(stdx.zeroed(index_block[padding_area.start..padding_area.end]));
+        }
+
+        return index;
     }
 
     pub fn metadata(index_block: BlockPtrConst) *const Metadata {
@@ -223,6 +228,34 @@ pub const TableIndex = struct {
         assert(header_metadata.data_block_count > 0);
         assert(header_metadata.data_block_count <= index.data_block_count_max);
         return header_metadata.data_block_count;
+    }
+
+    pub fn padding(
+        index: *const TableIndex,
+        index_block: BlockPtrConst,
+    ) [4]struct { start: usize, end: usize } {
+        const data_checksums_skip = index.data_blocks_used(index_block) * checksum_size;
+        const keys_min_skip = index.data_blocks_used(index_block) * index.key_size;
+        const keys_max_skip = index.data_blocks_used(index_block) * index.key_size;
+        const data_addresses_skip = index.data_blocks_used(index_block) * address_size;
+        return .{
+            .{
+                .start = index.data_checksums_offset + data_checksums_skip,
+                .end = index.data_checksums_offset + index.data_checksums_size,
+            },
+            .{
+                .start = index.keys_min_offset + keys_min_skip,
+                .end = index.keys_min_offset + index.keys_size,
+            },
+            .{
+                .start = index.keys_max_offset + keys_max_skip,
+                .end = index.keys_max_offset + index.keys_size,
+            },
+            .{
+                .start = index.data_addresses_offset + data_addresses_skip,
+                .end = index.data_addresses_offset + index.data_addresses_size,
+            },
+        };
     }
 };
 
