@@ -4,10 +4,11 @@
 
 ### Safety And Performance
 
-- [#1496](https://github.com/tigerbeetle/tigerbeetle/pull/1496),
+- [#1489](https://github.com/tigerbeetle/tigerbeetle/pull/1489),
+  [#1496](https://github.com/tigerbeetle/tigerbeetle/pull/1496),
   [#1501](https://github.com/tigerbeetle/tigerbeetle/pull/1501).
 
-  Harden VSR against synchronization edge cases.
+  Harden VSR against edge cases.
 
 - [#1508](https://github.com/tigerbeetle/tigerbeetle/pull/1508),
   [#1509](https://github.com/tigerbeetle/tigerbeetle/pull/1509).
@@ -25,25 +26,32 @@
 
 ### Features
 
-- [#1503](https://github.com/tigerbeetle/tigerbeetle/pull/1503),
-  [#1491](https://github.com/tigerbeetle/tigerbeetle/pull/1491),
+- [#1491](https://github.com/tigerbeetle/tigerbeetle/pull/1491),
+  [#1503](https://github.com/tigerbeetle/tigerbeetle/pull/1503).
 
   TigerBeetle's [dev workbench](https://tigerbeetle.github.io/tigerbeetle/) now also tracks
   memory usage (RSS), throughput, and latency benchmarks over time!
 
 ### Internals
 
-- [#1493](https://github.com/tigerbeetle/tigerbeetle/pull/1493),
+- [#1481](https://github.com/tigerbeetle/tigerbeetle/pull/1481),
+  [#1493](https://github.com/tigerbeetle/tigerbeetle/pull/1493),
   [#1495](https://github.com/tigerbeetle/tigerbeetle/pull/1495),
   [#1498](https://github.com/tigerbeetle/tigerbeetle/pull/1498).
 
   Simplify assertions and tests for VSR and Replica.
 
-- [#1502](https://github.com/tigerbeetle/tigerbeetle/pull/1502),
-  [#1497](https://github.com/tigerbeetle/tigerbeetle/pull/1497),
+- [#1497](https://github.com/tigerbeetle/tigerbeetle/pull/1497),
+  [#1502](https://github.com/tigerbeetle/tigerbeetle/pull/1502),
   [#1504](https://github.com/tigerbeetle/tigerbeetle/pull/1504).
 
   .NET CI fixups
+
+- [#1485](https://github.com/tigerbeetle/tigerbeetle/pull/1485),
+  [#1499](https://github.com/tigerbeetle/tigerbeetle/pull/1499),
+  [#1504](https://github.com/tigerbeetle/tigerbeetle/pull/1504).
+
+  Spring Cleaning
 
 ### TigerTracks 🎧
 
