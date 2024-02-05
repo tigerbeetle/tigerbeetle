@@ -274,8 +274,7 @@ fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     const ring_index = ring.index;
 
     inline for (.{ .immutable, .mutable }) |mutability| {
-        var loops: usize = 0;
-        while (loops < 2) : (loops += 1) {
+        for (0..2) |_| {
             var iterator = switch (mutability) {
                 .immutable => ring.iterator(),
                 .mutable => ring.iterator_mutable(),
