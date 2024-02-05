@@ -18,6 +18,7 @@ const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
+const AccountBalance = tb.AccountBalance;
 
 const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
@@ -100,6 +101,14 @@ pub fn StateMachineType(
 
                 pub const posted = .{
                     .timestamp = 20,
+                };
+
+                pub const debits_history = .{
+                    .timestamp = 21,
+                };
+
+                pub const credits_history = .{
+                    .timestamp = 22,
                 };
             };
         };
@@ -239,12 +248,52 @@ pub fn StateMachineType(
             }
         };
 
+        const DebitsHistoryGroove = GrooveType(
+            Storage,
+            AccountBalance,
+            .{
+                .ids = constants.tree_ids.debits_history,
+                .value_count_max = .{
+                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                },
+                .ignored = &[_][]const u8{
+                    "debits_posted",
+                    "debits_pending",
+                    "credits_posted",
+                    "credits_pending",
+                    "reserved",
+                },
+                .derived = .{},
+            },
+        );
+
+        const CreditsHistoryGroove = GrooveType(
+            Storage,
+            AccountBalance,
+            .{
+                .ids = constants.tree_ids.credits_history,
+                .value_count_max = .{
+                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                },
+                .ignored = &[_][]const u8{
+                    "debits_posted",
+                    "debits_pending",
+                    "credits_posted",
+                    "credits_pending",
+                    "reserved",
+                },
+                .derived = .{},
+            },
+        );
+
         pub const Workload = WorkloadType(StateMachine);
 
         pub const Forest = ForestType(Storage, .{
             .accounts = AccountsGroove,
             .transfers = TransfersGroove,
             .posted = PostedGroove,
+            .debits_history = DebitsHistoryGroove,
+            .credits_history = CreditsHistoryGroove,
         });
 
         const TransfersScanLookup = ScanLookupType(TransfersGroove, Storage);
@@ -777,6 +826,8 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.posted.scope_open();
+                    self.forest.grooves.debits_history.scope_open();
+                    self.forest.grooves.credits_history.scope_open();
                 },
                 else => unreachable,
             }
@@ -791,6 +842,8 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
                     self.forest.grooves.posted.scope_close(mode);
+                    self.forest.grooves.debits_history.scope_close(mode);
+                    self.forest.grooves.credits_history.scope_close(mode);
                 },
                 else => unreachable,
             }
@@ -1087,6 +1140,26 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
+            if (dr_account_new.flags.history) {
+                self.forest.grooves.debits_history.insert(&.{
+                    .timestamp = t2.timestamp,
+                    .debits_posted = dr_account_new.debits_posted,
+                    .debits_pending = dr_account_new.debits_pending,
+                    .credits_posted = dr_account_new.credits_posted,
+                    .credits_pending = dr_account_new.credits_pending,
+                });
+            }
+
+            if (cr_account_new.flags.history) {
+                self.forest.grooves.credits_history.insert(&.{
+                    .timestamp = t2.timestamp,
+                    .debits_posted = cr_account_new.debits_posted,
+                    .debits_pending = cr_account_new.debits_pending,
+                    .credits_posted = cr_account_new.credits_posted,
+                    .credits_pending = cr_account_new.credits_pending,
+                });
+            }
+
             self.commit_timestamp = t.timestamp;
             return .ok;
         }
@@ -1347,6 +1420,22 @@ pub fn StateMachineType(
                     // Nothing lookups posted groove.
                     .prefetch_entries_for_read_max = 0,
                     // create_transfer() posts/voids at most one transfer.
+                    .prefetch_entries_for_update_max = batch_transfers_max,
+                    .cache_entries_max = options.cache_entries_posted,
+                    .tree_options_object = .{},
+                    .tree_options_id = {},
+                    .tree_options_index = .{},
+                },
+                .debits_history = .{
+                    .prefetch_entries_for_read_max = 0,
+                    .prefetch_entries_for_update_max = batch_transfers_max,
+                    .cache_entries_max = options.cache_entries_posted,
+                    .tree_options_object = .{},
+                    .tree_options_id = {},
+                    .tree_options_index = .{},
+                },
+                .credits_history = .{
+                    .prefetch_entries_for_read_max = 0,
                     .prefetch_entries_for_update_max = batch_transfers_max,
                     .cache_entries_max = options.cache_entries_posted,
                     .tree_options_object = .{},

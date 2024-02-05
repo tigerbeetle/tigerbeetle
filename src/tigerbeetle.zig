@@ -53,11 +53,27 @@ pub const AccountFlags = packed struct(u16) {
     linked: bool = false,
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
-    padding: u13 = 0,
+    history: bool = false,
+    padding: u12 = 0,
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u16));
         assert(@bitSizeOf(AccountFlags) == @sizeOf(AccountFlags) * 8);
+    }
+};
+
+pub const AccountBalance = extern struct {
+    debits_pending: u128,
+    debits_posted: u128,
+    credits_pending: u128,
+    credits_posted: u128,
+    timestamp: u64 = 0,
+    reserved: [56]u8 = [_]u8{0} ** 56,
+
+    comptime {
+        assert(stdx.no_padding(AccountBalance));
+        assert(@sizeOf(AccountBalance) == 128);
+        assert(@alignOf(AccountBalance) == 16);
     }
 };
 
