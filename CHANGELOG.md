@@ -1,5 +1,54 @@
 # TigerBeetle Changelog
 
+## 2024-02-05
+
+### Safety And Performance
+
+- [#1496](https://github.com/tigerbeetle/tigerbeetle/pull/1496),
+  [#1501](https://github.com/tigerbeetle/tigerbeetle/pull/1501).
+
+  Harden VSR against synchronization edge cases.
+
+- [#1508](https://github.com/tigerbeetle/tigerbeetle/pull/1508),
+  [#1509](https://github.com/tigerbeetle/tigerbeetle/pull/1509).
+
+  Allows VSR to perform checkpoint steps concurrently to reduce latency spikes.
+
+- [#1505](https://github.com/tigerbeetle/tigerbeetle/pull/1505)
+
+  Removed unused indexes on account balances for a nice bump in throughput and lower memory usage.
+
+- [#1512](https://github.com/tigerbeetle/tigerbeetle/pull/1512)
+
+  Only zero-out the parts necessary for correctness of fresh storage buffers. "Defense in Depth"
+  without sacrificing performance!
+
+### Features
+
+- [#1503](https://github.com/tigerbeetle/tigerbeetle/pull/1503),
+  [#1491](https://github.com/tigerbeetle/tigerbeetle/pull/1491),
+
+  TigerBeetle's [dev workbench](https://tigerbeetle.github.io/tigerbeetle/) now also tracks
+  memory usage (RSS), throughput, and latency benchmarks over time!
+
+### Internals
+
+- [#1493](https://github.com/tigerbeetle/tigerbeetle/pull/1493),
+  [#1495](https://github.com/tigerbeetle/tigerbeetle/pull/1495),
+  [#1498](https://github.com/tigerbeetle/tigerbeetle/pull/1498).
+
+  Simplify assertions and tests for VSR and Replica.
+
+- [#1502](https://github.com/tigerbeetle/tigerbeetle/pull/1502),
+  [#1497](https://github.com/tigerbeetle/tigerbeetle/pull/1497),
+  [#1504](https://github.com/tigerbeetle/tigerbeetle/pull/1504).
+
+  .NET CI fixups
+
+### TigerTracks 🎧
+
+- [Bone Dry](https://open.spotify.com/track/0adZjn5WV3b0BcZbvSi0y9)
+
 ## 2024-01-29
 
 ### Safety And Performance
