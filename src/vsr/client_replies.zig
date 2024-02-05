@@ -52,7 +52,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         const Read = struct {
             client_replies: *ClientReplies,
             completion: Storage.Read,
-            callback: *const fn (
+            callback: ?*const fn (
                 client_replies: *ClientReplies,
                 reply_header: *const vsr.Header.Reply,
                 reply: ?*Message.Reply,
@@ -233,7 +233,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const client_replies = read.client_replies;
             const header = read.header;
             const message = read.message;
-            const callback = read.callback;
+            const callback_or_null = read.callback;
             const destination_replica = read.destination_replica;
 
             client_replies.reads.release(read);
@@ -242,6 +242,15 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 client_replies.message_pool.unref(message);
                 client_replies.write_reply_next();
             }
+
+            const callback = callback_or_null orelse {
+                log.debug("{}: read_reply: already resolved (client={} reply={})", .{
+                    client_replies.replica,
+                    header.client,
+                    header.checksum,
+                });
+                return;
+            };
 
             if (!message.header.valid_checksum() or
                 !message.header.valid_checksum_body(message.body()))
@@ -338,6 +347,26 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 },
             }
 
+            // Resolve any pending reads for this reply.
+            // If we don't do this, an earlier started read can complete with an error, and
+            // erroneously clobber the faulty bit.
+            // For simplicity, resolve the reads synchronously, instead of going through next tick
+            // machinery.
+            var reads = client_replies.reads.iterate();
+            while (reads.next()) |read| {
+                if (read.callback == null) continue; // Already resolved.
+                if (read.header.checksum == message.header.checksum) {
+                    defer read.callback = null;
+
+                    read.callback.?(
+                        client_replies,
+                        &read.header,
+                        message,
+                        read.destination_replica,
+                    );
+                }
+            }
+
             // Clear the fault *before* the write completes, not after.
             // Otherwise, a replica exiting state sync might mark a reply as faulty, then the
             // ClientReplies clears that bit due to an unrelated write that was already queued.
@@ -365,16 +394,13 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 client_replies.write_queue.push_assume_capacity(write);
                 client_replies.write_reply_next();
             }
+
+            assert(client_replies.writing.isSet(write.slot.index));
         }
 
         fn write_reply_next(client_replies: *ClientReplies) void {
             while (client_replies.write_queue.head()) |write| {
                 if (client_replies.writing.isSet(write.slot.index)) return;
-
-                var reads = client_replies.reads.iterate();
-                while (reads.next()) |read| {
-                    if (read.slot.index == write.slot.index) return;
-                }
 
                 const message = write.message;
                 _ = client_replies.write_queue.pop();
@@ -401,6 +427,19 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const message = write.message;
             assert(client_replies.writing.isSet(write.slot.index));
             maybe(client_replies.faulty.isSet(write.slot.index));
+
+            var reads = client_replies.reads.iterate();
+            while (reads.next()) |read| {
+                if (read.slot.index == write.slot.index) {
+                    if (read.header.checksum == message.header.checksum) {
+                        assert(read.callback == null);
+                    } else {
+                        // A read and a write can race on the slot if:
+                        // - the write is from before the latest state sync (outdated write)
+                        // - the read is from before the write (outdated read)
+                    }
+                }
+            }
 
             log.debug("{}: write_reply: wrote (client={} request={})", .{
                 client_replies.replica,
