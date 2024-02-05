@@ -8916,6 +8916,7 @@ const DVCQuorum = struct {
         assert(dvcs_canonical_.count() > 0);
         assert(dvcs_canonical_.count() <= dvcs_all_.count());
 
+        const log_view_canonical = DVCQuorum.log_view_max(dvc_quorum);
         const op_head_max = DVCQuorum.op_max_canonical(dvc_quorum);
         const op_head_min = DVCQuorum.commit_max(dvc_quorum);
 
@@ -8967,11 +8968,19 @@ const DVCQuorum = struct {
                 if (header_nacks.isSet(header_index)) {
                     // The op is nacked explicitly.
                     nacks += 1;
-                } else if (vsr.Headers.dvc_header_type(header) == .valid and
-                    header_canonical != null and header_canonical.?.checksum != header.checksum)
-                {
-                    // The op is nacked implicitly, because the replica has a different header.
-                    nacks += 1;
+                } else if (vsr.Headers.dvc_header_type(header) == .valid) {
+                    if (header_canonical != null and header_canonical.?.checksum != header.checksum) {
+                        // The op is nacked implicitly, because the replica has a different header.
+                        nacks += 1;
+                    }
+
+                    if (header_canonical == null and header.view < log_view_canonical) {
+                        // New condition. We don't have canonical header, and the header we have is from the
+                        // previous view. Although we don't know _which_ header is canonical, we also know that the
+                        // current header isn't the one: if `header` were in fact a part of canonical view, then it
+                        // would be present in `SV` message for that view!
+                        nacks += 1;
+                    }
                 }
             }
 
