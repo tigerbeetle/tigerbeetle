@@ -59,7 +59,6 @@ const CommitStage = union(enum) {
     setup_client_replies,
     compact_state_machine,
     checkpoint_data: CheckpointDataProgress,
-    checkpoint_grid,
     checkpoint_superblock,
     /// A commit just finished. Clean up before proceeding to the next.
     cleanup,
@@ -69,6 +68,7 @@ const CheckpointData = enum {
     state_machine,
     client_replies,
     client_sessions,
+    grid,
 };
 
 const CheckpointDataProgress = std.enums.EnumSet(CheckpointData);
@@ -2792,7 +2792,7 @@ pub fn ReplicaType(
             // we would need to wait for it before sync starts anyhow, and the newer
             // checkpoint might sidestep the need for sync anyhow.
             if (self.commit_stage == .checkpoint_superblock) return;
-            if (self.commit_stage == .checkpoint_grid) return;
+            if (self.commit_stage == .checkpoint_data) return;
 
             // TODO Test connectivity to cluster to rule out a network partition.
 
@@ -3147,8 +3147,10 @@ pub fn ReplicaType(
                     self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
                     self.client_sessions_checkpoint.checkpoint(commit_op_checkpoint_client_sessions_callback);
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
+                    // The grid checkpoint must begin after the manifest/trailers have acquired all
+                    // their blocks, since it encodes the free set:
+                    self.grid.checkpoint(commit_op_checkpoint_grid_callback);
                 },
-                .checkpoint_grid => self.commit_op_checkpoint_grid(),
                 .checkpoint_superblock => self.commit_op_checkpoint_superblock(),
                 .cleanup => self.commit_op_cleanup(),
                 .idle => assert(self.commit_prepare == null),
@@ -3513,11 +3515,13 @@ pub fn ReplicaType(
 
         fn commit_op_checkpoint_state_machine_callback(state_machine: *StateMachine) void {
             const self = @fieldParentPtr(Self, "state_machine", state_machine);
+            assert(self.commit_stage == .checkpoint_data);
             self.commit_op_checkpoint_data_callback(.state_machine);
         }
 
         fn commit_op_checkpoint_client_replies_callback(client_replies: *ClientReplies) void {
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
+            assert(self.commit_stage == .checkpoint_data);
             self.commit_op_checkpoint_data_callback(.client_replies);
         }
 
@@ -3525,6 +3529,18 @@ pub fn ReplicaType(
             const self = @fieldParentPtr(Self, "client_sessions_checkpoint", client_sessions_checkpoint);
             assert(self.commit_stage == .checkpoint_data);
             self.commit_op_checkpoint_data_callback(.client_sessions);
+        }
+
+        fn commit_op_checkpoint_grid_callback(grid: *Grid) void {
+            const self = @fieldParentPtr(Self, "grid", grid);
+            assert(self.commit_stage == .checkpoint_data);
+            assert(self.commit_prepare.?.header.op <= self.op);
+            assert(self.commit_prepare.?.header.op == self.commit_min);
+            assert(self.grid.free_set.opened);
+            assert(self.grid.free_set.count_released() ==
+                self.grid.free_set_checkpoint.block_count());
+
+            self.commit_op_checkpoint_data_callback(.grid);
         }
 
         fn commit_op_checkpoint_data_callback(
@@ -3542,42 +3558,22 @@ pub fn ReplicaType(
             if (self.commit_stage.checkpoint_data.count() == CheckpointDataProgress.len) {
                 self.grid.assert_only_repairing();
 
-                self.commit_dispatch(.checkpoint_grid);
-            }
-        }
-
-        fn commit_op_checkpoint_grid(self: *Self) void {
-            assert(self.commit_stage == .checkpoint_grid);
-            assert(self.commit_prepare.?.header.op <= self.op);
-            assert(self.commit_prepare.?.header.op == self.commit_min);
-
-            self.grid.checkpoint(commit_op_checkpoint_grid_callback);
-        }
-
-        fn commit_op_checkpoint_grid_callback(grid: *Grid) void {
-            const self = @fieldParentPtr(Self, "grid", grid);
-            assert(self.commit_stage == .checkpoint_grid);
-            assert(self.commit_prepare.?.header.op <= self.op);
-            assert(self.commit_prepare.?.header.op == self.commit_min);
-            assert(self.grid.free_set.opened);
-            assert(self.grid.free_set.count_released() ==
-                self.grid.free_set_checkpoint.block_count());
-
-            {
-                const checkpoint = &self.client_sessions_checkpoint;
-                var address_previous: u64 = 0;
-                for (checkpoint.block_addresses[0..checkpoint.block_count()]) |address| {
-                    assert(address > 0);
-                    assert(address > address_previous);
-                    address_previous = address;
-                    self.grid.release(address);
+                {
+                    const checkpoint = &self.client_sessions_checkpoint;
+                    var address_previous: u64 = 0;
+                    for (checkpoint.block_addresses[0..checkpoint.block_count()]) |address| {
+                        assert(address > 0);
+                        assert(address > address_previous);
+                        address_previous = address;
+                        self.grid.release(address);
+                    }
                 }
-            }
-            assert(self.grid.free_set.count_released() ==
-                self.grid.free_set_checkpoint.block_count() +
-                self.client_sessions_checkpoint.block_count());
+                assert(self.grid.free_set.count_released() ==
+                    self.grid.free_set_checkpoint.block_count() +
+                    self.client_sessions_checkpoint.block_count());
 
-            self.commit_dispatch(.checkpoint_superblock);
+                self.commit_dispatch(.checkpoint_superblock);
+            }
         }
 
         fn commit_op_checkpoint_superblock(self: *Self) void {
@@ -7699,7 +7695,6 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_data,
-                .checkpoint_grid,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
 
@@ -7845,7 +7840,6 @@ pub fn ReplicaType(
                 .next_journal,
                 .setup_client_replies,
                 .checkpoint_data,
-                .checkpoint_grid,
                 .checkpoint_superblock,
                 => {},
             }

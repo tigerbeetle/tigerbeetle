@@ -1028,15 +1028,27 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     // Allow B2 to join, but partition A0 to force a view change.
-    // B1 is lagging far enough behind that it must state sync – it will transition to
+    // B2 is lagging far enough behind that it must state sync – it will transition to
     // recovering_head. Despite this, the cluster of B1/B2 should recover to normal status.
     b2.pass_all(.R_, .bidirectional);
     a0.drop_all(.R_, .bidirectional);
+
+    // When B2 rejoins, it will race between:
+    // - Discovering that it is lagging, and requesting a sync_checkpoint (which transitions B2 to
+    //   recovering_head).
+    // - Participating in a view-change with B1 (while we are still in status=normal in the original
+    //   view).
+    // For this test, we want the former to occur before the latter (since the latter would always
+    // work).
+    b2.drop(.R_, .bidirectional, .start_view_change);
+    t.run();
+    b2.pass(.R_, .bidirectional, .start_view_change);
     t.run();
 
-    try expectEqual(b1.role(), .primary);
+    // try expectEqual(b1.role(), .primary);
+    try expectEqual(b1.status(), .normal);
     try expectEqual(b2.status(), .recovering_head);
-    //try expectEqual(t.replica(.R_).status(), .normal);
+    // try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).sync_status(), .idle);
     try expectEqual(b2.commit(), checkpoint_2);
     // try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
