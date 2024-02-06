@@ -738,6 +738,7 @@ pub const Header = extern struct {
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
+        /// The checksum of the corresponding Request.
         parent: u128,
         parent_padding: u128 = 0,
         /// The checksum of the prepare message to which this message refers.

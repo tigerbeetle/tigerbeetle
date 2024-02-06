@@ -587,6 +587,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     });
                     return;
                 }
+                assert(reply.header.parent == inflight.message.header.checksum);
             } else {
                 log.debug("{}: on_reply: ignoring (no inflight request)", .{self.id});
                 return;

@@ -4578,6 +4578,7 @@ pub fn ReplicaType(
                         assert(pipeline_message_header.client == message.header.client);
 
                         if (pipeline_message.header.checksum == message.header.checksum) {
+                            assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already queued)", .{self.replica});
                             return true;
                         }
@@ -4587,6 +4588,7 @@ pub fn ReplicaType(
 
                         if (pipeline_message_header.request_checksum == message.header.checksum) {
                             assert(pipeline_message_header.op > self.commit_max);
+                            assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
                             return true;
                         }
