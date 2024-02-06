@@ -11,6 +11,8 @@ const TableType = @import("table.zig").TableType;
 const TreeType = @import("tree.zig").TreeType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
+const is_composite_key = @import("composite_key.zig").is_composite_key;
+
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const CacheMapType = @import("cache_map.zig").CacheMapType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
@@ -19,61 +21,118 @@ const ScanBuilderType = @import("scan_builder.zig").ScanBuilderType;
 
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 
-fn ObjectTreeHelpers(comptime Object: type) type {
-    assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
+fn ObjectHelperType(comptime Object: type, comptime groove_options: anytype) type {
+    const CompositeKey_ = CompositeKey: {
+        const Timestamp = std.meta.fieldInfo(Object, .timestamp).type;
+        assert(Timestamp == u64);
 
-    return struct {
-        inline fn key_from_value(value: *const Object) u64 {
-            return value.timestamp & ~@as(u64, tombstone_bit);
+        const composite_parent_key: ?[]const u8 = groove_options.composite_parent_key;
+        if (composite_parent_key) |field| {
+            assert(@hasField(Object, field));
+            const ParentField = @TypeOf(@field(
+                @as(Object, undefined),
+                field,
+            ));
+            assert(ParentField == u64);
+            break :CompositeKey CompositeKeyType(ParentField, Timestamp);
         }
 
-        const sentinel_key = std.math.maxInt(u64);
+        break :CompositeKey void;
+    };
+
+    return struct {
+        pub const CompositeKey = CompositeKey_;
+        pub const TableKey = if (CompositeKey == void) u64 else CompositeKey.Key;
+
+        const sentinel_key = std.math.maxInt(TableKey);
         const tombstone_bit = 1 << (64 - 1);
+
+        inline fn key_from_value(object: *const Object) TableKey {
+            const timestamp = object.timestamp & ~@as(u64, tombstone_bit);
+            return if (CompositeKey == void)
+                timestamp
+            else
+                CompositeKey.key_from_value(&.{
+                    .prefix = @field(object, groove_options.composite_parent_key),
+                    .value = timestamp,
+                });
+        }
+
+        inline fn set_key(object: *Object, key: TableKey) void {
+            if (CompositeKey == void) {
+                object.timestamp = key;
+            } else {
+                @field(object, groove_options.composite_parent_key) = CompositeKey.key_prefix(key);
+                object.timestamp = CompositeKey.key_value(key);
+            }
+        }
 
         inline fn tombstone(value: *const Object) bool {
             return (value.timestamp & tombstone_bit) != 0;
         }
 
-        inline fn tombstone_from_key(timestamp: u64) Object {
-            assert(timestamp & tombstone_bit == 0);
+        inline fn tombstone_from_key(key: TableKey) Object {
+            assert((key & tombstone_bit) == 0);
 
-            var value = std.mem.zeroes(Object); // Full zero-initialized Value.
-            value.timestamp = timestamp | tombstone_bit;
-            return value;
+            if (CompositeKey == void) {
+                return std.mem.zeroInit(Object, .{
+                    .timestamp = key | tombstone_bit,
+                });
+            } else {
+                var object = std.mem.zeroInit(Object, .{});
+                set_key(&object, key);
+                return object;
+            }
         }
     };
 }
 
-const IdTreeValue = extern struct {
-    id: u128,
-    timestamp: u64,
-    padding: u64 = 0,
+fn IdTreeValueType(comptime TableKey_: type) type {
+    const pad = switch (TableKey_) {
+        u64 => [_]u8{0} ** 8,
+        u128 => [0]u8{},
+        else => unreachable,
+    };
+    const Pad = @TypeOf(pad);
 
-    comptime {
-        // Assert that there is no implicit padding.
-        assert(@sizeOf(IdTreeValue) == 32);
-        assert(stdx.no_padding(IdTreeValue));
-    }
+    return extern struct {
+        const IdTreeValue = @This();
 
-    inline fn key_from_value(value: *const IdTreeValue) u128 {
-        return value.id;
-    }
+        pub const TableKey = TableKey_;
 
-    const sentinel_key = std.math.maxInt(u128);
-    const tombstone_bit = 1 << (64 - 1);
+        const sentinel_key = std.math.maxInt(u128);
+        const tombstone_bit = 1 << (@bitSizeOf(TableKey) - 1);
 
-    inline fn tombstone(value: *const IdTreeValue) bool {
-        return (value.timestamp & tombstone_bit) != 0;
-    }
+        id: u128,
+        value: TableKey,
+        padding: Pad = pad,
 
-    inline fn tombstone_from_key(id: u128) IdTreeValue {
-        return .{
-            .id = id,
-            .timestamp = tombstone_bit,
-        };
-    }
-};
+        comptime {
+            // Assert that there is no implicit padding.
+            assert(@sizeOf(IdTreeValue) == 32);
+            assert(stdx.no_padding(IdTreeValue));
+        }
+
+        inline fn key_prefix(self: *const IdTreeValue) u128 {
+            return self.id;
+        }
+
+        inline fn key_value(self: *const IdTreeValue) TableKey {
+            return self.value;
+        }
+
+        inline fn tombstone(self: *const IdTreeValue) bool {
+            return (self.value & tombstone_bit) != 0;
+        }
+
+        inline fn tombstone_from_key(id: u128) IdTreeValue {
+            return .{
+                .id = id,
+                .value = tombstone_bit,
+            };
+        }
+    };
+}
 
 /// Normalizes index tree field types into either u64 or u128 for CompositeKey
 fn IndexCompositeKeyType(comptime Field: type) type {
@@ -116,9 +175,10 @@ comptime {
 fn IndexTreeType(
     comptime Storage: type,
     comptime Field: type,
+    comptime ObjectKey: type,
     comptime value_count_max: usize,
 ) type {
-    const CompositeKey = CompositeKeyType(IndexCompositeKeyType(Field), u64);
+    const CompositeKey = CompositeKeyType(IndexCompositeKeyType(Field), ObjectKey);
     const Table = TableType(
         CompositeKey.Key,
         CompositeKey,
@@ -154,6 +214,9 @@ pub fn GrooveType(
     /// - derived: { .field = *const fn (*const Object) DerivedType }:
     ///     An anonymous struct which contain fields that don't exist on the Object
     ///     but can be derived from an Object instance using the field's corresponding function.
+    ///
+    /// - composite_parent_key: ?[]const u8:
+    ///     The field on the Object type that should be used as the composite key with `timestamp`.
     comptime groove_options: anytype,
 ) type {
     @setEvalBranchQuota(64000);
@@ -166,8 +229,8 @@ pub fn GrooveType(
 
     comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
-    const primary_field = if (has_id) "id" else "timestamp";
-    const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
+    const ObjectHelper = ObjectHelperType(Object, groove_options);
+    const PrimaryKey = if (has_id) std.meta.fieldInfo(Object, .id).type else ObjectHelper.TableKey;
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -186,6 +249,7 @@ pub fn GrooveType(
             const IndexTree = IndexTreeType(
                 Storage,
                 field.type,
+                ObjectHelper.TableKey,
                 @field(groove_options.value_count_max, field.name),
             );
             index_fields = index_fields ++ [_]std.builtin.Type.StructField{
@@ -228,6 +292,7 @@ pub fn GrooveType(
         const IndexTree = IndexTreeType(
             Storage,
             DerivedType,
+            ObjectHelper.ObjectKey,
             @field(groove_options.value_count_max, field.name),
         );
 
@@ -258,23 +323,24 @@ pub fn GrooveType(
 
     const _ObjectTree = blk: {
         const Table = TableType(
-            u64, // key = timestamp
+            ObjectHelper.TableKey,
             Object,
-            ObjectTreeHelpers(Object).key_from_value,
-            ObjectTreeHelpers(Object).sentinel_key,
-            ObjectTreeHelpers(Object).tombstone,
-            ObjectTreeHelpers(Object).tombstone_from_key,
+            ObjectHelper.key_from_value,
+            ObjectHelper.sentinel_key,
+            ObjectHelper.tombstone,
+            ObjectHelper.tombstone_from_key,
             groove_options.value_count_max.timestamp,
             .general,
         );
         break :blk TreeType(Table, Storage);
     };
 
+    const IdTreeValue = IdTreeValueType(ObjectHelper.TableKey);
     const _IdTree = if (!has_id) void else blk: {
         const Table = TableType(
             u128,
             IdTreeValue,
-            IdTreeValue.key_from_value,
+            IdTreeValue.key_prefix,
             IdTreeValue.sentinel_key,
             IdTreeValue.tombstone,
             IdTreeValue.tombstone_from_key,
@@ -368,11 +434,10 @@ pub fn GrooveType(
         const tombstone_bit = 1 << (64 - 1);
 
         inline fn key_from_value(value: *const Object) PrimaryKey {
-            if (has_id) {
-                return value.id;
-            } else {
-                return value.timestamp & ~@as(u64, tombstone_bit);
-            }
+            return if (has_id)
+                value.id
+            else
+                ObjectHelper.key_from_value(value);
         }
 
         inline fn hash(key: PrimaryKey) u64 {
@@ -380,15 +445,12 @@ pub fn GrooveType(
         }
 
         inline fn tombstone_from_key(a: PrimaryKey) Object {
-            var obj: Object = undefined;
-            if (has_id) {
-                obj.id = a;
-                obj.timestamp = 0;
-            } else {
-                obj.timestamp = a;
-            }
-            obj.timestamp |= tombstone_bit;
-            return obj;
+            return if (has_id)
+                std.mem.zeroInit(Object, .{
+                    .id = a,
+                })
+            else
+                ObjectHelper.tombstone_from_key(a);
         }
 
         inline fn tombstone(a: *const Object) bool {
@@ -670,7 +732,7 @@ pub fn GrooveType(
                 .negative => {},
                 .positive => |id_tree_value| {
                     if (IdTreeValue.tombstone(id_tree_value)) return;
-                    groove.prefetch_from_memory_by_timestamp(id_tree_value.timestamp);
+                    groove.prefetch_from_memory_by_timestamp(id_tree_value.key_value());
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
@@ -690,7 +752,7 @@ pub fn GrooveType(
             )) {
                 .negative => {},
                 .positive => |object| {
-                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+                    assert(!ObjectHelper.tombstone(object));
                     groove.objects_cache.upsert(object);
                 },
                 .possible => |level| {
@@ -857,7 +919,7 @@ pub fn GrooveType(
 
                 if (result) |id_tree_value| {
                     if (!id_tree_value.tombstone()) {
-                        worker.lookup_by_timestamp(id_tree_value.timestamp);
+                        worker.lookup_by_timestamp(id_tree_value.key_value());
                         return;
                     }
                 }
@@ -896,7 +958,7 @@ pub fn GrooveType(
                 worker.lookup = undefined;
 
                 if (result) |object| {
-                    assert(!ObjectTreeHelpers(Object).tombstone(object));
+                    assert(!ObjectHelper.tombstone(object));
                     worker.context.groove.objects_cache.upsert(object);
                 } else {
                     assert(!has_id);
@@ -910,13 +972,18 @@ pub fn GrooveType(
         /// caller to ensure it doesn't already exist.
         pub fn insert(groove: *Groove, object: *const Object) void {
             if (constants.verify) {
-                assert(!groove.objects_cache.has(@field(object, primary_field)));
+                //FIXME Not sure if we need to check it here, since it was already checked
+                // building the Groove.
+                //assert(!groove.objects_cache.has(@field(object, primary_field)));
             }
 
             groove.objects_cache.upsert(object);
 
             if (has_id) {
-                groove.ids.put(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
+                groove.ids.put(&.{
+                    .id = object.id,
+                    .value = ObjectHelper.key_from_value(object),
+                });
                 groove.ids.key_range_update(object.id);
             }
             groove.objects.put(object);
@@ -945,7 +1012,10 @@ pub fn GrooveType(
             const new = values.new;
 
             if (constants.verify) {
-                const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
+                const old_from_cache = if (comptime has_id)
+                    groove.objects_cache.get(old.id).?
+                else
+                    groove.objects_cache.get(ObjectHelper.key_from_value(old)).?;
 
                 // While all that's actually required is that the _contents_ of the old_from_cache
                 // and old objects are identical, in current usage they're always the same piece of
@@ -966,8 +1036,8 @@ pub fn GrooveType(
             // Unlike the index trees, the new and old values in the object tree share the same
             // key. Therefore put() is sufficient to overwrite the old value.
             if (constants.verify) {
-                const tombstone = ObjectTreeHelpers(Object).tombstone;
-                const key_from_value = ObjectTreeHelpers(Object).key_from_value;
+                const tombstone = ObjectHelper.tombstone;
+                const key_from_value = ObjectHelper.key_from_value;
 
                 assert(!stdx.equal_bytes(Object, old, new));
                 assert(key_from_value(old) == key_from_value(new));

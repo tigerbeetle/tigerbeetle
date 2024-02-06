@@ -18,6 +18,7 @@ const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
+const AccountBalance = tb.AccountBalance;
 
 const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
@@ -100,6 +101,10 @@ pub fn StateMachineType(
 
                 pub const posted = .{
                     .timestamp = 20,
+                };
+
+                pub const accounts_history = .{
+                    .timestamp = 21,
                 };
             };
         };
@@ -184,6 +189,7 @@ pub fn StateMachineType(
                     "reserved",
                 },
                 .derived = .{},
+                .composite_parent_key = null,
             },
         );
 
@@ -208,6 +214,7 @@ pub fn StateMachineType(
                 },
                 .ignored = &[_][]const u8{"flags"},
                 .derived = .{},
+                .composite_parent_key = null,
             },
         );
 
@@ -221,6 +228,7 @@ pub fn StateMachineType(
                 },
                 .ignored = &[_][]const u8{ "fulfillment", "padding" },
                 .derived = .{},
+                .composite_parent_key = null,
             },
         );
 
@@ -239,12 +247,34 @@ pub fn StateMachineType(
             }
         };
 
+        const AccountsHistoryGroove = GrooveType(
+            Storage,
+            AccountBalance,
+            .{
+                .ids = constants.tree_ids.accounts_history,
+                .value_count_max = .{
+                    .timestamp = config.lsm_batch_multiple * 2 * constants.batch_max.create_transfers,
+                },
+                .ignored = &[_][]const u8{
+                    "debits_posted",
+                    "debits_pending",
+                    "credits_posted",
+                    "credits_pending",
+                    "account_timestamp",
+                    "reserved",
+                },
+                .derived = .{},
+                .composite_parent_key = "account_timestamp",
+            },
+        );
+
         pub const Workload = WorkloadType(StateMachine);
 
         pub const Forest = ForestType(Storage, .{
             .accounts = AccountsGroove,
             .transfers = TransfersGroove,
             .posted = PostedGroove,
+            .accounts_history = AccountsHistoryGroove,
         });
 
         const TransfersScanLookup = ScanLookupType(TransfersGroove, Storage);
@@ -777,6 +807,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.posted.scope_open();
+                    self.forest.grooves.accounts_history.scope_open();
                 },
                 else => unreachable,
             }
@@ -791,6 +822,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
                     self.forest.grooves.posted.scope_close(mode);
+                    self.forest.grooves.accounts_history.scope_close(mode);
                 },
                 else => unreachable,
             }
@@ -1087,6 +1119,20 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
+            // Inserting the balance history for both the debit and credit account:
+            inline for (&.{ &dr_account_new, &cr_account_new }) |account| {
+                if (account.flags.history) {
+                    self.forest.grooves.accounts_history.insert(&.{
+                        .timestamp = t2.timestamp,
+                        .account_timestamp = account.timestamp,
+                        .debits_pending = account.debits_pending,
+                        .debits_posted = account.debits_posted,
+                        .credits_pending = account.credits_pending,
+                        .credits_posted = account.credits_posted,
+                    });
+                }
+            }
+
             self.commit_timestamp = t.timestamp;
             return .ok;
         }
@@ -1304,7 +1350,7 @@ pub fn StateMachineType(
 
             return .{
                 .accounts = .{
-                    // lookup_account() looks up 1 AccountImmutable per item.
+                    // lookup_account() looks up 1 Account per item.
                     .prefetch_entries_for_read_max = batch_accounts_max,
                     .prefetch_entries_for_update_max = @max(
                         batch_accounts_max, // create_account()
@@ -1349,6 +1395,14 @@ pub fn StateMachineType(
                     // create_transfer() posts/voids at most one transfer.
                     .prefetch_entries_for_update_max = batch_transfers_max,
                     .cache_entries_max = options.cache_entries_posted,
+                    .tree_options_object = .{},
+                    .tree_options_id = {},
+                    .tree_options_index = .{},
+                },
+                .accounts_history = .{
+                    .prefetch_entries_for_read_max = 0,
+                    .prefetch_entries_for_update_max = 2 * batch_transfers_max,
+                    .cache_entries_max = options.cache_entries_posted, //FIXME support zero cache?
                     .tree_options_object = .{},
                     .tree_options_id = {},
                     .tree_options_index = .{},

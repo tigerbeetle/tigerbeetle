@@ -65,13 +65,17 @@ pub fn CompositeKeyType(comptime Prefix_: type, comptime Value_: type) type {
             return @truncate(key >> value_shift);
         }
 
+        pub inline fn key_value(key: Key) Value {
+            return @truncate(key);
+        }
+
         pub inline fn tombstone(self: *const CompositeKey) bool {
             return (self.value & tombstone_bit) != 0;
         }
 
         pub inline fn tombstone_from_key(key: Key) CompositeKey {
-            const value: Value = @truncate(key);
-            const prefix: Prefix = @truncate(key >> value_shift);
+            const prefix: Prefix = key_prefix(key);
+            const value: Value = key_value(key);
             assert(value & tombstone_bit == 0);
 
             return .{
