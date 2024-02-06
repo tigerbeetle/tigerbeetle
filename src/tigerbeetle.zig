@@ -53,7 +53,8 @@ pub const AccountFlags = packed struct(u16) {
     linked: bool = false,
     debits_must_not_exceed_credits: bool = false,
     credits_must_not_exceed_debits: bool = false,
-    padding: u13 = 0,
+    history: bool = false,
+    padding: u12 = 0,
 
     comptime {
         assert(@sizeOf(AccountFlags) == @sizeOf(u16));

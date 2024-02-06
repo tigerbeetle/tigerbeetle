@@ -73,12 +73,17 @@ pub fn ScanBuilderType(
             };
         }
 
-        pub fn Tree(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
+        pub fn TreeType(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
             return std.meta.fieldInfo(Groove.IndexTrees, field).type;
         }
 
         pub fn CompositeKeyType(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            return Tree(field).Table.Value;
+            const Table = TreeType(field).Table;
+            return switch (Table.usage) {
+                .general => unreachable,
+                .secondary_index => Table.Value,
+                .include_index => Table.Value.CompositeKey,
+            };
         }
 
         pub fn CompositeKeyPrefix(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
@@ -254,7 +259,7 @@ pub fn ScanBuilderType(
         fn tree(
             self: *ScanBuilder,
             comptime field: std.meta.FieldEnum(Groove.IndexTrees),
-        ) *Tree(field) {
+        ) *TreeType(field) {
             return &@field(self.groove().indexes, @tagName(field));
         }
 
@@ -394,14 +399,21 @@ pub fn ScanType(
                 => |*scan_merge| return try scan_merge.next(),
                 inline else => |*scan_tree| {
                     while (try scan_tree.next()) |value| {
-                        // When iterating over `ScanTreeType` the result is a `CompositeKey`,
-                        // check if it's not a tombstone and return only the `timestamp` part.
-                        const ScanTree = @TypeOf(scan_tree.*);
-                        if (ScanTree.Tree.Table.tombstone(&value)) {
+                        const Table = @TypeOf(scan_tree.*).Tree.Table;
+
+                        // Check if it's not a tombstone.
+                        if (Table.tombstone(&value)) {
                             continue;
                         }
 
-                        return value.timestamp;
+                        // When iterating over `ScanTreeType` the result is a `CompositeKey`,
+                        // or a struct that contains one in case of `.include_index`.
+                        // We need to return only the `timestamp` part.
+                        return switch (Table.usage) {
+                            .general => unreachable,
+                            .secondary_index => value.timestamp,
+                            .include_index => value.key.timestamp,
+                        };
                     }
                     return null;
                 },
@@ -429,8 +441,13 @@ pub fn ScanType(
                 .merge_difference,
                 => |scan_merge| return scan_merge.direction,
                 inline else => |*scan_tree| {
-                    const ScanTree = @TypeOf(scan_tree.*);
-                    const key_prefix = ScanTree.Tree.Table.Value.key_prefix;
+                    const Table = @TypeOf(scan_tree.*).Tree.Table;
+                    const key_prefix = switch (Table.usage) {
+                        .general => unreachable,
+                        .secondary_index => Table.Value.key_prefix,
+                        .include_index => Table.Value.CompositeKey.key_prefix,
+                    };
+
                     return if (key_prefix(scan_tree.key_min) == key_prefix(scan_tree.key_max))
                         scan_tree.direction
                     else

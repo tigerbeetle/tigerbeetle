@@ -18,6 +18,7 @@ const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
 const Account = tb.Account;
 const AccountFlags = tb.AccountFlags;
+const AccountBalance = tb.AccountBalance;
 
 const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
@@ -96,10 +97,12 @@ pub fn StateMachineType(
                     .ledger = 17,
                     .code = 18,
                     .timestamp = 19,
+                    .debit_account_history = 20,
+                    .credit_account_history = 21,
                 };
 
                 pub const posted = .{
-                    .timestamp = 20,
+                    .timestamp = 22,
                 };
             };
         };
@@ -184,8 +187,27 @@ pub fn StateMachineType(
                     "reserved",
                 },
                 .derived = .{},
+                .include = .{},
             },
         );
+
+        const AccountBalanceInclude = extern struct {
+            debits_pending: u128,
+            debits_posted: u128,
+            credits_pending: u128,
+            credits_posted: u128,
+
+            comptime {
+                assert(stdx.no_padding(AccountBalanceInclude));
+                assert(@sizeOf(AccountBalanceInclude) == 64);
+                assert(@alignOf(AccountBalanceInclude) == 16);
+            }
+        };
+
+        const TransferContext = struct {
+            debit_account: *const Account,
+            credit_account: *const Account,
+        };
 
         const TransfersGroove = GrooveType(
             Storage,
@@ -205,9 +227,76 @@ pub fn StateMachineType(
                     .timeout = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .debit_account_history = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .credit_account_history = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{"flags"},
-                .derived = .{},
+                .derived = .{
+                    // Functions that return the account timestamp to be indexed as derived indexes.
+                    .debit_account_history = struct {
+                        fn action(
+                            context: ?*const anyopaque,
+                            transfer: *const Transfer,
+                        ) u64 {
+                            _ = transfer;
+                            const transfer_context: *const TransferContext = @ptrCast(
+                                @alignCast(context.?),
+                            );
+                            const account = transfer_context.debit_account;
+                            return if (account.flags.history) account.timestamp else 0;
+                        }
+                    }.action,
+                    .credit_account_history = struct {
+                        fn action(
+                            context: ?*const anyopaque,
+                            transfer: *const Transfer,
+                        ) u64 {
+                            _ = transfer;
+                            const transfer_context: *const TransferContext = @ptrCast(
+                                @alignCast(context.?),
+                            );
+                            const account = transfer_context.credit_account;
+                            return if (account.flags.history) account.timestamp else 0;
+                        }
+                    }.action,
+                },
+                .include = .{
+                    // Function that returns the account balance to be included alongside
+                    // the `debit_account_history` index.
+                    .debit_account_history = struct {
+                        fn action(
+                            context: ?*const anyopaque,
+                            transfer: *const Transfer,
+                        ) AccountBalanceInclude {
+                            _ = transfer;
+                            const transfer_context: *const TransferContext = @ptrCast(
+                                @alignCast(context.?),
+                            );
+                            return .{
+                                .debits_posted = transfer_context.debit_account.debits_posted,
+                                .debits_pending = transfer_context.debit_account.debits_pending,
+                                .credits_posted = transfer_context.debit_account.credits_posted,
+                                .credits_pending = transfer_context.debit_account.credits_pending,
+                            };
+                        }
+                    }.action,
+                    // Function that returns the account balance to be included alongside
+                    // the `credit_account_history` index.
+                    .credit_account_history = struct {
+                        fn action(context: ?*const anyopaque, transfer: *const Transfer) AccountBalanceInclude {
+                            _ = transfer;
+                            const transfer_context: *const TransferContext = @ptrCast(
+                                @alignCast(context.?),
+                            );
+                            return .{
+                                .debits_posted = transfer_context.credit_account.debits_posted,
+                                .debits_pending = transfer_context.credit_account.debits_pending,
+                                .credits_posted = transfer_context.credit_account.credits_posted,
+                                .credits_pending = transfer_context.credit_account.credits_pending,
+                            };
+                        }
+                    }.action,
+                },
             },
         );
 
@@ -221,6 +310,7 @@ pub fn StateMachineType(
                 },
                 .ignored = &[_][]const u8{ "fulfillment", "padding" },
                 .derived = .{},
+                .include = .{},
             },
         );
 
@@ -967,7 +1057,10 @@ pub fn StateMachineType(
                 return create_account_exists(a, e);
             }
 
-            self.forest.grooves.accounts.insert(a);
+            self.forest.grooves.accounts.insert(.{
+                .context = null,
+                .object = a,
+            });
             self.commit_timestamp = a.timestamp;
             return .ok;
         }
@@ -1071,10 +1164,6 @@ pub fn StateMachineType(
             if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
             if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
 
-            var t2 = t.*;
-            t2.amount = amount;
-            self.forest.grooves.transfers.insert(&t2);
-
             var dr_account_new = dr_account.*;
             var cr_account_new = cr_account.*;
             if (t.flags.pending) {
@@ -1084,8 +1173,29 @@ pub fn StateMachineType(
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
-            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
-            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+
+            const context = TransferContext{
+                .debit_account = &dr_account_new,
+                .credit_account = &cr_account_new,
+            };
+
+            var t2 = t.*;
+            t2.amount = amount;
+            self.forest.grooves.transfers.insert(.{
+                .context = &context,
+                .object = &t2,
+            });
+
+            self.forest.grooves.accounts.update(.{
+                .context = null,
+                .old = dr_account,
+                .new = &dr_account_new,
+            });
+            self.forest.grooves.accounts.update(.{
+                .context = null,
+                .old = cr_account,
+                .new = &cr_account_new,
+            });
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1176,32 +1286,6 @@ pub fn StateMachineType(
                 if (t.timestamp >= p.timestamp + timeout_ns) return .pending_transfer_expired;
             }
 
-            self.forest.grooves.transfers.insert(&Transfer{
-                .id = t.id,
-                .debit_account_id = p.debit_account_id,
-                .credit_account_id = p.credit_account_id,
-                .user_data_128 = if (t.user_data_128 > 0) t.user_data_128 else p.user_data_128,
-                .user_data_64 = if (t.user_data_64 > 0) t.user_data_64 else p.user_data_64,
-                .user_data_32 = if (t.user_data_32 > 0) t.user_data_32 else p.user_data_32,
-                .ledger = p.ledger,
-                .code = p.code,
-                .pending_id = t.pending_id,
-                .timeout = 0,
-                .timestamp = t.timestamp,
-                .flags = t.flags,
-                .amount = amount,
-            });
-
-            self.forest.grooves.posted.insert(&PostedGrooveValue{
-                .timestamp = p.timestamp,
-                .fulfillment = fulfillment: {
-                    if (t.flags.post_pending_transfer) break :fulfillment .posted;
-                    if (t.flags.void_pending_transfer) break :fulfillment .voided;
-                    unreachable;
-                },
-                .padding = [_]u8{0} ** 7,
-            });
-
             var dr_account_new = dr_account.*;
             var cr_account_new = cr_account.*;
             dr_account_new.debits_pending -= p.amount;
@@ -1214,8 +1298,53 @@ pub fn StateMachineType(
                 cr_account_new.credits_posted += amount;
             }
 
-            self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
-            self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+            const context = TransferContext{
+                .debit_account = &dr_account_new,
+                .credit_account = &cr_account_new,
+            };
+
+            self.forest.grooves.transfers.insert(.{
+                .context = &context,
+                .object = &Transfer{
+                    .id = t.id,
+                    .debit_account_id = p.debit_account_id,
+                    .credit_account_id = p.credit_account_id,
+                    .user_data_128 = if (t.user_data_128 > 0) t.user_data_128 else p.user_data_128,
+                    .user_data_64 = if (t.user_data_64 > 0) t.user_data_64 else p.user_data_64,
+                    .user_data_32 = if (t.user_data_32 > 0) t.user_data_32 else p.user_data_32,
+                    .ledger = p.ledger,
+                    .code = p.code,
+                    .pending_id = t.pending_id,
+                    .timeout = 0,
+                    .timestamp = t.timestamp,
+                    .flags = t.flags,
+                    .amount = amount,
+                },
+            });
+
+            self.forest.grooves.posted.insert(.{
+                .context = null,
+                .object = &PostedGrooveValue{
+                    .timestamp = p.timestamp,
+                    .fulfillment = fulfillment: {
+                        if (t.flags.post_pending_transfer) break :fulfillment .posted;
+                        if (t.flags.void_pending_transfer) break :fulfillment .voided;
+                        unreachable;
+                    },
+                    .padding = [_]u8{0} ** 7,
+                },
+            });
+
+            self.forest.grooves.accounts.update(.{
+                .context = null,
+                .old = dr_account,
+                .new = &dr_account_new,
+            });
+            self.forest.grooves.accounts.update(.{
+                .context = null,
+                .old = cr_account,
+                .new = &cr_account_new,
+            });
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1341,6 +1470,8 @@ pub fn StateMachineType(
                         .ledger = .{},
                         .code = .{},
                         .amount = .{},
+                        .debit_account_history = .{},
+                        .credit_account_history = .{},
                     },
                 },
                 .posted = .{
@@ -1616,6 +1747,7 @@ fn check(test_table: []const u8) !void {
                 account_new.credits_posted = b.credits_posted;
                 if (!stdx.equal_bytes(Account, &account_new, account)) {
                     context.state_machine.forest.grooves.accounts.update(.{
+                        .context = null,
                         .old = account,
                         .new = &account_new,
                     });

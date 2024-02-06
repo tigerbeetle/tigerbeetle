@@ -29,6 +29,9 @@ pub const TableUsage = enum {
     /// * Immediately cancel out an insert and a tombstone for a "different" insert: as the values
     ///   are equal, it is correct to just resurrect an older value.
     secondary_index,
+    /// The same behavior as `secondary_index`, except TableValue can include user-defined fields.
+    /// See the `include` field in the `groove_options`.
+    include_index,
 };
 
 const address_size = @sizeOf(u64);

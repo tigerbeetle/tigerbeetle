@@ -599,7 +599,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 // In this way, enough object deletions may lead to compactions where the both input
                 // tables entirely cancel each other out, and no output table is written at all.
                 // See `TableUsage` for more detail.
-                .secondary_index => {},
+                .secondary_index, .include_index => {},
             }
 
             const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
