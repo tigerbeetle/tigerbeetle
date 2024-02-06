@@ -4,82 +4,94 @@ const math = std.math;
 
 const stdx = @import("../stdx.zig");
 
-pub fn CompositeKeyType(comptime Field: type) type {
-    // The type if zeroed padding is needed.
-    const pad = switch (Field) {
-        u128 => @as(u64, 0),
-        // [0]u8 as zero-sized-type workaround for https://github.com/ziglang/zig/issues/16394.
-        u64 => [0]u8{},
-        else => @compileError("invalid Field for CompositeKey: " ++ @typeName(Field)),
+pub fn CompositeKeyType(comptime Prefix_: type, comptime Value_: type) type {
+    if (Prefix_ != u64 and Prefix_ != u128) {
+        @compileError("invalid Prefix for CompositeKey: " ++ @typeName(Prefix_));
+    }
+    if (Value_ != u64 and Value_ != u128) {
+        @compileError("invalid Value for CompositeKey: " ++ @typeName(Value_));
+    }
+
+    // The schema requires the size to be a power of two,
+    // so we may need to add a pad to the next power of two greater than the current size.
+    const pad = pad: {
+        const value_size = @sizeOf(Prefix_) + @sizeOf(Value_);
+        const expected_size = 1 << std.math.log2_int_ceil(usize, value_size);
+        assert(expected_size >= value_size);
+
+        const pad_size = expected_size - value_size;
+        break :pad [_]u8{0} ** pad_size;
     };
     const Pad = @TypeOf(pad);
 
     return extern struct {
-        const Self = @This();
+        const CompositeKey = @This();
+
+        pub const Prefix = Prefix_;
+        pub const Value = Value_;
 
         pub const sentinel_key: Key = key_from_value(&.{
-            .field = math.maxInt(Field),
-            .timestamp = math.maxInt(u64),
+            .prefix = math.maxInt(Prefix),
+            .value = math.maxInt(u64),
         });
 
-        const tombstone_bit: u64 = 1 << 63;
-
-        // u128 may be aligned to 8 instead of the expected 16.
-        const field_bitsize_alignment = @divExact(@bitSizeOf(Field), 8);
+        const value_shift = @bitSizeOf(Value);
+        const tombstone_bit: Value = 1 << (value_shift - 1);
 
         pub const Key = std.meta.Int(
             .unsigned,
-            @bitSizeOf(u64) + @bitSizeOf(Field) + @bitSizeOf(Pad),
+            @bitSizeOf(Prefix) + @bitSizeOf(Value) + @bitSizeOf(Pad),
         );
 
-        field: Field align(field_bitsize_alignment),
+        // u128 may be aligned to 8 instead of the expected 16.
+        prefix: Prefix align(8),
         /// The most significant bit must be unset as it is used to indicate a tombstone.
-        timestamp: u64,
+        value: Value align(8),
         padding: Pad = pad,
 
         comptime {
-            assert(@sizeOf(Self) == @sizeOf(Field) * 2);
-            assert(@sizeOf(Self) == @sizeOf(Key));
-            assert(@alignOf(Self) >= @alignOf(Field));
-            assert(@alignOf(Self) == field_bitsize_alignment);
-            assert(stdx.no_padding(Self));
+            assert(@sizeOf(CompositeKey) == 16 or @sizeOf(CompositeKey) == 32);
+            assert(@alignOf(CompositeKey) >= @alignOf(Prefix));
+            assert(@sizeOf(CompositeKey) * 8 == @bitSizeOf(CompositeKey));
+            assert(@sizeOf(CompositeKey) == @sizeOf(Key));
+            assert(stdx.no_padding(Key));
         }
 
-        pub inline fn key_from_value(value: *const Self) Key {
-            return @as(Key, value.timestamp & ~tombstone_bit) | (@as(Key, value.field) << 64);
+        pub inline fn key_from_value(self: *const CompositeKey) Key {
+            return @as(Key, self.value & ~tombstone_bit) | (@as(Key, self.prefix) << value_shift);
         }
 
-        pub inline fn key_prefix(key: Key) Field {
-            return @truncate(key >> 64);
+        pub inline fn key_prefix(key: Key) Prefix {
+            return @truncate(key >> value_shift);
         }
 
-        pub inline fn tombstone(value: *const Self) bool {
-            return (value.timestamp & tombstone_bit) != 0;
+        pub inline fn tombstone(self: *const CompositeKey) bool {
+            return (self.value & tombstone_bit) != 0;
         }
 
-        pub inline fn tombstone_from_key(key: Key) Self {
-            const timestamp: u64 = @truncate(key);
-            const field: Field = @truncate(key >> 64);
-            assert(timestamp & tombstone_bit == 0);
+        pub inline fn tombstone_from_key(key: Key) CompositeKey {
+            const value: Value = @truncate(key);
+            const prefix: Prefix = @truncate(key >> value_shift);
+            assert(value & tombstone_bit == 0);
 
             return .{
-                .field = field,
-                .timestamp = timestamp | tombstone_bit,
+                .prefix = prefix,
+                .value = value | tombstone_bit,
             };
         }
     };
 }
 
-pub fn is_composite_key(comptime Value: type) bool {
-    if (@typeInfo(Value) == .Struct and
-        @hasField(Value, "field") and
-        @hasField(Value, "timestamp"))
+pub fn is_composite_key(comptime CompositeKey: type) bool {
+    if (@typeInfo(CompositeKey) == .Struct and
+        @hasField(CompositeKey, "prefix") and
+        @hasField(CompositeKey, "value"))
     {
-        const Field = std.meta.fieldInfo(Value, .field).type;
-        return switch (Field) {
-            u64, u128 => Value == CompositeKeyType(Field),
-            else => false,
-        };
+        const Prefix = std.meta.fieldInfo(CompositeKey, .prefix).type;
+        const Value = std.meta.fieldInfo(CompositeKey, .value).type;
+        if ((Prefix == u64 or Prefix == u128) and (Value == u64 or Value == u128)) {
+            return CompositeKey == CompositeKeyType(Prefix, Value);
+        }
     }
 
     return false;
@@ -87,38 +99,57 @@ pub fn is_composite_key(comptime Value: type) bool {
 
 fn composite_key_test(comptime CompositeKey: type) !void {
     {
-        const a = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
-        const b = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 101 });
+        const a = CompositeKey.key_from_value(&.{ .prefix = 1, .value = 100 });
+        const b = CompositeKey.key_from_value(&.{ .prefix = 1, .value = 101 });
         try std.testing.expect(a < b);
     }
 
     {
-        const a = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
-        const b = CompositeKey.key_from_value(&.{ .field = 2, .timestamp = 99 });
+        const a = CompositeKey.key_from_value(&.{ .prefix = 1, .value = 100 });
+        const b = CompositeKey.key_from_value(&.{ .prefix = 2, .value = 99 });
         try std.testing.expect(a < b);
     }
 
     {
         const a = CompositeKey.key_from_value(&.{
-            .field = 1,
-            .timestamp = @as(u64, 100) | CompositeKey.tombstone_bit,
+            .prefix = 1,
+            .value = @as(CompositeKey.Value, 100) | CompositeKey.tombstone_bit,
         });
         const b = CompositeKey.key_from_value(&.{
-            .field = 1,
-            .timestamp = 100,
+            .prefix = 1,
+            .value = 100,
         });
         try std.testing.expect(a == b);
     }
 
     {
-        const key = CompositeKey.key_from_value(&.{ .field = 1, .timestamp = 100 });
+        const key = CompositeKey.key_from_value(&.{ .prefix = 1, .value = 100 });
         const value = CompositeKey.tombstone_from_key(key);
         try std.testing.expect(CompositeKey.tombstone(&value));
-        try std.testing.expect(value.timestamp == @as(u64, 100) | CompositeKey.tombstone_bit);
+        try std.testing.expect(
+            value.value == @as(CompositeKey.Value, 100) | CompositeKey.tombstone_bit,
+        );
     }
 }
 
 test "composite_key" {
-    try composite_key_test(CompositeKeyType(u64));
-    try composite_key_test(CompositeKeyType(u128));
+    try composite_key_test(CompositeKeyType(u64, u64));
+    try composite_key_test(CompositeKeyType(u128, u64));
+    try composite_key_test(CompositeKeyType(u64, u128));
+    try composite_key_test(CompositeKeyType(u128, u128));
+}
+
+test "is_composite_key" {
+    try std.testing.expect(is_composite_key(CompositeKeyType(u64, u64)));
+    try std.testing.expect(is_composite_key(CompositeKeyType(u128, u64)));
+    try std.testing.expect(is_composite_key(CompositeKeyType(u64, u128)));
+    try std.testing.expect(is_composite_key(CompositeKeyType(u128, u128)));
+
+    try std.testing.expect(!is_composite_key(u64));
+    try std.testing.expect(!is_composite_key(u128));
+
+    try std.testing.expect(!is_composite_key(struct {
+        prefix: u64,
+        value: u64,
+    }));
 }

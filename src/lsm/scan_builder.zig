@@ -83,7 +83,7 @@ pub fn ScanBuilderType(
 
         pub fn CompositeKeyPrefix(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
             const CompositeKey = CompositeKeyType(field);
-            return std.meta.fieldInfo(CompositeKey, .field).type;
+            return std.meta.fieldInfo(CompositeKey, .prefix).type;
         }
 
         fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
@@ -96,8 +96,8 @@ pub fn ScanBuilderType(
             timestamp: u64,
         ) CompositeKeyType(field).Key {
             return CompositeKeyType(field).key_from_value(&.{
-                .field = prefix,
-                .timestamp = timestamp,
+                .prefix = prefix,
+                .value = timestamp,
             });
         }
 
@@ -393,15 +393,15 @@ pub fn ScanType(
                 .merge_difference,
                 => |*scan_merge| return try scan_merge.next(),
                 inline else => |*scan_tree| {
-                    while (try scan_tree.next()) |value| {
+                    while (try scan_tree.next()) |composite_key| {
                         // When iterating over `ScanTreeType` the result is a `CompositeKey`,
-                        // check if it's not a tombstone and return only the `timestamp` part.
+                        // check if it's not a tombstone and return only the `value` part.
                         const ScanTree = @TypeOf(scan_tree.*);
-                        if (ScanTree.Tree.Table.tombstone(&value)) {
+                        if (ScanTree.Tree.Table.tombstone(&composite_key)) {
                             continue;
                         }
 
-                        return value.timestamp;
+                        return composite_key.value;
                     }
                     return null;
                 },

@@ -590,7 +590,7 @@ pub fn TableType(
 }
 
 test "Table" {
-    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u128);
+    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u128, u64);
 
     const Table = TableType(
         CompositeKey.Key,

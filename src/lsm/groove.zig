@@ -118,7 +118,7 @@ fn IndexTreeType(
     comptime Field: type,
     comptime value_count_max: usize,
 ) type {
-    const CompositeKey = CompositeKeyType(IndexCompositeKeyType(Field));
+    const CompositeKey = CompositeKeyType(IndexCompositeKeyType(Field), u64);
     const Table = TableType(
         CompositeKey.Key,
         CompositeKey,
@@ -928,8 +928,8 @@ pub fn GrooveType(
                 // Fields with `value == 0` are not indexed.
                 if (index != 0) {
                     @field(groove.indexes, field.name).put(&.{
-                        .timestamp = object.timestamp,
-                        .field = index,
+                        .prefix = index,
+                        .value = object.timestamp,
                     });
                 }
             }
@@ -983,15 +983,15 @@ pub fn GrooveType(
                 if (old_index != new_index) {
                     if (old_index != 0) {
                         @field(groove.indexes, field.name).remove(&.{
-                            .timestamp = old.timestamp,
-                            .field = old_index,
+                            .prefix = old_index,
+                            .value = old.timestamp,
                         });
                     }
 
                     if (new_index != 0) {
                         @field(groove.indexes, field.name).put(&.{
-                            .timestamp = new.timestamp,
-                            .field = new_index,
+                            .prefix = new_index,
+                            .value = new.timestamp,
                         });
                     }
                 }
@@ -1026,8 +1026,8 @@ pub fn GrooveType(
                 const index = Helper.derive_index(object);
                 if (index != 0) {
                     @field(groove.indexes, field.name).remove(&.{
-                        .timestamp = object.timestamp,
-                        .field = index,
+                        .prefix = index,
+                        .value = object.timestamp,
                     });
                 }
             }

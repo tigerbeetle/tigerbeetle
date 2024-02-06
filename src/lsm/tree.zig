@@ -1134,7 +1134,7 @@ test "table_count_max_for_level/tree" {
 }
 
 test "TreeType" {
-    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);
+    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64, u64);
     const Table = @import("table.zig").TableType(
         CompositeKey.Key,
         CompositeKey,
