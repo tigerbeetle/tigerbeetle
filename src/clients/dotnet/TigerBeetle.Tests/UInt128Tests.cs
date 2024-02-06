@@ -3,6 +3,8 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace TigerBeetle.Tests;
 
@@ -113,5 +115,37 @@ public class UInt128Tests
         Assert.IsTrue(expected.SequenceEqual(BigInteger.Parse("123456", NumberStyles.HexNumber).ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(new Guid(expected).ToUInt128().ToArray()));
         Assert.IsTrue(expected.SequenceEqual(new UInt128(0, 0x123456).ToArray()));
+    }
+
+    [TestMethod]
+    public void IDCreation()
+    {
+        var verifier = () =>
+        {
+            UInt128 idA = ID.Create();
+            for (int i = 0; i < 1_000_000; i++)
+            {
+                if (i % 1_000 == 0)
+                {
+                    Thread.Sleep(1);
+                }
+
+                UInt128 idB = ID.Create();
+                Assert.IsTrue(idB.CompareTo(idA) > 0);
+                idA = idB;
+            }
+        };
+
+        // Verify monotonic IDs locally.
+        verifier();
+
+        // Verify monotonic IDs across multiple threads.
+        var concurrency = 10;
+        var startBarrier = new Barrier(concurrency);
+        Parallel.For(0, concurrency, (_, _) =>
+        {
+            startBarrier.SignalAndWait();
+            verifier();
+        });
     }
 }

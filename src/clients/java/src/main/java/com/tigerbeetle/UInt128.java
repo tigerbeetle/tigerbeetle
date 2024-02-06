@@ -175,7 +175,7 @@ public enum UInt128 {
     }
 
     private static long idLastTimestamp = 0L;
-    private static final byte[] idLastRandom = new byte[80];
+    private static final byte[] idLastRandom = new byte[10];
     private static final SecureRandom idSecureRandom = new SecureRandom();
 
     /**
@@ -186,7 +186,7 @@ public enum UInt128 {
      * <a href="https://github.com/ulid/spec">ULID</a> but is adjusted for u128-LE interpretation.
      *
      * @throws ArithmeticException if the random monotonic bits in the same millisecond overflows.
-     * @return an array of 16 bytes representing an unsigned 128-bit value in little endian.
+     * @return An array of 16 bytes representing an unsigned 128-bit value in little endian.
      */
     public static byte[] ID() {
         long randomLo;
@@ -207,16 +207,16 @@ public enum UInt128 {
             randomLo = random.getLong();
             randomHi = random.getShort();
 
-            // If randomLo will overflow from increment, then increment randomHi as carry.
-            // If randomHi will overflow on increment, throw error on 80-bit random overflow.
-            if (randomLo == 0xFFFFFFFFFFFFFFFFL) {
-                if (randomHi == 0xFFFF) {
+            // Increment the u80 stored in idLastRandom using a u64 increment then u16 increment.
+            // Throws an exception if the entire u80 represented with both overflows.
+            // In Java, all arithmetic wraps around on overflow by default so check for zero.
+            randomLo += 1;
+            if (randomLo == 0) {
+                randomHi += 1;
+                if (randomHi == 0) {
                     throw new ArithmeticException("random bits overflow on monotonic increment");
                 }
-                randomHi += 1;
             }
-            // Wrapping increment on randomLo. Java allows overflowing arithmetic by default.
-            randomLo += 1;
 
             // Write back the incremented random.
             random.flip();

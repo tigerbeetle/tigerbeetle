@@ -9,6 +9,7 @@ import {
   AccountFilter,
   AccountFilterFlags,
   AccountFlags,
+  createID,
 } from '.'
 
 const client = createClient({
@@ -57,6 +58,20 @@ function test(name: string, fn: () => Promise<void>) {
 test.skip = (name: string, fn: () => Promise<void>) => {
   console.log(name + ': SKIPPED')
 }
+
+test('createID monotonically increasing', async (): Promise<void> => {
+  let idA = createID();
+  for (let i = 0; i < 10_000_000; i++) {
+    // Ensure ID is monotonic between milliseconds if the loop executes too fast.
+    if (i % 10_000 == 0) {
+      await new Promise(resolve => setTimeout(resolve, 1))
+    }
+
+    const idB = createID();
+    assert.ok(idB > idA, 'createID() returned an id that did not monotonically increase');
+    idA = idB;
+  }
+})
 
 test('range check `code` on Account to be u16', async (): Promise<void> => {
   const account = { ...accountA, id: 0n }

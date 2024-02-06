@@ -47,6 +47,14 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec("go run main.go", .{});
     }
+
+    // Test the `types` package helpers
+    {
+        try shell.pushd("./pkg/types");
+        defer shell.popd();
+
+        try shell.exec("go test", .{});
+    }
 }
 
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {

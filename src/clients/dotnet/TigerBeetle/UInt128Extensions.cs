@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace TigerBeetle;
 
@@ -99,5 +100,67 @@ public static class UInt128Extensions
 
             return ret;
         }
+    }
+}
+
+/// <summary>
+/// Safe generation of Universally Unique and Byte-Sortable Identifiers as UInt128s.
+/// </summary>
+public static class ID
+{
+    private static long idLastTimestamp = 0L;
+    private static readonly byte[] idLastRandom = new byte[12];
+
+    /// <summary>
+    /// Generates a universally unique identifier as a UInt128.
+    /// Each call generates a monotonically increasing value to last under sequential consistency.
+    /// This function is thread-safe.
+    /// </summary>
+    public static UInt128 Create()
+    {
+        // Safe to cast from long to ulong as, in C#, this
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        ulong randomLo;
+        ushort randomHi;
+
+        lock (idLastRandom)
+        {
+            if (timestamp <= idLastTimestamp)
+            {
+                timestamp = idLastTimestamp;
+            }
+            else
+            {
+                idLastTimestamp = timestamp;
+                RandomNumberGenerator.Fill(idLastRandom);
+            }
+
+            Span<byte> lastRandom = idLastRandom;
+            randomLo = BitConverter.ToUInt64(lastRandom.Slice(0));
+            randomHi = BitConverter.ToUInt16(lastRandom.Slice(8));
+
+            // Increment the u80 stored in lastRandom using a u64 increment then u16 increment.
+            // Throws an exception if the entire u80 represented with both overflows.
+            // In C#, unsigned arithmetic wraps around on overflow by default so check for zero.
+            randomLo += 1;
+            if (randomLo == 0)
+            {
+                randomHi += 1;
+                if (randomHi == 0)
+                {
+                    throw new OverflowException("random bits overflow on monotonic increment");
+                }
+            }
+
+            BitConverter.TryWriteBytes(lastRandom.Slice(0), randomLo);
+            BitConverter.TryWriteBytes(lastRandom.Slice(8), randomHi);
+        }
+
+        Span<byte> bytes = stackalloc byte[16];
+        BitConverter.TryWriteBytes(bytes.Slice(0), randomLo);
+        BitConverter.TryWriteBytes(bytes.Slice(8), randomHi);
+        BitConverter.TryWriteBytes(bytes.Slice(10), (ushort)(timestamp));
+        BitConverter.TryWriteBytes(bytes.Slice(12), (uint)(timestamp >> 16));
+        return ((ReadOnlySpan<byte>)bytes).ToUInt128();
     }
 }
