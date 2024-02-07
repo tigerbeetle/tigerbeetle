@@ -10,7 +10,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.junit.Test;
@@ -53,6 +52,7 @@ public class IntegrationTest {
         accounts.setUserData32(102);
         accounts.setLedger(720);
         accounts.setCode(1);
+        accounts.setFlags(AccountFlags.HISTORY);
 
         accounts.add();
         accounts.setId(account2Id);
@@ -61,6 +61,7 @@ public class IntegrationTest {
         accounts.setUserData32(202);
         accounts.setLedger(720);
         accounts.setCode(2);
+        accounts.setFlags(AccountFlags.HISTORY);
 
         accountIds = new IdBatch(2);
         accountIds.add();
@@ -1237,7 +1238,7 @@ public class IntegrationTest {
                 // Querying transfers where:
                 // `debit_account_id=$account1Id OR credit_account_id=$account1Id
                 // ORDER BY timestamp ASC`.
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account1Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1246,12 +1247,17 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(false);
                 var account_transfers = client.getAccountTransfers(filter);
+                var account_history = client.getAccountHistory(filter);
                 assertTrue(account_transfers.getLength() == 10);
+                assertTrue(account_history.getLength() == 10);
                 long timestamp = 0;
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) > 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
             }
 
@@ -1259,7 +1265,7 @@ public class IntegrationTest {
                 // Querying transfers where:
                 // `debit_account_id=$account2Id OR credit_account_id=$account2Id
                 // ORDER BY timestamp DESC`.
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1268,13 +1274,18 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(true);
                 var account_transfers = client.getAccountTransfers(filter);
+                var account_history = client.getAccountHistory(filter);
 
                 assertTrue(account_transfers.getLength() == 10);
+                assertTrue(account_history.getLength() == 10);
                 long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) < 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
             }
 
@@ -1282,7 +1293,7 @@ public class IntegrationTest {
                 // Querying transfers where:
                 // `debit_account_id=$account1Id
                 // ORDER BY timestamp ASC`.
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account1Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1291,12 +1302,18 @@ public class IntegrationTest {
                 filter.setCredits(false);
                 filter.setReversed(false);
                 var account_transfers = client.getAccountTransfers(filter);
+                var account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 5);
+                assertTrue(account_history.getLength() == 5);
                 long timestamp = 0;
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) > 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
             }
 
@@ -1304,7 +1321,7 @@ public class IntegrationTest {
                 // Querying transfers where:
                 // `credit_account_id=$account2Id
                 // ORDER BY timestamp DESC`.
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(1);
                 filter.setTimestampMax(-2L); // -2L == ulong max - 1
@@ -1313,12 +1330,19 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(true);
                 var account_transfers = client.getAccountTransfers(filter);
+                var account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 5);
+                assertTrue(account_history.getLength() == 5);
+
                 long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) < 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
             }
 
@@ -1326,7 +1350,7 @@ public class IntegrationTest {
                 // Querying transfers where:
                 // `debit_account_id=$account1Id OR credit_account_id=$account1Id
                 // ORDER BY timestamp ASC LIMIT 5`.
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account1Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1337,35 +1361,52 @@ public class IntegrationTest {
 
                 // First 5 items:
                 var account_transfers = client.getAccountTransfers(filter);
+                var account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 5);
+                assertTrue(account_history.getLength() == 5);
+
                 long timestamp = 0;
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) > 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
 
                 // Next 5 items from this timestamp:
                 filter.setTimestampMin(timestamp + 1);
                 account_transfers = client.getAccountTransfers(filter);
+                account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 5);
+                assertTrue(account_history.getLength() == 5);
+
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) > 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
 
                 // No more results after that timestamp:
                 filter.setTimestampMin(timestamp + 1);
                 account_transfers = client.getAccountTransfers(filter);
+                account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 0);
+                assertTrue(account_history.getLength() == 0);
             }
 
             {
                 // Querying transfers where:
                 // `debit_account_id=$account2Id OR credit_account_id=$account2Id
                 // ORDER BY timestamp DESC LIMIT 5`.
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1376,39 +1417,57 @@ public class IntegrationTest {
 
                 // First 5 items:
                 var account_transfers = client.getAccountTransfers(filter);
+                var account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 5);
+                assertTrue(account_transfers.getLength() == 5);
+
                 long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) < 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
 
                 // Next 5 items from this timestamp:
                 filter.setTimestampMax(timestamp - 1);
                 account_transfers = client.getAccountTransfers(filter);
+                account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 5);
+                assertTrue(account_history.getLength() == 5);
+
                 while (account_transfers.next()) {
                     assertTrue(
                             Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) < 0);
                     timestamp = account_transfers.getTimestamp();
+
+                    assertTrue(account_history.next());
+                    assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
                 }
 
                 // No more results before that timestamp:
                 filter.setTimestampMax(timestamp - 1);
                 account_transfers = client.getAccountTransfers(filter);
+                account_history = client.getAccountHistory(filter);
+
                 assertTrue(account_transfers.getLength() == 0);
+                assertTrue(account_history.getLength() == 0);
             }
 
             {
                 // Empty filter:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
 
             {
                 // Invalid account:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(0);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1417,11 +1476,12 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(false);
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
 
             {
                 // Invalid timestamp min:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(-1L); // -1L == ulong max value
                 filter.setTimestampMax(0);
@@ -1430,11 +1490,12 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(false);
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
 
             {
                 // Invalid timestamp max:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(-1L); // -1L == ulong max value
@@ -1443,11 +1504,12 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(false);
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
 
             {
                 // Invalid timestamp min > max:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(-2L); // -2L == ulong max - 1
                 filter.setTimestampMax(1);
@@ -1456,11 +1518,12 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(false);
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
 
             {
                 // Zero limit:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1469,11 +1532,12 @@ public class IntegrationTest {
                 filter.setCredits(true);
                 filter.setReversed(false);
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
 
             {
                 // Zero flags:
-                var filter = new AccountTransfers();
+                var filter = new AccountFilter();
                 filter.setAccountId(account2Id);
                 filter.setTimestampMin(0);
                 filter.setTimestampMax(0);
@@ -1482,6 +1546,7 @@ public class IntegrationTest {
                 filter.setCredits(false);
                 filter.setReversed(false);
                 assertTrue(client.getAccountTransfers(filter).getLength() == 0);
+                assertTrue(client.getAccountHistory(filter).getLength() == 0);
             }
         }
     }

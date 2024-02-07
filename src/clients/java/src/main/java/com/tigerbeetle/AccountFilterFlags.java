@@ -5,7 +5,7 @@
 
 package com.tigerbeetle;
 
-public interface GetAccountTransfersFlags {
+public interface AccountFilterFlags {
     int NONE = (int) 0;
 
     /**

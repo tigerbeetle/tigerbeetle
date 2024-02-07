@@ -23,6 +23,11 @@ public interface AccountFlags {
      */
     int CREDITS_MUST_NOT_EXCEED_DEBITS = (int) (1 << 2);
 
+    /**
+     * @see <a href="https://docs.tigerbeetle.com/reference/accounts#flagshistory">history</a>
+     */
+    int HISTORY = (int) (1 << 3);
+
     static boolean hasLinked(final int flags) {
         return (flags & LINKED) == LINKED;
     }
@@ -33,6 +38,10 @@ public interface AccountFlags {
 
     static boolean hasCreditsMustNotExceedDebits(final int flags) {
         return (flags & CREDITS_MUST_NOT_EXCEED_DEBITS) == CREDITS_MUST_NOT_EXCEED_DEBITS;
+    }
+
+    static boolean hasHistory(final int flags) {
+        return (flags & HISTORY) == HISTORY;
     }
 
 }

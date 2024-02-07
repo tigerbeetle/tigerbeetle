@@ -8,7 +8,7 @@ package com.tigerbeetle;
 import java.nio.ByteBuffer;
 
 
-final class GetAccountTransfersBatch extends Batch {
+final class AccountFilterBatch extends Batch {
 
     interface Struct {
         int SIZE = 64;
@@ -21,7 +21,7 @@ final class GetAccountTransfersBatch extends Batch {
         int Reserved = 40;
     }
 
-    static final GetAccountTransfersBatch EMPTY = new GetAccountTransfersBatch(0);
+    static final AccountFilterBatch EMPTY = new AccountFilterBatch(0);
 
     /**
      * Creates an empty batch with the desired maximum capacity.
@@ -32,11 +32,11 @@ final class GetAccountTransfersBatch extends Batch {
      * @param capacity the maximum capacity.
      * @throws IllegalArgumentException if capacity is negative.
      */
-    public GetAccountTransfersBatch(final int capacity) {
+    public AccountFilterBatch(final int capacity) {
         super(capacity, Struct.SIZE);
     }
 
-    GetAccountTransfersBatch(final ByteBuffer buffer) {
+    AccountFilterBatch(final ByteBuffer buffer) {
         super(buffer, Struct.SIZE);
     }
 

@@ -1,6 +1,6 @@
 package com.tigerbeetle;
 
-public final class AccountTransfers {
+public final class AccountFilter {
 
     // @formatter:off
     /*
@@ -15,10 +15,10 @@ public final class AccountTransfers {
     */
     // @formatter:on
 
-    GetAccountTransfersBatch batch;
+    AccountFilterBatch batch;
 
-    public AccountTransfers() {
-        this.batch = new GetAccountTransfersBatch(1);
+    public AccountFilter() {
+        this.batch = new AccountFilterBatch(1);
         this.batch.add();
     }
 
@@ -129,7 +129,7 @@ public final class AccountTransfers {
      *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits">debits</a>
      */
     public boolean getDebits() {
-        return getFlags(GetAccountTransfersFlags.DEBITS);
+        return getFlags(AccountFilterFlags.DEBITS);
     }
 
     /**
@@ -138,7 +138,7 @@ public final class AccountTransfers {
      *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits">debits</a>
      */
     public void setDebits(boolean value) {
-        setFlags(GetAccountTransfersFlags.DEBITS, value);
+        setFlags(AccountFilterFlags.DEBITS, value);
     }
 
     /**
@@ -146,7 +146,7 @@ public final class AccountTransfers {
      *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits">credits</a>
      */
     public boolean getCredits() {
-        return getFlags(GetAccountTransfersFlags.CREDITS);
+        return getFlags(AccountFilterFlags.CREDITS);
     }
 
     /**
@@ -155,7 +155,7 @@ public final class AccountTransfers {
      *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits">credits</a>
      */
     public void setCredits(boolean value) {
-        setFlags(GetAccountTransfersFlags.CREDITS, value);
+        setFlags(AccountFilterFlags.CREDITS, value);
     }
 
     /**
@@ -163,7 +163,7 @@ public final class AccountTransfers {
      *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed">reversed</a>
      */
     public boolean getReversed() {
-        return getFlags(GetAccountTransfersFlags.REVERSED);
+        return getFlags(AccountFilterFlags.REVERSED);
     }
 
     /**
@@ -172,7 +172,7 @@ public final class AccountTransfers {
      *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed">reversed</a>
      */
     public void setReversed(boolean value) {
-        setFlags(GetAccountTransfersFlags.REVERSED, value);
+        setFlags(AccountFilterFlags.REVERSED, value);
     }
 
     boolean getFlags(final int flag) {
