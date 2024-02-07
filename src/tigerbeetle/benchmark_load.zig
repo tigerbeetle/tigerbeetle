@@ -225,7 +225,9 @@ const Benchmark = struct {
                 .reserved = 0,
                 .ledger = 2,
                 .code = 1,
-                .flags = .{},
+                .flags = .{
+                    .history = true,
+                },
                 .debits_pending = 0,
                 .debits_posted = 0,
                 .credits_pending = 0,
