@@ -739,8 +739,8 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         /// The checksum of the corresponding Request.
-        parent: u128,
-        parent_padding: u128 = 0,
+        request_checksum: u128,
+        request_checksum_padding: u128 = 0,
         /// The checksum of the prepare message to which this message refers.
         /// This allows for cryptographic guarantees beyond request, op, and commit numbers, which
         /// have low entropy and may otherwise collide in the event of any correctness bugs.
@@ -760,7 +760,7 @@ pub const Header = extern struct {
             assert(self.command == .reply);
             // Initialization within `client.zig` asserts that client `id` is greater than zero:
             if (self.client == 0) return "client == 0";
-            if (self.parent_padding != 0) return "parent_padding != 0";
+            if (self.request_checksum_padding != 0) return "request_checksum_padding != 0";
             if (self.context_padding != 0) return "context_padding != 0";
             if (self.op != self.commit) return "op != commit";
             if (self.timestamp == 0) return "timestamp == 0";
