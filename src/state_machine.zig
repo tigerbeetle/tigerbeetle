@@ -29,7 +29,7 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
 
-const GetAccountTransfers = tb.GetAccountTransfers;
+const AccountFilter = tb.AccountFilter;
 
 pub fn StateMachineType(
     comptime Storage: type,
@@ -56,6 +56,7 @@ pub fn StateMachineType(
                 pub const lookup_accounts = operation_batch_max(.lookup_accounts);
                 pub const lookup_transfers = operation_batch_max(.lookup_transfers);
                 pub const get_account_transfers = operation_batch_max(.get_account_transfers);
+                pub const get_account_history = operation_batch_max(.get_account_history);
 
                 comptime {
                     assert(create_accounts > 0);
@@ -63,6 +64,7 @@ pub fn StateMachineType(
                     assert(lookup_accounts > 0);
                     assert(lookup_transfers > 0);
                     assert(get_account_transfers > 0);
+                    assert(get_account_history > 0);
                 }
 
                 fn operation_batch_max(comptime operation: Operation) usize {
@@ -118,6 +120,7 @@ pub fn StateMachineType(
             .lookup_accounts = false,
             .lookup_transfers = false,
             .get_account_transfers = false,
+            .get_account_history = false,
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
@@ -299,7 +302,18 @@ pub fn StateMachineType(
             .account_history = AccountHistoryGroove,
         });
 
-        const TransfersScanLookup = ScanLookupType(TransfersGroove, Storage);
+        const TransfersScanLookup = ScanLookupType(
+            TransfersGroove,
+            TransfersGroove.ScanBuilder.Scan,
+            Storage,
+        );
+
+        const AccountHistoryScanLookup = ScanLookupType(
+            AccountHistoryGroove,
+            // Both Objects use the same timestamp, so we can use the TransfersGroove's indexes.
+            TransfersGroove.ScanBuilder.Scan,
+            Storage,
+        );
 
         pub const Operation = enum(u8) {
             /// Operations exported by TigerBeetle:
@@ -308,6 +322,7 @@ pub fn StateMachineType(
             lookup_accounts = config.vsr_operations_reserved + 2,
             lookup_transfers = config.vsr_operations_reserved + 3,
             get_account_transfers = config.vsr_operations_reserved + 4,
+            get_account_history = config.vsr_operations_reserved + 5,
         };
 
         pub const Options = struct {
@@ -348,6 +363,36 @@ pub fn StateMachineType(
             }
         };
 
+        /// Since scan lookups are used one at a time, it's safe to access
+        /// the union's fields and reuse the same memory for all ScanLookup instances.
+        const ScanLookup = union(enum) {
+            null,
+            transfer: TransfersScanLookup,
+            account_history: AccountHistoryScanLookup,
+
+            pub const Field = std.meta.FieldEnum(ScanLookup);
+            pub fn FieldType(comptime field: Field) type {
+                return std.meta.fieldInfo(ScanLookup, field).type;
+            }
+
+            pub fn parent(
+                comptime field: Field,
+                completion: *FieldType(field),
+            ) *StateMachine {
+                comptime assert(field != .null);
+
+                const context = @fieldParentPtr(ScanLookup, @tagName(field), completion);
+                return @fieldParentPtr(StateMachine, "scan_lookup", context);
+            }
+
+            pub fn get(self: *ScanLookup, comptime field: Field) *FieldType(field) {
+                assert(self.* == .null);
+
+                self.* = @unionInit(ScanLookup, @tagName(field), undefined);
+                return &@field(self, @tagName(field));
+            }
+        };
+
         prepare_timestamp: u64,
         commit_timestamp: u64,
         forest: Forest,
@@ -356,10 +401,8 @@ pub fn StateMachineType(
         prefetch_callback: ?*const fn (*StateMachine) void = null,
         prefetch_context: PrefetchContext = .null,
 
-        // TODO(batiati): Scan for Transfers only,
-        // we can refactor it to an `union(enum)` when we need lookups for other objects.
-        scan_lookup: TransfersScanLookup = undefined,
-        scan_buffer: *[constants.batch_max.get_account_transfers]Transfer,
+        scan_lookup: ScanLookup = .null,
+        scan_buffer: []align(16) u8,
         scan_result_count: u32 = 0,
         scan_next_tick: Grid.NextTick = undefined,
 
@@ -378,21 +421,24 @@ pub fn StateMachineType(
             );
             errdefer forest.deinit(allocator);
 
-            var scan_buffer = try allocator.alloc(Transfer, constants.batch_max.get_account_transfers);
+            var scan_buffer = try allocator.alignedAlloc(u8, 16, @max(
+                constants.batch_max.get_account_transfers * @sizeOf(Transfer),
+                constants.batch_max.get_account_history * @sizeOf(AccountHistoryGrooveValue),
+            ));
             errdefer allocator.free(scan_buffer);
 
             return StateMachine{
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = forest,
-                .scan_buffer = scan_buffer[0..constants.batch_max.get_account_transfers],
+                .scan_buffer = scan_buffer,
             };
         }
 
         pub fn deinit(self: *StateMachine, allocator: mem.Allocator) void {
             assert(self.tracer_slot == null);
 
-            allocator.destroy(self.scan_buffer);
+            allocator.free(self.scan_buffer);
             self.forest.deinit(allocator);
         }
 
@@ -418,7 +464,8 @@ pub fn StateMachineType(
                 .create_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
-                .get_account_transfers => GetAccountTransfers,
+                .get_account_transfers => AccountFilter,
+                .get_account_history => AccountFilter,
             };
         }
 
@@ -429,6 +476,7 @@ pub fn StateMachineType(
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
+                .get_account_history => AccountBalance,
             };
         }
 
@@ -456,6 +504,7 @@ pub fn StateMachineType(
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
+                .get_account_history => 0,
             };
         }
 
@@ -498,17 +547,10 @@ pub fn StateMachineType(
                     self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, input));
                 },
                 .get_account_transfers => {
-                    // TODO(batiati): Using a zeroed filter in case of invalid input.
-                    // Implement input validation on `prepare` for all operations.
-                    const filter = if (input.len != @sizeOf(GetAccountTransfers))
-                        std.mem.zeroInit(GetAccountTransfers, .{})
-                    else
-                        mem.bytesToValue(
-                            GetAccountTransfers,
-                            input[0..@sizeOf(GetAccountTransfers)],
-                        );
-
-                    self.scan_account_transfers(filter);
+                    self.prefetch_get_account_transfers(parse_filter_from_input(input));
+                },
+                .get_account_history => {
+                    self.prefetch_get_account_history(parse_filter_from_input(input));
                 },
             };
         }
@@ -516,6 +558,7 @@ pub fn StateMachineType(
         fn prefetch_finish(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_context == .null);
+            assert(self.scan_lookup == .null);
 
             const callback = self.prefetch_callback.?;
             self.prefetch_input = null;
@@ -644,9 +687,131 @@ pub fn StateMachineType(
             self.prefetch_finish();
         }
 
-        fn scan_account_transfers(self: *StateMachine, filter: GetAccountTransfers) void {
+        fn prefetch_get_account_transfers(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_result_count == 0);
 
+            if (self.get_scan_from_filter(filter)) |scan| {
+                var scan_buffer = std.mem.bytesAsSlice(Transfer, self.scan_buffer);
+                assert(scan_buffer.len >= constants.batch_max.get_account_transfers);
+
+                var scan_lookup = self.scan_lookup.get(.transfer);
+                scan_lookup.* = TransfersScanLookup.init(
+                    &self.forest.grooves.transfers,
+                    scan,
+                );
+
+                // Limiting the buffer size according to the query limit.
+                const limit = @min(filter.limit, constants.batch_max.get_account_transfers);
+                scan_lookup.read(
+                    scan_buffer[0..limit],
+                    &prefetch_get_account_transfers_callback,
+                );
+            } else {
+                // TODO(batiati): Improve the way we do validations on the state machine.
+                log.info("invalid filter for get_account_transfers: {any}", .{filter});
+                self.forest.grid.on_next_tick(
+                    &prefetch_scan_next_tick_callback,
+                    &self.scan_next_tick,
+                );
+            }
+        }
+
+        fn prefetch_get_account_transfers_callback(scan_lookup: *TransfersScanLookup) void {
+            const self: *StateMachine = ScanLookup.parent(.transfer, scan_lookup);
+            self.scan_result_count = @intCast(scan_lookup.slice().len);
+
+            self.scan_lookup = .null;
+            self.forest.scan_buffer_pool.reset();
+            self.forest.grooves.transfers.scan_builder.reset();
+
+            self.prefetch_finish();
+        }
+
+        fn prefetch_get_account_history(self: *StateMachine, filter: AccountFilter) void {
+            self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
+            self.forest.grooves.accounts.prefetch(
+                prefetch_get_account_history_lookup_account_callback,
+                self.prefetch_context.get(.accounts),
+            );
+        }
+
+        fn prefetch_get_account_history_lookup_account_callback(
+            completion: *AccountsGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
+            self.prefetch_context = .null;
+
+            const filter = parse_filter_from_input(self.prefetch_input.?);
+            self.prefetch_get_account_history_scan(filter);
+        }
+
+        fn prefetch_get_account_history_scan(self: *StateMachine, filter: AccountFilter) void {
+            assert(self.scan_result_count == 0);
+
+            if (self.get_scan_from_filter(filter)) |scan| {
+                if (self.forest.grooves.accounts.get(filter.account_id)) |account| {
+                    if (account.flags.history) {
+                        var scan_buffer = std.mem.bytesAsSlice(
+                            AccountHistoryGrooveValue,
+                            self.scan_buffer,
+                        );
+                        assert(scan_buffer.len >= constants.batch_max.get_account_history);
+
+                        var scan_lookup = self.scan_lookup.get(.account_history);
+                        scan_lookup.* = AccountHistoryScanLookup.init(
+                            &self.forest.grooves.account_history,
+                            scan,
+                        );
+
+                        // Limiting the buffer size according to the query limit.
+                        const limit = @min(filter.limit, constants.batch_max.get_account_history);
+                        scan_lookup.read(
+                            scan_buffer[0..limit],
+                            &prefetch_get_account_history_scan_callback,
+                        );
+
+                        return;
+                    }
+                }
+            } else {
+                // TODO(batiati): Improve the way we do validations on the state machine.
+                log.info(
+                    "invalid filter for get_account_history: {any}",
+                    .{filter},
+                );
+            }
+
+            // Returning an empty array on the next tick.
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_next_tick_callback,
+                &self.scan_next_tick,
+            );
+        }
+
+        fn prefetch_get_account_history_scan_callback(scan_lookup: *AccountHistoryScanLookup) void {
+            const self: *StateMachine = ScanLookup.parent(.account_history, scan_lookup);
+            self.scan_result_count = @intCast(scan_lookup.slice().len);
+
+            self.forest.scan_buffer_pool.reset();
+            self.forest.grooves.transfers.scan_builder.reset();
+            self.scan_lookup = .null;
+
+            self.prefetch_finish();
+        }
+
+        // TODO(batiati): Using a zeroed filter in case of invalid input.
+        // Implement input validation on `prepare` for all operations.
+        fn parse_filter_from_input(input: []const u8) AccountFilter {
+            return if (input.len != @sizeOf(AccountFilter))
+                std.mem.zeroInit(AccountFilter, .{})
+            else
+                mem.bytesToValue(
+                    AccountFilter,
+                    input[0..@sizeOf(AccountFilter)],
+                );
+        }
+
+        fn get_scan_from_filter(self: *StateMachine, filter: AccountFilter) ?*TransfersGroove.ScanBuilder.Scan {
             const filter_valid =
                 filter.account_id != 0 and filter.account_id != std.math.maxInt(u128) and
                 filter.timestamp_min != std.math.maxInt(u64) and
@@ -657,89 +822,64 @@ pub fn StateMachineType(
                 filter.flags.padding == 0 and
                 stdx.zeroed(&filter.reserved);
 
-            if (!filter_valid) {
-                // TODO(batiati): Improve the way we do validations on the state machine.
-                log.info("invalid filter for get_account_transfers: {any}", .{filter});
-                self.forest.grid.on_next_tick(
-                    &scan_account_transfers_validation_callback,
-                    &self.scan_next_tick,
-                );
-                return;
-            }
+            if (!filter_valid) return null;
 
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
             const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
 
-            const scan = scan: {
-                const timestamp_range: TimestampRange = .{
-                    .min = if (filter.timestamp_min == 0)
-                        TimestampRange.timestamp_min
-                    else
-                        filter.timestamp_min,
+            const timestamp_range: TimestampRange = .{
+                .min = if (filter.timestamp_min == 0)
+                    TimestampRange.timestamp_min
+                else
+                    filter.timestamp_min,
 
-                    .max = if (filter.timestamp_max == 0)
-                        TimestampRange.timestamp_max
-                    else
-                        filter.timestamp_max,
-                };
-
-                // This query may have 2 conditions:
-                // `WHERE debit_account_id = $account_id OR credit_account_id = $account_id`.
-                var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 2) = .{};
-                const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
-
-                // Adding the condition for `debit_account_id = $account_id`.
-                if (filter.flags.debits) {
-                    scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
-                        .debit_account_id,
-                        self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                        snapshot_latest,
-                        filter.account_id,
-                        timestamp_range,
-                        direction,
-                    ));
-                }
-
-                // Adding the condition for `credit_account_id = $account_id`.
-                if (filter.flags.credits) {
-                    scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
-                        .credit_account_id,
-                        self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                        snapshot_latest,
-                        filter.account_id,
-                        timestamp_range,
-                        direction,
-                    ));
-                }
-
-                break :scan switch (scan_conditions.count()) {
-                    1 => scan_conditions.get(0),
-                    // Creating an union `OR` with the conditions.
-                    2 => scan_builder.merge_union(scan_conditions.const_slice()),
-                    else => unreachable,
-                };
+                .max = if (filter.timestamp_max == 0)
+                    TimestampRange.timestamp_max
+                else
+                    filter.timestamp_max,
             };
 
-            // Initializing a lookup for the `Transfers` found by the scan:
-            self.scan_lookup = TransfersScanLookup.init(transfers_groove, scan);
-            self.scan_lookup.read(
-                // Limiting the buffer size according to the query limit.
-                self.scan_buffer[0..@min(filter.limit, self.scan_buffer.len)],
-                &scan_account_transfers_callback,
-            );
+            // This query may have 2 conditions:
+            // `WHERE debit_account_id = $account_id OR credit_account_id = $account_id`.
+            var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 2) = .{};
+            const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
+
+            // Adding the condition for `debit_account_id = $account_id`.
+            if (filter.flags.debits) {
+                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                    .debit_account_id,
+                    self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                    snapshot_latest,
+                    filter.account_id,
+                    timestamp_range,
+                    direction,
+                ));
+            }
+
+            // Adding the condition for `credit_account_id = $account_id`.
+            if (filter.flags.credits) {
+                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                    .credit_account_id,
+                    self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                    snapshot_latest,
+                    filter.account_id,
+                    timestamp_range,
+                    direction,
+                ));
+            }
+
+            return switch (scan_conditions.count()) {
+                1 => scan_conditions.get(0),
+                // Creating an union `OR` with the conditions.
+                2 => scan_builder.merge_union(scan_conditions.const_slice()),
+                else => unreachable,
+            };
         }
 
-        fn scan_account_transfers_validation_callback(completion: *Grid.NextTick) void {
+        fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
             const self: *StateMachine = @fieldParentPtr(StateMachine, "scan_next_tick", completion);
-            self.prefetch_finish();
-        }
+            self.scan_lookup = .null;
 
-        fn scan_account_transfers_callback(scan_lookup: *TransfersScanLookup) void {
-            var self: *StateMachine = @fieldParentPtr(StateMachine, "scan_lookup", scan_lookup);
-            self.scan_result_count = @intCast(scan_lookup.slice().len);
-
-            self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.transfers.scan_builder.reset();
             self.prefetch_finish();
         }
 
@@ -768,6 +908,7 @@ pub fn StateMachineType(
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 .get_account_transfers => self.execute_get_account_transfers(input, output),
+                .get_account_history => self.execute_get_account_history(input, output),
             };
 
             tracer.end(
@@ -976,7 +1117,6 @@ pub fn StateMachineType(
             return results_count * @sizeOf(Transfer);
         }
 
-        // Transfers that do not fit in the response are omitted.
         fn execute_get_account_transfers(
             self: *StateMachine,
             input: []const u8,
@@ -986,15 +1126,60 @@ pub fn StateMachineType(
             defer self.scan_result_count = 0;
 
             const result_size: usize = self.scan_result_count * @sizeOf(Transfer);
-            const results: []Transfer = mem.bytesAsSlice(Transfer, output[0..result_size]);
             stdx.copy_disjoint(
                 .exact,
-                Transfer,
-                results,
-                self.scan_buffer[0..self.scan_result_count],
+                u8,
+                output[0..result_size],
+                self.scan_buffer[0..result_size],
             );
 
             return result_size;
+        }
+
+        fn execute_get_account_history(
+            self: *StateMachine,
+            input: []const u8,
+            output: *align(16) [constants.message_body_size_max]u8,
+        ) usize {
+            if (self.scan_result_count == 0) return 0;
+            defer self.scan_result_count = 0;
+
+            const filter: AccountFilter = mem.bytesToValue(
+                AccountFilter,
+                input[0..@sizeOf(AccountFilter)],
+            );
+
+            const scan_results: []const AccountHistoryGrooveValue = mem.bytesAsSlice(
+                AccountHistoryGrooveValue,
+                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(AccountHistoryGrooveValue)],
+            );
+
+            const output_slice: []AccountBalance = mem.bytesAsSlice(AccountBalance, output);
+            var output_count: usize = 0;
+
+            for (scan_results) |*result| {
+                output_slice[output_count] = if (filter.account_id == result.dr_account_id) .{
+                    .timestamp = result.timestamp,
+                    .debits_pending = result.dr_debits_pending,
+                    .debits_posted = result.dr_debits_posted,
+                    .credits_pending = result.dr_credits_pending,
+                    .credits_posted = result.dr_credits_posted,
+                } else if (filter.account_id == result.cr_account_id) .{
+                    .timestamp = result.timestamp,
+                    .debits_pending = result.cr_debits_pending,
+                    .debits_posted = result.cr_debits_posted,
+                    .credits_pending = result.cr_credits_pending,
+                    .credits_posted = result.cr_credits_posted,
+                } else {
+                    // We have checked that this account has `flags.history == true`.
+                    unreachable;
+                };
+
+                output_count += 1;
+            }
+
+            assert(output_count == self.scan_result_count);
+            return output_count * @sizeOf(AccountBalance);
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {

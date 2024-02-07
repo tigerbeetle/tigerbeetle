@@ -62,6 +62,21 @@ pub const AccountFlags = packed struct(u16) {
     }
 };
 
+pub const AccountBalance = extern struct {
+    debits_pending: u128,
+    debits_posted: u128,
+    credits_pending: u128,
+    credits_posted: u128,
+    timestamp: u64,
+    reserved: [56]u8 = [_]u8{0} ** 56,
+
+    comptime {
+        assert(stdx.no_padding(AccountBalance));
+        assert(@sizeOf(AccountBalance) == 128);
+        assert(@alignOf(AccountBalance) == 16);
+    }
+};
+
 pub const Transfer = extern struct {
     id: u128,
     debit_account_id: u128,
@@ -249,7 +264,8 @@ pub const CreateTransfersResult = extern struct {
     }
 };
 
-pub const GetAccountTransfers = extern struct {
+/// Filter used in both `get_account_transfer` and `get_account_history`.
+pub const AccountFilter = extern struct {
     /// The account id.
     account_id: u128,
     /// The initial timestamp (inclusive).
@@ -258,30 +274,30 @@ pub const GetAccountTransfers = extern struct {
     /// The final timestamp (inclusive).
     /// Use ZERO for no filter.
     timestamp_max: u64,
-    /// Maximum number of transfers that can be returned by this query.
+    /// Maximum number of results that can be returned by this query.
     limit: u32,
     /// Query flags.
-    flags: GetAccountTransfersFlags,
+    flags: AccountFilterFlags,
     reserved: [24]u8 = [_]u8{0} ** 24,
 
     comptime {
-        assert(@sizeOf(GetAccountTransfers) == 64);
-        assert(stdx.no_padding(GetAccountTransfers));
+        assert(@sizeOf(AccountFilter) == 64);
+        assert(stdx.no_padding(AccountFilter));
     }
 };
 
-pub const GetAccountTransfersFlags = packed struct(u32) {
-    /// Whether to include debit transfers where `debit_account_id` matches.
+pub const AccountFilterFlags = packed struct(u32) {
+    /// Whether to include results where `debit_account_id` matches.
     debits: bool,
-    /// Whether to include credit transfers where `credit_account_id` matches.
+    /// Whether to include results where `credit_account_id` matches.
     credits: bool,
     /// Whether the results are sorted by timestamp in chronological or reverse-chronological order.
     reversed: bool,
     padding: u29 = 0,
 
     comptime {
-        assert(@sizeOf(GetAccountTransfersFlags) == @sizeOf(u32));
-        assert(@bitSizeOf(GetAccountTransfersFlags) == @sizeOf(GetAccountTransfersFlags) * 8);
+        assert(@sizeOf(AccountFilterFlags) == @sizeOf(u32));
+        assert(@bitSizeOf(AccountFilterFlags) == @sizeOf(AccountFilterFlags) * 8);
     }
 };
 

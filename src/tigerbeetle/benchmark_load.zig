@@ -403,7 +403,7 @@ const Benchmark = struct {
         }
 
         b.account_index = b.rng.random().intRangeLessThan(usize, 0, b.account_count);
-        var filter = tb.GetAccountTransfers{
+        var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .timestamp_min = 0,
             .timestamp_max = 0,
