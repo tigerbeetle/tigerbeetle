@@ -54,11 +54,12 @@ const CliArgs = union(enum) {
 
     benchmark: struct {
         account_count: usize = 10_000,
+        account_history: bool = false,
         transfer_count: usize = 10_000_000,
         query_count: usize = 100,
         transfer_count_per_second: usize = 1_000_000,
         print_batch_timings: bool = false,
-        id_order: Command.Benchmark.IdOrder = .reversed,
+        id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
         addresses: ?[]const u8 = null,
     },
@@ -188,11 +189,12 @@ pub const Command = union(enum) {
         pub const IdOrder = enum { sequential, random, reversed };
 
         account_count: usize = 10_000,
+        account_history: bool = false,
         transfer_count: usize = 10_000_000,
         query_count: usize = 100,
         transfer_count_per_second: usize = 1_000_000,
         print_batch_timings: bool = false,
-        id_order: IdOrder = .reversed,
+        id_order: IdOrder = .sequential,
         statsd: bool = false,
         addresses: ?[]const net.Address = null,
     };
