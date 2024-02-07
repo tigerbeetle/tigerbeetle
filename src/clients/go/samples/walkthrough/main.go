@@ -188,7 +188,7 @@ func main() {
 		TimestampMin: 0,  // No filter by Timestamp.
 		TimestampMax: 0,  // No filter by Timestamp.
 		Limit:        10, // Limit to ten transfers at most.
-		Flags: GetAccountTransfersFlags{
+		Flags: AccountFilterFlags{
 			Debits:   true, // Include transfer from the debit side.
 			Credits:  true, // Include transfer from the credit side.
 			Reversed: true, // Sort by timestamp in reverse-chronological order.

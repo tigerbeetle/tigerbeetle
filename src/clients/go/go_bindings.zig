@@ -7,14 +7,15 @@ const output_file = "src/clients/go/pkg/types/bindings.go";
 const type_mappings = .{
     .{ tb.AccountFlags, "AccountFlags" },
     .{ tb.TransferFlags, "TransferFlags" },
-    .{ tb.GetAccountTransfersFlags, "GetAccountTransfersFlags" },
+    .{ tb.AccountFilterFlags, "AccountFilterFlags" },
     .{ tb.Account, "Account" },
     .{ tb.Transfer, "Transfer" },
     .{ tb.CreateAccountResult, "CreateAccountResult", "Account" },
     .{ tb.CreateTransferResult, "CreateTransferResult", "Transfer" },
     .{ tb.CreateAccountsResult, "AccountEventResult" },
     .{ tb.CreateTransfersResult, "TransferEventResult" },
-    .{ tb.GetAccountTransfers, "GetAccountTransfers" },
+    .{ tb.AccountFilter, "AccountFilter" },
+    .{ tb.AccountBalance, "AccountBalance" },
 };
 
 fn go_type(comptime Type: type) []const u8 {
@@ -258,8 +259,8 @@ fn emit_struct(
             tb.AccountFlags
         else if (comptime std.mem.eql(u8, name, "Transfer"))
             tb.TransferFlags
-        else if (comptime std.mem.eql(u8, name, "GetAccountTransfers"))
-            tb.GetAccountTransfersFlags
+        else if (comptime std.mem.eql(u8, name, "AccountFilter"))
+            tb.AccountFilterFlags
         else
             unreachable;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
