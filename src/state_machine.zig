@@ -1773,7 +1773,7 @@ const TestCreateAccount = struct {
     flags_linked: ?enum { LNK } = null,
     flags_debits_must_not_exceed_credits: ?enum { @"D<C" } = null,
     flags_credits_must_not_exceed_debits: ?enum { @"C<D" } = null,
-    flags_padding: u13 = 0,
+    flags_padding: u12 = 0,
     timestamp: u64 = 0,
     result: CreateAccountResult,
 
