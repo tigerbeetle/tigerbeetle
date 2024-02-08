@@ -133,8 +133,9 @@ public class AccountBalanceTest {
         balances.add();
 
         final var bytes = new byte[56];
-        for (int i = 0; i < 56; i++)
-            bytes[i] = (byte) i;
+        for (byte i = 0; i < 56; i++) {
+            bytes[i] = i;
+        }
 
         balances.setReserved(bytes);
         assertArrayEquals(bytes, balances.getReserved());
