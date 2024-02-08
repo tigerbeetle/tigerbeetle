@@ -162,10 +162,15 @@ pub const Header = extern struct {
         if (self.checksum_padding != 0) return "checksum_padding != 0";
         if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
         if (self.nonce_reserved != 0) return "nonce_reserved != 0";
-        if (self.version != vsr.Version) return "version != Version";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
+
+        if (self.command == .block) {
+            if (self.version > vsr.Version) return "block: version > Version";
+        } else {
+            if (self.version != vsr.Version) return "version != Version";
+        }
 
         switch (self.into_any()) {
             inline else => |command_header| return command_header.invalid_header(),
