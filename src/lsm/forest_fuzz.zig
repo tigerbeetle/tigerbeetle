@@ -363,7 +363,11 @@ const Environment = struct {
     }
 
     const Scanner = struct {
-        const AccountsScanLookup = ScanLookupType(GrooveAccounts, Storage);
+        const AccountsScanLookup = ScanLookupType(
+            GrooveAccounts,
+            GrooveAccounts.ScanBuilder.Scan,
+            Storage,
+        );
         scan_lookup: AccountsScanLookup = undefined,
         result: ?[]const tb.Account = null,
 
