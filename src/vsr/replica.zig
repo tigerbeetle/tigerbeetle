@@ -2417,6 +2417,8 @@ pub fn ReplicaType(
             assert(message.header.command == .block);
             assert(message.header.size <= constants.block_size);
             assert(message.header.address > 0);
+            assert(message.header.protocol <= vsr.Version);
+            maybe(message.header.protocol < vsr.Version);
 
             if (self.grid.callback == .cancel) {
                 assert(self.grid.read_global_queue.count == 0);
@@ -6573,6 +6575,12 @@ pub fn ReplicaType(
             }
 
             assert(message.header.cluster == self.cluster);
+
+            if (message.header.command == .block) {
+                assert(message.header.protocol <= vsr.Version);
+            } else {
+                assert(message.header.protocol == vsr.Version);
+            }
 
             // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.into_any()) {

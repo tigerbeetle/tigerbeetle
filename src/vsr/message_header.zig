@@ -166,10 +166,15 @@ pub const Header = extern struct {
         if (self.checksum_padding != 0) return "checksum_padding != 0";
         if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
         if (self.nonce_reserved != 0) return "nonce_reserved != 0";
-        if (self.protocol != vsr.Version) return "protocol != Version";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
+
+        if (self.command == .block) {
+            if (self.protocol > vsr.Version) return "block: protocol > Version";
+        } else {
+            if (self.protocol != vsr.Version) return "protocol != Version";
+        }
 
         switch (self.into_any()) {
             inline else => |command_header| return command_header.invalid_header(),
