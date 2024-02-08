@@ -9,7 +9,7 @@ const {
   TransferFlags,
   CreateTransferError,
   CreateAccountError,
-  GetAccountTransfersFlags,
+  AccountFilterFlags,
 } = require("tigerbeetle-node");
 
 async function main() {
@@ -347,13 +347,26 @@ async function main() {
     account_id: 2n,
     timestamp_min: 0n, // No filter by Timestamp.
     timestamp_max: 0n, // No filter by Timestamp.
-    limit: 10, // Limit to ten transfers at most.
-    flags: GetAccountTransfersFlags.debits | // Include transfer from the debit side.
-      GetAccountTransfersFlags.credits | // Include transfer from the credit side.
-      GetAccountTransfersFlags.reversed, // Sort by timestamp in reverse-chronological order.
+    limit: 10, // Limit to ten balances at most.
+    flags: AccountFilterFlags.debits | // Include transfer from the debit side.
+      AccountFilterFlags.credits | // Include transfer from the credit side.
+      AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
   };
   const account_transfers = await client.getAccountTransfers(filter);
   // endsection:get-account-transfers
+
+  // section:get-account-history
+  filter = {
+    account_id: 2n,
+    timestamp_min: 0n, // No filter by Timestamp.
+    timestamp_max: 0n, // No filter by Timestamp.
+    limit: 10, // Limit to ten balances at most.
+    flags: AccountFilterFlags.debits | // Include transfer from the debit side.
+      AccountFilterFlags.credits | // Include transfer from the credit side.
+      AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
+  };
+  const account_balances = await client.getAccountHistory(filter);
+  // endsection:get-account-history
 
     try {
         // section:linked-events

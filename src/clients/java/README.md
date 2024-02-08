@@ -187,6 +187,7 @@ To toggle behavior for an account, combine enum values stored in the
 * `AccountFlags.LINKED`
 * `AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS`
 * `AccountFlags.CREDITS_MUST_NOT_EXCEED_CREDITS`
+* `AccountFlags.HISTORY`
 
 For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
@@ -469,7 +470,7 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```java
-AccountTransfers filter = new AccountTransfers();
+AccountFilter filter = new AccountFilter();
 filter.setAccountId(2);
 filter.setTimestampMin(0); // No filter by Timestamp.
 filter.setTimestampMax(0); // No filter by Timestamp.
@@ -478,6 +479,29 @@ filter.setDebits(true); // Include transfer from the debit side.
 filter.setCredits(true); // Include transfer from the credit side.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 transfers = client.getAccountTransfers(filter);
+```
+
+## Get Account History
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the point-in-time balances of a given account, allowing basic filter and pagination
+capabilities.
+
+The balances in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```java
+filter = new AccountFilter();
+filter.setAccountId(2);
+filter.setTimestampMin(0); // No filter by Timestamp.
+filter.setTimestampMax(0); // No filter by Timestamp.
+filter.setLimit(10); // Limit to ten balances at most.
+filter.setDebits(true); // Include transfer from the debit side.
+filter.setCredits(true); // Include transfer from the credit side.
+filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+AccountBalanceBatch account_balances = client.getAccountHistory(filter);
 ```
 
 ## Linked Events

@@ -148,19 +148,33 @@ using (var client = new Client(clusterID, addresses))
     // endsection:lookup-transfers
 
     // section:get-account-transfers
-    var filter = new GetAccountTransfers
+    var filter = new AccountFilter
     {
         AccountId = 2,
         TimestampMin = 0, // No filter by Timestamp.
         TimestampMax = 0, // No filter by Timestamp.
         Limit = 10, // Limit to ten transfers at most.
-        Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
-            GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
-            GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+        Flags = AccountFilterFlags.Debits | // Include transfer from the debit side.
+            AccountFilterFlags.Credits | // Include transfer from the credit side.
+            AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
     };
     transfers = client.GetAccountTransfers(filter);
     // endsection:get-account-transfers
 
+    // section:get-account-history
+    filter = new AccountFilter
+    {
+        AccountId = 2,
+        TimestampMin = 0, // No filter by Timestamp.
+        TimestampMax = 0, // No filter by Timestamp.
+        Limit = 10, // Limit to ten balances at most.
+        Flags = AccountFilterFlags.Debits | // Include transfer from the debit side.
+            AccountFilterFlags.Credits | // Include transfer from the credit side.
+            AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+    };
+    var account_balances = client.GetAccountHistory(filter);
+    // endsection:get-account-history
+    
     // section:linked-events
     var batch = new System.Collections.Generic.List<Transfer>();
 

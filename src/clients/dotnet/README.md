@@ -141,6 +141,7 @@ To toggle behavior for an account, combine enum values stored in the
 * `AccountFlags.Linked`
 * `AccountFlags.DebitsMustNotExceedCredits`
 * `AccountFlags.CreditsMustNotExceedDebits`
+* `AccountFlags.History`
 
 For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
@@ -384,17 +385,42 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```cs
-var filter = new GetAccountTransfers
+var filter = new AccountFilter
 {
     AccountId = 2,
     TimestampMin = 0, // No filter by Timestamp.
     TimestampMax = 0, // No filter by Timestamp.
     Limit = 10, // Limit to ten transfers at most.
-    Flags = GetAccountTransfersFlags.Debits | // Include transfer from the debit side.
-        GetAccountTransfersFlags.Credits | // Include transfer from the credit side.
-        GetAccountTransfersFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+    Flags = AccountFilterFlags.Debits | // Include transfer from the debit side.
+        AccountFilterFlags.Credits | // Include transfer from the credit side.
+        AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 transfers = client.GetAccountTransfers(filter);
+```
+
+## Get Account History
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the point-in-time balances of a given account, allowing basic filter and pagination
+capabilities.
+
+The balances in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```cs
+filter = new AccountFilter
+{
+    AccountId = 2,
+    TimestampMin = 0, // No filter by Timestamp.
+    TimestampMax = 0, // No filter by Timestamp.
+    Limit = 10, // Limit to ten balances at most.
+    Flags = AccountFilterFlags.Debits | // Include transfer from the debit side.
+        AccountFilterFlags.Credits | // Include transfer from the credit side.
+        AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
+};
+var account_balances = client.GetAccountHistory(filter);
 ```
 
 ## Linked Events
