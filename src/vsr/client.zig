@@ -587,6 +587,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                     });
                     return;
                 }
+                assert(reply.header.request_checksum == inflight.message.header.checksum);
             } else {
                 log.debug("{}: on_reply: ignoring (no inflight request)", .{self.id});
                 return;
@@ -618,7 +619,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 reply.header.operation.tag_name(StateMachine),
             });
 
-            assert(reply.header.parent == self.parent);
+            assert(reply.header.request_checksum == self.parent);
             assert(reply.header.client == self.id);
             assert(reply.header.request == inflight_request);
             assert(reply.header.cluster == self.cluster);
@@ -1042,7 +1043,7 @@ test "Client Batching" {
                 .view = message.header.view,
                 .command = .reply,
                 .replica = message.header.replica,
-                .parent = message.header.checksum,
+                .request_checksum = message.header.checksum,
                 .client = message.header.client,
                 .context = undefined, // computed below.
                 .op = bus.commit,

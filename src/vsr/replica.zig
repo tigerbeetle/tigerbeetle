@@ -3791,7 +3791,7 @@ pub fn ReplicaType(
             reply.header.* = .{
                 .command = .reply,
                 .operation = prepare.header.operation,
-                .parent = prepare.header.request_checksum,
+                .request_checksum = prepare.header.request_checksum,
                 .client = prepare.header.client,
                 .request = prepare.header.request,
                 .cluster = prepare.header.cluster,
@@ -4386,7 +4386,7 @@ pub fn ReplicaType(
                     log.debug("{}: on_request: ignoring older request", .{self.replica});
                     return true;
                 } else if (entry.header.request == message.header.request) {
-                    if (message.header.checksum == entry.header.parent) {
+                    if (message.header.checksum == entry.header.request_checksum) {
                         assert(entry.header.operation == message.header.operation);
 
                         log.debug("{}: on_request: replying to duplicate request", .{self.replica});
@@ -4450,7 +4450,7 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view); // See ignore_request_message_backup().
             assert(message.header.session == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
-            assert(message.header.checksum == entry.header.parent);
+            assert(message.header.checksum == entry.header.request_checksum);
             assert(message.header.request == entry.header.request);
 
             if (entry.header.size == @sizeOf(Header)) {
@@ -4578,6 +4578,7 @@ pub fn ReplicaType(
                         assert(pipeline_message_header.client == message.header.client);
 
                         if (pipeline_message.header.checksum == message.header.checksum) {
+                            assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already queued)", .{self.replica});
                             return true;
                         }
@@ -4587,6 +4588,7 @@ pub fn ReplicaType(
 
                         if (pipeline_message_header.request_checksum == message.header.checksum) {
                             assert(pipeline_message_header.op > self.commit_max);
+                            assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already preparing)", .{self.replica});
                             return true;
                         }
