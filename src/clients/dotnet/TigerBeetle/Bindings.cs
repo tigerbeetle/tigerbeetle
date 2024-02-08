@@ -78,17 +78,17 @@ public enum AccountFilterFlags : uint
     None = 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits
+    /// https://docs.tigerbeetle.com/reference/account_filter#flagsdebits
     /// </summary>
     Debits = 1 << 0,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits
+    /// https://docs.tigerbeetle.com/reference/account_filter#flagscredits
     /// </summary>
     Credits = 1 << 1,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed
+    /// https://docs.tigerbeetle.com/reference/account_filter#flagsreversed
     /// </summary>
     Reversed = 1 << 2,
 
@@ -126,67 +126,67 @@ public struct Account
     private ulong timestamp;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#id
+    /// https://docs.tigerbeetle.com/reference/accounts#id
     /// </summary>
     public UInt128 Id { get => id; set => id = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#debits_pending
+    /// https://docs.tigerbeetle.com/reference/accounts#debits_pending
     /// </summary>
     public UInt128 DebitsPending { get => debitsPending; internal set => debitsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#debits_posted
+    /// https://docs.tigerbeetle.com/reference/accounts#debits_posted
     /// </summary>
     public UInt128 DebitsPosted { get => debitsPosted; internal set => debitsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#credits_pending
+    /// https://docs.tigerbeetle.com/reference/accounts#credits_pending
     /// </summary>
     public UInt128 CreditsPending { get => creditsPending; internal set => creditsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#credits_posted
+    /// https://docs.tigerbeetle.com/reference/accounts#credits_posted
     /// </summary>
     public UInt128 CreditsPosted { get => creditsPosted; internal set => creditsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#user_data_128
+    /// https://docs.tigerbeetle.com/reference/accounts#user_data_128
     /// </summary>
     public UInt128 UserData128 { get => userData128; set => userData128 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#user_data_64
+    /// https://docs.tigerbeetle.com/reference/accounts#user_data_64
     /// </summary>
     public ulong UserData64 { get => userData64; set => userData64 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#user_data_32
+    /// https://docs.tigerbeetle.com/reference/accounts#user_data_32
     /// </summary>
     public uint UserData32 { get => userData32; set => userData32 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#reserved
+    /// https://docs.tigerbeetle.com/reference/accounts#reserved
     /// </summary>
     internal uint Reserved { get => reserved; set => reserved = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#ledger
+    /// https://docs.tigerbeetle.com/reference/accounts#ledger
     /// </summary>
     public uint Ledger { get => ledger; set => ledger = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#code
+    /// https://docs.tigerbeetle.com/reference/accounts#code
     /// </summary>
     public ushort Code { get => code; set => code = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#flags
+    /// https://docs.tigerbeetle.com/reference/accounts#flags
     /// </summary>
     public AccountFlags Flags { get => flags; set => flags = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/accounts/#timestamp
+    /// https://docs.tigerbeetle.com/reference/accounts#timestamp
     /// </summary>
     public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
 
@@ -224,67 +224,67 @@ public struct Transfer
     private ulong timestamp;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#id
+    /// https://docs.tigerbeetle.com/reference/transfers#id
     /// </summary>
     public UInt128 Id { get => id; set => id = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#debit_account_id
+    /// https://docs.tigerbeetle.com/reference/transfers#debit_account_id
     /// </summary>
     public UInt128 DebitAccountId { get => debitAccountId; set => debitAccountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#credit_account_id
+    /// https://docs.tigerbeetle.com/reference/transfers#credit_account_id
     /// </summary>
     public UInt128 CreditAccountId { get => creditAccountId; set => creditAccountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#amount
+    /// https://docs.tigerbeetle.com/reference/transfers#amount
     /// </summary>
     public UInt128 Amount { get => amount; set => amount = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#pending_id
+    /// https://docs.tigerbeetle.com/reference/transfers#pending_id
     /// </summary>
     public UInt128 PendingId { get => pendingId; set => pendingId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#user_data_128
+    /// https://docs.tigerbeetle.com/reference/transfers#user_data_128
     /// </summary>
     public UInt128 UserData128 { get => userData128; set => userData128 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#user_data_64
+    /// https://docs.tigerbeetle.com/reference/transfers#user_data_64
     /// </summary>
     public ulong UserData64 { get => userData64; set => userData64 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#user_data_32
+    /// https://docs.tigerbeetle.com/reference/transfers#user_data_32
     /// </summary>
     public uint UserData32 { get => userData32; set => userData32 = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#timeout
+    /// https://docs.tigerbeetle.com/reference/transfers#timeout
     /// </summary>
     public uint Timeout { get => timeout; set => timeout = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#ledger
+    /// https://docs.tigerbeetle.com/reference/transfers#ledger
     /// </summary>
     public uint Ledger { get => ledger; set => ledger = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#code
+    /// https://docs.tigerbeetle.com/reference/transfers#code
     /// </summary>
     public ushort Code { get => code; set => code = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#flags
+    /// https://docs.tigerbeetle.com/reference/transfers#flags
     /// </summary>
     public TransferFlags Flags { get => flags; set => flags = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/transfers/#timestamp
+    /// https://docs.tigerbeetle.com/reference/transfers#timestamp
     /// </summary>
     public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
 
@@ -763,32 +763,32 @@ public struct AccountFilter
     private ReservedData reserved;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id
+    /// https://docs.tigerbeetle.com/reference/account_filter#account_id
     /// </summary>
     public UInt128 AccountId { get => accountId; set => accountId = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min
+    /// https://docs.tigerbeetle.com/reference/account_filter#timestamp_min
     /// </summary>
     public ulong TimestampMin { get => timestampMin; set => timestampMin = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max
+    /// https://docs.tigerbeetle.com/reference/account_filter#timestamp_max
     /// </summary>
     public ulong TimestampMax { get => timestampMax; set => timestampMax = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit
+    /// https://docs.tigerbeetle.com/reference/account_filter#limit
     /// </summary>
     public uint Limit { get => limit; set => limit = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags
+    /// https://docs.tigerbeetle.com/reference/account_filter#flags
     /// </summary>
     public AccountFilterFlags Flags { get => flags; set => flags = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#reserved
+    /// https://docs.tigerbeetle.com/reference/account_filter#reserved
     /// </summary>
     internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 
@@ -839,32 +839,32 @@ public struct AccountBalance
     private ReservedData reserved;
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#debits_pending
+    /// https://docs.tigerbeetle.com/reference/account_balances#debits_pending
     /// </summary>
     public UInt128 DebitsPending { get => debitsPending; set => debitsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#debits_posted
+    /// https://docs.tigerbeetle.com/reference/account_balances#debits_posted
     /// </summary>
     public UInt128 DebitsPosted { get => debitsPosted; set => debitsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#credits_pending
+    /// https://docs.tigerbeetle.com/reference/account_balances#credits_pending
     /// </summary>
     public UInt128 CreditsPending { get => creditsPending; set => creditsPending = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#credits_posted
+    /// https://docs.tigerbeetle.com/reference/account_balances#credits_posted
     /// </summary>
     public UInt128 CreditsPosted { get => creditsPosted; set => creditsPosted = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp
+    /// https://docs.tigerbeetle.com/reference/account_balances#timestamp
     /// </summary>
     public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#reserved
+    /// https://docs.tigerbeetle.com/reference/account_balances#reserved
     /// </summary>
     internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
 

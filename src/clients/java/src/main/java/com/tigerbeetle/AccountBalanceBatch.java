@@ -43,7 +43,7 @@ public final class AccountBalanceBatch extends Batch {
     /**
      * @return a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_pending">debits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_pending">debits_pending</a>
      */
     public BigInteger getDebitsPending() {
         final var index = at(Struct.DebitsPending);
@@ -58,7 +58,7 @@ public final class AccountBalanceBatch extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_pending">debits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_pending">debits_pending</a>
      */
     public long getDebitsPending(final UInt128 part) {
         return getUInt128(at(Struct.DebitsPending), part);
@@ -68,7 +68,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param debitsPending a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_pending">debits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_pending">debits_pending</a>
      */
     void setDebitsPending(final BigInteger debitsPending) {
         putUInt128(at(Struct.DebitsPending), UInt128.asBytes(debitsPending));
@@ -79,7 +79,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_pending">debits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_pending">debits_pending</a>
      */
     void setDebitsPending(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.DebitsPending), leastSignificant, mostSignificant);
@@ -89,7 +89,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_pending">debits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_pending">debits_pending</a>
      */
     void setDebitsPending(final long leastSignificant) {
         putUInt128(at(Struct.DebitsPending), leastSignificant, 0);
@@ -98,7 +98,7 @@ public final class AccountBalanceBatch extends Batch {
     /**
      * @return a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_posted">debits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_posted">debits_posted</a>
      */
     public BigInteger getDebitsPosted() {
         final var index = at(Struct.DebitsPosted);
@@ -113,7 +113,7 @@ public final class AccountBalanceBatch extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_posted">debits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_posted">debits_posted</a>
      */
     public long getDebitsPosted(final UInt128 part) {
         return getUInt128(at(Struct.DebitsPosted), part);
@@ -123,7 +123,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param debitsPosted a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_posted">debits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_posted">debits_posted</a>
      */
     void setDebitsPosted(final BigInteger debitsPosted) {
         putUInt128(at(Struct.DebitsPosted), UInt128.asBytes(debitsPosted));
@@ -134,7 +134,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_posted">debits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_posted">debits_posted</a>
      */
     void setDebitsPosted(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.DebitsPosted), leastSignificant, mostSignificant);
@@ -144,7 +144,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#debits_posted">debits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#debits_posted">debits_posted</a>
      */
     void setDebitsPosted(final long leastSignificant) {
         putUInt128(at(Struct.DebitsPosted), leastSignificant, 0);
@@ -153,7 +153,7 @@ public final class AccountBalanceBatch extends Batch {
     /**
      * @return a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_pending">credits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_pending">credits_pending</a>
      */
     public BigInteger getCreditsPending() {
         final var index = at(Struct.CreditsPending);
@@ -168,7 +168,7 @@ public final class AccountBalanceBatch extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_pending">credits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_pending">credits_pending</a>
      */
     public long getCreditsPending(final UInt128 part) {
         return getUInt128(at(Struct.CreditsPending), part);
@@ -178,7 +178,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param creditsPending a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_pending">credits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_pending">credits_pending</a>
      */
     void setCreditsPending(final BigInteger creditsPending) {
         putUInt128(at(Struct.CreditsPending), UInt128.asBytes(creditsPending));
@@ -189,7 +189,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_pending">credits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_pending">credits_pending</a>
      */
     void setCreditsPending(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.CreditsPending), leastSignificant, mostSignificant);
@@ -199,7 +199,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_pending">credits_pending</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_pending">credits_pending</a>
      */
     void setCreditsPending(final long leastSignificant) {
         putUInt128(at(Struct.CreditsPending), leastSignificant, 0);
@@ -208,7 +208,7 @@ public final class AccountBalanceBatch extends Batch {
     /**
      * @return a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_posted">credits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_posted">credits_posted</a>
      */
     public BigInteger getCreditsPosted() {
         final var index = at(Struct.CreditsPosted);
@@ -223,7 +223,7 @@ public final class AccountBalanceBatch extends Batch {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_posted">credits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_posted">credits_posted</a>
      */
     public long getCreditsPosted(final UInt128 part) {
         return getUInt128(at(Struct.CreditsPosted), part);
@@ -233,7 +233,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param creditsPosted a {@link java.math.BigInteger} representing the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_posted">credits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_posted">credits_posted</a>
      */
     void setCreditsPosted(final BigInteger creditsPosted) {
         putUInt128(at(Struct.CreditsPosted), UInt128.asBytes(creditsPosted));
@@ -244,7 +244,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_posted">credits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_posted">credits_posted</a>
      */
     void setCreditsPosted(final long leastSignificant, final long mostSignificant) {
         putUInt128(at(Struct.CreditsPosted), leastSignificant, mostSignificant);
@@ -254,7 +254,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#credits_posted">credits_posted</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#credits_posted">credits_posted</a>
      */
     void setCreditsPosted(final long leastSignificant) {
         putUInt128(at(Struct.CreditsPosted), leastSignificant, 0);
@@ -262,7 +262,7 @@ public final class AccountBalanceBatch extends Batch {
 
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#timestamp">timestamp</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#timestamp">timestamp</a>
      */
     public long getTimestamp() {
         final var value = getUInt64(at(Struct.Timestamp));
@@ -273,7 +273,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param timestamp
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#timestamp">timestamp</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#timestamp">timestamp</a>
      */
     void setTimestamp(final long timestamp) {
         putUInt64(at(Struct.Timestamp), timestamp);
@@ -281,7 +281,7 @@ public final class AccountBalanceBatch extends Batch {
 
     /**
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#reserved">reserved</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#reserved">reserved</a>
      */
     byte[] getReserved() {
         return getArray(at(Struct.Reserved), 56);
@@ -291,7 +291,7 @@ public final class AccountBalanceBatch extends Batch {
      * @param reserved
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
-     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter/#reserved">reserved</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_balances#reserved">reserved</a>
      */
     void setReserved(byte[] reserved) {
         if (reserved == null)
