@@ -28,6 +28,11 @@ public enum AccountFlags : ushort
     /// </summary>
     CreditsMustNotExceedDebits = 1 << 2,
 
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/accounts#flagshistory
+    /// </summary>
+    History = 1 << 3,
+
 }
 
 [Flags]
@@ -68,7 +73,7 @@ public enum TransferFlags : ushort
 }
 
 [Flags]
-public enum GetAccountTransfersFlags : uint
+public enum AccountFilterFlags : uint
 {
     None = 0,
 
@@ -714,7 +719,7 @@ public struct CreateTransfersResult
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-public struct GetAccountTransfers
+public struct AccountFilter
 {
     public const int SIZE = 64;
 
@@ -753,7 +758,7 @@ public struct GetAccountTransfers
 
     private uint limit;
 
-    private GetAccountTransfersFlags flags;
+    private AccountFilterFlags flags;
 
     private ReservedData reserved;
 
@@ -780,7 +785,83 @@ public struct GetAccountTransfers
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags
     /// </summary>
-    public GetAccountTransfersFlags Flags { get => flags; set => flags = value; }
+    public AccountFilterFlags Flags { get => flags; set => flags = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#reserved
+    /// </summary>
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
+
+}
+
+[StructLayout(LayoutKind.Sequential, Size = SIZE)]
+public struct AccountBalance
+{
+    public const int SIZE = 128;
+
+    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 56;
+
+        private fixed byte raw[SIZE];
+
+        public byte[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+            }
+        }
+
+        public void SetData(byte[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<byte>(ptr, SIZE));
+            }
+        }
+    }
+
+    private UInt128 debitsPending;
+
+    private UInt128 debitsPosted;
+
+    private UInt128 creditsPending;
+
+    private UInt128 creditsPosted;
+
+    private ulong timestamp;
+
+    private ReservedData reserved;
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#debits_pending
+    /// </summary>
+    public UInt128 DebitsPending { get => debitsPending; set => debitsPending = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#debits_posted
+    /// </summary>
+    public UInt128 DebitsPosted { get => debitsPosted; set => debitsPosted = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#credits_pending
+    /// </summary>
+    public UInt128 CreditsPending { get => creditsPending; set => creditsPending = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#credits_posted
+    /// </summary>
+    public UInt128 CreditsPosted { get => creditsPosted; set => creditsPosted = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp
+    /// </summary>
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
     /// <summary>
     /// https://docs.tigerbeetle.com/reference/operations/get_account_transfers#reserved
@@ -842,6 +923,8 @@ internal enum TBOperation : byte
     LookupTransfers = 131,
 
     GetAccountTransfers = 132,
+
+    GetAccountHistory = 133,
 
 }
 

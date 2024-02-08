@@ -43,8 +43,8 @@ const type_mappings = .{
         .private_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
-    .{ tb.GetAccountTransfersFlags, TypeMapping{
-        .name = "GetAccountTransfersFlags",
+    .{ tb.AccountFilterFlags, TypeMapping{
+        .name = "AccountFilterFlags",
         .visibility = .public,
         .private_fields = &.{"padding"},
         .docs_link = "reference/operations/get_account_transfers#flags",
@@ -81,8 +81,14 @@ const type_mappings = .{
         .name = "CreateTransfersResult",
         .visibility = .public,
     } },
-    .{ tb.GetAccountTransfers, TypeMapping{
-        .name = "GetAccountTransfers",
+    .{ tb.AccountFilter, TypeMapping{
+        .name = "AccountFilter",
+        .visibility = .public,
+        .private_fields = &.{"reserved"},
+        .docs_link = "reference/operations/get_account_transfers#",
+    } },
+    .{ tb.AccountBalance, TypeMapping{
+        .name = "AccountBalance",
         .visibility = .public,
         .private_fields = &.{"reserved"},
         .docs_link = "reference/operations/get_account_transfers#",
