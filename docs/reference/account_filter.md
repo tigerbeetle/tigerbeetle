@@ -21,7 +21,7 @@ Constraints:
 
 ### `timestamp_min`
 
-The minimum [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, inclusive range.
+The minimum [`Transfer.timestamp`](transfers.md#timestamp) from which results will be returned, inclusive range.
 Optional; set to zero to disable the lower-bound filter.
 
 Constraints:
@@ -31,7 +31,7 @@ Constraints:
 
 ### `timestamp_max`
 
-The maximum [`Transfer.timestamp`](../transfers.md#timestamp) from which results will be returned, inclusive range.
+The maximum [`Transfer.timestamp`](transfers.md#timestamp) from which results will be returned, inclusive range.
 Optional; set to zero to disable the upper-bound filter.
 
 Constraints:
@@ -43,7 +43,7 @@ Constraints:
 
 The maximum number of results that can be returned by this query.
 
-Limited by the [maximum message size](../../design/client-requests.md#batching-events).
+Limited by the [maximum message size](../design/client-requests.md#batching-events).
 
 Constraints:
 
@@ -60,12 +60,12 @@ Constraints:
 
 #### `flags.debits`
 
-Whether or not to include results where the field [`debit_account_id`](../transfers.md#debit_account_id)
+Whether or not to include results where the field [`debit_account_id`](transfers.md#debit_account_id)
 matches the parameter [`account_id`](#account_id).
 
 #### `flags.credits`
 
-Whether or not to include results where the field [`credit_account_id`](../transfers.md#credit_account_id)
+Whether or not to include results where the field [`credit_account_id`](transfers.md#credit_account_id)
 matches the parameter [`account_id`](#account_id).
 
 #### `flags.reversed`

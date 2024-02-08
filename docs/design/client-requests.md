@@ -22,12 +22,14 @@ The maximum number of events per batch depends on the maximum message size
 
 In the default configuration, the batch sizes are:
 
-| Operation          | Batch Size |
-| ------------------ | ---------: |
-| `lookup_accounts`  | 8190       |
-| `lookup_transfers` | 8190       |
-| `create_accounts`  | 8190       |
-| `create_transfers` | 8190       |
+| Operation               | Batch Size |
+| ----------------------- | ---------: |
+| `lookup_accounts`       | 8190       |
+| `lookup_transfers`      | 8190       |
+| `create_accounts`       | 8190       |
+| `create_transfers`      | 8190       |
+| `get_account_transfers` | 8190       |
+| `get_account_history`   | 8190       |
 
 Presently the client application is responsible for batching events, but only as a stopgap
 because this has not yet been implemented within the clients themselves.

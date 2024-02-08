@@ -1,6 +1,6 @@
 # `get_account_history`
 
-Fetch the historical [`AccountBalance`](../account_balance.md)s of a given [`Account`](../accounts.md).
+Fetch the historical [`AccountBalance`](../account_balances.md)s of a given [`Account`](../accounts.md).
 
 ## Event
 
