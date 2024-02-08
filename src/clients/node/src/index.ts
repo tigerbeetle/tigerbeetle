@@ -5,7 +5,8 @@ import {
   CreateAccountsError,
   CreateTransfersError,
   Operation,
-  GetAccountTransfers,
+  AccountFilter,
+  AccountBalance,
 } from './bindings'
 
 const binding: Binding = (() => {
@@ -66,8 +67,8 @@ const binding: Binding = (() => {
 export type Context = object // tb_client
 export type AccountID = bigint // u128
 export type TransferID = bigint // u128
-export type Event = Account | Transfer | AccountID | TransferID | GetAccountTransfers
-export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer
+export type Event = Account | Transfer | AccountID | TransferID | AccountFilter
+export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer | AccountBalance
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
 interface BindingInitArgs {
@@ -93,7 +94,8 @@ export interface Client {
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
-  getAccountTransfers: (filter: GetAccountTransfers) => Promise<Transfer[]>
+  getAccountTransfers: (filter: AccountFilter) => Promise<Transfer[]>
+  getAccountHistory: (filter: AccountFilter) => Promise<AccountBalance[]>
   destroy: () => void
 }
 
@@ -129,6 +131,7 @@ export function createClient (args: ClientInitArgs): Client {
     lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
     lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
     getAccountTransfers(filter) { return request(Operation.get_account_transfers, [filter]) },
+    getAccountHistory(filter) { return request(Operation.get_account_history, [filter]) },
     destroy() { binding.deinit(context) },
   }
 }

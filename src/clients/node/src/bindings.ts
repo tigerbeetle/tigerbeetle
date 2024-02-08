@@ -24,6 +24,11 @@ export enum AccountFlags {
   * See [credits_must_not_exceed_debits](https://docs.tigerbeetle.com/reference/accounts#flagscredits_must_not_exceed_debits)
   */
   credits_must_not_exceed_debits = (1 << 2),
+
+  /**
+  * See [history](https://docs.tigerbeetle.com/reference/accounts#flagshistory)
+  */
+  history = (1 << 3),
 }
 
 
@@ -66,9 +71,9 @@ export enum TransferFlags {
 
 
 /**
-* See [GetAccountTransfersFlags](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags)
+* See [AccountFilterFlags](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags)
 */
-export enum GetAccountTransfersFlags {
+export enum AccountFilterFlags {
   none = 0,
 
   /**
@@ -647,9 +652,9 @@ export type CreateTransfersError = {
 
 
 /**
-* See [GetAccountTransfers](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#)
+* See [AccountFilter](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#)
 */
-export type GetAccountTransfers = {
+export type AccountFilter = {
 
   /**
   * See [account_id](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id)
@@ -677,11 +682,44 @@ export type GetAccountTransfers = {
   flags: number
 }
 
+
+/**
+* See [AccountBalance](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#)
+*/
+export type AccountBalance = {
+
+  /**
+  * See [debits_pending](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#debits_pending)
+  */
+  debits_pending: bigint
+
+  /**
+  * See [debits_posted](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#debits_posted)
+  */
+  debits_posted: bigint
+
+  /**
+  * See [credits_pending](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#credits_pending)
+  */
+  credits_pending: bigint
+
+  /**
+  * See [credits_posted](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#credits_posted)
+  */
+  credits_posted: bigint
+
+  /**
+  * See [timestamp](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp)
+  */
+  timestamp: bigint
+}
+
 export enum Operation {
   create_accounts = 128,
   create_transfers = 129,
   lookup_accounts = 130,
   lookup_transfers = 131,
   get_account_transfers = 132,
+  get_account_history = 133,
 }
 
