@@ -116,7 +116,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
     child.request_resource_usage_statistics = true;
     child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
+    child.stderr_behavior = .Inherit;
     try child.spawn();
     errdefer {
         _ = child.kill() catch {};
