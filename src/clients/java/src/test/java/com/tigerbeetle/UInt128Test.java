@@ -173,14 +173,14 @@ public class UInt128Test {
     @Test
     public void testID() throws Exception {
         {
-            // Generate IDs, sleeping for ~1ms after a few to test intra-millisecond monotonicity.
-            var idA = UInt128.asBigInteger(UInt128.ID());
-            for (int i = 0; i < 10_000_000; i++) {
+            // Generate IDs, sleeping for ~1ms occasionally to test intra-millisecond monotonicity.
+            var idA = UInt128.asBigInteger(UInt128.createID());
+            for (int i = 0; i < 1_000_000; i++) {
                 if (i % 10_000 == 0) {
                     Thread.sleep(1);
                 }
 
-                var idB = UInt128.asBigInteger(UInt128.ID());
+                var idB = UInt128.asBigInteger(UInt128.createID());
                 assertTrue(idB.compareTo(idA) > 0);
 
                 // Use the generated ID as the new reference point for the next loop.
@@ -201,13 +201,13 @@ public class UInt128Test {
                     latchStart.await();
 
                     // Same as serial test above, but with smaller bounds.
-                    var idA = UInt128.asBigInteger(UInt128.ID());
+                    var idA = UInt128.asBigInteger(UInt128.createID());
                     for (int j = 0; j < 10_000; j++) {
                         if (j % 1000 == 0) {
                             Thread.sleep(1);
                         }
 
-                        var idB = UInt128.asBigInteger(UInt128.ID());
+                        var idB = UInt128.asBigInteger(UInt128.createID());
                         assertTrue(idB.compareTo(idA) > 0);
                         idA = idB;
                     }

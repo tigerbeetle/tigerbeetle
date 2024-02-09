@@ -188,7 +188,7 @@ public enum UInt128 {
      * @throws ArithmeticException if the random monotonic bits in the same millisecond overflows.
      * @return An array of 16 bytes representing an unsigned 128-bit value in little endian.
      */
-    public static byte[] ID() {
+    public static byte[] createID() {
         long randomLo;
         short randomHi;
         long timestamp = System.currentTimeMillis();
@@ -214,7 +214,7 @@ public enum UInt128 {
             if (randomLo == 0) {
                 randomHi += 1;
                 if (randomHi == 0) {
-                    throw new ArithmeticException("random bits overflow on monotonic increment");
+                    throw new ArithmeticException("Random bits overflow on monotonic increment");
                 }
             }
 

@@ -108,7 +108,7 @@ var idLastRandom [10]byte
 var idMutex sync.Mutex
 
 // Generates a Universally Unique and Sortable Identifier encoded as a Uint128. 
-func ID() Uint128 {
+func CreateID() Uint128 {
 	timestamp := time.Now().UnixMilli()
 
 	// Lock the mutex for global id variables.
@@ -130,7 +130,7 @@ func ID() Uint128 {
 	randomHi := binary.LittleEndian.Uint16(idLastRandom[8:])
 
 	// Increment the random bits as a uint80 together, checking for overflow.
-	// Golang defines unsigned arithmetic to wrap around on overflow by default so check for zero.
+	// Go defines unsigned arithmetic to wrap around on overflow by default so check for zero.
 	randomLo += 1
 	if randomLo == 0 {
 		randomHi += 1

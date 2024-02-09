@@ -109,7 +109,7 @@ public static class UInt128Extensions
 public static class ID
 {
     private static long idLastTimestamp = 0L;
-    private static readonly byte[] idLastRandom = new byte[12];
+    private static readonly byte[] idLastRandom = new byte[10];
 
     /// <summary>
     /// Generates a universally unique identifier as a UInt128.
@@ -118,8 +118,7 @@ public static class ID
     /// </summary>
     public static UInt128 Create()
     {
-        // Safe to cast from long to ulong as, in C#, this
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         ulong randomLo;
         ushort randomHi;
 
@@ -141,14 +140,18 @@ public static class ID
 
             // Increment the u80 stored in lastRandom using a u64 increment then u16 increment.
             // Throws an exception if the entire u80 represented with both overflows.
-            // In C#, unsigned arithmetic wraps around on overflow by default so check for zero.
-            randomLo += 1;
-            if (randomLo == 0)
+            // We rely on unsigned arithmetic wrapping on overflow by detecting for zero after inc.
+            // Unsigned types wrap by default but can be overriden by compiler flag so be explicit. 
+            unchecked
             {
-                randomHi += 1;
-                if (randomHi == 0)
+                randomLo += 1;
+                if (randomLo == 0)
                 {
-                    throw new OverflowException("random bits overflow on monotonic increment");
+                    randomHi += 1;
+                    if (randomHi == 0)
+                    {
+                        throw new OverflowException("Random bits overflow on monotonic increment");
+                    }
                 }
             }
 
