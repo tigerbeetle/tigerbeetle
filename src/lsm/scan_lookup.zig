@@ -11,12 +11,14 @@ const GridType = @import("../vsr/grid.zig").GridType;
 const ScanType = @import("scan_builder.zig").ScanType;
 
 /// Implements the lookup logic for loading objects from scans.
-pub fn ScanLookupType(comptime Groove: type, comptime Storage: type) type {
+pub fn ScanLookupType(
+    comptime Groove: type,
+    comptime Scan: type,
+    comptime Storage: type,
+) type {
     return struct {
         const ScanLookup = @This();
         const Grid = GridType(Storage);
-        const Scan = ScanType(Groove, Storage);
-
         const Object = Groove.ObjectTree.Table.Value;
 
         pub const Callback = *const fn (*ScanLookup) void;

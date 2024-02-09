@@ -164,7 +164,7 @@
               <exclude>com/tigerbeetle/PacketAcquireStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
-              <exclude>com/tigerbeetle/GetAccountTransfersFlags.class</exclude>
+              <exclude>com/tigerbeetle/AccountFilterFlags.class</exclude>
 
               <!-- Excluding the benchmark -->
               <exclude>benchmark/Benchmark.class</exclude>
@@ -190,8 +190,9 @@
               <exclude>com/tigerbeetle/PacketStatus.java</exclude>
               <exclude>com/tigerbeetle/TransferBatch.java</exclude>
               <exclude>com/tigerbeetle/TransferFlags.java</exclude>
-              <exclude>com/tigerbeetle/GetAccountTransfersFlags.java</exclude>
-              <exclude>com/tigerbeetle/GetAccountTransfersBatch.java</exclude>
+              <exclude>com/tigerbeetle/AccountFilterFlags.java</exclude>
+              <exclude>com/tigerbeetle/AccountFilterBatch.java</exclude>
+              <exclude>com/tigerbeetle/AccountBalanceBatch.java</exclude>
             </excludes>
           </configuration>
         </plugin>

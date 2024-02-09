@@ -83,6 +83,7 @@ const Environment = struct {
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
         .cache_entries_posted = cache_entries_max,
+        .cache_entries_account_history = cache_entries_max,
     });
 
     const free_set_fragments_max = 2048;
@@ -363,7 +364,11 @@ const Environment = struct {
     }
 
     const Scanner = struct {
-        const AccountsScanLookup = ScanLookupType(GrooveAccounts, Storage);
+        const AccountsScanLookup = ScanLookupType(
+            GrooveAccounts,
+            GrooveAccounts.ScanBuilder.Scan,
+            Storage,
+        );
         scan_lookup: AccountsScanLookup = undefined,
         result: ?[]const tb.Account = null,
 

@@ -43,25 +43,25 @@ const type_mappings = .{
         .private_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
-    .{ tb.GetAccountTransfersFlags, TypeMapping{
-        .name = "GetAccountTransfersFlags",
+    .{ tb.AccountFilterFlags, TypeMapping{
+        .name = "AccountFilterFlags",
         .visibility = .public,
         .private_fields = &.{"padding"},
-        .docs_link = "reference/operations/get_account_transfers#flags",
+        .docs_link = "reference/account_filter#flags",
     } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
         .visibility = .public,
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
-        .docs_link = "reference/accounts/#",
+        .docs_link = "reference/accounts#",
     } },
     .{ tb.Transfer, TypeMapping{
         .name = "Transfer",
         .visibility = .public,
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{"timestamp"},
-        .docs_link = "reference/transfers/#",
+        .docs_link = "reference/transfers#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
@@ -81,11 +81,17 @@ const type_mappings = .{
         .name = "CreateTransfersResult",
         .visibility = .public,
     } },
-    .{ tb.GetAccountTransfers, TypeMapping{
-        .name = "GetAccountTransfers",
+    .{ tb.AccountFilter, TypeMapping{
+        .name = "AccountFilter",
         .visibility = .public,
         .private_fields = &.{"reserved"},
-        .docs_link = "reference/operations/get_account_transfers#",
+        .docs_link = "reference/account_filter#",
+    } },
+    .{ tb.AccountBalance, TypeMapping{
+        .name = "AccountBalance",
+        .visibility = .public,
+        .private_fields = &.{"reserved"},
+        .docs_link = "reference/account_balances#",
     } },
     .{ tb_client.tb_status_t, TypeMapping{
         .name = "InitializationStatus",

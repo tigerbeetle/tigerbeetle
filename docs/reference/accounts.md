@@ -198,6 +198,10 @@ account.credits_posted + transfer.amount > account.debits_posted`.
 
 This cannot be set when `debits_must_not_exceed_credits` is also set.
 
+#### `flags.history`
+
+When set, the account will retain the history of balances at each transfer.
+
 ### `timestamp`
 
 This is the time the account was created, as nanoseconds since

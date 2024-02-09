@@ -20,6 +20,7 @@ typedef enum TB_ACCOUNT_FLAGS {
     TB_ACCOUNT_LINKED = 1 << 0,
     TB_ACCOUNT_DEBITS_MUST_NOT_EXCEED_CREDITS = 1 << 1,
     TB_ACCOUNT_CREDITS_MUST_NOT_EXCEED_DEBITS = 1 << 2,
+    TB_ACCOUNT_HISTORY = 1 << 3,
 } TB_ACCOUNT_FLAGS;
 
 typedef struct tb_account_t {
@@ -163,6 +164,7 @@ typedef enum TB_OPERATION {
     TB_OPERATION_LOOKUP_ACCOUNTS = 130,
     TB_OPERATION_LOOKUP_TRANSFERS = 131,
     TB_OPERATION_GET_ACCOUNT_TRANSFERS = 132,
+    TB_OPERATION_GET_ACCOUNT_HISTORY = 133,
 } TB_OPERATION;
 
 typedef enum TB_PACKET_STATUS {
@@ -178,20 +180,29 @@ typedef enum TB_PACKET_ACQUIRE_STATUS {
     TB_PACKET_ACQUIRE_SHUTDOWN = 2,
 } TB_PACKET_ACQUIRE_STATUS;
 
-typedef struct tb_get_account_transfers_t {
+typedef struct tb_account_filter_t {
     tb_uint128_t account_id;
     uint64_t timestamp_min;
     uint64_t timestamp_max;
     uint32_t limit;
     uint32_t flags;
     uint8_t reserved[24];
-} tb_get_account_transfers_t;
+} tb_account_filter_t;
 
-typedef enum TB_GET_ACCOUNT_TRANSFERS_FLAGS {
-    TB_GET_ACCOUNT_TRANSFERS_DEBITS = 1 << 0,
-    TB_GET_ACCOUNT_TRANSFERS_CREDITS = 1 << 1,
-    TB_GET_ACCOUNT_TRANSFERS_REVERSED = 1 << 2,
-} TB_GET_ACCOUNT_TRANSFERS_FLAGS;
+typedef enum TB_ACCOUNT_FILTER_FLAGS {
+    TB_ACCOUNT_FILTER_DEBITS = 1 << 0,
+    TB_ACCOUNT_FILTER_CREDITS = 1 << 1,
+    TB_ACCOUNT_FILTER_REVERSED = 1 << 2,
+} TB_ACCOUNT_FILTER_FLAGS;
+
+typedef struct tb_account_balance_t {
+    tb_uint128_t debits_pending;
+    tb_uint128_t debits_posted;
+    tb_uint128_t credits_pending;
+    tb_uint128_t credits_posted;
+    uint64_t timestamp;
+    uint8_t reserved[56];
+} tb_account_balance_t;
 
 typedef struct tb_packet_t {
     struct tb_packet_t* next;

@@ -67,6 +67,7 @@ pub const GoDocs = Docs{
     \\* `AccountFlags{Linked: true}.ToUint16()`
     \\* `AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
     \\* `AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
+    \\* `AccountFlags{History: true}.ToUint16()`
     ,
 
     .create_accounts_errors_documentation =

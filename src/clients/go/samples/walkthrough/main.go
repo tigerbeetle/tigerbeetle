@@ -183,12 +183,12 @@ func main() {
 	// endsection:lookup-transfers
 
 	// section:get-account-transfers
-	filter := GetAccountTransfers{
+	filter := AccountFilter{
 		AccountID:    ToUint128(2),
 		TimestampMin: 0,  // No filter by Timestamp.
 		TimestampMax: 0,  // No filter by Timestamp.
 		Limit:        10, // Limit to ten transfers at most.
-		Flags: GetAccountTransfersFlags{
+		Flags: AccountFilterFlags{
 			Debits:   true, // Include transfer from the debit side.
 			Credits:  true, // Include transfer from the credit side.
 			Reversed: true, // Sort by timestamp in reverse-chronological order.
@@ -201,6 +201,26 @@ func main() {
 	}
 	log.Println(transfers)
 	// endsection:get-account-transfers
+
+	// section:get-account-history
+	filter = AccountFilter{
+		AccountID:    ToUint128(2),
+		TimestampMin: 0,  // No filter by Timestamp.
+		TimestampMax: 0,  // No filter by Timestamp.
+		Limit:        10, // Limit to ten balances at most.
+		Flags: AccountFilterFlags{
+			Debits:   true, // Include transfer from the debit side.
+			Credits:  true, // Include transfer from the credit side.
+			Reversed: true, // Sort by timestamp in reverse-chronological order.
+		}.ToUint32(),
+	}
+	account_balances, err := client.GetAccountHistory(filter)
+	if err != nil {
+		log.Printf("Could not fetch the history: %s", err)
+		return
+	}
+	log.Println(account_balances)
+	// endsection:get-account-history
 
 	// section:linked-events
 	batch := []Transfer{}

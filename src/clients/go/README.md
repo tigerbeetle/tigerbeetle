@@ -167,6 +167,7 @@ few examples:
 * `AccountFlags{Linked: true}.ToUint16()`
 * `AccountFlags{DebitsMustNotExceedCredits: true}.ToUint16()`
 * `AccountFlags{CreditsMustNotExceedDebits: true}.ToUint16()`
+* `AccountFlags{History: true}.ToUint16()`
 
 For example, to link two accounts where the first account
 additionally has the `debits_must_not_exceed_credits` constraint:
@@ -431,12 +432,12 @@ The transfers in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
 
 ```go
-filter := GetAccountTransfers{
+filter := AccountFilter{
 	AccountID:    ToUint128(2),
 	TimestampMin: 0,  // No filter by Timestamp.
 	TimestampMax: 0,  // No filter by Timestamp.
 	Limit:        10, // Limit to ten transfers at most.
-	Flags: GetAccountTransfersFlags{
+	Flags: AccountFilterFlags{
 		Debits:   true, // Include transfer from the debit side.
 		Credits:  true, // Include transfer from the credit side.
 		Reversed: true, // Sort by timestamp in reverse-chronological order.
@@ -448,6 +449,41 @@ if err != nil {
 	return
 }
 log.Println(transfers)
+```
+
+## Get Account History
+
+NOTE: This is a preview API that is subject to breaking changes once we have
+a stable querying API.
+
+Fetches the point-in-time balances of a given account, allowing basic filter and
+pagination capabilities.
+
+Only accounts created with the flag
+[`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
+the history of balances.
+
+The balances in the response are sorted by `timestamp` in chronological or
+reverse-chronological order.
+
+```go
+filter = AccountFilter{
+	AccountID:    ToUint128(2),
+	TimestampMin: 0,  // No filter by Timestamp.
+	TimestampMax: 0,  // No filter by Timestamp.
+	Limit:        10, // Limit to ten balances at most.
+	Flags: AccountFilterFlags{
+		Debits:   true, // Include transfer from the debit side.
+		Credits:  true, // Include transfer from the credit side.
+		Reversed: true, // Sort by timestamp in reverse-chronological order.
+	}.ToUint32(),
+}
+account_balances, err := client.GetAccountHistory(filter)
+if err != nil {
+	log.Printf("Could not fetch the history: %s", err)
+	return
+}
+log.Println(account_balances)
 ```
 
 ## Linked Events

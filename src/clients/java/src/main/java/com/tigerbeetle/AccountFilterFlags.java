@@ -5,21 +5,21 @@
 
 package com.tigerbeetle;
 
-public interface GetAccountTransfersFlags {
+public interface AccountFilterFlags {
     int NONE = (int) 0;
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits">debits</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter#flagsdebits">debits</a>
      */
     int DEBITS = (int) (1 << 0);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits">credits</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter#flagscredits">credits</a>
      */
     int CREDITS = (int) (1 << 1);
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed">reversed</a>
+     * @see <a href="https://docs.tigerbeetle.com/reference/account_filter#flagsreversed">reversed</a>
      */
     int REVERSED = (int) (1 << 2);
 

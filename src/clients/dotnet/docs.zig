@@ -66,6 +66,7 @@ pub const DotnetDocs = Docs{
     \\* `AccountFlags.Linked`
     \\* `AccountFlags.DebitsMustNotExceedCredits`
     \\* `AccountFlags.CreditsMustNotExceedDebits`
+    \\* `AccountFlags.History`
     ,
 
     .create_accounts_errors_documentation = "",

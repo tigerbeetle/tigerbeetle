@@ -182,7 +182,7 @@ public final class Main {
             // endsection:lookup-transfers
 
             // section:get-account-transfers
-            AccountTransfers filter = new AccountTransfers();
+            AccountFilter filter = new AccountFilter();
             filter.setAccountId(2);
             filter.setTimestampMin(0); // No filter by Timestamp.
             filter.setTimestampMax(0); // No filter by Timestamp.
@@ -192,6 +192,18 @@ public final class Main {
             filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
             transfers = client.getAccountTransfers(filter);
             // endsection:get-account-transfers
+
+            // section:get-account-history
+            filter = new AccountFilter();
+            filter.setAccountId(2);
+            filter.setTimestampMin(0); // No filter by Timestamp.
+            filter.setTimestampMax(0); // No filter by Timestamp.
+            filter.setLimit(10); // Limit to ten balances at most.
+            filter.setDebits(true); // Include transfer from the debit side.
+            filter.setCredits(true); // Include transfer from the credit side.
+            filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
+            AccountBalanceBatch account_balances = client.getAccountHistory(filter);
+            // endsection:get-account-history
 
             // section:linked-events
             transfers = new TransferBatch(10);

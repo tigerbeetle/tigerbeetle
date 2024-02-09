@@ -143,6 +143,7 @@ pub fn main(
         .client = &client,
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
+        .account_history = cli_args.account_history,
         .account_index = 0,
         .query_count = cli_args.query_count,
         .query_index = 0,
@@ -181,6 +182,7 @@ const Benchmark = struct {
     client: *Client,
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
+    account_history: bool,
     account_index: usize,
     query_count: usize,
     query_index: usize,
@@ -225,7 +227,9 @@ const Benchmark = struct {
                 .reserved = 0,
                 .ledger = 2,
                 .code = 1,
-                .flags = .{},
+                .flags = .{
+                    .history = b.account_history,
+                },
                 .debits_pending = 0,
                 .debits_posted = 0,
                 .credits_pending = 0,
@@ -401,7 +405,7 @@ const Benchmark = struct {
         }
 
         b.account_index = b.rng.random().intRangeLessThan(usize, 0, b.account_count);
-        var filter = tb.GetAccountTransfers{
+        var filter = tb.AccountFilter{
             .account_id = b.account_id_permutation.encode(b.account_index + 1),
             .timestamp_min = 0,
             .timestamp_max = 0,

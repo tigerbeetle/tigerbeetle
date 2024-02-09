@@ -24,6 +24,11 @@ export enum AccountFlags {
   * See [credits_must_not_exceed_debits](https://docs.tigerbeetle.com/reference/accounts#flagscredits_must_not_exceed_debits)
   */
   credits_must_not_exceed_debits = (1 << 2),
+
+  /**
+  * See [history](https://docs.tigerbeetle.com/reference/accounts#flagshistory)
+  */
+  history = (1 << 3),
 }
 
 
@@ -66,23 +71,23 @@ export enum TransferFlags {
 
 
 /**
-* See [GetAccountTransfersFlags](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags)
+* See [AccountFilterFlags](https://docs.tigerbeetle.com/reference/account_filter#flags)
 */
-export enum GetAccountTransfersFlags {
+export enum AccountFilterFlags {
   none = 0,
 
   /**
-  * See [debits](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits)
+  * See [debits](https://docs.tigerbeetle.com/reference/account_filter#flagsdebits)
   */
   debits = (1 << 0),
 
   /**
-  * See [credits](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits)
+  * See [credits](https://docs.tigerbeetle.com/reference/account_filter#flagscredits)
   */
   credits = (1 << 1),
 
   /**
-  * See [reversed](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed)
+  * See [reversed](https://docs.tigerbeetle.com/reference/account_filter#flagsreversed)
   */
   reversed = (1 << 2),
 }
@@ -647,34 +652,66 @@ export type CreateTransfersError = {
 
 
 /**
-* See [GetAccountTransfers](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#)
+* See [AccountFilter](https://docs.tigerbeetle.com/reference/account_filter#)
 */
-export type GetAccountTransfers = {
+export type AccountFilter = {
 
   /**
-  * See [account_id](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id)
+  * See [account_id](https://docs.tigerbeetle.com/reference/account_filter#account_id)
   */
   account_id: bigint
 
   /**
-  * See [timestamp_min](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min)
+  * See [timestamp_min](https://docs.tigerbeetle.com/reference/account_filter#timestamp_min)
   */
   timestamp_min: bigint
 
   /**
-  * See [timestamp_max](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max)
+  * See [timestamp_max](https://docs.tigerbeetle.com/reference/account_filter#timestamp_max)
   */
   timestamp_max: bigint
 
   /**
-  * See [limit](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit)
+  * See [limit](https://docs.tigerbeetle.com/reference/account_filter#limit)
   */
   limit: number
 
   /**
-  * See [flags](https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flags)
+  * See [flags](https://docs.tigerbeetle.com/reference/account_filter#flags)
   */
   flags: number
+}
+
+
+/**
+* See [AccountBalance](https://docs.tigerbeetle.com/reference/account_balances#)
+*/
+export type AccountBalance = {
+
+  /**
+  * See [debits_pending](https://docs.tigerbeetle.com/reference/account_balances#debits_pending)
+  */
+  debits_pending: bigint
+
+  /**
+  * See [debits_posted](https://docs.tigerbeetle.com/reference/account_balances#debits_posted)
+  */
+  debits_posted: bigint
+
+  /**
+  * See [credits_pending](https://docs.tigerbeetle.com/reference/account_balances#credits_pending)
+  */
+  credits_pending: bigint
+
+  /**
+  * See [credits_posted](https://docs.tigerbeetle.com/reference/account_balances#credits_posted)
+  */
+  credits_posted: bigint
+
+  /**
+  * See [timestamp](https://docs.tigerbeetle.com/reference/account_balances#timestamp)
+  */
+  timestamp: bigint
 }
 
 export enum Operation {
@@ -683,5 +720,6 @@ export enum Operation {
   lookup_accounts = 130,
   lookup_transfers = 131,
   get_account_transfers = 132,
+  get_account_history = 133,
 }
 

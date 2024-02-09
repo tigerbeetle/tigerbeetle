@@ -15,8 +15,9 @@ const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
-const GetAccountTransfers = tb.GetAccountTransfers;
-const GetAccountTransfersFlags = tb.GetAccountTransfersFlags;
+const AccountFilter = tb.AccountFilter;
+const AccountFilterFlags = tb.AccountFilterFlags;
+const AccountBalance = tb.AccountBalance;
 
 const Storage = @import("../../../storage.zig").Storage;
 const StateMachine = @import("../../../state_machine.zig").StateMachineType(Storage, constants.state_machine_config);
@@ -367,7 +368,7 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
     for (events, 0..) |*event, i| {
         const object = try translate.array_element(env, array, @intCast(i));
         switch (Event) {
-            Account, Transfer, GetAccountTransfers => {
+            Account, Transfer, AccountFilter, AccountBalance => {
                 inline for (std.meta.fields(Event)) |field| {
                     const value: field.type = switch (@typeInfo(field.type)) {
                         .Struct => |info| @bitCast(try @field(
@@ -419,6 +420,8 @@ fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result)
             const FieldInt = switch (@typeInfo(field.type)) {
                 .Struct => |info| info.backing_integer.?,
                 .Enum => |info| info.tag_type,
+                // Arrays are only used for padding/reserved fields.
+                .Array => continue,
                 else => field.type,
             };
 
@@ -474,9 +477,7 @@ fn BufferType(comptime op: Operation) type {
             // Allocate enough bytes to hold memory for the Events and the Results.
             const max_bytes = @max(
                 @sizeOf(Event) * count,
-                @sizeOf(Result) *
-                    // Ad-hoc hack, event and result sizes are not the same size.
-                    if (op == .get_account_transfers) 8190 else count,
+                @sizeOf(Result) * event_count(op, count),
             );
             if (@sizeOf(vsr.Header) + max_bytes > constants.message_size_max) {
                 return translate.throw(env, "Batch is larger than the maximum message size.");
@@ -496,9 +497,7 @@ fn BufferType(comptime op: Operation) type {
         fn free(buffer: Buffer) void {
             const max_bytes = @max(
                 @sizeOf(Event) * buffer.count,
-                @sizeOf(Result) *
-                    //TODO(batiati): Refine the way we handle events with asymmetric results.
-                    if (op == .get_account_transfers) 8190 else buffer.count,
+                @sizeOf(Result) * event_count(op, buffer.count),
             );
             const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
             allocator.free(bytes);
@@ -510,10 +509,16 @@ fn BufferType(comptime op: Operation) type {
         }
 
         fn results(buffer: Buffer) []Result {
-            const result_bytes = buffer.ptr[0 .. @sizeOf(Result) *
-                // Ad-hoc hack, event and result sizes are not the same size.
-                if (op == .get_account_transfers) 8190 else buffer.count];
+            const result_bytes = buffer.ptr[0 .. @sizeOf(Result) * event_count(op, buffer.count)];
             return @alignCast(std.mem.bytesAsSlice(Result, result_bytes));
+        }
+
+        fn event_count(operation: Operation, count: usize) usize {
+            // TODO(batiati): Refine the way we handle events with asymmetric results.
+            return switch (operation) {
+                .get_account_transfers, .get_account_history => 8190,
+                else => count,
+            };
         }
     };
 }

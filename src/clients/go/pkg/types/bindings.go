@@ -15,6 +15,7 @@ type AccountFlags struct {
 	Linked                     bool
 	DebitsMustNotExceedCredits bool
 	CreditsMustNotExceedDebits bool
+	History                    bool
 }
 
 func (f AccountFlags) ToUint16() uint16 {
@@ -30,6 +31,10 @@ func (f AccountFlags) ToUint16() uint16 {
 
 	if f.CreditsMustNotExceedDebits {
 		ret |= (1 << 2)
+	}
+
+	if f.History {
+		ret |= (1 << 3)
 	}
 
 	return ret
@@ -74,13 +79,13 @@ func (f TransferFlags) ToUint16() uint16 {
 	return ret
 }
 
-type GetAccountTransfersFlags struct {
+type AccountFilterFlags struct {
 	Debits   bool
 	Credits  bool
 	Reversed bool
 }
 
-func (f GetAccountTransfersFlags) ToUint32() uint32 {
+func (f AccountFilterFlags) ToUint32() uint32 {
 	var ret uint32 = 0
 
 	if f.Debits {
@@ -119,6 +124,7 @@ func (o Account) AccountFlags() AccountFlags {
 	f.Linked = ((o.Flags >> 0) & 0x1) == 1
 	f.DebitsMustNotExceedCredits = ((o.Flags >> 1) & 0x1) == 1
 	f.CreditsMustNotExceedDebits = ((o.Flags >> 2) & 0x1) == 1
+	f.History = ((o.Flags >> 3) & 0x1) == 1
 	return f
 }
 
@@ -415,7 +421,7 @@ type TransferEventResult struct {
 	Result CreateTransferResult
 }
 
-type GetAccountTransfers struct {
+type AccountFilter struct {
 	AccountID    Uint128
 	TimestampMin uint64
 	TimestampMax uint64
@@ -424,11 +430,20 @@ type GetAccountTransfers struct {
 	Reserved     [24]uint8
 }
 
-func (o GetAccountTransfers) GetAccountTransfersFlags() GetAccountTransfersFlags {
-	var f GetAccountTransfersFlags
+func (o AccountFilter) AccountFilterFlags() AccountFilterFlags {
+	var f AccountFilterFlags
 	f.Debits = ((o.Flags >> 0) & 0x1) == 1
 	f.Credits = ((o.Flags >> 1) & 0x1) == 1
 	f.Reversed = ((o.Flags >> 2) & 0x1) == 1
 	return f
+}
+
+type AccountBalance struct {
+	DebitsPending  Uint128
+	DebitsPosted   Uint128
+	CreditsPending Uint128
+	CreditsPosted  Uint128
+	Timestamp      uint64
+	Reserved       [56]uint8
 }
 

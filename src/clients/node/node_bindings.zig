@@ -31,10 +31,10 @@ const type_mappings = .{
         .hidden_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
-    .{ tb.GetAccountTransfersFlags, TypeMapping{
-        .name = "GetAccountTransfersFlags",
+    .{ tb.AccountFilterFlags, TypeMapping{
+        .name = "AccountFilterFlags",
         .hidden_fields = &.{"padding"},
-        .docs_link = "reference/operations/get_account_transfers#flags",
+        .docs_link = "reference/account_filter#flags",
     } },
     .{ tb.Account, TypeMapping{
         .name = "Account",
@@ -58,10 +58,15 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransfersError",
     } },
-    .{ tb.GetAccountTransfers, TypeMapping{
-        .name = "GetAccountTransfers",
+    .{ tb.AccountFilter, TypeMapping{
+        .name = "AccountFilter",
         .hidden_fields = &.{"reserved"},
-        .docs_link = "reference/operations/get_account_transfers#",
+        .docs_link = "reference/account_filter#",
+    } },
+    .{ tb.AccountBalance, TypeMapping{
+        .name = "AccountBalance",
+        .hidden_fields = &.{"reserved"},
+        .docs_link = "reference/account_balances#",
     } },
     .{ tb_client.tb_operation_t, TypeMapping{
         .name = "Operation",

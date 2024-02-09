@@ -66,23 +66,29 @@ const type_mappings = .{
         .private_fields = &.{"padding"},
         .docs_link = "reference/transfers#flags",
     } },
-    .{ tb.GetAccountTransfersFlags, TypeMapping{
-        .name = "GetAccountTransfersFlags",
+    .{ tb.AccountFilterFlags, TypeMapping{
+        .name = "AccountFilterFlags",
         .private_fields = &.{"padding"},
         .visibility = .public,
-        .docs_link = "reference/operations/get_account_transfers#flags",
+        .docs_link = "reference/account_filter#flags",
     } },
     .{ tb.Account, TypeMapping{
         .name = "AccountBatch",
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
-        .docs_link = "reference/accounts/#",
+        .docs_link = "reference/accounts#",
+    } },
+    .{ tb.AccountBalance, TypeMapping{
+        .name = "AccountBalanceBatch",
+        .private_fields = &.{"reserved"},
+        .readonly_fields = &.{ "debits_pending", "credits_pending", "debits_posted", "credits_posted", "timestamp" },
+        .docs_link = "reference/account_balances#",
     } },
     .{ tb.Transfer, TypeMapping{
         .name = "TransferBatch",
         .private_fields = &.{"reserved"},
         .readonly_fields = &.{"timestamp"},
-        .docs_link = "reference/transfers/#",
+        .docs_link = "reference/transfers#",
     } },
     .{ tb.CreateAccountResult, TypeMapping{
         .name = "CreateAccountResult",
@@ -100,8 +106,8 @@ const type_mappings = .{
         .name = "CreateTransferResultBatch",
         .readonly_fields = &.{ "index", "result" },
     } },
-    .{ tb.GetAccountTransfers, TypeMapping{
-        .name = "GetAccountTransfersBatch",
+    .{ tb.AccountFilter, TypeMapping{
+        .name = "AccountFilterBatch",
         .visibility = .internal,
         .private_fields = &.{"reserved"},
     } },

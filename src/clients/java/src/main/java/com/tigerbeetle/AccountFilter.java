@@ -1,12 +1,12 @@
 package com.tigerbeetle;
 
-public final class AccountTransfers {
+public final class AccountFilter {
 
     // @formatter:off
     /*
     * Summary:
     *
-    * Wraps the `GetAccountTransfersBatch` auto-generated binding in a single-item batch.
+    * Wraps the `AccountFilterBatch` auto-generated binding in a single-item batch.
     * Since `getAccountTransfers()` expects only one item, we avoid exposing the `Batch` class externally.
     *
     * This is an ad-hoc feature meant to be replaced by a proper querying API shortly,
@@ -15,17 +15,17 @@ public final class AccountTransfers {
     */
     // @formatter:on
 
-    GetAccountTransfersBatch batch;
+    AccountFilterBatch batch;
 
-    public AccountTransfers() {
-        this.batch = new GetAccountTransfersBatch(1);
+    public AccountFilter() {
+        this.batch = new AccountFilterBatch(1);
         this.batch.add();
     }
 
     /**
      * @return an array of 16 bytes representing the 128-bit value.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id">account_id</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#account_id">account_id</a>
      */
     public byte[] getAccountId() {
         return batch.getAccountId();
@@ -38,7 +38,7 @@ public final class AccountTransfers {
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id">account_id</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#account_id">account_id</a>
      */
     public long getAccountId(final UInt128 part) {
         return batch.getAccountId(part);
@@ -48,7 +48,7 @@ public final class AccountTransfers {
      * @param accountId an array of 16 bytes representing the 128-bit value.
      * @throws IllegalArgumentException if {@code id} is not 16 bytes long.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id">account_id</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#account_id">account_id</a>
      */
     public void setAccountId(final byte[] accountId) {
         batch.setAccountId(accountId);
@@ -58,7 +58,7 @@ public final class AccountTransfers {
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id">account_id</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#account_id">account_id</a>
      */
     public void setAccountId(final long leastSignificant, final long mostSignificant) {
         batch.setAccountId(leastSignificant, mostSignificant);
@@ -67,7 +67,7 @@ public final class AccountTransfers {
     /**
      * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#account_id">account_id</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#account_id">account_id</a>
      */
     public void setAccountId(final long leastSignificant) {
         batch.setAccountId(leastSignificant);
@@ -75,7 +75,7 @@ public final class AccountTransfers {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min">timestamp_min</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#timestamp_min">timestamp_min</a>
      */
     public long getTimestampMin() {
         return batch.getTimestampMin();
@@ -84,7 +84,7 @@ public final class AccountTransfers {
     /**
      * @param timestamp
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_min">timestamp_min</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#timestamp_min">timestamp_min</a>
      */
     public void setTimestampMin(final long timestamp) {
         batch.setTimestampMin(timestamp);
@@ -92,7 +92,7 @@ public final class AccountTransfers {
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max">timestamp_max</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#timestamp_max">timestamp_max</a>
      */
     public long getTimestampMax() {
         return batch.getTimestampMax();
@@ -101,15 +101,14 @@ public final class AccountTransfers {
     /**
      * @param timestamp
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#timestamp_max">timestamp_max</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#timestamp_max">timestamp_max</a>
      */
     public void setTimestampMax(final long timestamp) {
         batch.setTimestampMax(timestamp);
     }
 
     /**
-     * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit">limit</a>
+     * @see <a href= "https://docs.tigerbeetle.com/reference/account_filter#limit">limit</a>
      */
     public int getLimit() {
         return batch.getLimit();
@@ -117,62 +116,59 @@ public final class AccountTransfers {
 
     /**
      * @param limit
-     * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#limit">limit</a>
+     * @see <a href= "https://docs.tigerbeetle.com/reference/account_filter#limit">limit</a>
      */
     public void setLimit(final int limit) {
         batch.setLimit(limit);
     }
 
     /**
-     * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits">debits</a>
+     * @see <a href= "https://docs.tigerbeetle.com/reference/account_filter#flagsdebits">debits</a>
      */
     public boolean getDebits() {
-        return getFlags(GetAccountTransfersFlags.DEBITS);
+        return getFlags(AccountFilterFlags.DEBITS);
     }
 
     /**
      * @param value
-     * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsdebits">debits</a>
+     * @see <a href= "https://docs.tigerbeetle.com/reference/account_filter#flagsdebits">debits</a>
      */
     public void setDebits(boolean value) {
-        setFlags(GetAccountTransfersFlags.DEBITS, value);
+        setFlags(AccountFilterFlags.DEBITS, value);
     }
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits">credits</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#flagscredits">credits</a>
      */
     public boolean getCredits() {
-        return getFlags(GetAccountTransfersFlags.CREDITS);
+        return getFlags(AccountFilterFlags.CREDITS);
     }
 
     /**
      * @param value
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagscredits">credits</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#flagscredits">credits</a>
      */
     public void setCredits(boolean value) {
-        setFlags(GetAccountTransfersFlags.CREDITS, value);
+        setFlags(AccountFilterFlags.CREDITS, value);
     }
 
     /**
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed">reversed</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#flagsreversed">reversed</a>
      */
     public boolean getReversed() {
-        return getFlags(GetAccountTransfersFlags.REVERSED);
+        return getFlags(AccountFilterFlags.REVERSED);
     }
 
     /**
      * @param value
      * @see <a href=
-     *      "https://docs.tigerbeetle.com/reference/operations/get_account_transfers#flagsreversed">reversed</a>
+     *      "https://docs.tigerbeetle.com/reference/account_filter#flagsreversed">reversed</a>
      */
     public void setReversed(boolean value) {
-        setFlags(GetAccountTransfersFlags.REVERSED, value);
+        setFlags(AccountFilterFlags.REVERSED, value);
     }
 
     boolean getFlags(final int flag) {
