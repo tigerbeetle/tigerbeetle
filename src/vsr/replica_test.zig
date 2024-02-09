@@ -857,6 +857,63 @@ test "Cluster: view-change: primary with dirty log" {
     // try expectEqual(b2.status(), .normal);
 }
 
+test "Cluster: view-change: nack older view" {
+    // a0 prepares (but does not commit) three ops (`x`, `x + 1`, `x + 2`) at view `v`.
+    // b1 prepares (but does not commit) the same ops at view `v + 1`.
+    // b2 receives only `x + 2` op prepared at b1.
+    // b1 gets permanently partitioned from the cluster, and a0 and b2 form a core.
+    //
+    // a0 and b2 and should be able to truncate all the prepared, but uncommitted ops.
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    try expectEqual(a0.role(), .primary);
+    t.replica(.R_).drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger);
+    try expectEqual(a0.op_head(), checkpoint_1_trigger + 3);
+
+    b1.pass(.R_, .bidirectional, .start_view_change);
+    b1.pass(.R_, .incoming, .do_view_change);
+    b1.pass(.R_, .outgoing, .start_view);
+    a0.drop_all(.R_, .bidirectional);
+    b2.pass(.R_, .incoming, .prepare);
+    b2.filter(.R_, .incoming, struct {
+        fn drop_message(message: *Message) bool {
+            switch (message.into_any()) {
+                .prepare => |prepare| {
+                    return (prepare.header.op < checkpoint_1_trigger + 3);
+                },
+                else => return false,
+            }
+        }
+    }.drop_message);
+
+    t.run();
+    try expectEqual(b1.role(), .primary);
+    try expectEqual(b1.status(), .normal);
+
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger + 3);
+    try expectEqual(t.replica(.R_).commit_max(), checkpoint_1_trigger);
+
+    a0.pass_all(.R_, .bidirectional);
+    b2.pass_all(.R_, .bidirectional);
+    b2.filter(.R_, .incoming, null);
+    b1.drop_all(.R_, .bidirectional);
+
+    try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger + 3);
+    try expectEqual(b2.commit_max(), checkpoint_1_trigger + 3);
+    try expectEqual(a0.commit_max(), checkpoint_1_trigger + 3);
+    try expectEqual(b1.commit_max(), checkpoint_1_trigger);
+}
+
 test "Cluster: sync: partition, lag, sync (transition from idle)" {
     for ([_]u64{
         // Normal case: the cluster has committed atop the checkpoint trigger.

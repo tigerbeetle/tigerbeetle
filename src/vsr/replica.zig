@@ -8912,6 +8912,7 @@ const DVCQuorum = struct {
         const dvcs_all_ = DVCQuorum.dvcs_all(dvc_quorum);
         if (dvcs_all_.count() < options.quorum_view_change) return .awaiting_quorum;
 
+        const log_view_canonical = DVCQuorum.log_view_max(dvc_quorum);
         const dvcs_canonical_ = DVCQuorum.dvcs_canonical(dvc_quorum);
         assert(dvcs_canonical_.count() > 0);
         assert(dvcs_canonical_.count() <= dvcs_all_.count());
@@ -8953,6 +8954,7 @@ const DVCQuorum = struct {
 
                 const header = &headers.slice[header_index];
                 assert(header.op == op);
+                assert(header.view <= log_view_canonical);
 
                 const header_nacks = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.nack_bitset };
                 const header_present = std.bit_set.IntegerBitSet(128){ .mask = dvc.header.present_bitset };
@@ -8967,11 +8969,17 @@ const DVCQuorum = struct {
                 if (header_nacks.isSet(header_index)) {
                     // The op is nacked explicitly.
                     nacks += 1;
-                } else if (vsr.Headers.dvc_header_type(header) == .valid and
-                    header_canonical != null and header_canonical.?.checksum != header.checksum)
-                {
-                    // The op is nacked implicitly, because the replica has a different header.
-                    nacks += 1;
+                } else if (vsr.Headers.dvc_header_type(header) == .valid) {
+                    if (header_canonical != null and header_canonical.?.checksum != header.checksum) {
+                        // The op is nacked implicitly, because the replica has a different header.
+                        nacks += 1;
+                    }
+                    if (header_canonical == null and header.view < log_view_canonical) {
+                        assert(dvc.header.log_view < log_view_canonical);
+                        // The op is nacked implicitly, because the header has already been
+                        // truncated in the latest log_view.
+                        nacks += 1;
+                    }
                 }
             }
 
