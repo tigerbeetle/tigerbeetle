@@ -14,7 +14,8 @@ A _request_ is a [batch](#batching-events) of one or more
 
 To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by
 batching many operation events in each request. For the best performance, each request should batch
-as many events as possible. Typically this means funneling events through fewer client instances.
+as many events as possible. Typically this means funneling events through fewer client instances
+(e.g. a single client instance per process).
 
 The maximum number of events per batch depends on the maximum message size
 (`config.message_size_max`) and the operation type.
@@ -31,14 +32,16 @@ In the default configuration, the batch sizes are:
 | `get_account_transfers` | 8190       |
 | `get_account_history`   | 8190       |
 
-Presently the client application is responsible for batching events, but only as a stopgap
-because this has not yet been implemented within the clients themselves.
+The application layer can batch events by itself, however, when the same client instance is shared
+by multiple threads/tasks, it is able to transparently batch requests of the same operation type
+in a single message.
 
 Read more about how two-phase transfers work with each client.
 
 * [Node](/src/clients/node/README.md#batching)
 * [Go](/src/clients/go/README.md#batching)
 * [Java](/src/clients/java/README.md#batching)
+* [.NET](/src/clients/dotnet/README.md#batching)
 
 ## API Layer Architecture
 
