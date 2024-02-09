@@ -382,9 +382,9 @@ fn readme_root(ctx: *Context) !void {
             \\Fetches the point-in-time balances of a given account, allowing basic filter and
             \\pagination capabilities.
             \\
-            \\Only accounts created with the flag [history]
-            \\(https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain the
-            \\history of balances.
+            \\Only accounts created with the flag
+            \\[`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
+            \\the history of balances.
             \\
             \\The balances in the response are sorted by `timestamp` in chronological or
             \\reverse-chronological order.
