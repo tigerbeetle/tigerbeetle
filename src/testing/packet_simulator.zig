@@ -86,15 +86,28 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             packet: Packet,
         };
 
+        pub const LinkDropPacketFn = *const fn (packet: *const Packet) bool;
+
         const Link = struct {
             queue: PriorityQueue(LinkPacket, void, order_packets),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
+            drop_packet_fn: ?*const fn (packet: *const Packet) bool = null,
             /// Commands in the set are recorded for a later replay.
             record: LinkFilter = .{},
             /// We can arbitrary clog a path until a tick.
             clogged_till: u64 = 0,
+
+            fn should_drop(link: *const @This(), packet: *const Packet) bool {
+                if (!link.filter.contains(packet.command())) {
+                    return true;
+                }
+                if (link.drop_packet_fn) |drop_packet_fn| {
+                    return drop_packet_fn(packet);
+                }
+                return false;
+            }
         };
 
         const RecordedPacket = struct {
@@ -180,6 +193,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn link_filter(self: *Self, path: Path) *LinkFilter {
             return &self.links[self.path_index(path)].filter;
+        }
+
+        pub fn link_drop_packet_fn(self: *Self, path: Path) *?LinkDropPacketFn {
+            return &self.links[self.path_index(path)].drop_packet_fn;
         }
 
         pub fn link_record(self: *Self, path: Path) *LinkFilter {
@@ -359,7 +376,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         _ = queue.remove();
                         defer link_packet.packet.deinit();
 
-                        if (!self.links[self.path_index(path)].filter.contains(link_packet.packet.command())) {
+                        if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
                             log.warn("dropped packet (different partitions): from={} to={}", .{ from, to });
                             continue;
                         }

@@ -1511,6 +1511,25 @@ const TestReplicas = struct {
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
     }
 
+    pub fn filter(
+        t: *const TestReplicas,
+        peer: ProcessSelector,
+        direction: LinkDirection,
+        comptime drop_message_fn: ?fn (message: *Message) bool,
+    ) void {
+        const paths = t.peer_paths(peer, direction);
+        for (paths.const_slice()) |path| {
+            t.cluster.network.link_drop_packet_fn(path).* = if (drop_message_fn) |f|
+                &struct {
+                    fn drop_packet(packet: *const Network.Packet) bool {
+                        return f(packet.message);
+                    }
+                }.drop_packet
+            else
+                null;
+        }
+    }
+
     pub fn record(
         t: *const TestReplicas,
         peer: ProcessSelector,

@@ -43,6 +43,8 @@ pub const Network = struct {
         }
     };
 
+    const PacketSimulator = PacketSimulatorType(Packet);
+
     pub const Path = struct {
         source: Process,
         target: Process,
@@ -59,7 +61,7 @@ pub const Network = struct {
     allocator: std.mem.Allocator,
 
     options: NetworkOptions,
-    packet_simulator: PacketSimulatorType(Packet),
+    packet_simulator: PacketSimulator,
 
     // TODO(Zig) If this stored a ?*MessageBus, then a process's bus could be set to `null` while
     // the replica is crashed, and replaced when it is destroyed. But Zig complains:
@@ -195,6 +197,13 @@ pub const Network = struct {
 
     pub fn link_filter(network: *Network, path: Path) *LinkFilter {
         return network.packet_simulator.link_filter(.{
+            .source = network.process_to_address(path.source),
+            .target = network.process_to_address(path.target),
+        });
+    }
+
+    pub fn link_drop_packet_fn(network: *Network, path: Path) *?PacketSimulator.LinkDropPacketFn {
+        return network.packet_simulator.link_drop_packet_fn(.{
             .source = network.process_to_address(path.source),
             .target = network.process_to_address(path.target),
         });
