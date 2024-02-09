@@ -104,7 +104,8 @@ public static class UInt128Extensions
 }
 
 /// <summary>
-/// Safe generation of Universally Unique and Byte-Sortable Identifiers as UInt128s.
+/// Universally Unique and Binary-Sortable Identifiers as UInt128s based on
+/// <a href="https://github.com/ulid/spec">ULID</a>
 /// </summary>
 public static class ID
 {
@@ -113,8 +114,8 @@ public static class ID
 
     /// <summary>
     /// Generates a universally unique identifier as a UInt128.
-    /// Each call generates a monotonically increasing value to last under sequential consistency.
-    /// This function is thread-safe.
+    /// IDs are guaranteed to be monotonically increasing from the last.
+    /// This function is thread-safe and monotonicity is sequentially consistent.
     /// </summary>
     public static UInt128 Create()
     {

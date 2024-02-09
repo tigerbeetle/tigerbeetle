@@ -92,9 +92,9 @@ func BigIntToUint128(value big.Int) Uint128 {
 		return BytesToUint128(*(*[16]byte)(bytes))
 	}
 	
-	var padded [16]byte
-	copy(padded[:], bytes)
-	return BytesToUint128(padded)
+	var zeroPadded [16]byte
+	copy(zeroPadded[:], bytes)
+	return BytesToUint128(zeroPadded)
 }
 
 // ToUint128 converts a integer to a Uint128.
@@ -107,8 +107,10 @@ var idLastTimestamp int64
 var idLastRandom [10]byte
 var idMutex sync.Mutex
 
-// Generates a Universally Unique and Sortable Identifier encoded as a Uint128. 
-func CreateID() Uint128 {
+// Generates a Universally Unique and Sortable Identifier based on https://github.com/ulid/spec.
+// Uint128 returned are guaranteed to be monotonically increasing when interpreted as little-endian.
+// `ID()` is safe to call from multiple goroutines with monotonicity being sequentially consistent. 
+func ID() Uint128 {
 	timestamp := time.Now().UnixMilli()
 
 	// Lock the mutex for global id variables.

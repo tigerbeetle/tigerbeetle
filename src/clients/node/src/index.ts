@@ -141,12 +141,13 @@ let idLastTimestamp = 0;
 let idLastBuffer = new DataView(new ArrayBuffer(16));
 
 /**
- * Generates a Universally Unique and Binary Sortable Identifier as a u128 bigint.
- * 
+ * Generates a Universally Unique and Sortable Identifier as a u128 bigint.
+ *
  * @remarks
- * IDs returned are monotonically increasing 
+ * Based on {@link https://github.com/ulid/spec}, IDs returned are guaranteed to be monotonically
+ * increasing.
  */
-export function createID(): bigint {
+export function id(): bigint {
   // Ensure timestamp monotonically increases and generate a new random on each new timestamp.
   let timestamp = Date.now()
   if (timestamp <= idLastTimestamp) {

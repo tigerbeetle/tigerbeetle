@@ -72,15 +72,15 @@ func Test_BigIntToUint128(t *testing.T) {
 	}
 }
 
-func Test_CreateID(t *testing.T) {
+func Test_ID(t *testing.T) {
 	verifier := func() {
-		idA := CreateID()
+		idA := ID()
 		for i := 0; i < 1_000_000; i++ {
 			if i % 1_000 == 0 {
 				time.Sleep(1 * time.Millisecond)
 			}
 
-			idB := CreateID()
+			idB := ID()
 			
 			// Verify idB and idA are monotonic using BigInts. 
 			a := idA.BigInt()
