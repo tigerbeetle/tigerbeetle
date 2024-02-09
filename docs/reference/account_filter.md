@@ -12,7 +12,7 @@ and the [account historical balances](operations/get_account_history.md).
 
 ### `account_id`
 
-The unique identifier of the account for which the results will be retrieved.
+The unique [identifier](accounts.md#id) of the account for which the results will be retrieved.
 
 Constraints:
 

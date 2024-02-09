@@ -330,6 +330,7 @@ pub fn StateMachineType(
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
             cache_entries_posted: u32,
+            cache_entries_account_history: u32,
         };
 
         /// Since prefetch contexts are used one at a time, it's safe to access
@@ -356,6 +357,7 @@ pub fn StateMachineType(
             }
 
             pub fn get(self: *PrefetchContext, comptime field: Field) *FieldType(field) {
+                comptime assert(field != .null);
                 assert(self.* == .null);
 
                 self.* = @unionInit(PrefetchContext, @tagName(field), undefined);
@@ -386,6 +388,7 @@ pub fn StateMachineType(
             }
 
             pub fn get(self: *ScanLookup, comptime field: Field) *FieldType(field) {
+                comptime assert(field != .null);
                 assert(self.* == .null);
 
                 self.* = @unionInit(ScanLookup, @tagName(field), undefined);
@@ -691,8 +694,12 @@ pub fn StateMachineType(
             assert(self.scan_result_count == 0);
 
             if (self.get_scan_from_filter(filter)) |scan| {
-                var scan_buffer = std.mem.bytesAsSlice(Transfer, self.scan_buffer);
-                assert(scan_buffer.len >= constants.batch_max.get_account_transfers);
+                var scan_buffer = std.mem.bytesAsSlice(
+                    Transfer,
+                    self.scan_buffer[0 .. @sizeOf(Transfer) *
+                        constants.batch_max.get_account_transfers],
+                );
+                assert(scan_buffer.len == constants.batch_max.get_account_transfers);
 
                 var scan_lookup = self.scan_lookup.get(.transfer);
                 scan_lookup.* = TransfersScanLookup.init(
@@ -700,10 +707,9 @@ pub fn StateMachineType(
                     scan,
                 );
 
-                // Limiting the buffer size according to the query limit.
-                const limit = @min(filter.limit, constants.batch_max.get_account_transfers);
                 scan_lookup.read(
-                    scan_buffer[0..limit],
+                    // Limiting the buffer size according to the query limit.
+                    scan_buffer[0..@min(filter.limit, scan_buffer.len)],
                     &prefetch_get_account_transfers_callback,
                 );
             } else {
@@ -728,6 +734,8 @@ pub fn StateMachineType(
         }
 
         fn prefetch_get_account_history(self: *StateMachine, filter: AccountFilter) void {
+            assert(self.scan_result_count == 0);
+
             self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
             self.forest.grooves.accounts.prefetch(
                 prefetch_get_account_history_lookup_account_callback,
@@ -753,9 +761,10 @@ pub fn StateMachineType(
                     if (account.flags.history) {
                         var scan_buffer = std.mem.bytesAsSlice(
                             AccountHistoryGrooveValue,
-                            self.scan_buffer,
+                            self.scan_buffer[0 .. @sizeOf(AccountHistoryGrooveValue) *
+                                constants.batch_max.get_account_history],
                         );
-                        assert(scan_buffer.len >= constants.batch_max.get_account_history);
+                        assert(scan_buffer.len == constants.batch_max.get_account_history);
 
                         var scan_lookup = self.scan_lookup.get(.account_history);
                         scan_lookup.* = AccountHistoryScanLookup.init(
@@ -763,10 +772,9 @@ pub fn StateMachineType(
                             scan,
                         );
 
-                        // Limiting the buffer size according to the query limit.
-                        const limit = @min(filter.limit, constants.batch_max.get_account_history);
                         scan_lookup.read(
-                            scan_buffer[0..limit],
+                            // Limiting the buffer size according to the query limit.
+                            scan_buffer[0..@min(filter.limit, scan_buffer.len)],
                             &prefetch_get_account_history_scan_callback,
                         );
 
@@ -1123,6 +1131,8 @@ pub fn StateMachineType(
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = input;
+            assert(self.scan_result_count <= constants.batch_max.get_account_transfers);
+            if (self.scan_result_count == 0) return 0;
             defer self.scan_result_count = 0;
 
             const result_size: usize = self.scan_result_count * @sizeOf(Transfer);
@@ -1141,6 +1151,7 @@ pub fn StateMachineType(
             input: []const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
+            assert(self.scan_result_count <= constants.batch_max.get_account_history);
             if (self.scan_result_count == 0) return 0;
             defer self.scan_result_count = 0;
 
@@ -1158,6 +1169,8 @@ pub fn StateMachineType(
             var output_count: usize = 0;
 
             for (scan_results) |*result| {
+                assert(result.dr_account_id != result.cr_account_id);
+
                 output_slice[output_count] = if (filter.account_id == result.dr_account_id) .{
                     .timestamp = result.timestamp,
                     .debits_pending = result.dr_debits_pending,
@@ -1619,7 +1632,7 @@ pub fn StateMachineType(
                 .account_history = .{
                     .prefetch_entries_for_read_max = 0,
                     .prefetch_entries_for_update_max = batch_transfers_max,
-                    .cache_entries_max = options.cache_entries_posted,
+                    .cache_entries_max = options.cache_entries_account_history,
                     .tree_options_object = .{},
                     .tree_options_id = {},
                     .tree_options_index = .{},
@@ -1711,6 +1724,7 @@ const TestContext = struct {
             .cache_entries_accounts = 2048,
             .cache_entries_transfers = 2048,
             .cache_entries_posted = 2048,
+            .cache_entries_account_history = 2048,
         });
         errdefer ctx.state_machine.deinit(allocator);
     }

@@ -19,6 +19,8 @@ UNIX epoch.
 The timestamp refers to the same [`Transfer.timestamp`](./transfers.md#timestamp)
 which changed the [`Account`](./accounts.md).
 
+The amounts refer to the account balance recorded _after_ the transfer execution.
+
 Constraints:
 
 * Type is 64-bit unsigned integer (8 bytes)

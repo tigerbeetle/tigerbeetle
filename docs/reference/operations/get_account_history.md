@@ -2,6 +2,15 @@
 
 Fetch the historical [`AccountBalance`](../account_balances.md)s of a given [`Account`](../accounts.md).
 
+- Each balance returned has a correponding transfer with the same [`timestamp`](../transfers.md#timestamp),
+  see the [`get_account_transfers`](get_account_transfers.md) operation for more details.
+
+- The amounts refer to the account balance recorded _after_ the transfer execution.
+
+- Only accounts created with the flag [`history`](../accounts.md#flagshistory) set retain the
+  history of balances.
+
+
 ## Event
 
 The query filter. See [`AccountFilter`](../account_filter.md) for constraints.

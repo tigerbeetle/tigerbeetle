@@ -32,6 +32,8 @@ const CliArgs = union(enum) {
         cache_transfers: flags.ByteSize = .{ .bytes = constants.cache_transfers_size_default },
         cache_transfers_posted: flags.ByteSize =
             .{ .bytes = constants.cache_transfers_posted_size_default },
+        cache_account_history: flags.ByteSize =
+            .{ .bytes = constants.cache_account_history_size_default },
         cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
         memory_lsm_manifest: flags.ByteSize =
             .{ .bytes = constants.lsm_manifest_memory_size_default },
@@ -169,6 +171,7 @@ pub const Command = union(enum) {
         cache_accounts: u32,
         cache_transfers: u32,
         cache_transfers_posted: u32,
+        cache_account_history: u32,
         storage_size_limit: u64,
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
@@ -269,6 +272,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
             const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
             const PostedValuesCache = groove_config.posted.ObjectsCache.Cache;
+            const AccountHistoryValuesCache = groove_config.account_history.ObjectsCache.Cache;
 
             const addresses = parse_addresses(allocator, start.addresses);
 
@@ -339,6 +343,11 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         StateMachine.PostedGrooveValue,
                         PostedValuesCache,
                         start.cache_transfers_posted,
+                    ),
+                    .cache_account_history = parse_cache_size_to_count(
+                        StateMachine.AccountHistoryGrooveValue,
+                        AccountHistoryValuesCache,
+                        start.cache_account_history,
                     ),
                     .cache_grid_blocks = parse_cache_size_to_count(
                         [constants.block_size]u8,

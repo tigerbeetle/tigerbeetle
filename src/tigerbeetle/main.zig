@@ -190,6 +190,7 @@ const Command = struct {
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,
                 .cache_entries_posted = args.cache_transfers_posted,
+                .cache_entries_account_history = args.cache_account_history,
             },
             .message_bus_options = .{
                 .configuration = args.addresses,
