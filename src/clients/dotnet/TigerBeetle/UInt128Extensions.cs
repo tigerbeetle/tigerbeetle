@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace TigerBeetle;
 
@@ -99,5 +100,71 @@ public static class UInt128Extensions
 
             return ret;
         }
+    }
+}
+
+/// <summary>
+/// Universally Unique and Binary-Sortable Identifiers as UInt128s based on
+/// <a href="https://github.com/ulid/spec">ULID</a>
+/// </summary>
+public static class ID
+{
+    private static long idLastTimestamp = 0L;
+    private static readonly byte[] idLastRandom = new byte[10];
+
+    /// <summary>
+    /// Generates a universally unique identifier as a UInt128.
+    /// IDs are guaranteed to be monotonically increasing from the last.
+    /// This function is thread-safe and monotonicity is sequentially consistent.
+    /// </summary>
+    public static UInt128 Create()
+    {
+        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        ulong randomLo;
+        ushort randomHi;
+
+        lock (idLastRandom)
+        {
+            if (timestamp <= idLastTimestamp)
+            {
+                timestamp = idLastTimestamp;
+            }
+            else
+            {
+                idLastTimestamp = timestamp;
+                RandomNumberGenerator.Fill(idLastRandom);
+            }
+
+            Span<byte> lastRandom = idLastRandom;
+            randomLo = BitConverter.ToUInt64(lastRandom.Slice(0));
+            randomHi = BitConverter.ToUInt16(lastRandom.Slice(8));
+
+            // Increment the u80 stored in lastRandom using a u64 increment then u16 increment.
+            // Throws an exception if the entire u80 represented with both overflows.
+            // We rely on unsigned arithmetic wrapping on overflow by detecting for zero after inc.
+            // Unsigned types wrap by default but can be overriden by compiler flag so be explicit. 
+            unchecked
+            {
+                randomLo += 1;
+                if (randomLo == 0)
+                {
+                    randomHi += 1;
+                    if (randomHi == 0)
+                    {
+                        throw new OverflowException("Random bits overflow on monotonic increment");
+                    }
+                }
+            }
+
+            BitConverter.TryWriteBytes(lastRandom.Slice(0), randomLo);
+            BitConverter.TryWriteBytes(lastRandom.Slice(8), randomHi);
+        }
+
+        Span<byte> bytes = stackalloc byte[16];
+        BitConverter.TryWriteBytes(bytes.Slice(0), randomLo);
+        BitConverter.TryWriteBytes(bytes.Slice(8), randomHi);
+        BitConverter.TryWriteBytes(bytes.Slice(10), (ushort)(timestamp));
+        BitConverter.TryWriteBytes(bytes.Slice(12), (uint)(timestamp >> 16));
+        return ((ReadOnlySpan<byte>)bytes).ToUInt128();
     }
 }
