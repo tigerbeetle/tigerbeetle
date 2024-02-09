@@ -2,7 +2,7 @@
 
 An _operation_ queries or updates the database state.
 
-There are four operations available to clients:
+There are six operations available to clients:
 
 - [`create_accounts`](./create_accounts.md): create `Account`s
 - [`create_transfers`](./create_transfers.md): create `Transfer`s
@@ -10,6 +10,7 @@ There are four operations available to clients:
 - [`lookup_transfers`](./lookup_transfers.md): fetch `Transfer`s by `id`
 - [`get_account_transfers`](./get_account_transfers.md): fetch `Transfer`s
 by `debit_account_id` or `credit_account_id`
+- [`get_account_history`](./get_account_history.md): fetch the historical account balance by the `Account`'s `id`.
 
 ## Events and Results
 
@@ -31,4 +32,5 @@ batched results.
 | `create_transfers`      | [`Transfer`](./create_transfers.md#Event)              | [`CreateTransferResult`](./create_transfers.md#Result)     |
 | `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)             | [`Account`](./lookup_accounts.md#Result) or nothing        |
 | `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)           | [`Transfer`](./lookup_transfers.md#Result) or nothing      |
-| `get_account_transfers` | [`AccountTransfers`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing |
+| `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event) | [`Transfer`](./get_account_transfers.md#Result) or nothing |
+| `get_account_history` | [`AccountFilter`](./get_account_history.md#Event) | [`AccountBalance`](./get_account_history.md#Result) or nothing |
