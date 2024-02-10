@@ -209,7 +209,7 @@ pub const configs = struct {
         .process = .{
             .direct_io = true,
             .direct_io_required = true,
-            .grid_cache_size_default = 32 * 1024 * 1024,
+            .grid_cache_size_default = 128 * 1024 * 1024,
             .cache_accounts_size_default = 256 * 1024,
             .cache_transfers_size_default = 256 * 1024,
             .cache_transfers_posted_size_default = 256 * 1024,
@@ -224,11 +224,12 @@ pub const configs = struct {
         .cluster = .{
             .clients_max = 2,
             .pipeline_prepare_queue_max = 2,
+            .lsm_levels = 5,
             .lsm_scans_max = 2,
             .lsm_snapshots_max = 1,
             .lsm_batch_multiple = 4,
-            .message_size_max = 64 * 1024,
-            .block_size = 64 * 1024,
+            .message_size_max = 256 * 1024,
+            .block_size = 256 * 1024,
         },
     };
 

@@ -100,7 +100,7 @@ using (var client = new Client(clusterID, addresses))
     // endsection:no-batch
 
     // section:batch
-    var BATCH_SIZE = 510;
+    var BATCH_SIZE = 2046;
     for (int i = 0; i < transfers.Length; i += BATCH_SIZE)
     {
         var batchSize = BATCH_SIZE;

@@ -516,7 +516,7 @@ fn BufferType(comptime op: Operation) type {
         fn event_count(operation: Operation, count: usize) usize {
             // TODO(batiati): Refine the way we handle events with asymmetric results.
             return switch (operation) {
-                .get_account_transfers, .get_account_history => 510,
+                .get_account_transfers, .get_account_history => 2046,
                 else => count,
             };
         }

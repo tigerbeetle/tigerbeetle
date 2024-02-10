@@ -132,7 +132,7 @@ func main() {
 	// endsection:no-batch
 
 	// section:batch
-	BATCH_SIZE := 510
+	BATCH_SIZE := 2046
 	for i := 0; i < len(transfers); i += BATCH_SIZE {
 		batch := BATCH_SIZE
 		if i+BATCH_SIZE > len(transfers) {
