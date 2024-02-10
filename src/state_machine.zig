@@ -78,35 +78,35 @@ pub fn StateMachineType(
             pub const tree_ids = struct {
                 pub const accounts = .{
                     .id = 1,
-                    .user_data_128 = 2,
-                    .user_data_64 = 3,
-                    .user_data_32 = 4,
-                    .ledger = 5,
-                    .code = 6,
-                    .timestamp = 7,
+                    //.user_data_128 = 2,
+                    //.user_data_64 = 3,
+                    //.user_data_32 = 4,
+                    //.ledger = 5,
+                    //.code = 6,
+                    .timestamp = 2,
                 };
 
                 pub const transfers = .{
-                    .id = 8,
-                    .debit_account_id = 9,
-                    .credit_account_id = 10,
-                    .amount = 11,
-                    .pending_id = 12,
-                    .user_data_128 = 13,
-                    .user_data_64 = 14,
-                    .user_data_32 = 15,
-                    .timeout = 16,
-                    .ledger = 17,
-                    .code = 18,
-                    .timestamp = 19,
+                    .id = 3,
+                    .debit_account_id = 4,
+                    .credit_account_id = 5,
+                    //.amount = 11,
+                    //.pending_id = 12,
+                    //.user_data_128 = 13,
+                    //.user_data_64 = 14,
+                    //.user_data_32 = 15,
+                    //.timeout = 16,
+                    //.ledger = 17,
+                    //.code = 18,
+                    .timestamp = 6,
                 };
 
                 pub const posted = .{
-                    .timestamp = 20,
+                    .timestamp = 7,
                 };
 
                 pub const account_history = .{
-                    .timestamp = 21,
+                    .timestamp = 8,
                 };
             };
         };
@@ -184,6 +184,11 @@ pub fn StateMachineType(
                     )),
                 },
                 .ignored = &[_][]const u8{
+                    "user_data_32",
+                    "user_data_64",
+                    "user_data_128",
+                    "ledger",
+                    "code",
                     "debits_posted",
                     "debits_pending",
                     "credits_posted",
@@ -214,7 +219,17 @@ pub fn StateMachineType(
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
-                .ignored = &[_][]const u8{"flags"},
+                .ignored = &[_][]const u8{
+                    "amount",
+                    "pending_id",
+                    "user_data_32",
+                    "user_data_64",
+                    "user_data_128",
+                    "timeout",
+                    "ledger",
+                    "code",
+                    "flags",
+                },
                 .derived = .{},
             },
         );
@@ -1590,11 +1605,11 @@ pub fn StateMachineType(
                     .tree_options_object = .{},
                     .tree_options_id = .{},
                     .tree_options_index = .{
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
-                        .ledger = .{},
-                        .code = .{},
+                        //.user_data_128 = .{},
+                        //.user_data_64 = .{},
+                        //.user_data_32 = .{},
+                        //.ledger = .{},
+                        //.code = .{},
                     },
                 },
                 .transfers = .{
@@ -1609,14 +1624,14 @@ pub fn StateMachineType(
                     .tree_options_index = .{
                         .debit_account_id = .{},
                         .credit_account_id = .{},
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
-                        .pending_id = .{},
-                        .timeout = .{},
-                        .ledger = .{},
-                        .code = .{},
-                        .amount = .{},
+                        //.user_data_128 = .{},
+                        //.user_data_64 = .{},
+                        //.user_data_32 = .{},
+                        //.pending_id = .{},
+                        //.timeout = .{},
+                        //.ledger = .{},
+                        //.code = .{},
+                        //.amount = .{},
                     },
                 },
                 .posted = .{

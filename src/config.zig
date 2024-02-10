@@ -209,17 +209,26 @@ pub const configs = struct {
         .process = .{
             .direct_io = true,
             .direct_io_required = true,
-            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
-            // TODO: Currently we need a non-zero cache size, because of how our CacheMap works.
-            // We should check if optimizing it to explicitly allow a zero cache size will increase
-            // performance, since the Transfer object cache isn't useful.
-            .cache_transfers_size_default = @sizeOf(vsr.tigerbeetle.Transfer) * 2048,
-            .cache_transfers_posted_size_default = @sizeOf(u256) * 256 * 1024,
-            .cache_account_history_size_default = 2 * 256 * 1024,
+            .grid_cache_size_default = 32 * 1024 * 1024,
+            .cache_accounts_size_default = 256 * 1024,
+            .cache_transfers_size_default = 256 * 1024,
+            .cache_transfers_posted_size_default = 256 * 1024,
+            .cache_account_history_size_default = 512 * 1024,
+            .grid_repair_request_max = 4,
+            .grid_repair_reads_max = 4,
+            .grid_missing_blocks_max = 3,
+            .grid_missing_tables_max = 2,
+            .storage_size_limit_max = 32 * 1024 * 1024 * 1024,
             .verify = false,
         },
         .cluster = .{
-            .clients_max = 32,
+            .clients_max = 2,
+            .pipeline_prepare_queue_max = 2,
+            .lsm_scans_max = 2,
+            .lsm_snapshots_max = 1,
+            .lsm_batch_multiple = 4,
+            .message_size_max = 64 * 1024,
+            .block_size = 64 * 1024,
         },
     };
 

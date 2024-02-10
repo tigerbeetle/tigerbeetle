@@ -347,7 +347,7 @@ func (c *c_client) GetAccountTransfers(filter types.AccountFilter) ([]types.Tran
 	//TODO(batiati): we need to expose the max message size to the client.
 	//since queries have asymmetric events and results, we can't allocate
 	//the results array based on the number of events.
-	results := make([]types.Transfer, 8190)
+	results := make([]types.Transfer, 510)
 
 	wrote, err := c.doRequest(
 		C.TB_OPERATION_GET_ACCOUNT_TRANSFERS,

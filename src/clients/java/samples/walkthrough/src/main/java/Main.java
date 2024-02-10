@@ -123,7 +123,7 @@ public final class Main {
             // endsection:no-batch
 
             // section:batch
-            var BATCH_SIZE = 8190;
+            var BATCH_SIZE = 510;
             for (int i = 0; i < transferIds.length; i += BATCH_SIZE) {
                 TransferBatch batch = new TransferBatch(BATCH_SIZE);
 
