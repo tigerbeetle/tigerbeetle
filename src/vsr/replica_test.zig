@@ -138,6 +138,31 @@ test "Cluster: recovery: WAL prepare corruption (R=1, corrupt between checkpoint
     }
 }
 
+test "Cluster: recovery: WAL prepare corruption (corrupt root op)" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, 1);
+    const a0 = t.replica(.A0);
+    const b1 = t.replica(.B1);
+    const b2 = t.replica(.B2);
+
+    try c.request(8, 8);
+
+    for ([_]TestReplicas{ b1, b2 }) |backup| {
+        backup.stop();
+        backup.corrupt(.{ .wal_prepare = 0 });
+        try backup.open();
+        t.run(); // Give backup time to run repairs.
+    }
+    a0.stop();
+
+    try c.request(20, 8); // Wrong behavior.
+
+    // Cluster should recover after root op corruption:
+    // try c.request(20, 20);
+}
+
 test "Cluster: recovery: WAL header corruption (R=1)" {
     // R=1 locally repairs WAL-header corruption.
     const t = try TestContext.init(.{ .replica_count = 1 });
