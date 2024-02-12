@@ -57,7 +57,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
             const image = "mcr.microsoft.com/dotnet/sdk:" ++ image_tag;
 
             for (0..5) |attempt| {
-                if (attempt > 0) std.time.sleep(60 * std.time.ns_per_min);
+                if (attempt > 0) std.time.sleep(1 * std.time.ns_per_min);
                 if (shell.exec("docker image pull {image}", .{ .image = image })) {
                     break;
                 } else |_| {}
