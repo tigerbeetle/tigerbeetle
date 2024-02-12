@@ -42,12 +42,12 @@ func (value Uint128) String() string {
 	return s[lastNonZero:]
 }
 
-func (value Uint128) BigInt() big.Int {
+func (value Uint128) BigInt() *big.Int {
 	// big.Int uses bytes in big-endian but Uint128 stores bytes in little endian, so reverse it.
 	bytes := value.Bytes()
 	swapEndian(bytes[:])
 
-	ret := big.Int{}
+	ret := &big.Int{}
 	ret.SetBytes(bytes[:])
 	return ret
 }
@@ -82,7 +82,7 @@ func HexStringToUint128(value string) (Uint128, error) {
 }
 
 // BigIntToUint128 converts a [math/big.Int] to a Uint128.
-func BigIntToUint128(value big.Int) Uint128 {
+func BigIntToUint128(value *big.Int) Uint128 {
 	// big.Int bytes are big-endian so convert them to little-endian for Uint128 bytes.
 	bytes := value.Bytes()
 	swapEndian(bytes[:])
