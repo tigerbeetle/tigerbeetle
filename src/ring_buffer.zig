@@ -228,12 +228,10 @@ pub fn RingBuffer(
             count: usize = 0,
 
             pub fn next(it: *Iterator) ?T {
-                if (it.ring.buffer.len == 0) return null;
-                // TODO Use next_ptr() internally to avoid duplicating this code.
-                assert(it.count <= it.ring.count);
-                if (it.count == it.ring.count) return null;
-                defer it.count += 1;
-                return it.ring.buffer[(it.ring.index + it.count) % it.ring.buffer.len];
+                if (it.next_ptr()) |item| {
+                    return item.*;
+                }
+                return null;
             }
 
             pub fn next_ptr(it: *Iterator) ?*const T {
@@ -264,7 +262,6 @@ pub fn RingBuffer(
             }
         };
 
-        // TODO Add to tests.
         pub fn iterator_mutable(self: *Self) IteratorMutable {
             return .{ .ring = self };
         }
@@ -276,18 +273,45 @@ const testing = std.testing;
 fn test_iterator(comptime T: type, ring: *T, values: []const u32) !void {
     const ring_index = ring.index;
 
-    var loops: usize = 0;
-    while (loops < 2) : (loops += 1) {
-        var iterator = ring.iterator();
-        var index: usize = 0;
-        while (iterator.next()) |item| {
-            try testing.expectEqual(values[index], item);
-            index += 1;
+    inline for (.{ .immutable, .mutable }) |mutability| {
+        for (0..2) |_| {
+            var iterator = switch (mutability) {
+                .immutable => ring.iterator(),
+                .mutable => ring.iterator_mutable(),
+                else => unreachable,
+            };
+            var index: u32 = 0;
+            switch (mutability) {
+                .immutable => while (iterator.next()) |item| {
+                    try testing.expectEqual(values[index], item);
+                    index += 1;
+                },
+                .mutable => {
+                    const permutation = @divFloor(std.math.maxInt(u32), 2);
+                    while (iterator.next_ptr()) |item| {
+                        try testing.expectEqual(values[index], item.*);
+                        item.* += permutation + index;
+                        index += 1;
+                    }
+                    iterator = ring.iterator_mutable();
+                    var check_index: u32 = 0;
+                    while (iterator.next_ptr()) |item| {
+                        try testing.expectEqual(
+                            values[check_index] + permutation + check_index,
+                            item.*,
+                        );
+                        item.* -= permutation + check_index;
+                        check_index += 1;
+                    }
+                    try testing.expectEqual(index, check_index);
+                },
+                else => unreachable,
+            }
+            try testing.expectEqual(values.len, index);
         }
-        try testing.expectEqual(values.len, index);
-    }
 
-    try testing.expectEqual(ring_index, ring.index);
+        try testing.expectEqual(ring_index, ring.index);
+    }
 }
 
 fn test_low_level_interface(comptime Ring: type, ring: *Ring) !void {
