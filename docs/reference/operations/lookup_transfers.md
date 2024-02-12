@@ -15,10 +15,10 @@ An [`id`](../transfers.md#id) belonging to a [`Transfer`](../transfers.md).
 
 For language-specific docs see:
 
-* [Looking up transfers using the .NET library](/src/clients/dotnet/README.md#transfer-lookup)
-* [Looking up transfers using the Java library](/src/clients/java/README.md#transfer-lookup)
-* [Looking up transfers using the Go library](/src/clients/go/README.md#transfer-lookup)
-* [Looking up transfers using the Node.js library](/src/clients/node/README.md#transfer-lookup)
+* [.NET library](/src/clients/dotnet/README.md#transfer-lookup)
+* [Java library](/src/clients/java/README.md#transfer-lookup)
+* [Go library](/src/clients/go/README.md#transfer-lookup)
+* [Node.js library](/src/clients/node/README.md#transfer-lookup)
 
 ## Internals
 

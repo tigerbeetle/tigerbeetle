@@ -28,7 +28,7 @@ The query filter. See [`AccountFilter`](../account_filter.md) for constraints.
 
 For language-specific docs see:
 
-* [Looking up transfers using the .NET library](/src/clients/dotnet/README.md#get-account-history)
-* [Looking up transfers using the Java library](/src/clients/java/README.md#get-account-history)
-* [Looking up transfers using the Go library](/src/clients/go/README.md#get-account-history)
-* [Looking up transfers using the Node.js library](/src/clients/node/README.md#get-account-history)
+* [.NET library](/src/clients/dotnet/README.md#get-account-history)
+* [Java library](/src/clients/java/README.md#get-account-history)
+* [Go library](/src/clients/go/README.md#get-account-history)
+* [Node.js library](/src/clients/node/README.md#get-account-history)

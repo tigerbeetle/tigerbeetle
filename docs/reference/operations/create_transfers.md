@@ -357,10 +357,10 @@ would exceed `credit_account.debits_posted`.
 
 For language-specific docs see:
 
-* [Creating transfers using the .NET library](/src/clients/dotnet/README.md#create-transfers)
-* [Creating transfers using the Java library](/src/clients/java/README.md#create-transfers)
-* [Creating transfers using the Go library](/src/clients/go/README.md#create-transfers)
-* [Creating transfers using the Node.js library](/src/clients/node/README.md#create-transfers)
+* [.NET library](/src/clients/dotnet/README.md#create-transfers)
+* [Java library](/src/clients/java/README.md#create-transfers)
+* [Go library](/src/clients/go/README.md#create-transfers)
+* [Node.js library](/src/clients/node/README.md#create-transfers)
 
 ## Internals
 
