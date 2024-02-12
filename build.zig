@@ -121,6 +121,27 @@ pub fn build(b: *std.Build) !void {
         },
     });
 
+    {
+        // Run a tigerbeetle build without running codegen and waiting for llvm
+        // see <https://github.com/ziglang/zig/commit/5c0181841081170a118d8e50af2a09f5006f59e1>
+        // how it's supposed to work.
+        // In short, codegen only runs if zig build sees a dependency on the binary output of
+        // the step. So we duplicate the build definition so that it doesn't get polluted by
+        // b.installArtifact.
+        // TODO(zig): https://github.com/ziglang/zig/issues/18877
+        const tigerbeetle = b.addExecutable(.{
+            .name = "tigerbeetle",
+            .root_source_file = .{ .path = "src/tigerbeetle/main.zig" },
+            .target = target,
+            .optimize = mode,
+        });
+        tigerbeetle.addModule("vsr", vsr_module);
+        tigerbeetle.addModule("vsr_options", vsr_options_module);
+
+        const check = b.step("check", "Check if Tigerbeetle compiles");
+        check.dependOn(&tigerbeetle.step);
+    }
+
     const tigerbeetle = b.addExecutable(.{
         .name = "tigerbeetle",
         .root_source_file = .{ .path = "src/tigerbeetle/main.zig" },
