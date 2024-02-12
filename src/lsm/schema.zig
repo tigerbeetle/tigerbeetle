@@ -71,7 +71,7 @@ pub const BlockType = enum(u8) {
     }
 };
 
-// TODO(extern u256): Once "extern struct" supports u256, change all checksums to (padded) u256.
+// TODO(zig): Once "extern struct" supports u256, change all checksums to (padded) u256.
 pub const Checksum = extern struct {
     value: u128,
     padding: u128 = 0,
