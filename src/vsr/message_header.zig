@@ -20,13 +20,13 @@ pub const Header = extern struct {
     /// This checksum is enough to uniquely identify a network message or journal entry.
     checksum: u128,
 
-    // TODO(extern u256): When Zig supports u256 in extern-structs, merge this into `checksum`.
+    // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum`.
     checksum_padding: u128,
 
     /// A checksum covering only the associated body after this header.
     checksum_body: u128,
 
-    // TODO(extern u256): When Zig supports u256 in extern-structs, merge this into `checksum_body`.
+    // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum_body`.
     checksum_body_padding: u128,
 
     /// Reserved for future use by AEAD.
