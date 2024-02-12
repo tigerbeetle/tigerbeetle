@@ -1,5 +1,43 @@
 # TigerBeetle Changelog
 
+## 2024-02-12
+
+### Safety And Performance
+
+- [#1519](https://github.com/tigerbeetle/tigerbeetle/pull/1519)
+
+  Reduce checkpoint latency by checkpointing the grid concurrently with other trailers.
+
+- [#1515](https://github.com/tigerbeetle/tigerbeetle/pull/1515)
+
+  Fix a logical race condition (which was caught by an assert) when reading and writing client
+  replies concurrently.
+
+
+- [#1522](https://github.com/tigerbeetle/tigerbeetle/pull/1522)
+
+  Double check that both checksum and request number match between a request and the corresponding
+  reply.
+
+- [#1520](https://github.com/tigerbeetle/tigerbeetle/pull/1520)
+
+  Optimize fields with zero value by not adding them to an index.
+
+### Features
+
+- [#1526](https://github.com/tigerbeetle/tigerbeetle/pull/1526),
+  [#1531](https://github.com/tigerbeetle/tigerbeetle/pull/1531).
+
+  Introduce `get_account_history` operation for querying the historical balances of a given account.
+
+- [#1523](https://github.com/tigerbeetle/tigerbeetle/pull/1523)
+
+  Add helper function for generating approximately monotonic IDs to various language clients.
+
+### TigerTracks 🎧
+
+- [Musique à Grande Vitesse](https://open.spotify.com/album/0pmrBIfqDn65p4FX9ubqXn?si=aLliiV5dSOeeId57jtaHhw)
+
 ## 2024-02-05
 
 ### Safety And Performance
