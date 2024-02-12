@@ -76,7 +76,7 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KB|MB|GB>] <path>
         \\
-        \\  tigerbeetle version [--version]
+        \\  tigerbeetle version [--verbose]
         \\
         \\  tigerbeetle repl --cluster=<integer> --addresses=<addresses>
         \\
