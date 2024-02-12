@@ -58,11 +58,11 @@ Releases are triggered manually, on Monday. Default release rotation is on the d
 The middle name is the default release manager for the _current_ week. After the release, please
 ping the next person to pass the baton.
 
-Before triggering a release, update CHANGELOG.md with the changes since the last release. You can
-use the following command to see all relevant merges:
+Before triggering a release, update CHANGELOG.md with the changes since the last release. Run the
+following command to create a release branch and generate changelog skeleton:
 
 ```console
-$ git fetch origin && git log --merges origin/release..origin/main
+$ ./zig/zig build scripts -- changelog
 ```
 
 After the changelog PR is merged, trigger a release  by pushing a commit from `origin/main` to
