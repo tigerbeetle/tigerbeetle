@@ -109,7 +109,8 @@ fn test_quorums_working(
     const misdirect = random.boolean(); // true:cluster false:replica
     var quorums: Quorums = undefined;
     var headers: [4]SuperBlockHeader = undefined;
-    var checksums: [6]?u128 = undefined;
+    var checksums: [6]u128 = undefined;
+    for (&checksums) |*c| c.* = random.int(u128);
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
@@ -126,7 +127,7 @@ fn test_quorums_working(
             .copy = @as(u8, @intCast(i)),
             .version = SuperBlockVersion,
             .sequence = copies[i].sequence,
-            .parent = checksums[copies[i].sequence - 1] orelse random.int(u128),
+            .parent = checksums[copies[i].sequence - 1],
             .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
                 .replica_id = members[1],
                 .members = members,
