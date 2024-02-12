@@ -138,6 +138,14 @@ function plotSeries(seriesList, rootNode) {
           formatter: formatBytes,
         },
       };
+      if (series.label === "executable size") {
+        // Measure executable size in floppies!
+        options.dataLabels = {
+          formatter: function (val) {
+            return (val / 1474560).toFixed(2) + "💾";
+          }
+        }
+      }
     }
 
     if (series.unit === "ms") {
