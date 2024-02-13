@@ -102,31 +102,43 @@ function plotSeries(seriesList, rootNode) {
         text: series.label,
       },
       chart: {
-        type: "bar",
+        type: "line",
         height: "400px",
         events: {
           dataPointSelection: (event, chartContext, { dataPointIndex }) => {
             window.open(
-              "https://github.com/tigerbeetle/tigerbeetle/commits/" +
+              "https://github.com/tigerbeetle/tigerbeetle/commit/" +
                 series.revision[dataPointIndex],
             );
           },
         },
+      },
+      markers: {
+        size: 4,
       },
       series: [{
         name: series.label,
         data: series.value,
       }],
       xaxis: {
-        categories: series.revision.map((sha) => sha.substring(0, 6)),
+        categories: series.timestamp.map((timestamp) =>
+          new Date(timestamp * 1000).toLocaleDateString()
+        ),
+        tooltip: {
+          enabled: false,
+        },
       },
       tooltip: {
         enabled: true,
+        shared: false,
+        intersect: true,
         x: {
           formatter: function (val, { dataPointIndex }) {
             const timestamp = new Date(series.timestamp[dataPointIndex] * 1000);
-            const formattedDate = timestamp.toISOString();
-            return `<div>${val}</div><div>${formattedDate}</div>`;
+            const formattedDate = timestamp.toLocaleString();
+            return `<div>${
+              series.revision[dataPointIndex]
+            }</div><div>${formattedDate}</div>`;
           },
         },
       },
