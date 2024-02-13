@@ -37,8 +37,6 @@ pub fn main() !void {
     };
 
     const gpa = gpa_allocator.allocator();
-    var arena_allocator = std.heap.ArenaAllocator.init(gpa);
-    defer arena_allocator.deinit();
 
     const shell = try Shell.create(gpa);
     defer shell.destroy();
