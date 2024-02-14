@@ -9013,10 +9013,12 @@ const DVCQuorum = struct {
                     nacks += 1;
                 } else if (vsr.Headers.dvc_header_type(header) == .valid) {
                     if (header_canonical != null and header_canonical.?.checksum != header.checksum) {
+                        assert(dvc.header.log_view < log_view_canonical);
                         // The op is nacked implicitly, because the replica has a different header.
                         nacks += 1;
                     }
-                    if (header_canonical == null and header.view < log_view_canonical) {
+                    if (header_canonical == null) {
+                        assert(header.view < log_view_canonical);
                         assert(dvc.header.log_view < log_view_canonical);
                         // The op is nacked implicitly, because the header has already been
                         // truncated in the latest log_view.
