@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
 	"testing"
 	"unsafe"
 
@@ -234,7 +235,6 @@ func doTestClient(s *testing.T, client Client) {
 	s.Run("can create concurrent transfers", func(t *testing.T) {
 		const TRANSFERS_MAX = 1_000_000
 		concurrencyMax := make(chan struct{}, TIGERBEETLE_CONCURRENCY_MAX)
-		finished := make(chan struct{}, TRANSFERS_MAX)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -244,8 +244,13 @@ func doTestClient(s *testing.T, client Client) {
 		accountACredits := accounts[0].CreditsPosted.BigInt()
 		accountBDebits := accounts[1].DebitsPosted.BigInt()
 
+		var waitGroup sync.WaitGroup
 		for i := 0; i < TRANSFERS_MAX; i++ {
+			waitGroup.Add(1)
+
 			go func(i int) {
+				defer waitGroup.Done()
+
 				concurrencyMax <- struct{}{}
 				results, err := client.CreateTransfers([]types.Transfer{
 					{
@@ -263,13 +268,9 @@ func doTestClient(s *testing.T, client Client) {
 				}
 
 				assert.Empty(t, results)
-				finished <- struct{}{}
 			}(i)
 		}
-
-		for i := 0; i < TRANSFERS_MAX; i++ {
-			<-finished
-		}
+		waitGroup.Wait()
 
 		accounts, err = client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
