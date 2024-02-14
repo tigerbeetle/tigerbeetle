@@ -232,11 +232,8 @@ pub fn build(b: *std.Build) !void {
     };
 
     {
-        const test_filter = b.option(
-            []const u8,
-            "test-filter",
-            "Skip tests that do not match filter",
-        );
+        const test_filter: ?[]const u8 =
+            if (b.args != null and b.args.?.len == 1) b.args.?[0] else null;
 
         const unit_tests = b.addTest(.{
             .root_source_file = .{ .path = "src/unit_tests.zig" },

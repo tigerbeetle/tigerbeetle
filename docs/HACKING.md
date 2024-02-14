@@ -58,7 +58,7 @@ zig/zig build test
 To run a single test by name:
 
 ```console
-zig/zig build test:unit -Dtest-filter="name of test"
+zig/zig build test:unit -- "name of test"
 ```
 
 To run tests with code coverage (assuming `kcov` is installed on your system):
