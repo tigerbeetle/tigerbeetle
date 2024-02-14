@@ -7549,62 +7549,11 @@ pub fn ReplicaType(
                 Status.view_change,
             });
 
-            const status_before = self.status;
-            self.status = .view_change;
-
-            if (status_before == .normal and self.view_headers.array.get(0).op > self.op) {
-                // Transition from normal status, but the SV headers were part of the next wrap,
-                // so we didn't install them to our journal, and we didn't catch up.
-                // We will reuse the SV headers as our DVC headers to ensure that participating in
-                // another view-change won't allow the op to backtrack.
-                assert(self.log_view == self.view);
-                assert(self.view_headers.command == .start_view);
-
-                log.debug("{}: transition_to_view_change_status: " ++
-                    "(op_head={} view_headers_head={})", .{
-                    self.replica,
-                    self.op,
-                    self.view_headers.array.get(0).op,
-                });
-
-                self.view_headers.start_view_into_do_view_change();
-            } else if (status_before == .normal or
-                (status_before == .recovering and self.log_view == self.view) or
-                (status_before == .view_change and self.log_view == self.view))
+            if (self.status == .normal or
+                (self.status == .recovering and self.log_view == self.view) or
+                (self.status == .view_change and self.log_view == self.view))
             {
-                // Either:
-                // - Transition from normal status.
-                // - Recovering from normal status.
-                // - Retired primary that didn't finish repair.
-                assert(self.view == self.log_view);
-                assert(self.view < view_new);
-
-                self.view_headers.command = .do_view_change;
-                self.view_headers.array.clear();
-                self.view_headers.append(self.journal.header_with_op(self.op).?);
-
-                // The DVC headers include:
-                // - all available cluster-uncommitted ops, and
-                // - the highest cluster-committed op (if available).
-                // We cannot safely go beyond that in all cases:
-                // - During a prior view-change we might have only accepted a single header from the
-                //   DVC: "header.op = op_prepare_max", and then not completed any
-                //   repair.
-                // - Similarly, we might have receive a catch-up SV message and only installed a
-                //   single (checkpoint trigger) hook header.
-                var op = self.op;
-                while (op > self.commit_max) {
-                    op -= 1;
-
-                    if (self.journal.header_with_op(op)) |header| {
-                        self.view_headers.append(header);
-                    } else {
-                        self.view_headers.append_blank(op);
-                    }
-                }
-
-                assert(op <= self.commit_max);
-                assert(op == self.commit_max or self.commit_max > self.op);
+                self.view_change_update_view_headers();
             }
 
             self.view_headers.verify();
@@ -7612,6 +7561,8 @@ pub fn ReplicaType(
             assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
                 self.commit_max);
 
+            const status_before = self.status;
+            self.status = .view_change;
             if (self.view == view_new) {
                 assert(status_before == .recovering);
             } else {
@@ -7657,6 +7608,94 @@ pub fn ReplicaType(
             assert(self.do_view_change_quorum == false);
 
             self.send_do_view_change();
+        }
+
+        fn view_change_update_view_headers(self: *Self) void {
+            // Either:
+            // - Transition from normal status.
+            // - Recovering from normal status.
+            // - Retired primary that didn't finish repair.
+            assert(self.status == .normal or
+                (self.status == .recovering and self.log_view == self.view) or
+                (self.status == .view_change and self.log_view == self.view));
+
+            const primary_repairing =
+                self.status == .view_change and self.log_view == self.view;
+            if (primary_repairing) {
+                assert(self.primary_index(self.view) == self.replica);
+                assert(self.do_view_change_quorum);
+            }
+
+            assert(self.view == self.log_view);
+
+            // The DVC headers include:
+            // - all available cluster-uncommitted ops, and
+            // - the highest cluster-committed op (if available).
+            // We cannot safely go beyond that in all cases for fear of concealing a break:
+            // - During a prior view-change we might have only accepted a single header from the
+            //   DVC: "header.op = op_prepare_max", and then not completed any
+            //   repair.
+            // - Similarly, we might have receive a catch-up SV message and only installed a
+            //   single (checkpoint trigger) hook header.
+            //
+            // DVC headers are stitched together from the journal and existing view headers (they
+            // might belong to the next log wrap), to guarantee that a DVC with log_view=v includes
+            // all uncommitted ops with views <v. Special case: a primary that has collected a DVC
+            // quorum and installed surviving headers into the journal ignores view headers (they
+            // might have some truncated ops).
+            var view_headers_updated = vsr.Headers.ViewChangeArray{
+                .command = .do_view_change,
+                .array = .{},
+            };
+
+            const view_headers_op_max = self.view_headers.array.get(0).op;
+            var op = if (primary_repairing) self.op else @max(self.op, view_headers_op_max);
+            for (0..constants.pipeline_prepare_queue_max + 1) |_| {
+                const header_journal: ?*const vsr.Header.Prepare =
+                    self.journal.header_with_op(op);
+
+                const header_view: ?*const vsr.Header.Prepare = header: {
+                    if (primary_repairing or op > view_headers_op_max) break :header null;
+
+                    const header = &self.view_headers.array.const_slice()[view_headers_op_max - op];
+                    break :header switch (vsr.Headers.dvc_header_type(header)) {
+                        .valid => header,
+                        .blank => null,
+                    };
+                };
+
+                if (header_journal != null and header_view != null) {
+                    assert(header_journal.?.op == header_view.?.op);
+                    assert(header_journal.?.view == header_view.?.view);
+                    assert(header_journal.?.checksum == header_view.?.checksum);
+                }
+
+                if (header_journal == null and header_view == null) {
+                    assert(view_headers_updated.array.count() > 0);
+                    assert(op != self.op);
+                    view_headers_updated.append_blank(op);
+                } else {
+                    if (header_journal) |h| {
+                        view_headers_updated.append(h);
+                    } else {
+                        // Transition from normal status, but the SV headers were part of the next
+                        // wrap, so we didn't install them to our journal, and we didn't catch up.
+                        // We will reuse the SV headers as our DVC headers to ensure that
+                        // participating in another view-change won't allow the op to backtrack.
+                        assert(self.log_view == self.view);
+                        view_headers_updated.append(header_view.?);
+                    }
+                }
+
+                if (op <= self.commit_max) break;
+                op -= 1;
+            } else unreachable;
+
+            assert(op <= self.commit_max);
+            assert(op == self.commit_max or self.commit_max > self.op);
+
+            self.view_headers = view_headers_updated;
+            self.view_headers.verify();
         }
 
         /// Transition from "not syncing" to "syncing".

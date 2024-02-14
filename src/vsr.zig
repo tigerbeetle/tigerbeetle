@@ -1287,35 +1287,6 @@ const ViewChangeHeadersArray = struct {
         }).verify();
     }
 
-    pub fn start_view_into_do_view_change(headers: *ViewChangeHeadersArray) void {
-        assert(headers.command == .start_view);
-        // This function is only called by a replica that is lagging behind the primary's
-        // checkpoint, so the start_view has a full suffix of headers.
-        assert(headers.array.get(0).op >=
-            constants.vsr_checkpoint_interval + constants.lsm_batch_multiple);
-        assert(headers.array.count() >= constants.view_change_headers_suffix_max);
-        assert(headers.array.count() >= constants.pipeline_prepare_queue_max + 1);
-
-        const commit_max = @max(
-            headers.array.get(0).op -| constants.pipeline_prepare_queue_max,
-            headers.array.get(0).commit,
-        );
-        const commit_max_header = headers.array.get(headers.array.get(0).op - commit_max);
-        assert(commit_max_header.command == .prepare);
-        assert(commit_max_header.operation != .reserved);
-        assert(commit_max_header.op == commit_max);
-
-        // SVs may include more headers than DVC:
-        // - Remove the SV "hook" checkpoint trigger(s), since they would create gaps in the ops.
-        // - Remove any SV headers that don't fit in the DVC's body.
-        //   (SV headers are determined by view_change_headers_suffix_max,
-        //   but DVC headers must stop at commit_max.)
-        headers.command = .do_view_change;
-        headers.array.truncate(constants.pipeline_prepare_queue_max + 1);
-
-        headers.verify();
-    }
-
     pub fn replace(
         headers: *ViewChangeHeadersArray,
         command: ViewChangeCommand,
