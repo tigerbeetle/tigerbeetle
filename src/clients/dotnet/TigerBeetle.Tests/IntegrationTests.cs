@@ -1626,16 +1626,12 @@ internal class TBServer : IDisposable
 
     public void Dispose()
     {
-        try
+        if (process != null && !process.HasExited)
         {
-            if (process != null && !process.HasExited)
-            {
-                process.Kill();
-                process.Dispose();
-            }
-
-            File.Delete($"./{dataFile}");
+            process.Kill();
+            process.Dispose();
         }
-        catch { }
+
+        File.Delete($"./{dataFile}");
     }
 }
