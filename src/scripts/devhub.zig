@@ -20,6 +20,10 @@ pub const CliArgs = struct {
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     _ = gpa;
 
+    const commit_timestamp_str =
+        try shell.exec_stdout("git show -s --format=%ct {sha}", .{ .sha = cli_args.sha });
+    const commit_timestamp = try std.fmt.parseInt(u64, commit_timestamp_str, 10);
+
     var timer = try std.time.Timer.start();
     try shell.zig("build -Drelease -Dconfig=production install", .{});
     const build_time_ms = timer.lap() / std.time.ns_per_ms;
@@ -33,7 +37,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
 
     try upload_run(shell, Run{
-        .timestamp = std.time.timestamp(),
+        // Use commit timestamp, rather wall clock time here. That way, it is possible to re-bench
+        // mark the entire history while getting a comparable time series.
+        .timestamp = commit_timestamp,
         .revision = cli_args.sha,
         .measurements = &[_]Measurement{
             .{ .label = "build time", .value = build_time_ms, .unit = "ms" },
@@ -53,7 +59,7 @@ const Measurement = struct {
 };
 
 const Run = struct {
-    timestamp: i64,
+    timestamp: u64,
     revision: []const u8,
     measurements: []const Measurement,
 };
