@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 import org.junit.Test;
@@ -1143,10 +1144,9 @@ public class IntegrationTest {
      */
     @Test
     public void testAsyncTasks() throws Throwable {
-        // Defining the concurrency_max equals to tasks_qty
-        // The goal here is to allow to all requests being submitted at once.
-        final int tasks_qty = 100;
-        final int concurrency_max = tasks_qty;
+        final int tasks_qty = 1_000_000;
+        final int concurrency_max = 8192;
+        final var semaphore = new Semaphore(concurrency_max);
 
         try (var server = new Server();
                 var client = new Client(clusterId, new String[] {server.getAddress()},
@@ -1169,7 +1169,11 @@ public class IntegrationTest {
                 transfers.setAmount(100);
 
                 // Starting async batch.
-                tasks[i] = client.createTransfersAsync(transfers);
+                semaphore.acquire();
+                tasks[i] = client.createTransfersAsync(transfers).thenApplyAsync((result) -> {
+                    semaphore.release();
+                    return result;
+                });
             }
 
             // Wait for all threads.
