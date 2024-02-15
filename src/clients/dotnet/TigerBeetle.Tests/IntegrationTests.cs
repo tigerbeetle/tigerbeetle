@@ -1595,7 +1595,7 @@ internal class TBServer : IDisposable
     private const string TB_SERVER = TB_PATH + "/" + TB_EXE;
 
     private readonly Process process;
-    private readonly String dataFile;
+    private readonly string dataFile;
 
     public string Address { get; }
 
@@ -1626,16 +1626,9 @@ internal class TBServer : IDisposable
 
     public void Dispose()
     {
-        try
-        {
-            if (process != null && !process.HasExited)
-            {
-                process.Kill();
-                process.Dispose();
-            }
-
-            File.Delete($"./{dataFile}");
-        }
-        catch { }
+        process.Kill();
+        process.WaitForExit();
+        process.Dispose();
+        File.Delete($"./{dataFile}");
     }
 }
