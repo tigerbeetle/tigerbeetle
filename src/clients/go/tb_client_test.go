@@ -20,7 +20,7 @@ const (
 	TIGERBEETLE_CLUSTER_ID      uint64 = 0
 	TIGERBEETLE_REPLICA_ID      uint32 = 0
 	TIGERBEETLE_REPLICA_COUNT   uint32 = 1
-	TIGERBEETLE_CONCURRENCY_MAX uint   = 4096
+	TIGERBEETLE_CONCURRENCY_MAX uint   = 8192
 )
 
 func HexStringToUint128(value string) types.Uint128 {

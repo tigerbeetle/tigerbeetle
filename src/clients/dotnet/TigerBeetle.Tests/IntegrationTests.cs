@@ -1332,8 +1332,8 @@ public class IntegrationTests
 
     private void ConcurrencyTest(bool isAsync)
     {
-        const int TASKS_QTY = 32;
-        int MAX_CONCURRENCY = 32;
+        const int TASKS_QTY = 1_000_000;
+        const int MAX_CONCURRENCY = 8192;
 
         using var server = new TBServer();
         using var client = GetClient(server.Address, MAX_CONCURRENCY);
@@ -1342,6 +1342,33 @@ public class IntegrationTests
         Assert.IsTrue(errors.Length == 0);
 
         var list = new List<Task<CreateTransferResult>>();
+        var semaphore = new SemaphoreSlim(MAX_CONCURRENCY);
+
+        async Task<CreateTransferResult> asyncAction(Transfer transfer)
+        {
+            try
+            {
+                await semaphore.WaitAsync();
+                return await client.CreateTransferAsync(transfer);
+            }
+            finally
+            {
+                _ = semaphore.Release();
+            }
+        }
+
+        CreateTransferResult syncAction(Transfer transfer)
+        {
+            try
+            {
+                semaphore.Wait();
+                return client.CreateTransfer(transfer);
+            }
+            finally
+            {
+                _ = semaphore.Release();
+            }
+        }
 
         for (int i = 0; i < TASKS_QTY; i++)
         {
@@ -1350,13 +1377,13 @@ public class IntegrationTests
                 Id = (UInt128)(i + 1),
                 CreditAccountId = accounts[0].Id,
                 DebitAccountId = accounts[1].Id,
-                Amount = 100,
+                Amount = 1,
                 Ledger = 1,
                 Code = 1,
             };
 
             /// Starts multiple tasks.
-            var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
+            var task = isAsync ? asyncAction(transfer) : Task.Run(() => syncAction(transfer));
             list.Add(task);
         }
 
@@ -1369,11 +1396,11 @@ public class IntegrationTests
 
         // Assert that all tasks ran to the conclusion
 
-        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (ulong)(100 * TASKS_QTY));
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (uint)TASKS_QTY);
         Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0LU);
 
         Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
-        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (ulong)(100 * TASKS_QTY));
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (uint)TASKS_QTY);
     }
 
     /// <summary>
