@@ -80,10 +80,20 @@ pub fn init(
     }
 
     const port = port: {
-        errdefer log.err("failed to read port number from tigerbeetle process", .{});
+        var exit_status: ?std.ChildProcess.Term = null;
+        errdefer log.err(
+            "failed to read port number from tigerbeetle process: {?}",
+            .{exit_status},
+        );
+
         var port_buf: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
-        const port_bun_len = try process.stdout.?.readAll(&port_buf);
-        break :port try std.fmt.parseInt(u16, port_buf[0 .. port_bun_len - 1], 10);
+        const port_buf_len = try process.stdout.?.readAll(&port_buf);
+        if (port_buf_len == 0) {
+            exit_status = try process.wait();
+            return error.NoPort;
+        }
+
+        break :port try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
     };
 
     var port_str: stdx.BoundedArray(u8, 8) = .{};
