@@ -101,6 +101,9 @@ pub fn main(
         },
     );
 
+    const request_body = try allocator.create([constants.message_body_size_max]u8);
+    defer allocator.destroy(request_body);
+
     var batch_accounts =
         try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
     defer batch_accounts.deinit(allocator);
@@ -141,6 +144,8 @@ pub fn main(
         .io = &io,
         .message_pool = &message_pool,
         .client = &client,
+        .request = undefined,
+        .request_body = request_body,
         .batch_accounts = batch_accounts,
         .account_count = cli_args.account_count,
         .account_history = cli_args.account_history,
@@ -180,6 +185,8 @@ const Benchmark = struct {
     io: *IO,
     message_pool: *MessagePool,
     client: *Client,
+    request: Client.Request,
+    request_body: *[constants.message_body_size_max]u8,
     batch_accounts: std.ArrayListUnmanaged(tb.Account),
     account_count: usize,
     account_history: bool,
@@ -474,29 +481,26 @@ const Benchmark = struct {
     ) void {
         b.callback = callback;
 
-        const event_count = switch (operation) {
-            inline else => |op| @divExact(payload.len, @sizeOf(StateMachine.Event(op))),
-        };
+        const event_data = b.request_body[0..payload.len];
+        stdx.copy_disjoint(.exact, u8, event_data, payload);
 
-        const batch = b.client.batch_get(operation, event_count) catch unreachable;
-        stdx.copy_disjoint(.exact, u8, batch.slice(), payload);
-
-        b.client.batch_submit(
-            @intCast(@intFromPtr(b)),
+        b.client.submit(
             send_complete,
-            batch,
+            &b.request,
+            operation,
+            event_data,
         );
     }
 
     fn send_complete(
-        user_data: u128,
-        operation: StateMachine.Operation,
+        request: *Client.Request,
         result: []const u8,
     ) void {
-        const b: *Benchmark = @ptrFromInt(@as(usize, @intCast(user_data)));
+        const b = @fieldParentPtr(Benchmark, "request", request);
         const callback = b.callback.?;
         b.callback = null;
 
+        const operation = request.operation.cast(Client.StateMachine);
         callback(b, operation, result);
     }
 };

@@ -22,7 +22,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
         completion: *Completion,
         sent_data: [request_size_max]u8 = undefined,
         sent_data_size: u32,
-        packet: *c.tb_packet_t = undefined,
+        packet: c.tb_packet_t = undefined,
         reply: ?struct {
             tb_context: usize,
             tb_client: c.tb_client_t,
@@ -38,7 +38,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             result_ptr: [*c]const u8,
             result_len: u32,
         ) callconv(.C) void {
-            var self: *Self = @ptrCast(@alignCast(tb_packet.*.user_data.?));
+            const self = @fieldParentPtr(Self, "tb_packet", @as(*c.tb_packet_t, tb_packet));
             defer self.completion.complete();
 
             self.reply = .{
@@ -100,12 +100,9 @@ test "c_client echo" {
     const event_request_max = @divFloor(constants.message_body_size_max, event_size);
 
     // Initializing an echo client for testing purposes.
-    // We ensure that the retry mechanism is being tested
-    // by allowing more simultaneous packets than "client_request_queue_max".
     var tb_client: c.tb_client_t = undefined;
     const cluster_id = 0;
     const address = "3000";
-    const concurrency_max: u32 = constants.client_request_queue_max * 2;
     const tb_context: usize = 42;
     const result = c.tb_client_init_echo(
         &tb_client,
@@ -140,24 +137,12 @@ test "c_client echo" {
             };
             prng.random().bytes(request.sent_data[0..request.sent_data_size]);
 
-            request.packet = blk: {
-                var out_packet: ?*c.tb_packet_t = null;
-                const packet_acquire_status = c.tb_client_acquire_packet(tb_client, &out_packet);
+            request.packet.status = c.TB_PACKET_OK;
+            request.packet.request.operation = @enumFromInt(create_account_operation);
+            request.packet.request.body_ptr = &request.sent_data;
+            request.packet.request.body_len = request.sent_data_size;
 
-                if (out_packet) |packet| {
-                    try testing.expectEqual(@as(c_uint, c.TB_PACKET_ACQUIRE_OK), packet_acquire_status);
-
-                    packet.operation = create_accounts_operation;
-                    packet.user_data = request;
-                    packet.data = &request.sent_data;
-                    packet.data_size = request.sent_data_size;
-                    packet.next = null;
-                    packet.status = c.TB_PACKET_OK;
-                    break :blk packet;
-                } else unreachable;
-            };
-
-            c.tb_client_submit(tb_client, request.packet);
+            try testing.expect(c.tb_client_submit(tb_client, &request.packet));
         }
 
         // Waiting until the c_client thread has processed all submitted requests:
@@ -165,13 +150,11 @@ test "c_client echo" {
 
         // Checking if the received echo matches the data we sent:
         for (requests) |*request| {
-            defer c.tb_client_release_packet(tb_client, request.packet);
-
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
             try testing.expectEqual(tb_client, request.reply.?.tb_client);
             try testing.expectEqual(c.TB_PACKET_OK, request.packet.status);
-            try testing.expectEqual(@intFromPtr(request.packet), @intFromPtr(request.reply.?.tb_packet));
+            try testing.expectEqual(@intFromPtr(&request.packet), @intFromPtr(request.reply.?.tb_packet));
             try testing.expect(request.reply.?.result != null);
             try testing.expectEqual(request.sent_data_size, request.reply.?.result_len);
 

@@ -37,8 +37,7 @@ pub fn request(
     operation: StateMachine.Operation,
     batch: anytype,
     on_reply: *const fn (
-        user_data: u128,
-        operation: StateMachine.Operation,
+        vsr_request: *Client.Request,
         results: []const u8,
     ) void,
 ) !void {
@@ -66,13 +65,12 @@ pub fn request(
     );
     defer client.deinit(allocator);
 
-    const client_batch = client.batch_get(operation, batch.len) catch unreachable;
-    stdx.copy_disjoint(.exact, u8, client_batch.slice(), std.mem.asBytes(&batch));
-
-    client.batch_submit(
-        0,
+    var vsr_request: Client.Request = undefined;
+    client.submit(
         on_reply,
-        client_batch,
+        &vsr_request,
+        operation,
+        std.mem.asBytes(&batch),
     );
 
     while (client.request_queue.count > 0) {
@@ -82,45 +80,37 @@ pub fn request(
 }
 
 pub fn on_create_accounts(
-    user_data: u128,
-    operation: StateMachine.Operation,
+    vsr_request: *Client.Request,
     results: []const u8,
 ) void {
-    _ = user_data;
-    _ = operation;
+    _ = vsr_request;
 
     print_results(CreateAccountsResult, results);
 }
 
 pub fn on_lookup_accounts(
-    user_data: u128,
-    operation: StateMachine.Operation,
+    vsr_request: *Client.Request,
     results: []const u8,
 ) void {
-    _ = user_data;
-    _ = operation;
+    _ = vsr_request;
 
     print_results(Account, results);
 }
 
 pub fn on_lookup_transfers(
-    user_data: u128,
-    operation: StateMachine.Operation,
+    vsr_request: *Client.Request,
     results: []const u8,
 ) void {
-    _ = user_data;
-    _ = operation;
+    _ = vsr_request;
 
     print_results(Transfer, results);
 }
 
 pub fn on_create_transfers(
-    user_data: u128,
-    operation: StateMachine.Operation,
+    vsr_request: *Client.Request,
     results: []const u8,
 ) void {
-    _ = user_data;
-    _ = operation;
+    _ = vsr_request;
 
     print_results(CreateTransfersResult, results);
 }

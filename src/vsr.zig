@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
+const FIFO = @import("fifo.zig").FIFO;
 
 // vsr.zig is the root of a zig package, reexport all public APIs.
 //
@@ -279,6 +280,21 @@ pub const Operation = enum(u8) {
             }
         }
     }
+};
+
+pub const ClientRequest = extern struct {
+    pub const Callback = *const fn (
+        request: *ClientRequest,
+        result: []const u8,
+    ) void;
+
+    next: ?*ClientRequest,
+    operation: Operation,
+    callback: ?Callback,
+    body_ptr: [*]const u8,
+    body_len: u32,
+    queue_total: u32,
+    queue: FIFO(ClientRequest),
 };
 
 pub const BlockRequest = extern struct {

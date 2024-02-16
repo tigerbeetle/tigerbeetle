@@ -61,17 +61,12 @@ pub fn ThreadType(
 
         fn on_signal(signal: *Signal) void {
             const self = @fieldParentPtr(Self, "signal", signal);
-            self.context.tick();
-
-            // Process packets from either pending or submitted as long as we have messages.
+            
             while (self.submitted.pop()) |packet| {
-                self.context.request(packet) catch |err| switch (err) {
-                    error.TooManyOutstanding => {
-                        self.submitted.push(packet);
-                        break;
-                    },
-                };
+                self.context.request(packet);
             }
+
+            self.context.tick();
         }
     };
 }

@@ -196,15 +196,10 @@ fn request(
     );
     const client: tb.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
 
-    const packet = blk: {
-        var packet_ptr: ?*tb.tb_packet_t = undefined;
-        switch (tb.acquire_packet(client, &packet_ptr)) {
-            .ok => break :blk packet_ptr.?,
-            .shutdown => return translate.throw(env, "Client was shutdown."),
-            .concurrency_max_exceeded => return translate.throw(env, "Too many concurrent requests."),
-        }
+    const packet = allocator.create(tb.tb_packet_t) catch |e| switch (e) {
+        error.OutOfMemory => return translate.throw(env, "Packet allocation ran out of memory."),
     };
-    errdefer tb.release_packet(client, packet);
+    errdefer allocator.destroy(packet);
 
     // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
@@ -234,16 +229,14 @@ fn request(
         },
     };
 
-    packet.* = .{
-        .next = null,
-        .user_data = callback_ref,
-        .operation = @intFromEnum(operation),
-        .status = .ok,
-        .data_size = @intCast(packet_data.len),
-        .data = packet_data.ptr,
-    };
-
-    tb.submit(client, packet);
+    packet.user_data = callback_ref;
+    tb.submit(
+        client,
+        packet,
+        @intFromEnum(operation),
+        packet_data.ptr,
+        @intCast(packet_data.len),
+    );
 }
 
 // Packet only has one size field which normally tracks `BufferType(op).events().len`.

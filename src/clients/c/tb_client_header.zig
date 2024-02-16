@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const tb = @import("../../tigerbeetle.zig");
 const tb_client = @import("tb_client.zig");
 
@@ -13,7 +14,6 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, "tb_create_transfers_result_t" },
     .{ tb_client.tb_operation_t, "TB_OPERATION" },
     .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
-    .{ tb_client.tb_packet_acquire_status_t, "TB_PACKET_ACQUIRE_STATUS" },
     .{ tb.AccountFilter, "tb_account_filter_t" },
     .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
     .{ tb.AccountBalance, "tb_account_balance_t" },
@@ -26,7 +26,11 @@ fn resolve_c_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
-        .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+        .Struct => |info| return switch (info.layout) {
+            .Auto => @compileError("Zig struct (" ++ @typeName(Type) ++ ") not supported in C ffi"),
+            .Packed => resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .Extern => resolve_c_type([@sizeOf(Type)]u8),
+        },
         .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
@@ -35,7 +39,7 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                 32 => "uint32_t",
                 64 => "uint64_t",
                 128 => "tb_uint128_t",
-                else => @compileError("invalid int type"),
+                else => @compileError("invalid int type: " ++ @typeName(Type)),
             };
         },
         .Optional => |info| switch (@typeInfo(info.child)) {
@@ -119,13 +123,20 @@ fn emit_struct(
     try buffer.writer().print("typedef struct {s} {{\n", .{c_name});
 
     inline for (type_info.fields) |field| {
+        const field_type_name = comptime resolve_c_type(field.type);
         try buffer.writer().print("    {s} {s}", .{
-            resolve_c_type(field.type),
+            field_type_name,
             field.name,
         });
 
         switch (@typeInfo(field.type)) {
             .Array => |array| try buffer.writer().print("[{d}]", .{array.len}),
+            .Struct => |info| {
+                if (info.layout == .Extern) {
+                    comptime assert(std.mem.eql(u8, field_type_name, "uint8_t"));
+                    try buffer.writer().print("[{d}]", .{@sizeOf(field.type)});
+                }
+            },
             else => {},
         }
 
@@ -215,19 +226,12 @@ pub fn main() !void {
         \\    void (*on_completion_fn)(uintptr_t, tb_client_t, tb_packet_t*, const uint8_t*, uint32_t)
         \\);
         \\
-        \\TB_PACKET_ACQUIRE_STATUS tb_client_acquire_packet(
+        \\bool tb_client_submit(
         \\    tb_client_t client,
-        \\    tb_packet_t** out_packet
-        \\);
-        \\
-        \\void tb_client_release_packet(
-        \\    tb_client_t client,
-        \\    tb_packet_t* packet
-        \\);
-        \\
-        \\void tb_client_submit(
-        \\    tb_client_t client,
-        \\    tb_packet_t* packet
+        \\    tb_packet_t* packet,
+        \\    TB_OPERATION operation,
+        \\    uint8_t* data_ptr,
+        \\    uint32_t data_len
         \\);
         \\
         \\void tb_client_deinit(

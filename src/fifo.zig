@@ -7,14 +7,25 @@ const tracer = @import("./tracer.zig");
 /// An intrusive first in/first out linked list.
 /// The element type T must have a field called "next" of type ?*T
 pub fn FIFO(comptime T: type) type {
-    return struct {
+    return extern struct {
         const Self = @This();
 
         in: ?*T = null,
         out: ?*T = null,
         count: u64 = 0,
         // This should only be null if you're sure we'll never want to monitor `count`.
-        name: ?[]const u8,
+        name: ?[*:0]const u8,
+
+        pub fn push_front(self: *Self, elem: *T) void {
+            if (constants.verify) assert(!self.contains(elem));
+            
+            assert(elem.next == null);
+            elem.next = self.out;
+            self.out = elem;
+
+            self.count += 1;
+            self.plot();
+        }
 
         pub fn push(self: *Self, elem: *T) void {
             if (constants.verify) assert(!self.contains(elem));
@@ -91,7 +102,7 @@ pub fn FIFO(comptime T: type) type {
         fn plot(self: Self) void {
             if (self.name) |name| {
                 tracer.plot(
-                    .{ .queue_count = .{ .queue_name = name } },
+                    .{ .queue_count = .{ .queue_name = std.mem.span(name) } },
                     @as(f64, @floatFromInt(self.count)),
                 );
             }
@@ -112,6 +123,20 @@ test "FIFO: push/pop/peek/remove/empty" {
     try testing.expect(fifo.empty());
 
     fifo.push(&one);
+    try testing.expect(!fifo.empty());
+    try testing.expectEqual(@as(?*Foo, &one), fifo.peek());
+    try testing.expect(fifo.contains(&one));
+    try testing.expect(!fifo.contains(&two));
+    try testing.expect(!fifo.contains(&three));
+
+    fifo.push_front(&two);
+    try testing.expect(!fifo.empty());
+    try testing.expectEqual(@as(?*Foo, &two), fifo.peek());
+    try testing.expect(fifo.contains(&one));
+    try testing.expect(fifo.contains(&two));
+    try testing.expect(!fifo.contains(&three));
+
+    try testing.expectEqual(fifo.pop().?, &two);
     try testing.expect(!fifo.empty());
     try testing.expectEqual(@as(?*Foo, &one), fifo.peek());
     try testing.expect(fifo.contains(&one));

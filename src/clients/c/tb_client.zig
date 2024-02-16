@@ -3,7 +3,6 @@ const builtin = @import("builtin");
 
 pub const tb_packet_t = @import("tb_client/packet.zig").Packet;
 pub const tb_packet_status_t = tb_packet_t.Status;
-pub const tb_packet_acquire_status_t = @import("tb_client/context.zig").PacketAcquireStatus;
 
 pub const tb_client_t = *anyopaque;
 pub const tb_status_t = enum(c_int) {
@@ -110,28 +109,21 @@ pub fn completion_context(client: tb_client_t) callconv(.C) usize {
     return context.completion_ctx;
 }
 
-pub fn acquire_packet(
-    client: tb_client_t,
-    out_packet: *?*tb_packet_t,
-) callconv(.C) tb_packet_acquire_status_t {
-    const context = client_to_context(client);
-    return (context.acquire_packet_fn)(context, out_packet);
-}
-
-pub fn release_packet(
-    client: tb_client_t,
-    packet: *tb_packet_t,
-) callconv(.C) void {
-    const context = client_to_context(client);
-    return (context.release_packet_fn)(context, packet);
-}
-
 pub fn submit(
     client: tb_client_t,
     packet: *tb_packet_t,
-) callconv(.C) void {
+    operation: tb_operation_t,
+    data_ptr: [*c]const u8,
+    data_len: u32,
+) callconv(.C) bool {
+    packet.request.operation = operation;
+    packet.request.body_ptr = data_ptr;
+    packet.request.body_len = data_len;
+    packet.status = .ok;
+    packet.next = null;
+
     const context = client_to_context(client);
-    (context.submit_fn)(context, packet);
+    return (context.submit_fn)(context, packet);
 }
 
 pub fn deinit(

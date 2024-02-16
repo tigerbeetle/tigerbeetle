@@ -412,6 +412,8 @@ pub fn ReplType(comptime MessageBus: type) type {
     return struct {
         event_loop_done: bool,
         request_done: bool,
+        request: Client.Request = undefined,
+        request_data: stdx.BoundedArray(u8, constants.message_body_size_max) = .{},
 
         interactive: bool,
         debug_logs: bool,
@@ -684,23 +686,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             }
 
-            const batch = repl.client.batch_get(operation, switch (operation) {
-                inline else => |op| @divExact(arguments.len, @sizeOf(StateMachine.Event(op))),
-            }) catch unreachable;
-
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                batch.slice(),
-                arguments,
-            );
-
+            repl.request_data = @TypeOf(repl.request_data).from_slice(arguments) catch unreachable;
             repl.request_done = false;
             try repl.debug("Sending command: {}.\n", .{operation});
-            repl.client.batch_submit(
-                @intCast(@intFromPtr(repl)),
+            repl.client.submit(
                 client_request_callback,
-                batch,
+                &repl.request,
+                operation,
+                repl.request_data.const_slice(),
             );
         }
 
@@ -748,11 +741,11 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn client_request_callback_error(
-            user_data: u128,
-            operation: StateMachine.Operation,
+            request: *Client.Request,
             result: []const u8,
         ) !void {
-            const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
+            const repl = @fieldParentPtr(Repl, "request", request);
+            const operation = request.operation.cast(Client.StateMachine);
             assert(repl.request_done == false);
             try repl.debug("Operation completed: {}.\n", .{operation});
 
@@ -835,16 +828,11 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn client_request_callback(
-            user_data: u128,
-            operation: StateMachine.Operation,
+            request: *Client.Request,
             result: []const u8,
         ) void {
-            client_request_callback_error(
-                user_data,
-                operation,
-                result,
-            ) catch |err| {
-                const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
+            client_request_callback_error(request, result) catch |err| {
+                const repl = @fieldParentPtr(Repl, "request", request);
                 repl.fail("Error in callback: {any}", .{err}) catch return;
             };
         }
