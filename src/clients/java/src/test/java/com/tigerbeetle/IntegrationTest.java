@@ -859,14 +859,14 @@ public class IntegrationTest {
      */
     @Test
     public void testConcurrentTasks() throws Throwable {
-        // Defining the concurrency_max equals to tasks_qty
+        // Defining the CONCURRENCY_MAX equals to TASKS_COUNT
         // The goal here is to allow to all requests being submitted at once.
-        final int concurrency_max = 100;
-        final int tasks_qty = concurrency_max;
-        final var barrier = new CountDownLatch(tasks_qty);
+        final int CONCURRENCY_MAX = 100;
+        final int TASKS_COUNT = CONCURRENCY_MAX;
+        final var barrier = new CountDownLatch(TASKS_COUNT);
 
         try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, concurrency_max)) {
+                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -874,8 +874,8 @@ public class IntegrationTest {
             final var createAccountErrors = client.createAccounts(accounts);
             assertTrue(createAccountErrors.getLength() == 0);
 
-            final var tasks = new TransferTask[tasks_qty];
-            for (int i = 0; i < tasks_qty; i++) {
+            final var tasks = new TransferTask[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
                 // Starting multiple threads submitting transfers.
                 tasks[i] = new TransferTask(client, account1Id, account2Id, barrier,
                         new CountDownLatch(0));
@@ -883,7 +883,7 @@ public class IntegrationTest {
             }
 
             // Wait for all threads:
-            for (int i = 0; i < tasks_qty; i++) {
+            for (int i = 0; i < TASKS_COUNT; i++) {
                 tasks[i].join();
                 assertTrue(tasks[i].result.getLength() == 0);
             }
@@ -898,14 +898,14 @@ public class IntegrationTest {
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * tasks_qty), lookupAccounts.getCreditsPosted());
+            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getCreditsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
             assertTrue(accounts.next());
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * tasks_qty), lookupAccounts.getDebitsPosted());
+            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getDebitsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
         }
     }
@@ -918,12 +918,12 @@ public class IntegrationTest {
         // Defining a ratio between concurrent threads and client's concurrencyMax
         // The goal here is to force to have more threads than the client can process
         // simultaneously.
-        final int tasks_qty = 32;
-        final int concurrency_max = 2;
-        final var barrier = new CountDownLatch(tasks_qty);
+        final int TASKS_COUNT = 32;
+        final int CONCURRENCY_MAX = 2;
+        final var barrier = new CountDownLatch(TASKS_COUNT);
 
         try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, concurrency_max)) {
+                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -931,8 +931,8 @@ public class IntegrationTest {
             final var createAccountErrors = client.createAccounts(accounts);
             assertTrue(createAccountErrors.getLength() == 0);
 
-            final var tasks = new TransferTask[tasks_qty];
-            for (int i = 0; i < tasks_qty; i++) {
+            final var tasks = new TransferTask[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
                 // Starting multiple threads submitting transfers.
                 tasks[i] = new TransferTask(client, account1Id, account2Id, barrier,
                         new CountDownLatch(0));
@@ -942,7 +942,7 @@ public class IntegrationTest {
             // Wait for all threads:
             int succeededCount = 0;
             int failedCount = 0;
-            for (int i = 0; i < tasks_qty; i++) {
+            for (int i = 0; i < TASKS_COUNT; i++) {
                 tasks[i].join();
                 if (tasks[i].exception == null) {
                     assertTrue(tasks[i].result.getLength() == 0);
@@ -954,8 +954,8 @@ public class IntegrationTest {
             }
 
             // At least max_concurrency tasks must succeed.
-            assertTrue(succeededCount >= concurrency_max);
-            assertTrue(succeededCount + failedCount == tasks_qty);
+            assertTrue(succeededCount >= CONCURRENCY_MAX);
+            assertTrue(succeededCount + failedCount == TASKS_COUNT);
 
             // Asserting if all transfers were submitted correctly.
             final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
@@ -996,13 +996,13 @@ public class IntegrationTest {
         // Since our JNI module does not expose the acquire_packet function,
         // we cannot insert a lock/wait in between "acquire_packet" and "submit"
         // in order to cause and assert each variant.
-        final int tasks_qty = 256;
-        final int concurrency_max = tasks_qty;
-        final var enterBarrier = new CountDownLatch(tasks_qty);
+        final int TASKS_COUNT = 256;
+        final int CONCURRENCY_MAX = TASKS_COUNT;
+        final var enterBarrier = new CountDownLatch(TASKS_COUNT);
         final var exitBarrier = new CountDownLatch(1);
 
         try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, concurrency_max)) {
+                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
             final var accounts = generateAccounts(account1Id, account2Id);
@@ -1010,8 +1010,8 @@ public class IntegrationTest {
             final var createAccountErrors = client.createAccounts(accounts);
             assertTrue(createAccountErrors.getLength() == 0);
 
-            final var tasks = new TransferTask[tasks_qty];
-            for (int i = 0; i < tasks_qty; i++) {
+            final var tasks = new TransferTask[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
 
                 // Starting multiple threads submitting transfers.
                 tasks[i] =
@@ -1030,7 +1030,7 @@ public class IntegrationTest {
             int failedCount = 0;
             int succeededCount = 0;
 
-            for (int i = 0; i < tasks_qty; i++) {
+            for (int i = 0; i < TASKS_COUNT; i++) {
 
                 // The client.close must wait until all submitted requests have completed
                 // Asserting that either the task succeeded or failed while waiting.
@@ -1051,7 +1051,7 @@ public class IntegrationTest {
                 }
             }
 
-            assertTrue(succeededCount + failedCount == tasks_qty);
+            assertTrue(succeededCount + failedCount == TASKS_COUNT);
         }
     }
 
@@ -1102,12 +1102,12 @@ public class IntegrationTest {
      */
     @Test
     public void testAsyncTasks() throws Throwable {
-        final int tasks_qty = 1_000_000;
-        final int concurrency_max = 8192;
-        final var semaphore = new Semaphore(concurrency_max);
+        final int TASKS_COUNT = 1_000_000;
+        final int CONCURRENCY_MAX = 8192;
+        final var semaphore = new Semaphore(CONCURRENCY_MAX);
 
         try (final var client =
-                new Client(clusterId, new String[] {server.getAddress()}, concurrency_max)) {
+                new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
 
             final var account1Id = UInt128.id();
             final var account2Id = UInt128.id();
@@ -1116,8 +1116,8 @@ public class IntegrationTest {
             final var createAccountErrors = client.createAccounts(accounts);
             assertTrue(createAccountErrors.getLength() == 0);
 
-            final var tasks = new CompletableFuture[tasks_qty];
-            for (int i = 0; i < tasks_qty; i++) {
+            final var tasks = new CompletableFuture[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
 
                 final var transfers = new TransferBatch(1);
                 transfers.add();
@@ -1138,7 +1138,7 @@ public class IntegrationTest {
             }
 
             // Wait for all threads.
-            for (int i = 0; i < tasks_qty; i++) {
+            for (int i = 0; i < TASKS_COUNT; i++) {
                 @SuppressWarnings("unchecked")
                 final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
                 final var result = future.get();
@@ -1155,14 +1155,14 @@ public class IntegrationTest {
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * tasks_qty), lookupAccounts.getCreditsPosted());
+            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getCreditsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
             assertTrue(accounts.next());
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * tasks_qty), lookupAccounts.getDebitsPosted());
+            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getDebitsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
         }
     }
@@ -1219,17 +1219,17 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            final var account_transfers = client.getAccountTransfers(filter);
-            final var account_history = client.getAccountHistory(filter);
-            assertTrue(account_transfers.getLength() == 10);
-            assertTrue(account_history.getLength() == 10);
+            final var accountTransfers = client.getAccountTransfers(filter);
+            final var accountHistory = client.getAccountHistory(filter);
+            assertTrue(accountTransfers.getLength() == 10);
+            assertTrue(accountHistory.getLength() == 10);
             long timestamp = 0;
-            while (account_transfers.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) > 0);
-                timestamp = account_transfers.getTimestamp();
+            while (accountTransfers.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) > 0);
+                timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(account_history.next());
-                assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
+                assertTrue(accountHistory.next());
+                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
             }
         }
 
@@ -1245,18 +1245,18 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(true);
-            final var account_transfers = client.getAccountTransfers(filter);
-            final var account_history = client.getAccountHistory(filter);
+            final var accountTransfers = client.getAccountTransfers(filter);
+            final var accountHistory = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers.getLength() == 10);
-            assertTrue(account_history.getLength() == 10);
+            assertTrue(accountTransfers.getLength() == 10);
+            assertTrue(accountHistory.getLength() == 10);
             long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
-            while (account_transfers.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) < 0);
-                timestamp = account_transfers.getTimestamp();
+            while (accountTransfers.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) < 0);
+                timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(account_history.next());
-                assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
+                assertTrue(accountHistory.next());
+                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
             }
         }
 
@@ -1272,18 +1272,18 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(false);
             filter.setReversed(false);
-            final var account_transfers = client.getAccountTransfers(filter);
-            final var account_history = client.getAccountHistory(filter);
+            final var accountTransfers = client.getAccountTransfers(filter);
+            final var accountHistory = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers.getLength() == 5);
-            assertTrue(account_history.getLength() == 5);
+            assertTrue(accountTransfers.getLength() == 5);
+            assertTrue(accountHistory.getLength() == 5);
             long timestamp = 0;
-            while (account_transfers.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) > 0);
-                timestamp = account_transfers.getTimestamp();
+            while (accountTransfers.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) > 0);
+                timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(account_history.next());
-                assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
+                assertTrue(accountHistory.next());
+                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
             }
         }
 
@@ -1299,19 +1299,19 @@ public class IntegrationTest {
             filter.setDebits(false);
             filter.setCredits(true);
             filter.setReversed(true);
-            final var account_transfers = client.getAccountTransfers(filter);
-            final var account_history = client.getAccountHistory(filter);
+            final var accountTransfers = client.getAccountTransfers(filter);
+            final var accountHistory = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers.getLength() == 5);
-            assertTrue(account_history.getLength() == 5);
+            assertTrue(accountTransfers.getLength() == 5);
+            assertTrue(accountHistory.getLength() == 5);
 
             long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
-            while (account_transfers.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers.getTimestamp(), timestamp) < 0);
-                timestamp = account_transfers.getTimestamp();
+            while (accountTransfers.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) < 0);
+                timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(account_history.next());
-                assertEquals(account_transfers.getTimestamp(), account_history.getTimestamp());
+                assertTrue(accountHistory.next());
+                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
             }
         }
 
@@ -1329,44 +1329,44 @@ public class IntegrationTest {
             filter.setReversed(false);
 
             // First 5 items:
-            final var account_transfers_1 = client.getAccountTransfers(filter);
-            final var account_history_1 = client.getAccountHistory(filter);
+            final var accountTransfers1 = client.getAccountTransfers(filter);
+            final var accountHistory1 = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers_1.getLength() == 5);
-            assertTrue(account_history_1.getLength() == 5);
+            assertTrue(accountTransfers1.getLength() == 5);
+            assertTrue(accountHistory1.getLength() == 5);
 
             long timestamp = 0;
-            while (account_transfers_1.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers_1.getTimestamp(), timestamp) > 0);
-                timestamp = account_transfers_1.getTimestamp();
+            while (accountTransfers1.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers1.getTimestamp(), timestamp) > 0);
+                timestamp = accountTransfers1.getTimestamp();
 
-                assertTrue(account_history_1.next());
-                assertEquals(account_transfers_1.getTimestamp(), account_history_1.getTimestamp());
+                assertTrue(accountHistory1.next());
+                assertEquals(accountTransfers1.getTimestamp(), accountHistory1.getTimestamp());
             }
 
             // Next 5 items from this timestamp:
             filter.setTimestampMin(timestamp + 1);
-            final var account_transfers_2 = client.getAccountTransfers(filter);
-            final var account_history_2 = client.getAccountHistory(filter);
+            final var accountTransfers2 = client.getAccountTransfers(filter);
+            final var accountHistory2 = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers_2.getLength() == 5);
-            assertTrue(account_history_2.getLength() == 5);
+            assertTrue(accountTransfers2.getLength() == 5);
+            assertTrue(accountHistory2.getLength() == 5);
 
-            while (account_transfers_2.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers_2.getTimestamp(), timestamp) > 0);
-                timestamp = account_transfers_2.getTimestamp();
+            while (accountTransfers2.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers2.getTimestamp(), timestamp) > 0);
+                timestamp = accountTransfers2.getTimestamp();
 
-                assertTrue(account_history_2.next());
-                assertEquals(account_transfers_2.getTimestamp(), account_history_2.getTimestamp());
+                assertTrue(accountHistory2.next());
+                assertEquals(accountTransfers2.getTimestamp(), accountHistory2.getTimestamp());
             }
 
             // No more results after that timestamp:
             filter.setTimestampMin(timestamp + 1);
-            final var account_transfers_3 = client.getAccountTransfers(filter);
-            final var account_history_3 = client.getAccountHistory(filter);
+            final var accountTransfers3 = client.getAccountTransfers(filter);
+            final var accountHistory3 = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers_3.getLength() == 0);
-            assertTrue(account_history_3.getLength() == 0);
+            assertTrue(accountTransfers3.getLength() == 0);
+            assertTrue(accountHistory3.getLength() == 0);
         }
 
         {
@@ -1383,44 +1383,44 @@ public class IntegrationTest {
             filter.setReversed(true);
 
             // First 5 items:
-            final var account_transfers_1 = client.getAccountTransfers(filter);
-            final var account_history_1 = client.getAccountHistory(filter);
+            final var accountTransfers1 = client.getAccountTransfers(filter);
+            final var accountHistory1 = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers_1.getLength() == 5);
-            assertTrue(account_transfers_1.getLength() == 5);
+            assertTrue(accountTransfers1.getLength() == 5);
+            assertTrue(accountTransfers1.getLength() == 5);
 
             long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
-            while (account_transfers_1.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers_1.getTimestamp(), timestamp) < 0);
-                timestamp = account_transfers_1.getTimestamp();
+            while (accountTransfers1.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers1.getTimestamp(), timestamp) < 0);
+                timestamp = accountTransfers1.getTimestamp();
 
-                assertTrue(account_history_1.next());
-                assertEquals(account_transfers_1.getTimestamp(), account_history_1.getTimestamp());
+                assertTrue(accountHistory1.next());
+                assertEquals(accountTransfers1.getTimestamp(), accountHistory1.getTimestamp());
             }
 
             // Next 5 items from this timestamp:
             filter.setTimestampMax(timestamp - 1);
-            final var account_transfers_2 = client.getAccountTransfers(filter);
-            final var account_history_2 = client.getAccountHistory(filter);
+            final var accountTransfers2 = client.getAccountTransfers(filter);
+            final var accountHistory2 = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers_2.getLength() == 5);
-            assertTrue(account_history_2.getLength() == 5);
+            assertTrue(accountTransfers2.getLength() == 5);
+            assertTrue(accountHistory2.getLength() == 5);
 
-            while (account_transfers_2.next()) {
-                assertTrue(Long.compareUnsigned(account_transfers_2.getTimestamp(), timestamp) < 0);
-                timestamp = account_transfers_2.getTimestamp();
+            while (accountTransfers2.next()) {
+                assertTrue(Long.compareUnsigned(accountTransfers2.getTimestamp(), timestamp) < 0);
+                timestamp = accountTransfers2.getTimestamp();
 
-                assertTrue(account_history_2.next());
-                assertEquals(account_transfers_2.getTimestamp(), account_history_2.getTimestamp());
+                assertTrue(accountHistory2.next());
+                assertEquals(accountTransfers2.getTimestamp(), accountHistory2.getTimestamp());
             }
 
             // No more results before that timestamp:
             filter.setTimestampMax(timestamp - 1);
-            final var account_transfers_3 = client.getAccountTransfers(filter);
-            final var account_history_3 = client.getAccountHistory(filter);
+            final var accountTransfers3 = client.getAccountTransfers(filter);
+            final var accountHistory3 = client.getAccountHistory(filter);
 
-            assertTrue(account_transfers_3.getLength() == 0);
-            assertTrue(account_history_3.getLength() == 0);
+            assertTrue(accountTransfers3.getLength() == 0);
+            assertTrue(accountHistory3.getLength() == 0);
         }
 
         {
