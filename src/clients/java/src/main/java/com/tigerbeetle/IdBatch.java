@@ -33,6 +33,21 @@ public final class IdBatch extends Batch {
     }
 
     /**
+     * Constructs an batch of ids copying the elements from an array.
+     *
+     * @param ids the array of ids.
+     *
+     * @throws NullPointerException if {@code ids} is null.
+     */
+    public IdBatch(final byte[]... ids) {
+        super(ids.length, Struct.SIZE);
+
+        for (final var id : ids) {
+            add(id);
+        }
+    }
+
+    /**
      * Adds a new id at the end of this batch.
      * <p>
      * If successful, moves the current {@link #setPosition position} to the newly created id.
