@@ -33,7 +33,7 @@ public final class IdBatch extends Batch {
     }
 
     /**
-     * Constructs an batch of ids copying the elements from an array.
+     * Constructs a batch of ids copying the elements from an array.
      *
      * @param ids the array of ids.
      *
