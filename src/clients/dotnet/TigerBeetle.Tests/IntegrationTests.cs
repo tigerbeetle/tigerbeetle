@@ -1,12 +1,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Text;
 
 namespace TigerBeetle.Tests;
 
@@ -31,7 +29,7 @@ public class IntegrationTests
                 UserData128 = 1000,
                 UserData64 = 1001,
                 UserData32 = 1002,
-                Flags = AccountFlags.History,
+                Flags = AccountFlags.None,
                 Ledger = 1,
                 Code = 2,
             },
@@ -1297,7 +1295,7 @@ public class IntegrationTests
         Assert.IsTrue(accountResults.Length == 0);
 
 
-        var list = new List<Task<CreateTransferResult>>();
+        var tasks = new Task<CreateTransferResult>[TASKS_QTY];
         var semaphore = new SemaphoreSlim(CONCURRENCY_MAX);
 
         async Task<CreateTransferResult> asyncAction(Transfer transfer)
@@ -1305,7 +1303,7 @@ public class IntegrationTests
             try
             {
                 await semaphore.WaitAsync();
-                return await client!.CreateTransferAsync(transfer);
+                return await client.CreateTransferAsync(transfer);
             }
             finally
             {
@@ -1318,7 +1316,7 @@ public class IntegrationTests
             try
             {
                 semaphore.Wait();
-                return client!.CreateTransfer(transfer);
+                return client.CreateTransfer(transfer);
             }
             finally
             {
@@ -1340,12 +1338,12 @@ public class IntegrationTests
 
             /// Starts multiple tasks.
             var task = isAsync ? asyncAction(transfer) : Task.Run(() => syncAction(transfer));
-            list.Add(task);
+            tasks[i] = task;
         }
 
-        Task.WhenAll(list).Wait();
+        Task.WhenAll(tasks).Wait();
 
-        Assert.IsTrue(list.All(x => x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(tasks.All(x => x.Result == CreateTransferResult.Ok));
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -1381,7 +1379,7 @@ public class IntegrationTests
         var accountResults = client.CreateAccounts(accounts);
         Assert.IsTrue(accountResults.Length == 0);
 
-        var list = new List<Task<CreateTransferResult>>();
+        var tasks = new Task<CreateTransferResult>[TASKS_QTY];
 
         for (int i = 0; i < TASKS_QTY; i++)
         {
@@ -1397,26 +1395,25 @@ public class IntegrationTests
 
             /// Starts multiple tasks using a client with a limited concurrencyMax:
             var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
-            list.Add(task);
+            tasks[i] = task;
         }
 
         try
         {
             // Ignoring exceptions from the tasks.
-            Task.WhenAll(list).Wait();
+            Task.WhenAll(tasks).Wait();
         }
         catch { }
 
-        // It's expected for some tasks to failt with ConcurrencyExceededException or ObjectDisposedException:
-        var successCount = list.Count(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok);
-        var failedCount = list.Count(x => x.IsFaulted &&
-            (AssertException<ConcurrencyExceededException>(x.Exception!) ||
-            AssertException<ObjectDisposedException>(x.Exception!)));
+        // It's expected for some tasks to fail with ConcurrencyExceededException:
+        var successCount = tasks.Count(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok);
+        var failedCount = tasks.Count(x => x.IsFaulted &&
+            AssertException<ConcurrencyExceededException>(x.Exception!));
         Assert.IsTrue(successCount > 0);
         Assert.IsTrue(successCount + failedCount == TASKS_QTY);
 
         // Asserting that either the task failed or succeeded.
-        Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(tasks.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
@@ -1452,7 +1449,7 @@ public class IntegrationTests
         var accountResults = client.CreateAccounts(accounts);
         Assert.IsTrue(accountResults.Length == 0);
 
-        var list = new List<Task<CreateTransferResult>>();
+        var tasks = new Task<CreateTransferResult>[TASKS_QTY];
 
         for (int i = 0; i < TASKS_QTY; i++)
         {
@@ -1468,11 +1465,11 @@ public class IntegrationTests
 
             /// Starts multiple tasks.
             var task = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
-            list.Add(task);
+            tasks[i] = task;
         }
 
         // Waiting for just one task, the others may be pending.
-        list.First().Wait();
+        Task.WaitAny(tasks);
 
         // Disposes the client, waiting all placed requests to finish.
         client.Dispose();
@@ -1480,14 +1477,14 @@ public class IntegrationTests
         try
         {
             // Ignoring exceptions from the tasks.
-            Task.WhenAll(list).Wait();
+            Task.WhenAll(tasks).Wait();
         }
         catch { }
 
         // Asserting that either the task failed or succeeded,
         // at least one must be succeeded.
-        Assert.IsTrue(list.Any(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok));
-        Assert.IsTrue(list.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(tasks.Any(x => !x.IsFaulted && x.Result == CreateTransferResult.Ok));
+        Assert.IsTrue(tasks.All(x => x.IsFaulted || x.Result == CreateTransferResult.Ok));
     }
 
     [TestMethod]
@@ -1582,7 +1579,7 @@ internal class TBServer : IDisposable
         dataFile = Path.GetRandomFileName();
 
         {
-            var format = new Process();
+            using var format = new Process();
             format.StartInfo.FileName = TB_SERVER;
             format.StartInfo.Arguments = $"format --cluster=0 --replica=0 --replica-count=1 ./{dataFile}";
             format.StartInfo.RedirectStandardError = true;
