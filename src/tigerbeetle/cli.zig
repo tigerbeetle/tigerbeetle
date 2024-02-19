@@ -340,20 +340,20 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const storage_size_limit_min = data_file_size_min;
             const storage_size_limit_max = constants.storage_size_limit_max;
             if (storage_size_limit > storage_size_limit_max) {
-                flags.fatal("--storage-size-limit: size {} exceeds maximum: {}", .{
+                flags.fatal("--limit-storage: size {} exceeds maximum: {}", .{
                     storage_size_limit,
                     storage_size_limit_max,
                 });
             }
             if (storage_size_limit < storage_size_limit_min) {
-                flags.fatal("--storage-size-limit: size {} is below minimum: {}", .{
+                flags.fatal("--limit-storage: size {} is below minimum: {}", .{
                     storage_size_limit,
                     storage_size_limit_min,
                 });
             }
             if (storage_size_limit % constants.sector_size != 0) {
                 flags.fatal(
-                    "--storage-size-limit: size {} must be a multiple of sector size ({})",
+                    "--limit-storage: size {} must be a multiple of sector size ({})",
                     .{ storage_size_limit, constants.sector_size },
                 );
             }
