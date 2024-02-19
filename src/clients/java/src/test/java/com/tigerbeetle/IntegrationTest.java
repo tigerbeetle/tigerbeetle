@@ -1102,6 +1102,9 @@ public class IntegrationTest {
      */
     @Test
     public void testAsyncTasks() throws Throwable {
+        System.err.println("It can't be one thread, Anakin, right? "
+                + java.util.concurrent.ForkJoinPool.getCommonPoolParallelism());
+
         final int TASKS_COUNT = 1_000_000;
         final int CONCURRENCY_MAX = 8192;
         final var semaphore = new Semaphore(CONCURRENCY_MAX);
