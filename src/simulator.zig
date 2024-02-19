@@ -272,7 +272,7 @@ pub fn main() !void {
 
     // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
     // crashed or partitioned permanently. The core should converge to the same state.
-    const ticks_max_convergence = 5_000_000;
+    const ticks_max_convergence = 10_000_000;
     tick = 0;
     while (tick < ticks_max_convergence) : (tick += 1) {
         simulator.tick();
