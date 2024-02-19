@@ -536,9 +536,14 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica)) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
-                if (replica.commit_min < replica.op) {
-                    if (missing_op == null or missing_op.? > replica.commit_min + 1) {
-                        missing_op = replica.commit_min + 1;
+                if (replica.op > replica.commit_min) {
+                    for (replica.commit_min + 1..replica.op + 1) |op| {
+                        const header = simulator.cluster.state_checker.header_with_op(op);
+                        if (!replica.journal.has_clean(&header)) {
+                            if (missing_op == null or missing_op.? > op) {
+                                missing_op = op;
+                            }
+                        }
                     }
                 }
             }
