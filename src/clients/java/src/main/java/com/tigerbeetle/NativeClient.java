@@ -3,7 +3,7 @@ package com.tigerbeetle;
 import static com.tigerbeetle.AssertionError.assertTrue;
 import java.util.concurrent.atomic.AtomicLong;
 
-final class NativeClient {
+final class NativeClient implements AutoCloseable {
     static {
         JNILoader.loadFromJar();
     }
@@ -62,6 +62,7 @@ final class NativeClient {
         }
     }
 
+    @Override
     public void close() {
         if (contextHandle.getAcquire() != 0L) {
             synchronized (this) {
