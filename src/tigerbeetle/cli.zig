@@ -42,16 +42,16 @@ const CliArgs = union(enum) {
 
     start: struct {
         addresses: []const u8,
-        limit_storage: flags.ByteSize = .{ .bytes = constants.storage_size_limit_max },
-        cache_accounts: flags.ByteSize = .{ .bytes = constants.cache_accounts_size_default },
-        cache_transfers: flags.ByteSize = .{ .bytes = constants.cache_transfers_size_default },
+        limit_storage: flags.ByteSize = .{ .value = constants.storage_size_limit_max },
+        cache_accounts: flags.ByteSize = .{ .value = constants.cache_accounts_size_default },
+        cache_transfers: flags.ByteSize = .{ .value = constants.cache_transfers_size_default },
         cache_transfers_pending: flags.ByteSize =
-            .{ .bytes = constants.cache_transfers_pending_size_default },
+            .{ .value = constants.cache_transfers_pending_size_default },
         cache_account_balances: flags.ByteSize =
-            .{ .bytes = constants.cache_account_balances_size_default },
-        cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
+            .{ .value = constants.cache_account_balances_size_default },
+        cache_grid: flags.ByteSize = .{ .value = constants.grid_cache_size_default },
         memory_lsm_manifest: flags.ByteSize =
-            .{ .bytes = constants.lsm_manifest_memory_size_default },
+            .{ .value = constants.lsm_manifest_memory_size_default },
 
         positional: struct {
             path: [:0]const u8,
@@ -336,48 +336,60 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
 
             const addresses = parse_addresses(allocator, start.addresses);
 
-            const storage_size_limit = start.limit_storage.bytes;
+            const storage_size_limit = start.limit_storage.bytes();
             const storage_size_limit_min = data_file_size_min;
             const storage_size_limit_max = constants.storage_size_limit_max;
             if (storage_size_limit > storage_size_limit_max) {
-                flags.fatal("--limit-storage: size {} exceeds maximum: {}", .{
-                    storage_size_limit,
-                    storage_size_limit_max,
+                flags.fatal("--limit-storage: size {}{s} exceeds maximum: {}MiB", .{
+                    start.limit_storage.value,
+                    start.limit_storage.suffix(),
+                    @divExact(storage_size_limit_max, 1024 * 1024),
                 });
             }
             if (storage_size_limit < storage_size_limit_min) {
-                flags.fatal("--limit-storage: size {} is below minimum: {}", .{
-                    storage_size_limit,
-                    storage_size_limit_min,
+                flags.fatal("--limit-storage: size {}{s} is below minimum: {}KiB", .{
+                    start.limit_storage.value,
+                    start.limit_storage.suffix(),
+                    @divExact(storage_size_limit_min, 1024),
                 });
             }
             if (storage_size_limit % constants.sector_size != 0) {
                 flags.fatal(
-                    "--limit-storage: size {} must be a multiple of sector size ({})",
-                    .{ storage_size_limit, constants.sector_size },
+                    "--limit-storage: size {}{s} must be a multiple of sector size ({}KiB)",
+                    .{
+                        start.limit_storage.value,
+                        start.limit_storage.suffix(),
+                        @divExact(constants.sector_size, 1024),
+                    },
                 );
             }
 
-            const lsm_manifest_memory = start.memory_lsm_manifest.bytes;
+            const lsm_manifest_memory = start.memory_lsm_manifest.bytes();
             const lsm_manifest_memory_max = constants.lsm_manifest_memory_size_max;
             const lsm_manifest_memory_min = constants.lsm_manifest_memory_size_min;
             const lsm_manifest_memory_multiplier = constants.lsm_manifest_memory_size_multiplier;
             if (lsm_manifest_memory > lsm_manifest_memory_max) {
-                flags.fatal("--memory-lsm-manifest: size {} exceeds maximum: {}", .{
-                    lsm_manifest_memory,
-                    lsm_manifest_memory_max,
+                flags.fatal("--memory-lsm-manifest: size {}{s} exceeds maximum: {}MiB", .{
+                    start.memory_lsm_manifest.value,
+                    start.memory_lsm_manifest.suffix(),
+                    @divExact(lsm_manifest_memory_max, 1024 * 1024),
                 });
             }
             if (lsm_manifest_memory < lsm_manifest_memory_min) {
-                flags.fatal("--memory-lsm-manifest: size {} is below minimum: {}", .{
-                    lsm_manifest_memory,
-                    lsm_manifest_memory_min,
+                flags.fatal("--memory-lsm-manifest: size {}{s} is below minimum: {}MiB", .{
+                    start.memory_lsm_manifest.value,
+                    start.memory_lsm_manifest.suffix(),
+                    @divExact(lsm_manifest_memory_min, 1024 * 1024),
                 });
             }
             if (lsm_manifest_memory % lsm_manifest_memory_multiplier != 0) {
                 flags.fatal(
-                    "--memory-lsm-manifest: size {} must be a multiple of size ({})",
-                    .{ lsm_manifest_memory, lsm_manifest_memory_multiplier },
+                    "--memory-lsm-manifest: size {}{s} must be a multiple of {}MiB",
+                    .{
+                        start.memory_lsm_manifest.value,
+                        start.memory_lsm_manifest.suffix(),
+                        @divExact(lsm_manifest_memory_multiplier, 1024 * 1024),
+                    },
                 );
             }
 
@@ -491,14 +503,14 @@ fn parse_cache_size_to_count(
 ) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;
 
-    const count_limit = @divFloor(size.bytes, @sizeOf(T));
+    const count_limit = @divFloor(size.bytes(), @sizeOf(T));
     const count_rounded = @divFloor(
         count_limit,
         value_count_max_multiple,
     ) * value_count_max_multiple;
 
     const result: u32 = @intCast(count_rounded); // TODO: better error message on overflow
-    assert(@as(u64, result) * @sizeOf(T) <= size.bytes);
+    assert(@as(u64, result) * @sizeOf(T) <= size.bytes());
 
     return result;
 }
