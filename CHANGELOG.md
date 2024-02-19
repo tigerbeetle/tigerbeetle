@@ -1,5 +1,81 @@
 # TigerBeetle Changelog
 
+## 2024-02-19
+
+### Safety And Performance
+
+- [#1533](https://github.com/tigerbeetle/tigerbeetle/pull/1533)
+
+  DVCs implicitly nack missing prepares from old log-views.
+
+  (This partially addresses a liveness issue in the view change.)
+
+- [#1552](https://github.com/tigerbeetle/tigerbeetle/pull/1552)
+
+  When a replica joins a view by receiving an SV message, some of the SV's headers may be too far
+  ahead to insert into the journal. (That is, they are beyond the replica's checkpoint trigger.)
+
+  During a view change, those headers are now eligible to be DVC headers.
+
+  (This partially addresses a liveness issue in the view change.)
+
+- [#1560](https://github.com/tigerbeetle/tigerbeetle/pull/1560)
+
+  Fixes a bug in the C client that wasn't handling `error.TooManyOutstanding` correctly.
+
+### Internals
+
+- [#1482](https://github.com/tigerbeetle/tigerbeetle/pull/1482)
+
+  Bring back Windows tests for .Net client in CI.
+
+- [#1540](https://github.com/tigerbeetle/tigerbeetle/pull/1540)
+
+  Add script to scaffold changelog updates.
+
+- [#1542](https://github.com/tigerbeetle/tigerbeetle/pull/1542),
+  [#1553](https://github.com/tigerbeetle/tigerbeetle/pull/1553),
+  [#1559](https://github.com/tigerbeetle/tigerbeetle/pull/1559),
+  [#1561](https://github.com/tigerbeetle/tigerbeetle/pull/1561)
+
+  Improve CI/test error reporting.
+
+- [#1551](https://github.com/tigerbeetle/tigerbeetle/pull/1551)
+
+  Draw devhub graph as line graph.
+
+- [#1554](https://github.com/tigerbeetle/tigerbeetle/pull/1554)
+
+  Simplify command to run a single test.
+
+- [#1555](https://github.com/tigerbeetle/tigerbeetle/pull/1555)
+
+  Add client batching integration tests.
+
+- [#1557](https://github.com/tigerbeetle/tigerbeetle/pull/1557)
+
+  Format default values into the CLI help message.
+
+- [#1558](https://github.com/tigerbeetle/tigerbeetle/pull/1558)
+
+  Track commit timestamp to enable retrospective benchmarking in the devhub.
+
+- [#1562](https://github.com/tigerbeetle/tigerbeetle/pull/1562),
+  [#1563](https://github.com/tigerbeetle/tigerbeetle/pull/1563)
+
+  Improve CI/test performance.
+
+- [#1567](https://github.com/tigerbeetle/tigerbeetle/pull/1567)
+
+  Guarantee that the test runner correctly reports "zero tests run" when run with a filter that
+  matches no tests.
+
+### TigerTracks 🎧
+
+- [Eye Of The Tiger](https://www.youtube.com/watch?v=btPJPFnesV4)
+
+  (Hat tip to [iofthetiger](https://ziggit.dev/t/iofthetiger/3065)!)
+
 ## 2024-02-12
 
 ### Safety And Performance
