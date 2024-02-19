@@ -126,13 +126,13 @@ const CliArgs = union(enum) {
         \\        and should be set as large as possible.
         \\        On a machine running only TigerBeetle, this is somewhere around
         \\        (Total RAM) - 3GB (TigerBeetle) - 1GB (System), eg 12GB for a 16GB machine.
-        \\        Defaults to 1GB.
+        \\        Defaults to {[default_cache_grid_gb]d}GB.
         \\
         \\  --memory-lsm-manifest=<size><KB|MB|GB>
         \\        Sets the amount of memory allocated for LSM-tree manifests. When the
         \\        number or size of LSM-trees would become too large for their manifests to fit
         \\        into memory the server will terminate.
-        \\        Defaults to 64MB.
+        \\        Defaults to {[default_memory_lsm_manifest_mb]d}MB.
         \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
@@ -158,6 +158,14 @@ const CliArgs = union(enum) {
     , .{
         .default_address = constants.address,
         .default_port = constants.port,
+        .default_cache_grid_gb = @divExact(
+            constants.grid_cache_size_default,
+            1024 * 1024 * 1024,
+        ),
+        .default_memory_lsm_manifest_mb = @divExact(
+            constants.lsm_manifest_memory_size_default,
+            1024 * 1024,
+        ),
     });
 };
 
