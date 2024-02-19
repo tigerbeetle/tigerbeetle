@@ -1,4 +1,4 @@
-test {
+comptime {
     _ = @import("aof.zig");
     _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
