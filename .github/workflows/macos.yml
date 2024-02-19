@@ -18,17 +18,6 @@ jobs:
       - run: ./zig/zig build test
       - run: ./scripts/install.sh
 
-  benchmark:
-    timeout-minutes: 10
-    strategy:
-      matrix:
-        target: [macos-13]
-    runs-on: ${{ matrix.target }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: ./scripts/install_zig.sh
-      - run: ./zig/zig build -Drelease -Dconfig=production run -- benchmark --transfer-count=4000
-
   c_sample:
     strategy:
       matrix:

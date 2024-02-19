@@ -388,7 +388,7 @@ pub fn exec_options(
     }
 }
 
-/// Returns `true` if the command executed successfully with a zero exit code and an empty stderr.
+/// Returns `true` if the command executed successfully with a zero exit code.
 ///
 /// One intended use-case is sanity-checking that an executable is present, by running
 /// `my-tool --version`.
@@ -411,7 +411,7 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
     defer shell.gpa.free(res.stdout);
 
     return switch (res.term) {
-        .Exited => |code| code == 0 and res.stderr.len == 0,
+        .Exited => |code| code == 0,
         else => false,
     };
 }

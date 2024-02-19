@@ -144,3 +144,15 @@ test "repl integration" {
         \\
     ));
 }
+
+test "benchmark smoke" {
+    const shell = try Shell.create(std.testing.allocator);
+    defer shell.destroy();
+
+    const tigerbeetle = try tigerbeetle_exe(shell);
+    const status_ok = try shell.exec_status_ok(
+        "{tigerbeetle} benchmark --transfer-count=4000",
+        .{ .tigerbeetle = tigerbeetle },
+    );
+    try std.testing.expect(status_ok);
+}
