@@ -245,20 +245,6 @@ pub fn build(b: *std.Build) !void {
         unit_tests.step.dependOn(&tb_client_header_generate.step);
         link_tracer_backend(unit_tests, git_clone_tracy, tracer_backend, target);
 
-        // Turn on test coverage if COV env var is not blank.
-        if (std.process.getEnvVarOwned(b.allocator, "COV")) |coverage| {
-            b.allocator.free(coverage);
-            unit_tests.setExecCmd(&[_]?[]const u8{
-                "kcov",
-                "--clean",
-                "--include-path=src/",
-                "kcov-output",
-                null,
-            });
-        } else |_| {
-            // coverage not set
-        }
-
         // for src/clients/c/tb_client_header_test.zig to use cImport on tb_client.h
         unit_tests.linkLibC();
         unit_tests.addIncludePath(.{ .path = "src/clients/c/" });
