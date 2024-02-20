@@ -53,8 +53,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         java-version: ['11', '21']
 
     runs-on: ${{ matrix.os }}
@@ -77,7 +76,7 @@ jobs:
       -  if: matrix.os == 'windows-latest-large'
          run: '"$env:GITHUB_WORKSPACE/apache-maven-3.9.3/bin" | Out-File -FilePath $env:GITHUB_PATH -Append'
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=java
 
   client-node:
