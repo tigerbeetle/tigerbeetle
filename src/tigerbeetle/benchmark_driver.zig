@@ -22,11 +22,16 @@ const benchmark_load = @import("./benchmark_load.zig");
 
 const log = std.log;
 
-// Note: we intentionally don't use a temporary directory for this data file, and instead just put
-// it into CWD, as performance of TigerBeetle very much depends on a specific file system.
-const data_file = "0_0.tigerbeetle.benchmark";
-
 pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !void {
+    // Note: we intentionally don't use a temporary directory for this data file, and instead just
+    // put it into CWD, as performance of TigerBeetle very much depends on a specific file system.
+    const data_file = data_file: {
+        var random_bytes: [4]u8 = undefined;
+        std.crypto.random.bytes(&random_bytes);
+        const random_suffix: [8]u8 = std.fmt.bytesToHex(random_bytes, .lower);
+        break :data_file "0_0-" ++ random_suffix ++ ".tigerbeetle.benchmark";
+    };
+
     var data_file_created = false;
     defer {
         if (data_file_created) {
