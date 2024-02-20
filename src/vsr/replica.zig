@@ -5074,6 +5074,7 @@ pub fn ReplicaType(
             if (self.status == .recovering) assert(self.solo());
             assert(self.op >= self.op_checkpoint());
             assert(self.op <= self.op_prepare_max());
+            assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             const op = op: {
                 if (self.primary_index(self.view) == self.replica) {
