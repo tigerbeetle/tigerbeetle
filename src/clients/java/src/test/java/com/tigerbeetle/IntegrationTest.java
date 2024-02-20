@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
@@ -1111,6 +1112,8 @@ public class IntegrationTest {
         final int CONCURRENCY_MAX = 8192;
         final var semaphore = new Semaphore(CONCURRENCY_MAX);
 
+        final var executor = Executors.newFixedThreadPool(4);
+
         try (final var client =
                 new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
 
@@ -1139,10 +1142,12 @@ public class IntegrationTest {
                 tasks[i] = client.createTransfersAsync(transfers).thenApplyAsync((result) -> {
                     semaphore.release();
                     return result;
-                });
+                }, executor);
             }
 
             // Wait for all threads.
+            CompletableFuture.allOf(tasks).join();
+
             for (int i = 0; i < TASKS_COUNT; i++) {
                 @SuppressWarnings("unchecked")
                 final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];

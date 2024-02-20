@@ -78,14 +78,13 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
 
     @Override
     protected void setResult(final TResponse result) {
-
-        // To prevent the completion to run in the callback thread
-        // we must call "completeAsync" instead of "complete".
-        future.completeAsync(() -> result);
+        final var completed = future.complete(result);
+        AssertionError.assertTrue(completed, "CompletableFuture already completed");
     }
 
     @Override
     protected void setException(final Throwable exception) {
-        future.completeExceptionally(exception);
+        final var completed = future.completeExceptionally(exception);
+        AssertionError.assertTrue(completed, "CompletableFuture already completed");
     }
 }
