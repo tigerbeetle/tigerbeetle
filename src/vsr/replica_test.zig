@@ -849,12 +849,8 @@ test "Cluster: view-change: primary with dirty log" {
     b1.corrupt(.{ .wal_prepare = checkpoint_2 % slot_count });
     t.run();
 
-    // TODO Fix https://github.com/tigerbeetle/tigerbeetle/issues/1378
-    // B1 and B2 are stuck, endlessly trying to (unnecessarily) prepare the corrupt entry.
-    try expectEqual(b1.status(), .view_change);
-    try expectEqual(b2.status(), .view_change);
-    // try expectEqual(b1.status(), .normal);
-    // try expectEqual(b2.status(), .normal);
+    try expectEqual(b1.status(), .normal);
+    try expectEqual(b2.status(), .normal);
 }
 
 test "Cluster: view-change: nack older view" {
@@ -1112,6 +1108,34 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 
     // try TestReplicas.expect_sync_done(t.replica(.R_));
+}
+
+test "Cluster: sync: slightly lagging replica" {
+    // Sometimes a replica must switch to state sync even if it is within journal_slot_count
+    // ops from commit_max. Checkpointed ops are not repaired and might become unavailable.
+
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(checkpoint_1 - 1, checkpoint_1 - 1);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    b2.drop_all(.R_, .bidirectional);
+    try c.request(checkpoint_1_trigger + 1, checkpoint_1_trigger + 1);
+
+    // Corrupt all copies of a checkpointed prepare.
+    a0.corrupt(.{ .wal_prepare = checkpoint_1 });
+    b1.corrupt(.{ .wal_prepare = checkpoint_1 });
+    try c.request(checkpoint_1_trigger + 2, checkpoint_1_trigger + 2);
+
+    // At this point, b2 won't be able to repair WAL and must state sync.
+    b2.pass_all(.R_, .bidirectional);
+    try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger + 3);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + 3);
 }
 
 test "Cluster: prepare beyond checkpoint trigger" {
