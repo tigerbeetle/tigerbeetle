@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
@@ -657,8 +658,13 @@ public class IntegrationTest {
         assertTransfers(transfers, lookupTransfers);
         assertNotEquals(0L, lookupTransfers.getTimestamp());
 
-        // Waiting 1s for the timeout to expire:
-        Thread.sleep(1000);
+        // We need to wait 1s for the server to expire the transfer,
+        // however `Thread.sleep` does not have nanoseconds resolution and may finish earlier than
+        // the server timeout, so adding an extra delay to avoid flaky tests.
+        final var TIMEOUT_MS = 1000;
+        final var currentMilis = System.currentTimeMillis();
+        Thread.sleep(TIMEOUT_MS + 1);
+        assertTrue(System.currentTimeMillis() - currentMilis > TIMEOUT_MS);
 
         // Creating a void_pending transfer.
         final var voidTransfers = new TransferBatch(2);
@@ -1106,6 +1112,8 @@ public class IntegrationTest {
         final int CONCURRENCY_MAX = 8192;
         final var semaphore = new Semaphore(CONCURRENCY_MAX);
 
+        final var executor = Executors.newFixedThreadPool(4);
+
         try (final var client =
                 new Client(clusterId, new String[] {server.getAddress()}, CONCURRENCY_MAX)) {
 
@@ -1134,10 +1142,12 @@ public class IntegrationTest {
                 tasks[i] = client.createTransfersAsync(transfers).thenApplyAsync((result) -> {
                     semaphore.release();
                     return result;
-                });
+                }, executor);
             }
 
-            // Wait for all threads.
+            // Wait for all tasks.
+            CompletableFuture.allOf(tasks).join();
+
             for (int i = 0; i < TASKS_COUNT; i++) {
                 @SuppressWarnings("unchecked")
                 final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
