@@ -1394,14 +1394,11 @@ pub fn ReplicaType(
             assert(message.header.op > self.op);
             assert(message.header.op > self.commit_min);
 
-            defer {
-                if (self.backup()) {
-                    // A prepare may already be committed if requested by repair() so take the max:
-                    self.advance_commit_max(message.header.commit, @src().fn_name);
-                    self.commit_journal();
-                    assert(self.commit_max >= message.header.commit);
-                }
+            if (self.backup()) {
+                self.advance_commit_max(message.header.commit, @src().fn_name);
+                assert(self.commit_max >= message.header.commit);
             }
+            defer if (self.backup()) self.commit_journal();
 
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_prepare_max()) {
@@ -3030,7 +3027,6 @@ pub fn ReplicaType(
                     assert(self.commit_max == self.commit_min);
                     assert(self.commit_max == self.op - self.pipeline.queue.prepare_queue.count);
                 }
-
             }
 
             if (commit > self.commit_max) {
