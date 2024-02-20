@@ -657,8 +657,13 @@ public class IntegrationTest {
         assertTransfers(transfers, lookupTransfers);
         assertNotEquals(0L, lookupTransfers.getTimestamp());
 
-        // Waiting 1s for the timeout to expire:
-        Thread.sleep(1000);
+        // We need to wait 1s for the server to expire the transfer,
+        // however `Thread.sleep` does not have nanoseconds resolution and may finish earlier than
+        // the server timeout, so adding an extra delay to avoid flaky tests.
+        final var TIMEOUT_MS = 1000;
+        final var currentMilis = System.currentTimeMillis();
+        Thread.sleep(TIMEOUT_MS + 1);
+        assertTrue(System.currentTimeMillis() - currentMilis > TIMEOUT_MS);
 
         // Creating a void_pending transfer.
         final var voidTransfers = new TransferBatch(2);
