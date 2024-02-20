@@ -1145,7 +1145,7 @@ public class IntegrationTest {
                 }, executor);
             }
 
-            // Wait for all threads.
+            // Wait for all tasks.
             CompletableFuture.allOf(tasks).join();
 
             for (int i = 0; i < TASKS_COUNT; i++) {
