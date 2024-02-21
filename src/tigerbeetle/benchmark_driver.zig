@@ -54,7 +54,11 @@ pub fn main(allocator: std.mem.Allocator, args: *const cli.Command.Benchmark) !v
         try format(allocator, .{ .tigerbeetle = me, .data_file = data_file });
         data_file_created = true;
 
-        tigerbeetle_process = try start(allocator, .{ .tigerbeetle = me, .data_file = data_file });
+        tigerbeetle_process = try start(allocator, .{
+            .tigerbeetle = me,
+            .data_file = data_file,
+            .args = args,
+        });
     }
 
     const addresses = args.addresses orelse &.{tigerbeetle_process.?.address};
@@ -108,16 +112,65 @@ const TigerBeetleProcess = struct {
 fn start(allocator: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
     data_file: []const u8,
+    args: *const cli.Command.Benchmark,
 }) !TigerBeetleProcess {
-    var child = std.ChildProcess.init(
-        &.{
-            options.tigerbeetle,
-            "start",
-            "--addresses=0",
-            options.data_file,
-        },
-        allocator,
-    );
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var start_args = std.ArrayListUnmanaged([]const u8){};
+    try start_args.append(arena.allocator(), options.tigerbeetle);
+    try start_args.append(arena.allocator(), "start");
+    try start_args.append(arena.allocator(), "--addresses=0");
+
+    // Repassing the cache options to the tigerbeetle process:
+    if (options.args.cache_accounts) |cache_accounts| {
+        try start_args.append(
+            arena.allocator(),
+            try std.fmt.allocPrint(arena.allocator(), "--cache-accounts={s}", .{
+                cache_accounts,
+            }),
+        );
+    }
+
+    if (options.args.cache_transfers) |cache_transfers| {
+        try start_args.append(
+            arena.allocator(),
+            try std.fmt.allocPrint(arena.allocator(), "--cache-transfers={s}", .{
+                cache_transfers,
+            }),
+        );
+    }
+
+    if (options.args.cache_transfers_posted) |cache_transfers_posted| {
+        try start_args.append(
+            arena.allocator(),
+            try std.fmt.allocPrint(arena.allocator(), "--cache-transfers-posted={s}", .{
+                cache_transfers_posted,
+            }),
+        );
+    }
+
+    if (options.args.cache_account_history) |cache_account_history| {
+        try start_args.append(
+            arena.allocator(),
+            try std.fmt.allocPrint(arena.allocator(), "--cache-account-history={s}", .{
+                cache_account_history,
+            }),
+        );
+    }
+
+    if (options.args.cache_grid) |cache_grid| {
+        try start_args.append(
+            arena.allocator(),
+            try std.fmt.allocPrint(arena.allocator(), "--cache-grid={s}", .{
+                cache_grid,
+            }),
+        );
+    }
+
+    try start_args.append(arena.allocator(), options.data_file);
+    var child = std.ChildProcess.init(start_args.items, allocator);
+
     child.request_resource_usage_statistics = true;
     child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
