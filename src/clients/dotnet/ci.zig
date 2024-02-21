@@ -19,9 +19,12 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec(
         \\dotnet test
         \\    /p:CollectCoverage=false
-        \\    /p:Threshold="95,85,95"
-        \\    /p:ThresholdType="line,branch,method"
-    , .{});
+        \\    /p:Threshold={threshold}
+        \\    /p:ThresholdType={threshold_type}
+    , .{
+        .threshold = "\"95,85,95\"", // sic, coverlet wants quotes inside the argument
+        .threshold_type = "\"line,branch,method\"",
+    });
 
     // Integration tests.
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
