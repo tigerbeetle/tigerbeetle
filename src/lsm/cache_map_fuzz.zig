@@ -108,13 +108,13 @@ const Environment = struct {
                     const model_value = env.model.get(key);
                     if (model_value == null) {
                         assert(cache_map_value == null);
-                    } else if (env.compacts >= 2 and model_value.?.op <= env.compacts - 2) {
-                        // .compact() support; if the entry has an op 2 or more compacts ago, it
+                    } else if (env.compacts > model_value.?.op) {
+                        // .compact() support; if the entry has an op 1 or more compacts ago, it
                         // doesn't have to exist in the cache_map. It may still be served from the
                         // cache layer, however.
                         stdx.maybe(cache_map_value == null);
-                        if (cache_map_value) |unwrapped_cache_map_value| {
-                            assert(std.meta.eql(unwrapped_cache_map_value.*, model_value.?.value));
+                        if (cache_map_value) |cache_map_value_unwrapped| {
+                            assert(std.meta.eql(cache_map_value_unwrapped.*, model_value.?.value));
                         }
                     } else {
                         assert(std.meta.eql(model_value.?.value, cache_map_value.?.*));
@@ -155,7 +155,7 @@ const Environment = struct {
     /// We verify the negative space by iterating over the cache_map's cache and maps directly,
     /// ensuring that:
     /// 1. The values in the cache all exist and are equal in the model.
-    /// 2. The values in stash_1 either exists and are equal in the model, or there's the same key
+    /// 2. The values in stash either exists and are equal in the model, or there's the same key
     ///    in the cache.
     /// 3. The values in stash_2 either exists and are equal in the model, or there's the same key
     ///    in stash_1 or the cache.
@@ -163,15 +163,15 @@ const Environment = struct {
         var checked: u32 = 0;
         var it = env.model.iterator();
         while (it.next()) |kv| {
-            // .compact() support
-            if (env.compacts > 0 and kv.value_ptr.op < env.compacts - 1) {
-                continue;
-            }
-
-            // Get account from cache_map.
+            // Compare from cache_map, if found:
             const cache_map_value = env.cache_map.get(kv.key_ptr.*);
-
-            assert(std.meta.eql(kv.value_ptr.value, cache_map_value.?.*));
+            stdx.maybe(cache_map_value != null);
+            if (cache_map_value) |cache_map_value_unwraped| {
+                assert(std.meta.eql(kv.value_ptr.value, cache_map_value_unwraped.*));
+            } else {
+                // .compact() support:
+                assert(env.compacts > kv.value_ptr.op);
+            }
 
             checked += 1;
         }
@@ -187,15 +187,14 @@ const Environment = struct {
             }
 
             const model_val = env.model.get(TestTable.key_from_value(cache_value));
-
             assert(std.meta.eql(cache_value.*, model_val.?.value));
         }
 
         // The stash can have stale values, but in that case the real value _must_ exist
         // in the cache. It should be impossible for the stash to have a value that isn't in the
         // model, since cache_map.remove() removes from both the cache and stash.
-        var stash_iterator_1 = env.cache_map.stash_1.keyIterator();
-        while (stash_iterator_1.next()) |stash_value| {
+        var stash_iterator = env.cache_map.stash.valueIterator();
+        while (stash_iterator.next()) |stash_value| {
             // Get account from model.
             const model_value = env.model.getPtr(TestTable.key_from_value(stash_value));
 
@@ -207,31 +206,15 @@ const Environment = struct {
             if (!stash_value_equal) {
                 // We verified all cache entries were equal and correct above, so if it exists,
                 // it must be right.
-                const cache_value = env.cache_map.cache.get(TestTable.key_from_value(stash_value));
+                const cache_value = env.cache_map.cache.get(
+                    TestTable.key_from_value(stash_value),
+                );
                 assert(cache_value != null);
             }
         }
 
-        var stash_iterator_2 = env.cache_map.stash_2.keyIterator();
-        while (stash_iterator_2.next()) |stash_value| {
-            // Get account from model.
-            const model_value = env.model.getPtr(TestTable.key_from_value(stash_value));
-
-            // Even if the stash has stale values, the key must still exist in the model.
-            assert(model_value != null);
-
-            const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
-
-            if (!stash_value_equal) {
-                // Same logic as when stash_1 checks the cache above.
-                const cache_value = env.cache_map.cache.get(TestTable.key_from_value(stash_value));
-                const stash_1_value = env.cache_map.stash_1.get(stash_value.*);
-                assert(cache_value != null or stash_1_value != null);
-            }
-        }
-
         log.info(
-            "Verified all items in the cache, 1st stash, 2nd stash exist and match the model.",
+            "Verified all items in the cache and stash exist and match the model.",
             .{},
         );
     }
