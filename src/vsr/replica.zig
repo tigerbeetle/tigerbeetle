@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const SourceLocation = std.builtin.SourceLocation;
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
@@ -784,7 +785,7 @@ pub fn ReplicaType(
 
             if (self.solo()) {
                 if (self.commit_min < self.op) {
-                    self.advance_commit_max(self.op, @src().fn_name);
+                    self.advance_commit_max(self.op, @src());
                     self.commit_journal();
 
                     // Recovery will complete when commit_journal finishes.
@@ -1395,7 +1396,7 @@ pub fn ReplicaType(
             assert(message.header.op > self.commit_min);
 
             if (self.backup()) {
-                self.advance_commit_max(message.header.commit, @src().fn_name);
+                self.advance_commit_max(message.header.commit, @src());
                 assert(self.commit_max >= message.header.commit);
             }
             defer if (self.backup()) self.commit_journal();
@@ -1628,7 +1629,7 @@ pub fn ReplicaType(
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
                 if (commit_entry.checksum == message.header.commit_checksum) {
                     log.debug("{}: on_commit: checksum verified", .{self.replica});
-                } else if (self.valid_hash_chain("on_commit")) {
+                } else if (self.valid_hash_chain(@src())) {
                     @panic("commit checksum verification failed");
                 } else {
                     // We may still be repairing after receiving the start_view message.
@@ -1636,7 +1637,7 @@ pub fn ReplicaType(
                 }
             }
 
-            self.advance_commit_max(message.header.commit, @src().fn_name);
+            self.advance_commit_max(message.header.commit, @src());
             self.commit_journal();
         }
 
@@ -1950,7 +1951,7 @@ pub fn ReplicaType(
                     if (self.log_view < self.view or
                         (self.log_view == self.view and header.op >= self.op))
                     {
-                        self.set_op_and_commit_max(header.op, message.header.commit, "on_start_view");
+                        self.set_op_and_commit_max(header.op, message.header.commit, @src());
                         assert(self.op == header.op);
                         assert(self.commit_max >= message.header.commit);
                         break;
@@ -2817,7 +2818,7 @@ pub fn ReplicaType(
                 // "stuck" is not actually certain, merely likely (see below).
                 const stuck_header =
                     commit_next < primary_repair_min and
-                    !self.valid_hash_chain("repair_sync_timeout");
+                    !self.valid_hash_chain(@src());
 
                 const stuck_prepare =
                     commit_next < primary_repair_min and
@@ -3018,7 +3019,7 @@ pub fn ReplicaType(
         /// Caller must ensure that:
         /// - op=commit is indeed committed by the cluster,
         /// - local WAL doesn't contain truncated prepares from finished views.
-        fn advance_commit_max(self: *Self, commit: u64, method: []const u8) void {
+        fn advance_commit_max(self: *Self, commit: u64, source: SourceLocation) void {
             defer {
                 assert(self.commit_max >= commit);
                 assert(self.commit_max >= self.commit_min);
@@ -3032,7 +3033,7 @@ pub fn ReplicaType(
             if (commit > self.commit_max) {
                 log.debug("{}: {s}: advancing commit_max={}..{}", .{
                     self.replica,
-                    method,
+                    source.fn_name,
                     self.commit_max,
                     commit,
                 });
@@ -3236,7 +3237,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
             maybe(self.commit_max <= self.op);
 
-            if (!self.valid_hash_chain("commit_journal_next")) {
+            if (!self.valid_hash_chain(@src())) {
                 assert(!self.solo());
                 self.commit_dispatch(.idle);
                 return;
@@ -3789,7 +3790,7 @@ pub fn ReplicaType(
 
             self.commit_min += 1;
             assert(self.commit_min == prepare.header.op);
-            self.advance_commit_max(self.commit_min, @src().fn_name);
+            self.advance_commit_max(self.commit_min, @src());
 
             if (self.event_callback) |hook| hook(self, .committed);
 
@@ -4093,7 +4094,7 @@ pub fn ReplicaType(
             assert(self.primary_index(self.view) == self.replica);
             assert(self.repairs_allowed());
 
-            assert(self.valid_hash_chain("primary_discard_uncommitted_ops_from"));
+            assert(self.valid_hash_chain(@src()));
 
             const slot = self.journal.slot_with_op(op).?;
             assert(op > self.commit_max);
@@ -6970,7 +6971,7 @@ pub fn ReplicaType(
             }
         }
 
-        fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, method: []const u8) void {
+        fn set_op_and_commit_max(self: *Self, op: u64, commit_max: u64, source: SourceLocation) void {
             assert(self.status == .view_change or self.status == .normal or
                 self.status == .recovering_head);
 
@@ -6994,7 +6995,7 @@ pub fn ReplicaType(
             if (commit_max < self.commit_max and self.commit_min == self.commit_max) {
                 log.debug("{}: {s}: k={} < commit_max={} and commit_min == commit_max", .{
                     self.replica,
-                    method,
+                    source.fn_name,
                     commit_max,
                     self.commit_max,
                 });
@@ -7018,7 +7019,7 @@ pub fn ReplicaType(
 
             log.debug("{}: {s}: view={} op={}..{} commit={}..{}", .{
                 self.replica,
-                method,
+                source.fn_name,
                 self.view,
                 previous_op,
                 self.op,
@@ -7114,7 +7115,7 @@ pub fn ReplicaType(
                 // "`replica.op` exists" invariant may be broken briefly between
                 // set_op_and_commit_max() and replace_header().
 
-                self.set_op_and_commit_max(header_head.op, commit_max, "on_do_view_change");
+                self.set_op_and_commit_max(header_head.op, commit_max, @src());
                 assert(self.commit_max <= self.op_prepare_max());
                 assert(self.commit_max <= self.op);
                 maybe(self.journal.header_with_op(self.op) == null);
@@ -8002,7 +8003,7 @@ pub fn ReplicaType(
 
             // Bump commit_max before the superblock update so that a view_durable_update()
             // during the sync_start update uses the correct (new) commit_max.
-            self.advance_commit_max(stage.target.checkpoint_op, @src().fn_name);
+            self.advance_commit_max(stage.target.checkpoint_op, @src());
 
             const sync_op_max =
                 vsr.Checkpoint.trigger_for_checkpoint(stage.target.checkpoint_op).?;
@@ -8201,7 +8202,7 @@ pub fn ReplicaType(
         /// Whether it is safe to commit or send prepare_ok messages.
         /// Returns true if the hash chain is valid and up to date for the current view.
         /// This is a stronger guarantee than `valid_hash_chain_between()` below.
-        fn valid_hash_chain(self: *Self, method: []const u8) bool {
+        fn valid_hash_chain(self: *Self, source: SourceLocation) bool {
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op);
 
@@ -8210,7 +8211,7 @@ pub fn ReplicaType(
             if (self.op < self.op_repair_max()) {
                 log.debug("{}: {s}: waiting for repair (op={} < op_repair_max={}, commit_max={})", .{
                     self.replica,
-                    method,
+                    source.fn_name,
                     self.op,
                     self.op_repair_max(),
                     self.commit_max,
@@ -8227,7 +8228,7 @@ pub fn ReplicaType(
                 // in our journal yet.
                 log.debug("{}: {s}: recently synced; waiting for ops (op=checkpoint={})", .{
                     self.replica,
-                    method,
+                    source.fn_name,
                     self.op,
                 });
                 return false;
@@ -8239,7 +8240,7 @@ pub fn ReplicaType(
 
             // We must validate the hash chain as far as possible, since `self.op` may disclose a fork:
             if (!self.valid_hash_chain_between(op_verify_min, self.op)) {
-                log.debug("{}: {s}: waiting for repair (hash chain)", .{ self.replica, method });
+                log.debug("{}: {s}: waiting for repair (hash chain)", .{ self.replica, source.fn_name });
                 return false;
             }
 
