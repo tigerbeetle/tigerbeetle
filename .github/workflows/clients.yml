@@ -83,8 +83,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
         node-version: ['18.x', '20.x']
         exclude:
           - os: macos-13
@@ -101,7 +100,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=node
 
   clients-pipeline:
