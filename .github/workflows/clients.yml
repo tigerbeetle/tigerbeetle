@@ -34,8 +34,7 @@ jobs:
     strategy:
       max-parallel: 2
       matrix:
-        # os: [ubuntu-latest-large, windows-latest-large, macos-13,  macos-13-xlarge]
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -46,7 +45,7 @@ jobs:
         with:
           go-version: '1.18'
 
-      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest-large' && 'bat' || 'sh' }}
+      - run: ./scripts/install_zig.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=go
 
   client-java:

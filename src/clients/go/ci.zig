@@ -22,13 +22,18 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     //     reproducible
     //   - (implicitly) use `gcc` on Mac, as `zig cc` doesn't work there:
     //     <https://github.com/ziglang/zig/issues/15438>
-    const zig_cc = if (builtin.os.tag == .macos) void else cc: {
-        const zig_exe = try shell.project_root.realpathAlloc(
-            shell.arena.allocator(),
-            comptime "zig/zig" ++ builtin.target.exeFileExt(),
-        );
-        break :cc try shell.print("{s} cc", .{zig_exe});
-    };
+    switch (builtin.os.tag) {
+        .linux, .windows => {
+            const zig_exe = try shell.project_root.realpathAlloc(
+                shell.arena.allocator(),
+                comptime "zig/zig" ++ builtin.target.exeFileExt(),
+            );
+            const zig_cc = try shell.print("{s} cc", .{zig_exe});
+            try shell.env.put("CC", zig_cc);
+        },
+        .macos => {},
+        else => unreachable,
+    }
 
     // Building the server before running the integrated tests:
     try shell.zig("build install -Drelease -Dconfig=production", .{});
@@ -51,9 +56,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
 
-        if (builtin.os.tag != .macos) {
-            try shell.env.put("CC", zig_cc);
-        }
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec("go run main.go", .{});
     }
