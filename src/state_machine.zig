@@ -1721,10 +1721,10 @@ const TestContext = struct {
 
         ctx.state_machine = try StateMachine.init(allocator, &ctx.grid, .{
             .lsm_forest_node_count = 1,
-            .cache_entries_accounts = 2048,
-            .cache_entries_transfers = 2048,
-            .cache_entries_posted = 2048,
-            .cache_entries_account_history = 2048,
+            .cache_entries_accounts = 0,
+            .cache_entries_transfers = 0,
+            .cache_entries_posted = 0,
+            .cache_entries_account_history = 0,
         });
         errdefer ctx.state_machine.deinit(allocator);
     }
