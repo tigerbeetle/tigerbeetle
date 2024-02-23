@@ -652,7 +652,25 @@ pub const state_machine_config = StateMachineConfig{
     .vsr_operations_reserved = vsr_operations_reserved,
 };
 
-/// Whether to perform intensive online verification.
+/// TigerBeetle uses asserts proactively, unless they severely degrade performance. For production,
+/// 5% slow down might be deemed critical, tests tolerate slowdowns up to 5x. Tests should be
+/// reasonably fast to make deterministic simulation effective. `constants.verify` disambiguate the
+/// two cases.
+///
+/// In the control plane (eg, vsr proper) assert unconditionally. Due to batching, control plane
+/// overhead is negligible. It is acceptable to spend O(N) time to verify O(1) computation.
+///
+/// In the data plane (eg, lsm tree), finer grained judgement is required. Do an unconditional O(1)
+/// assert before an O(N) loop (e.g, a bounds check). Inside the loop, it might or might not be
+/// feasible to add an extra assert per iteration. In the latter case, guard the assert with `if
+/// (constants.verify)`, but prefer an unconditional assert unless benchmarks prove it to be costly.
+///
+/// In the data plane, never use O(N) asserts for O(1) computations --- due to do randomized testing
+/// the overall coverage is proportional to the number of tests run. Slow thorough assertions
+/// decrease the overall test coverage.
+///
+/// Specific data structures might use a comptime parameter, to enable extra costly verification
+/// only during unit tests of the data structure.
 pub const verify = config.process.verify;
 
 /// AOF (Append Only File) logs all transactions synchronously to disk before replying
