@@ -2823,7 +2823,7 @@ pub fn ReplicaType(
             // - we have not made any progress committing for some interval.
             // It is possible that we could in fact repair and progress anyway, but this is not
             // guaranteed: the rest of the cluster no longer repairs the relevant prepares.
-            // We  might be stuck waiting for a prepare or block which will never arrive.
+            // We might be stuck waiting for a prepare or block which will never arrive.
 
             log.warn("{}: on_repair_sync_timeout: start sync; lagging behind cluster " ++
                 "(op_head={} commit_min={} commit_max={} commit_stage={s})", .{
@@ -5048,13 +5048,13 @@ pub fn ReplicaType(
 
         /// Returns the oldest op that the replica must/(is permitted to) repair.
         ///
-        /// Safety condition: repairing an old op must not overwrite a newer op from the next  wrap.
+        /// Safety condition: repairing an old op must not overwrite a newer op from the next wrap.
         ///
         /// Availability condition: each committed op must be present either in a quorum of WALs or
         /// it in a quorum of checkpoints.
         ///
-        /// If op=trigger+1 is committed, the corresponding checkpoint is confirmed to be present on
-        /// a quorum of replicas. Repairig all ops since the latest confirmed checkpoint satisfies
+        /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
+        /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
         /// both conditions.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
