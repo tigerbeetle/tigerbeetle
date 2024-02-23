@@ -250,28 +250,23 @@ pub fn CacheMapType(
             // Make sure we aren't being called in regular code without another once over.
             assert(constants.verify);
 
-            if (self.cache) |*cache| {
-                const maybe_removed = cache.remove(key);
+            const cache_removed: ?Value = if (self.cache) |*cache|
+                cache.remove(key)
+            else
+                null;
 
-                if (self.scope_is_active) {
-                    // TODO: Actually, does the fuzz catch this...
-                    self.scope_rollback_log.appendAssumeCapacity(
-                        maybe_removed orelse
-                            self.stash.getKey(tombstone_from_key(key)) orelse return,
-                    );
-                }
+            // We always need to try remove from the stash; since it could have a stale value.
+            const stash_removed: ?Value = if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
+                kv.key
+            else
+                null;
 
-                // We always need to try remove from the stash; since it could have a stale value.
-                // The early return above is OK - if it doesn't exist, there's nothing to remove.
-                _ = self.stash.remove(tombstone_from_key(key));
-            } else {
-                const maybe_removed = self.stash.fetchRemove(tombstone_from_key(key));
-                if (self.scope_is_active) {
-                    if (maybe_removed) |kv| {
-                        // TODO: Actually, does the fuzz catch this...
-                        self.scope_rollback_log.appendAssumeCapacity(kv.key);
-                    }
-                }
+            if (self.scope_is_active) {
+                // TODO: Actually, does the fuzz catch this...
+                self.scope_rollback_log.appendAssumeCapacity(
+                    cache_removed orelse
+                        stash_removed orelse return,
+                );
             }
         }
 
