@@ -156,93 +156,78 @@ pub fn CacheMapType(
 
         fn upsert_scope_closed(self: *CacheMap, value: *const Value) void {
             assert(!self.scope_is_active);
-
-            if (self.cache) |*cache| {
-                const result = cache.upsert(value);
-
-                if (result.evicted) |*evicted| {
-                    switch (result.updated) {
-                        .insert => {
-                            assert(key_from_value(evicted) != key_from_value(value));
-                            // Here and in upsert_scope using `getOrPutAssumeCapacity` instead of
-                            // `putAssumeCapacity` is critical.
-                            // Since we use HashMaps with no Value, `putAssumeCapacity`
-                            // _will not_ clobber the existing value.
-                            const gop = self.stash.getOrPutAssumeCapacity(evicted.*);
-                            gop.key_ptr.* = evicted.*;
-                        },
-                        .update => {
-                            // The old version was evicted.
-                            assert(key_from_value(evicted) == key_from_value(value));
-                        },
-                    }
-                }
-            } else {
-                const gop = self.stash.getOrPutAssumeCapacity(value.*);
-                gop.key_ptr.* = value.*;
-            }
+            _ = self.fetch_upsert(value);
         }
 
-        // When upserting into a scope, there are a few cases that must be handled:
-        // 1. There was an eviction because an item was updated. Append the evicted item to the
-        //    scope rollback log.
-        // 2. There was an eviction because an item was inserted (eg, two different keys mapping to
-        //    the same tags). Put the item in the stash, just like the no-scope case, and don't
-        //    store anything in the scope rollback log yet. Case 3 will handle that.
-        // 3. Regardless of eviction, there was an insert:
-        //    a. If the item exists in the stash, it was really an update. Append the stash value
-        //       to the scope rollback log.
-        //    b. If the item doesn't exist in the stash, it was an insert. Append a tombstone to
-        //       the scope rollback log.
+        // When upserting into a scope:
+        //  a. If it was updated, append the old value to the the scope rollback log.
+        //  b. If it was an insert, append a tombstone to the scope rollback log.
         fn upsert_scope_opened(self: *CacheMap, value: *const Value) void {
             assert(self.scope_is_active);
 
-            const key = key_from_value(value);
+            if (self.fetch_upsert(value)) |old_value| {
+                self.scope_rollback_log.appendAssumeCapacity(old_value);
+            } else {
+                const key = key_from_value(value);
+                self.scope_rollback_log.appendAssumeCapacity(
+                    tombstone_from_key(key),
+                );
+            }
+        }
+
+        // Upserts the cache and stash and returns the old value in case of
+        // an update.
+        fn fetch_upsert(self: *CacheMap, value: *const Value) ?Value {
             if (self.cache) |*cache| {
+                const key = key_from_value(value);
                 const result = cache.upsert(value);
 
                 if (result.evicted) |*evicted| {
                     switch (result.updated) {
                         .update => {
-                            // Case 1: The old version was evicted.
                             assert(key_from_value(evicted) == key);
-                            self.scope_rollback_log.appendAssumeCapacity(evicted.*);
+
+                            // There was an eviction because an item was updated,
+                            // the evicted item is always its previous version.
+                            return evicted.*;
                         },
                         .insert => {
-                            // Case 2: Another item was evicted.
                             assert(key_from_value(evicted) != key);
-                            const gop = self.stash.getOrPutAssumeCapacity(evicted.*);
-                            gop.key_ptr.* = evicted.*;
 
-                            // Case 3 below handles appending into the rollback log if needed.
+                            // There was an eviction because a new item was inserted,
+                            // the evicted item will be added to the stash.
+                            const stash_updated = self.stash_upsert(evicted);
+
+                            // We don't expect stale values on the stash.
+                            assert(stash_updated == null);
                         },
                     }
+                } else {
+                    // It must be an insert without eviction,
+                    // since updates always evict the old version.
+                    assert(result.updated == .insert);
                 }
 
-                if (result.updated == .insert) {
-                    if (self.stash.getKeyPtr(tombstone_from_key(key))) |stash_value| {
-                        // Case 3a.
-                        self.scope_rollback_log.appendAssumeCapacity(stash_value.*);
-                    } else {
-                        // Case 3b.
-                        self.scope_rollback_log.appendAssumeCapacity(
-                            tombstone_from_key(key),
-                        );
-                    }
-                }
+                // The stash may have the old value if nothing was evicted.
+                return self.stash_remove(key);
             } else {
-                const gop = self.stash.getOrPutAssumeCapacity(value.*);
-                if (gop.found_existing) {
-                    // Case 3a.
-                    self.scope_rollback_log.appendAssumeCapacity(gop.key_ptr.*);
-                } else {
-                    // Case 3b.
-                    self.scope_rollback_log.appendAssumeCapacity(
-                        tombstone_from_key(key),
-                    );
-                }
-                gop.key_ptr.* = value.*;
+                // No cache.
+                // Upserting the stash directly.
+                return self.stash_upsert(value);
             }
+        }
+
+        fn stash_upsert(self: *CacheMap, value: *const Value) ?Value {
+            // Using `getOrPutAssumeCapacity` instead of `putAssumeCapacity` is
+            // critical, since we use HashMaps with no Value, `putAssumeCapacity`
+            // _will not_ clobber the existing value.
+            const gop = self.stash.getOrPutAssumeCapacity(value.*);
+            defer gop.key_ptr.* = value.*;
+
+            return if (gop.found_existing)
+                gop.key_ptr.*
+            else
+                null;
         }
 
         pub fn remove(self: *CacheMap, key: Key) void {
@@ -256,10 +241,7 @@ pub fn CacheMapType(
                 null;
 
             // We always need to try remove from the stash; since it could have a stale value.
-            const stash_removed: ?Value = if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
-                kv.key
-            else
-                null;
+            const stash_removed: ?Value = self.stash_remove(key);
 
             if (self.scope_is_active) {
                 // TODO: Actually, does the fuzz catch this...
@@ -268,6 +250,13 @@ pub fn CacheMapType(
                         stash_removed orelse return,
                 );
             }
+        }
+
+        fn stash_remove(self: *CacheMap, key: Key) ?Value {
+            return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
+                kv.key
+            else
+                null;
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -309,7 +298,7 @@ pub fn CacheMapType(
                         // so it only needs to be removed from the cache.
                         cache.remove(key) != null
                     else
-                        self.stash.remove(rollback_value.*);
+                        self.stash_remove(key) != null;
                     assert(removed);
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
