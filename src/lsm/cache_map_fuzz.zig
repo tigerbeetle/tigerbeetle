@@ -190,7 +190,7 @@ const Environment = struct {
         // The stash can have stale values, but in that case the real value _must_ exist
         // in the cache. It should be impossible for the stash to have a value that isn't in the
         // model, since cache_map.remove() removes from both the cache and stash.
-        var stash_iterator = env.cache_map.stash.valueIterator();
+        var stash_iterator = env.cache_map.stash.keyIterator();
         while (stash_iterator.next()) |stash_value| {
             // Get account from model.
             const model_value = env.model.getPtr(TestTable.key_from_value(stash_value));

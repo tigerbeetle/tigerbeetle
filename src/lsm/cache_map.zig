@@ -45,15 +45,15 @@ pub fn CacheMapType(
         );
 
         pub const Map = std.HashMapUnmanaged(
-            Key,
             Value,
+            void,
             struct {
-                pub inline fn eql(_: @This(), a: Key, b: Key) bool {
-                    return a == b;
+                pub inline fn eql(_: @This(), a: Value, b: Value) bool {
+                    return key_from_value(&a) == key_from_value(&b);
                 }
 
-                pub inline fn hash(_: @This(), key: Key) u64 {
-                    return stdx.hash_inline(key);
+                pub inline fn hash(_: @This(), value: Value) u64 {
+                    return stdx.hash_inline(key_from_value(&value));
                 }
             },
             map_load_percentage_max,
@@ -143,7 +143,7 @@ pub fn CacheMapType(
 
         pub fn get(self: *const CacheMap, key: Key) ?*Value {
             return (if (self.cache) |*cache| cache.get(key) else null) orelse
-                self.stash.getPtr(key);
+                self.stash.getKeyPtr(tombstone_from_key(key));
         }
 
         pub fn upsert(self: *CacheMap, value: *const Value) void {
@@ -161,20 +161,25 @@ pub fn CacheMapType(
                 const result = cache.upsert(value);
 
                 if (result.evicted) |*evicted| {
-                    const evicted_key = key_from_value(evicted);
                     switch (result.updated) {
                         .insert => {
-                            assert(evicted_key != key_from_value(value));
-                            self.stash.putAssumeCapacity(evicted_key, evicted.*);
+                            assert(key_from_value(evicted) != key_from_value(value));
+                            // Here and in upsert_scope using `getOrPutAssumeCapacity` instead of
+                            // `putAssumeCapacity` is critical.
+                            // Since we use HashMaps with no Value, `putAssumeCapacity`
+                            // _will not_ clobber the existing value.
+                            const gop = self.stash.getOrPutAssumeCapacity(evicted.*);
+                            gop.key_ptr.* = evicted.*;
                         },
                         .update => {
                             // The old version was evicted.
-                            assert(evicted_key == key_from_value(value));
+                            assert(key_from_value(evicted) == key_from_value(value));
                         },
                     }
                 }
             } else {
-                self.stash.putAssumeCapacity(key_from_value(value), value.*);
+                const gop = self.stash.getOrPutAssumeCapacity(value.*);
+                gop.key_ptr.* = value.*;
             }
         }
 
@@ -197,17 +202,17 @@ pub fn CacheMapType(
                 const result = cache.upsert(value);
 
                 if (result.evicted) |*evicted| {
-                    const evicted_key = key_from_value(evicted);
                     switch (result.updated) {
                         .update => {
                             // Case 1: The old version was evicted.
-                            assert(evicted_key == key_from_value(value));
+                            assert(key_from_value(evicted) == key);
                             self.scope_rollback_log.appendAssumeCapacity(evicted.*);
                         },
                         .insert => {
                             // Case 2: Another item was evicted.
-                            assert(evicted_key != key_from_value(value));
-                            self.stash.putAssumeCapacity(evicted_key, evicted.*);
+                            assert(key_from_value(evicted) != key);
+                            const gop = self.stash.getOrPutAssumeCapacity(evicted.*);
+                            gop.key_ptr.* = evicted.*;
 
                             // Case 3 below handles appending into the rollback log if needed.
                         },
@@ -215,7 +220,7 @@ pub fn CacheMapType(
                 }
 
                 if (result.updated == .insert) {
-                    if (self.stash.getPtr(key)) |stash_value| {
+                    if (self.stash.getKeyPtr(tombstone_from_key(key))) |stash_value| {
                         // Case 3a.
                         self.scope_rollback_log.appendAssumeCapacity(stash_value.*);
                     } else {
@@ -226,17 +231,17 @@ pub fn CacheMapType(
                     }
                 }
             } else {
-                const gop = self.stash.getOrPutAssumeCapacity(key);
+                const gop = self.stash.getOrPutAssumeCapacity(value.*);
                 if (gop.found_existing) {
                     // Case 3a.
-                    self.scope_rollback_log.appendAssumeCapacity(gop.value_ptr.*);
+                    self.scope_rollback_log.appendAssumeCapacity(gop.key_ptr.*);
                 } else {
                     // Case 3b.
                     self.scope_rollback_log.appendAssumeCapacity(
                         tombstone_from_key(key),
                     );
                 }
-                gop.value_ptr.* = value.*;
+                gop.key_ptr.* = value.*;
             }
         }
 
@@ -252,19 +257,19 @@ pub fn CacheMapType(
                     // TODO: Actually, does the fuzz catch this...
                     self.scope_rollback_log.appendAssumeCapacity(
                         maybe_removed orelse
-                            self.stash.get(key) orelse return,
+                            self.stash.getKey(tombstone_from_key(key)) orelse return,
                     );
                 }
 
                 // We always need to try remove from the stash; since it could have a stale value.
                 // The early return above is OK - if it doesn't exist, there's nothing to remove.
-                _ = self.stash.remove(key);
+                _ = self.stash.remove(tombstone_from_key(key));
             } else {
-                const maybe_removed = self.stash.fetchRemove(key);
+                const maybe_removed = self.stash.fetchRemove(tombstone_from_key(key));
                 if (self.scope_is_active) {
                     if (maybe_removed) |kv| {
                         // TODO: Actually, does the fuzz catch this...
-                        self.scope_rollback_log.appendAssumeCapacity(kv.value);
+                        self.scope_rollback_log.appendAssumeCapacity(kv.key);
                     }
                 }
             }
@@ -309,7 +314,7 @@ pub fn CacheMapType(
                         // so it only needs to be removed from the cache.
                         cache.remove(key) != null
                     else
-                        self.stash.remove(key);
+                        self.stash.remove(rollback_value.*);
                     assert(removed);
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
