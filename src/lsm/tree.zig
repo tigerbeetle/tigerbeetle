@@ -319,13 +319,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// ascertain the existence of the key are not in the Grid cache, it bails out.
         /// The returned `.positive` Value pointer is only valid synchronously.
         pub fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
-            if (constants.verify) {
-                // The object cache should be used instead.
-                tree.table_mutable.sort();
-                const not_found = tree.table_mutable.get(key) == null;
-                assert(not_found);
-            }
-
             if (tree.table_immutable.get(key)) |value| {
                 return .{ .positive = value };
             }

@@ -122,50 +122,25 @@ fn start(allocator: std.mem.Allocator, options: struct {
     try start_args.append(arena.allocator(), "start");
     try start_args.append(arena.allocator(), "--addresses=0");
 
-    // Repassing the cache options to the tigerbeetle process:
-    if (options.args.cache_accounts) |cache_accounts| {
-        try start_args.append(
-            arena.allocator(),
-            try std.fmt.allocPrint(arena.allocator(), "--cache-accounts={s}", .{
-                cache_accounts,
-            }),
-        );
-    }
+    // Forward the cache options to the tigerbeetle process:
+    const forward_args = &.{
+        .{ options.args.cache_accounts, "cache-accounts" },
+        .{ options.args.cache_transfers, "cache-transfers" },
+        .{ options.args.cache_transfers_posted, "cache-transfers-posted" },
+        .{ options.args.cache_account_history, "cache-account-history" },
+        .{ options.args.cache_grid, "cache-grid" },
+    };
 
-    if (options.args.cache_transfers) |cache_transfers| {
-        try start_args.append(
-            arena.allocator(),
-            try std.fmt.allocPrint(arena.allocator(), "--cache-transfers={s}", .{
-                cache_transfers,
-            }),
-        );
-    }
-
-    if (options.args.cache_transfers_posted) |cache_transfers_posted| {
-        try start_args.append(
-            arena.allocator(),
-            try std.fmt.allocPrint(arena.allocator(), "--cache-transfers-posted={s}", .{
-                cache_transfers_posted,
-            }),
-        );
-    }
-
-    if (options.args.cache_account_history) |cache_account_history| {
-        try start_args.append(
-            arena.allocator(),
-            try std.fmt.allocPrint(arena.allocator(), "--cache-account-history={s}", .{
-                cache_account_history,
-            }),
-        );
-    }
-
-    if (options.args.cache_grid) |cache_grid| {
-        try start_args.append(
-            arena.allocator(),
-            try std.fmt.allocPrint(arena.allocator(), "--cache-grid={s}", .{
-                cache_grid,
-            }),
-        );
+    inline for (forward_args) |forward_arg| {
+        if (forward_arg[0]) |arg_value| {
+            try start_args.append(
+                arena.allocator(),
+                try std.fmt.allocPrint(arena.allocator(), "--{s}={s}", .{
+                    forward_arg[1],
+                    arg_value,
+                }),
+            );
+        }
     }
 
     try start_args.append(arena.allocator(), options.data_file);
