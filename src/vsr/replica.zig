@@ -1458,6 +1458,7 @@ pub fn ReplicaType(
             });
             assert(message.header.op == self.op + 1);
             assert(message.header.op <= self.op_prepare_max());
+            assert(message.header.op - self.op_repair_min() < constants.journal_slot_count);
             self.op = message.header.op;
             self.journal.set_header_as_dirty(message.header);
 
@@ -2803,25 +2804,13 @@ pub fn ReplicaType(
             if (self.sync_target_max.?.checkpoint_op <= self.op_checkpoint()) return;
 
             {
-                // commit_max is the highest committed op *within our view*.
-                // But due to our sync target (from pings), we might know that the cluster is even
-                // farther ahead in a view that we have not joined.
-                const primary_commit_max =
-                    @max(self.commit_max, self.sync_target_max.?.checkpoint_op);
-                const primary_repair_min = (primary_commit_max +
-                    constants.pipeline_prepare_queue_max) -|
-                    (constants.journal_slot_count - 1);
-
                 const commit_next = self.commit_min + 1;
                 const commit_next_slot = self.journal.slot_with_op(commit_next);
 
                 // "stuck" is not actually certain, merely likely (see below).
-                const stuck_header =
-                    commit_next < primary_repair_min and
-                    !self.valid_hash_chain(@src());
+                const stuck_header = !self.valid_hash_chain(@src());
 
                 const stuck_prepare =
-                    commit_next < primary_repair_min and
                     (commit_next_slot == null or self.journal.dirty.bit(commit_next_slot.?));
 
                 const stuck_grid = !self.grid.read_global_queue.empty();
@@ -2830,11 +2819,11 @@ pub fn ReplicaType(
             }
 
             // At this point:
-            // - we know we are lagging behind the cluster by at least a checkpoint, and
-            // - our next commit may not be repairable, and
+            // - we know that the cluster committed atop of a future a checkpoint, and
             // - we have not made any progress committing for some interval.
-            // It is possible that we could in fact repair and progress anyway, but usually
-            // we are stuck waiting for a prepare or block which will never arrive.
+            // It is possible that we could in fact repair and progress anyway, but this is not
+            // guaranteed: the rest of the cluster no longer repairs the relevant prepares.
+            // We might be stuck waiting for a prepare or block which will never arrive.
 
             log.warn("{}: on_repair_sync_timeout: start sync; lagging behind cluster " ++
                 "(op_head={} commit_min={} commit_max={} commit_stage={s})", .{
@@ -5058,21 +5047,15 @@ pub fn ReplicaType(
         }
 
         /// Returns the oldest op that the replica must/(is permitted to) repair.
-        /// The goal is to repair as much as possible without triggering unnecessary state sync.
         ///
-        /// - Repairing uncommitted ops is necessary as primary — we will need them to proceed.
-        /// - Repairing committed + not-yet-checkpointed ops is useful because we might crash,
-        ///   in which case we will need them to recover.
-        /// - Repairing committed + checkpointed ops:
-        ///   - backups don't repair checkpointed ops because:
-        ///     - repairing an op from the previous checkpoint might "clean" a slot which belongs
-        ///       to a corrupt entry from the current WAL-wrap, leading to the backup incorrectly
-        ///       nacking the latter entry.
-        ///     - there is no guarantee that they will ever be available (if our head is behind),
-        ///       and we don't want to stall the new view startup.
-        ///   - primaries do repair checkpointed ops so that they can help lagging backups catch up,
-        ///     as long as the op is new enough to be present in the WAL of some other replica and
-        ///     is from the previous checkpoint.
+        /// Safety condition: repairing an old op must not overwrite a newer op from the next wrap.
+        ///
+        /// Availability condition: each committed op must be present either in a quorum of WALs or
+        /// it in a quorum of checkpoints.
+        ///
+        /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
+        /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
+        /// both conditions.
         ///
         /// When called from status=recovering_head or status=recovering, the caller is responsible
         /// for ensuring that replica.op is valid.
@@ -5083,44 +5066,18 @@ pub fn ReplicaType(
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             const op = op: {
-                if (self.primary_index(self.view) == self.replica) {
-                    assert(self.status == .normal or self.do_view_change_quorum or self.solo());
-                    // This is the oldest op that is guaranteed to be in the WALs of any replica.
-                    // (Assuming that this primary has not been superseded.)
-                    const op_wal_oldest = @min(
-                        // Add the oldest pipeline_prepare_queue_max ops because they may have been
-                        // newer ops which were then truncated by a view-change, causing the head op
-                        // to backtrack.
-                        self.op + constants.pipeline_prepare_queue_max,
-                        // ...But the pipeline messages could not have moved past the next
-                        // checkpoint's op_prepare_max.
-                        self.op_prepare_max(),
-                    ) -| (constants.journal_slot_count - 1);
+                if (self.op_checkpoint() == 0) {
+                    break :op 0;
+                }
 
-                    // We know checkpoint ids for the previous checkpoint and the one before that.
-                    // Don't try repairing ops with older checkpoint_ids which are impossible to
-                    // verify.
-                    const op_with_checkpoint_id_oldest =
-                        (self.op_checkpoint() + 1) -| constants.vsr_checkpoint_interval;
-                    assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest) != null);
-
-                    if (op_with_checkpoint_id_oldest > 0) {
-                        assert(self.checkpoint_id_for_op(op_with_checkpoint_id_oldest - 1) == null);
-                    }
-
-                    break :op @max(op_wal_oldest, op_with_checkpoint_id_oldest);
+                const op_checkpoint_trigger =
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+                // After state sync, commit_max might lag behind checkpoint_op.
+                maybe(self.commit_max < op_checkpoint_trigger);
+                if (self.commit_max > op_checkpoint_trigger) {
+                    break :op self.op_checkpoint() + 1;
                 } else {
-                    // Strictly speaking a backup only needs to repair commit_min+1… to proceed.
-                    // However, if the backup crashes and recovers, it will need to replay ops
-                    // from the checkpoint, so we repair slightly more.
-                    if (self.op_checkpoint() == self.op) {
-                        // Don't allow "op_repair_min > op_head".
-                        break :op self.op_checkpoint();
-                    } else {
-                        // +1 because the primary (and other replicas) may overwrite op_checkpoint.
-                        // And we don't need op_checkpoint's prepare/header in our log if we crash.
-                        break :op self.op_checkpoint() + 1;
-                    }
+                    break :op (self.op_checkpoint() + 1) -| constants.vsr_checkpoint_interval;
                 }
             };
 
