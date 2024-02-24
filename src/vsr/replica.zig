@@ -5075,6 +5075,10 @@ pub fn ReplicaType(
                 // After state sync, commit_max might lag behind checkpoint_op.
                 maybe(self.commit_max < op_checkpoint_trigger);
                 if (self.commit_max > op_checkpoint_trigger) {
+                    if (self.op == self.op_checkpoint()) {
+                        // Don't allow "op_repair_min > op_head".
+                        break :op self.op_checkpoint();
+                    }
                     break :op self.op_checkpoint() + 1;
                 } else {
                     break :op (self.op_checkpoint() + 1) -| constants.vsr_checkpoint_interval;
