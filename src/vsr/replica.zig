@@ -5065,9 +5065,9 @@ pub fn ReplicaType(
             assert(self.op <= self.op_prepare_max());
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
-            const op = op: {
+            const repair_min = repair_min: {
                 if (self.op_checkpoint() == 0) {
-                    break :op 0;
+                    break :repair_min 0;
                 }
 
                 const op_checkpoint_trigger =
@@ -5077,20 +5077,21 @@ pub fn ReplicaType(
                 if (self.commit_max > op_checkpoint_trigger) {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
-                        break :op self.op_checkpoint();
+                        break :repair_min self.op_checkpoint();
                     }
-                    break :op self.op_checkpoint() + 1;
+                    break :repair_min self.op_checkpoint() + 1;
                 } else {
-                    break :op (self.op_checkpoint() + 1) -| constants.vsr_checkpoint_interval;
+                    break :repair_min (self.op_checkpoint() + 1) -|
+                        constants.vsr_checkpoint_interval;
                 }
             };
 
-            assert(op <= self.op);
-            assert(op <= self.commit_min + 1);
-            assert(op <= self.op_checkpoint() + 1);
-            assert(self.op - op < constants.journal_slot_count);
-            assert(self.checkpoint_id_for_op(op) != null);
-            return op;
+            assert(repair_min <= self.op);
+            assert(repair_min <= self.commit_min + 1);
+            assert(repair_min <= self.op_checkpoint() + 1);
+            assert(self.op - repair_min < constants.journal_slot_count);
+            assert(self.checkpoint_id_for_op(repair_min) != null);
+            return repair_min;
         }
 
         /// The replica repairs backwards from `commit_max`. But if `commit_max` is too high
