@@ -147,31 +147,20 @@ pub fn CacheMapType(
         }
 
         pub fn upsert(self: *CacheMap, value: *const Value) void {
+            const old_value_maybe = self.fetch_upsert(value);
+
+            // When upserting into a scope:
             if (self.scope_is_active) {
-                return self.upsert_scope_opened(value);
-            } else {
-                return self.upsert_scope_closed(value);
-            }
-        }
-
-        fn upsert_scope_closed(self: *CacheMap, value: *const Value) void {
-            assert(!self.scope_is_active);
-            _ = self.fetch_upsert(value);
-        }
-
-        // When upserting into a scope:
-        //  a. If it was updated, append the old value to the the scope rollback log.
-        //  b. If it was an insert, append a tombstone to the scope rollback log.
-        fn upsert_scope_opened(self: *CacheMap, value: *const Value) void {
-            assert(self.scope_is_active);
-
-            if (self.fetch_upsert(value)) |old_value| {
-                self.scope_rollback_log.appendAssumeCapacity(old_value);
-            } else {
-                const key = key_from_value(value);
-                self.scope_rollback_log.appendAssumeCapacity(
-                    tombstone_from_key(key),
-                );
+                if (old_value_maybe) |old_value| {
+                    // If it was updated, append the old value to the the scope rollback log.
+                    self.scope_rollback_log.appendAssumeCapacity(old_value);
+                } else {
+                    // If it was an insert, append a tombstone to the scope rollback log.
+                    const key = key_from_value(value);
+                    self.scope_rollback_log.appendAssumeCapacity(
+                        tombstone_from_key(key),
+                    );
+                }
             }
         }
 
@@ -240,7 +229,8 @@ pub fn CacheMapType(
             else
                 null;
 
-            // We always need to try remove from the stash; since it could have a stale value.
+            // We don't allow stale values, so we need to remove from the stash as well,
+            // since both can have different versions with the same key.
             const stash_removed: ?Value = self.stash_remove(key);
 
             if (self.scope_is_active) {
@@ -291,18 +281,19 @@ pub fn CacheMapType(
                     const key = key_from_value(rollback_value);
 
                     // A tombstone in the rollback log can only occur when the value doesn't exist
-                    // in _both_ the cache and stash on insert (case 3b in `upsert_scope_opened`).
-                    const removed = if (self.cache) |*cache|
-                        // Since we replay the rollback operations backwards, the state of the
-                        // cache and stash here will be identical to that of just after the insert,
-                        // so it only needs to be removed from the cache.
-                        cache.remove(key) != null
-                    else
-                        self.stash_remove(key) != null;
-                    assert(removed);
+                    // in _both_ the cache and stash on insert.
+                    if (self.cache) |*cache| {
+                        // If we have cache enabled, it must be there.
+                        const cache_removed = cache.remove(key) != null;
+                        assert(cache_removed);
+                    }
+
+                    // It should be in the stash _iif_ we don't have cache enabled.
+                    const stash_removed = self.stash_remove(key) != null;
+                    assert(stash_removed == (self.cache == null));
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
-                    self.upsert_scope_closed(rollback_value);
+                    self.upsert(rollback_value);
                 }
             }
 
