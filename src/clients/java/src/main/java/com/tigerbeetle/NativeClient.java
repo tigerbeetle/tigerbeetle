@@ -10,10 +10,11 @@ final class NativeClient implements AutoCloseable {
 
     /*
      * Holds the `handle` in an object instance detached from `NativeClient` to provide state for
-     * the cleaner to dispose native memory when the `Client` instance is GCed.
+     * the cleaner to dispose native memory when the `Client` instance is GCed. Also implements
+     * `Runnable` to be usable as the cleaner action.
      * https://docs.oracle.com/javase%2F9%2Fdocs%2Fapi%2F%2F/java/lang/ref/Cleaner.html
      */
-    private static final class NativeHandle {
+    private static final class NativeHandle implements Runnable {
         // Keeping the contextHandle and a reference counter guarded by
         // atomics in order to prevent the client from using a disposed
         // context during `close()`.
@@ -70,6 +71,11 @@ final class NativeClient implements AutoCloseable {
                 }
             }
         }
+
+        @Override
+        public void run() {
+            close();
+        }
     }
 
     static {
@@ -104,7 +110,7 @@ final class NativeClient implements AutoCloseable {
     private NativeClient(final long contextHandle) {
         try {
             this.handle = new NativeHandle(contextHandle);
-            this.cleanable = cleaner.register(this, () -> handle.close());
+            this.cleanable = cleaner.register(this, handle);
         } catch (Throwable forward) {
             clientDeinit(contextHandle);
             throw forward;
