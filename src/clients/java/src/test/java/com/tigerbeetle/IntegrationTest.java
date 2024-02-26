@@ -128,6 +128,14 @@ public class IntegrationTest {
         }
     }
 
+    public void testConstructorCluster() throws Throwable {
+        final var clusterId = UInt128.id();
+        final var replicaAddresses = new String[] {"3001"};
+        try (final var client = new Client(clusterId, replicaAddresses)) {
+            assertArrayEquals(clusterId, client.getClusterID());
+        }
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void testConstructorInvalidCluster() throws Throwable {
         final var clusterIdInvalid = new byte[] {0, 0, 0};
@@ -1433,11 +1441,14 @@ public class IntegrationTest {
             assertTrue(accountHistory3.getLength() == 0);
         }
 
+        // For those tests it doesn't matter using the sync or async version. We use the async
+        // version here for test coverage purposes, but there's no need to duplicate the tests.
+
         {
             // Empty filter:
             final var filter = new AccountFilter();
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1450,8 +1461,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1464,8 +1475,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1478,8 +1489,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1492,8 +1503,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1506,8 +1517,8 @@ public class IntegrationTest {
             filter.setDebits(true);
             filter.setCredits(true);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1520,8 +1531,8 @@ public class IntegrationTest {
             filter.setDebits(false);
             filter.setCredits(false);
             filter.setReversed(false);
-            assertTrue(client.getAccountTransfers(filter).getLength() == 0);
-            assertTrue(client.getAccountHistory(filter).getLength() == 0);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
         }
     }
 

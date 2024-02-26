@@ -124,15 +124,27 @@ public class AccountFilterTest {
         final var accountFilter = new AccountFilterBatch(1);
         accountFilter.add();
 
+        // Empty array:
+        final var bytes = new byte[24];
         assertArrayEquals(new byte[24], accountFilter.getReserved());
 
-        final var bytes = new byte[24];
+        // Null == empty array:
+        assertArrayEquals(new byte[24], accountFilter.getReserved());
+        accountFilter.setReserved(null);
+
         for (byte i = 0; i < 24; i++) {
             bytes[i] = i;
         }
-
         accountFilter.setReserved(bytes);
         assertArrayEquals(bytes, accountFilter.getReserved());
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void testReservedInvalid() {
+        final var accountFilter = new AccountFilterBatch(1);
+        accountFilter.add();
+        accountFilter.setReserved(new byte[25]);
+        assert false;
     }
 
 }
