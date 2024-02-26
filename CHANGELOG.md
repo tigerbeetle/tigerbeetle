@@ -1,5 +1,61 @@
 # TigerBeetle Changelog
 
+## 2024-02-26
+
+### Safety And Performance
+
+- [#1591](https://github.com/tigerbeetle/tigerbeetle/pull/1591)
+  [#1589](https://github.com/tigerbeetle/tigerbeetle/pull/1589)
+  [#1579](https://github.com/tigerbeetle/tigerbeetle/pull/1579)
+  [#1576](https://github.com/tigerbeetle/tigerbeetle/pull/1576)
+
+  Rework the log repair logic to never repair beyond a "confirmed" checkpoint, fixing a
+  [liveness issue](https://github.com/tigerbeetle/tigerbeetle/issues/1378) where it was impossible
+  for the primary to repair its entire log, even with a quorum of replicas at a recent checkpoint.
+
+- [#1572](https://github.com/tigerbeetle/tigerbeetle/pull/1572)
+
+  Some Java unit tests created native client instances without the proper deinitialization,
+  causing an `OutOfMemoryError` during CI.
+
+- [#1569](https://github.com/tigerbeetle/tigerbeetle/pull/1569)
+  [#1570](https://github.com/tigerbeetle/tigerbeetle/pull/1570)
+
+  Fix Vopr's false alarms.
+
+### Internals
+
+- [#1585](https://github.com/tigerbeetle/tigerbeetle/pull/1585)
+
+  Document how assertions should be used, especially those with complexity _O(n)_ under
+  the `constants.verify` conditional.
+
+- [#1580](https://github.com/tigerbeetle/tigerbeetle/pull/1580)
+
+  Harmonize and automate the logging pattern by using the `@src` built-in to retrieve the
+  function name.
+
+- [#1568](https://github.com/tigerbeetle/tigerbeetle/pull/1568)
+
+  Include the benchmark smoke as part of the `zig build test` command rather than a special case
+  during CI.
+
+- [#1574](https://github.com/tigerbeetle/tigerbeetle/pull/1574)
+
+  Remove unused code coverage metrics from the CI.
+
+- [#1575](https://github.com/tigerbeetle/tigerbeetle/pull/1575)
+  [#1573](https://github.com/tigerbeetle/tigerbeetle/pull/1573)
+  [#1582](https://github.com/tigerbeetle/tigerbeetle/pull/1582)
+
+  Re-enable Windows CI 🎉.
+
+### TigerTracks 🎧
+
+- [Dos Margaritas](https://www.youtube.com/watch?v=Ts_7BYubYws)
+
+  [(_versión en español_)](https://www.youtube.com/watch?v=B_VLegyguoI)
+
 ## 2024-02-19
 
 ### Safety And Performance
