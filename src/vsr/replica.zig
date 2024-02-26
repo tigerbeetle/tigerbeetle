@@ -4942,7 +4942,8 @@ pub fn ReplicaType(
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
 
-            // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt.
+            // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
+            // if the replica restarts after state sync updates superblock.
             if (self.op < self.op_checkpoint()) return false;
 
             const slot_op_checkpoint = self.journal.slot_for_op(self.op_checkpoint());
@@ -8022,7 +8023,8 @@ pub fn ReplicaType(
             ));
 
             self.commit_min = self.superblock.working.vsr_state.checkpoint.commit_min;
-            if (self.op < self.commit_min) {
+            assert(self.commit_min == self.op_checkpoint());
+            if (self.op < self.op_checkpoint()) {
                 self.transition_to_recovering_head();
             }
 
