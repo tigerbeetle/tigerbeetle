@@ -31,40 +31,16 @@ pub fn CacheMapType(
     comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
     comptime tombstone: fn (*const Value) callconv(.Inline) bool,
 ) type {
-    const _Cache = SetAssociativeCacheType(
-        Key,
-        Value,
-        key_from_value,
-        hash_from_key,
-        .{},
-    );
-
-    const HashMapContextValue = struct {
-        const Self = @This();
-
-        pub inline fn eql(_: Self, a: Value, b: Value) bool {
-            return key_from_value(&a) == key_from_value(&b);
-        }
-
-        pub inline fn hash(_: Self, value: Value) u64 {
-            return stdx.hash_inline(key_from_value(&value));
-        }
-    };
-
-    const map_load_percentage_max = 50;
-    const _Map = std.HashMapUnmanaged(
-        Value,
-        void,
-        HashMapContextValue,
-        map_load_percentage_max,
-    );
-
     return struct {
         const Self = @This();
 
-        pub const Cache = _Cache;
-        pub const Map = _Map;
-
+        pub const Cache = SetAssociativeCacheType(
+            Key,
+            Value,
+            key_from_value,
+            hash_from_key,
+            .{},
+        );
         pub const Options = struct {
             cache_value_count_max: u32,
             map_value_count_max: u32,
@@ -72,14 +48,7 @@ pub fn CacheMapType(
             name: []const u8,
         };
 
-        // The hierarchy for lookups is cache -> stash_1 -> stash_2. Lower levels _may_ have stale
-        // values, provided the correct value exists in one of the levels above. We have two
-        // maps to implement our compact() support. Evictions from the cache first flow into
-        // stash_1, with .compact() clearing stash_2 and swapping it.
         cache: Cache,
-        stash_1: Map,
-        stash_2: Map,
-
         // Scopes allow you to perform operations on the CacheMap before either persisting or
         // discarding them.
         scope_is_active: bool = false,
@@ -99,14 +68,6 @@ pub fn CacheMapType(
             );
             errdefer cache.deinit(allocator);
 
-            var stash_1: Map = .{};
-            try stash_1.ensureTotalCapacity(allocator, options.map_value_count_max);
-            errdefer stash_1.deinit(allocator);
-
-            var stash_2: Map = .{};
-            try stash_2.ensureTotalCapacity(allocator, options.map_value_count_max);
-            errdefer stash_2.deinit(allocator);
-
             var scope_rollback_log = try std.ArrayListUnmanaged(Value).initCapacity(
                 allocator,
                 options.scope_value_count_max,
@@ -115,8 +76,6 @@ pub fn CacheMapType(
 
             return Self{
                 .cache = cache,
-                .stash_1 = stash_1,
-                .stash_2 = stash_2,
                 .scope_rollback_log = scope_rollback_log,
                 .options = options,
             };
@@ -125,114 +84,40 @@ pub fn CacheMapType(
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash_1.count() <= self.options.map_value_count_max);
-            assert(self.stash_2.count() <= self.options.map_value_count_max);
 
             self.scope_rollback_log.deinit(allocator);
-            self.stash_2.deinit(allocator);
-            self.stash_1.deinit(allocator);
             self.cache.deinit(allocator);
         }
 
         pub fn reset(self: *Self) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash_1.count() <= self.options.map_value_count_max);
-            assert(self.stash_2.count() <= self.options.map_value_count_max);
 
             self.cache.reset();
-            self.stash_1.clearRetainingCapacity();
-            self.stash_2.clearRetainingCapacity();
 
             self.* = .{
                 .cache = self.cache,
-                .stash_1 = self.stash_1,
-                .stash_2 = self.stash_2,
                 .scope_rollback_log = self.scope_rollback_log,
                 .options = self.options,
             };
         }
 
         pub fn has(self: *const Self, key: Key) bool {
-            return self.cache.get_index(key) != null or
-                self.stash_1.getKeyPtr(tombstone_from_key(key)) != null or
-                self.stash_2.getKeyPtr(tombstone_from_key(key)) != null;
+            return self.cache.get_index(key) != null;
         }
 
         pub fn get(self: *const Self, key: Key) ?*Value {
-            return self.cache.get(key) orelse
-                self.stash_1.getKeyPtr(tombstone_from_key(key)) orelse
-                self.stash_2.getKeyPtr(tombstone_from_key(key));
+            return self.cache.get(key);
         }
 
         pub fn upsert(self: *Self, value: *const Value) void {
+            const result = self.cache.upsert(value);
             if (self.scope_is_active) {
-                return self.upsert_scope_opened(value);
-            } else {
-                return self.upsert_scope_closed(value);
-            }
-        }
-
-        fn upsert_scope_closed(self: *Self, value: *const Value) void {
-            assert(!self.scope_is_active);
-
-            const result = self.cache.upsert(value);
-
-            if (result.evicted) |evicted| {
                 switch (result.updated) {
-                    .insert => {
-                        // Here and in upsert_scope, putAssumeCapacity vs getOrPutAssumeCapacity is
-                        // critical. Since we use HashMaps with no Value, putAssumeCapacity _will
-                        // not_ clobber the existing value.
-                        const gop = self.stash_1.getOrPutAssumeCapacity(evicted);
-                        gop.key_ptr.* = evicted;
-                    },
-                    .update => {},
-                }
-            }
-        }
-
-        // When upserting into a scope, there are a few cases that must be handled:
-        // 1. There was an eviction because an item was updated. Append the evicted item to the
-        //    scope rollback log.
-        // 2. There was an eviction because an item was inserted (eg, two different keys mapping to
-        //    the same tags). Put the item in the stash, just like the no-scope case, and don't
-        //    store anything in the scope rollback log yet. Case 3 will handle that.
-        // 3. Regardless of eviction, there was an insert:
-        //    a. If the item exists in the stash, it was really an update. Append the stash value
-        //       to the scope rollback log.
-        //    b. If the item doesn't exist in the stash, it was an insert. Append a tombstone to
-        //       the scope rollback log.
-        fn upsert_scope_opened(self: *Self, value: *const Value) void {
-            assert(self.scope_is_active);
-
-            const result = self.cache.upsert(value);
-
-            if (result.evicted) |evicted| {
-                switch (result.updated) {
-                    .update => {
-                        // Case 1.
-                        self.scope_rollback_log.appendAssumeCapacity(evicted);
-                    },
-                    .insert => {
-                        // Case 2.
-                        const gop = self.stash_1.getOrPutAssumeCapacity(evicted);
-                        gop.key_ptr.* = evicted;
-
-                        // Case 3 below handles appending into the rollback log if needed.
-                    },
-                }
-            }
-
-            if (result.updated == .insert) {
-                if (self.stash_1.getKey(value.*)) |stash_value| {
-                    // Case 3a.
-                    self.scope_rollback_log.appendAssumeCapacity(stash_value);
-                } else {
-                    // Case 3b.
-                    self.scope_rollback_log.appendAssumeCapacity(
+                    .update => self.scope_rollback_log.appendAssumeCapacity(result.evicted.?),
+                    .insert => self.scope_rollback_log.appendAssumeCapacity(
                         tombstone_from_key(key_from_value(value)),
-                    );
+                    ),
                 }
             }
         }
@@ -246,19 +131,10 @@ pub fn CacheMapType(
 
             if (self.scope_is_active) {
                 // TODO: Actually, does the fuzz catch this...
-                // TODO: So if we delete from stash_2 and put to stash_1, there's a problem;
-                //       because when we undo our scope we insert back to stash_1 :/
                 self.scope_rollback_log.appendAssumeCapacity(
-                    maybe_removed orelse
-                        self.stash_1.getKey(tombstone_from_key(key)) orelse
-                        self.stash_2.getKey(tombstone_from_key(key)) orelse return,
+                    maybe_removed orelse return,
                 );
             }
-
-            // We always need to try remove from the stash; since it could have a stale value.
-            // The early return above is OK - if it doesn't exist, there's nothing to remove.
-            _ = self.stash_1.remove(tombstone_from_key(key));
-            _ = self.stash_2.remove(tombstone_from_key(key));
         }
 
         /// Start a new scope. Within a scope, changes can be persisted
@@ -301,7 +177,7 @@ pub fn CacheMapType(
                     assert(removed_from_cache);
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
-                    self.upsert_scope_closed(rollback_value);
+                    self.upsert(rollback_value);
                 }
             }
 
@@ -311,11 +187,6 @@ pub fn CacheMapType(
         pub fn compact(self: *Self) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash_1.count() <= self.options.map_value_count_max);
-            assert(self.stash_2.count() <= self.options.map_value_count_max);
-
-            self.stash_2.clearRetainingCapacity();
-            std.mem.swap(Map, &self.stash_1, &self.stash_2);
         }
     };
 }

@@ -466,7 +466,7 @@ pub fn GrooveType(
         ///
         /// Invariant: if something is in the mutable or immutable table, it _must_ exist in our
         /// object cache.
-        objects_cache: ObjectsCache,
+        objects_cache: ?ObjectsCache,
 
         scan_builder: ScanBuilder,
 
@@ -488,7 +488,7 @@ pub fn GrooveType(
             grid: *Grid,
             options: Options,
         ) !Groove {
-            var objects_cache = try ObjectsCache.init(allocator, .{
+            var objects_cache: ?ObjectsCache = if (options.cache_entries_max == 0) null else try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
                 // In the worst case, each Map must be able to store the value_count_max (to
@@ -504,7 +504,7 @@ pub fn GrooveType(
 
                 .name = @typeName(Object),
             });
-            errdefer objects_cache.deinit(allocator);
+            errdefer if (objects_cache) |*objects_cache_unwrapped| objects_cache_unwrapped.deinit(allocator);
 
             // Initialize the object LSM tree.
             var object_tree = try ObjectTree.init(
@@ -589,7 +589,7 @@ pub fn GrooveType(
             if (has_id) groove.ids.deinit(allocator);
 
             groove.prefetch_keys.deinit(allocator);
-            groove.objects_cache.deinit(allocator);
+            if (groove.objects_cache) |*cache| cache.deinit(allocator);
 
             if (has_scan) groove.scan_builder.deinit(allocator);
 
@@ -604,7 +604,7 @@ pub fn GrooveType(
             if (has_id) groove.ids.reset();
 
             groove.prefetch_keys.clearRetainingCapacity();
-            groove.objects_cache.reset();
+            if (groove.objects_cache) |*cache| cache.reset();
 
             if (has_scan) groove.scan_builder.reset();
 
@@ -621,7 +621,7 @@ pub fn GrooveType(
         }
 
         pub fn get(groove: *const Groove, key: PrimaryKey) ?*const Object {
-            return groove.objects_cache.get(key);
+            return if (groove.objects_cache) |*cache| cache.get(key) else null;
         }
 
         /// Must be called directly before the state machine begins queuing ids for prefetch.
@@ -645,15 +645,11 @@ pub fn GrooveType(
             if (has_id) {
                 if (!groove.ids.key_range_contains(groove.prefetch_snapshot.?, key)) return;
 
-                if (groove.objects_cache.has(key)) {
-                    return;
-                }
+                if (groove.objects_cache) |*cache| if (cache.has(key)) return;
 
                 groove.prefetch_from_memory_by_id(key);
             } else {
-                if (groove.objects_cache.has(key)) {
-                    return;
-                }
+                if (groove.objects_cache) |*cache| if (cache.has(key)) return;
 
                 groove.prefetch_from_memory_by_timestamp(key);
             }
@@ -691,7 +687,7 @@ pub fn GrooveType(
                 .negative => {},
                 .positive => |object| {
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
-                    groove.objects_cache.upsert(object);
+                    if (groove.objects_cache) |*cache| cache.upsert(object);
                 },
                 .possible => |level| {
                     groove.prefetch_keys.putAssumeCapacity(
@@ -897,7 +893,7 @@ pub fn GrooveType(
 
                 if (result) |object| {
                     assert(!ObjectTreeHelpers(Object).tombstone(object));
-                    worker.context.groove.objects_cache.upsert(object);
+                    if (worker.context.groove.objects_cache) |*cache| cache.upsert(object);
                 } else {
                     assert(!has_id);
                 }
@@ -910,10 +906,10 @@ pub fn GrooveType(
         /// caller to ensure it doesn't already exist.
         pub fn insert(groove: *Groove, object: *const Object) void {
             if (constants.verify) {
-                assert(!groove.objects_cache.has(@field(object, primary_field)));
+                assert(groove.objects_cache == null or !groove.objects_cache.?.has(@field(object, primary_field)));
             }
 
-            groove.objects_cache.upsert(object);
+            if (groove.objects_cache) |*cache| cache.upsert(object);
 
             if (has_id) {
                 groove.ids.put(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
@@ -945,7 +941,7 @@ pub fn GrooveType(
             const new = values.new;
 
             if (constants.verify) {
-                const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
+                const old_from_cache = groove.get(@field(old, primary_field)).?;
 
                 // While all that's actually required is that the _contents_ of the old_from_cache
                 // and old objects are identical, in current usage they're always the same piece of
@@ -1001,7 +997,7 @@ pub fn GrooveType(
             // We diff the old and new objects, but the old object will be a pointer into the
             // objects_cache. If we upsert first, there's a high chance old.* == new.* (always,
             // unless old comes from the stash) and no secondary indexes will be updated!
-            groove.objects_cache.upsert(new);
+            if (groove.objects_cache) |*cache| cache.upsert(new);
             groove.objects.put(new);
         }
 
@@ -1011,14 +1007,14 @@ pub fn GrooveType(
             // extended to cover it.
             assert(false);
 
-            const object = groove.objects_cache.get(key).?;
+            const object = groove.objects_cache.?.get(key).?;
 
             groove.objects.remove(object);
             if (has_id) {
                 groove.ids.remove(&IdTreeValue{ .id = object.id, .timestamp = object.timestamp });
             }
 
-            groove.objects_cache.remove(key);
+            if (groove.objects_cache) |*cache| cache.remove(key);
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const Helper = IndexTreeFieldHelperType(field.name);
@@ -1034,7 +1030,7 @@ pub fn GrooveType(
         }
 
         pub fn scope_open(groove: *Groove) void {
-            groove.objects_cache.scope_open();
+            if (groove.objects_cache) |*cache| cache.scope_open();
 
             if (has_id) {
                 groove.ids.scope_open();
@@ -1047,7 +1043,7 @@ pub fn GrooveType(
         }
 
         pub fn scope_close(groove: *Groove, mode: ScopeCloseMode) void {
-            groove.objects_cache.scope_close(mode);
+            if (groove.objects_cache) |*cache| cache.scope_close(mode);
 
             if (has_id) {
                 groove.ids.scope_close(mode);
@@ -1091,13 +1087,6 @@ pub fn GrooveType(
             inline for (std.meta.fields(IndexTrees)) |field| {
                 const compact_tree_callback_ = compact_tree_callback(.{ .index = field.name });
                 @field(groove.indexes, field.name).compact(compact_tree_callback_, op);
-            }
-
-            // Compact the objects_cache on the last beat of the bar, just like the trees do to
-            // their mutable tables.
-            const compaction_beat = op % constants.lsm_batch_multiple;
-            if (compaction_beat == constants.lsm_batch_multiple - 1) {
-                groove.objects_cache.compact();
             }
 
             groove.compacting = .{ .callback = callback };

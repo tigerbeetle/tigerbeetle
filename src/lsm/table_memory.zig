@@ -3,6 +3,7 @@ const mem = std.mem;
 const math = std.math;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
 
@@ -15,9 +16,30 @@ pub fn TableMemoryType(comptime Table: type) type {
     return struct {
         const TableMemory = @This();
 
+        const map_load_percentage_max = 50;
+        const Map = std.HashMapUnmanaged(
+            Key,
+            u32,
+            struct {
+                pub inline fn eql(_: @This(), a: Key, b: Key) bool {
+                    return a == b;
+                }
+
+                pub inline fn hash(_: @This(), key: Key) u64 {
+                    return stdx.hash_inline(key);
+                }
+            },
+            map_load_percentage_max,
+        );
+
+        pub const Sorted = union(enum) {
+            sorted,
+            unsorted: u32,
+        };
+
         pub const ValueContext = struct {
-            count: usize = 0,
-            sorted: bool = true,
+            count: u32 = 0,
+            sorted: Sorted = .sorted,
         };
 
         const Mutability = union(enum) {
@@ -30,6 +52,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
+        map: Map,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
@@ -42,8 +65,13 @@ pub fn TableMemoryType(comptime Table: type) type {
             const values = try allocator.alloc(Value, value_count_max);
             errdefer allocator.free(values);
 
+            var map = Map{};
+            try map.ensureTotalCapacity(allocator, value_count_max);
+            errdefer map.deinit(allocator);
+
             return TableMemory{
                 .values = values,
+                .map = map,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = name,
@@ -52,6 +80,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
             allocator.free(table.values);
+            table.map.deinit(allocator);
         }
 
         pub fn reset(table: *TableMemory) void {
@@ -62,6 +91,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .map = table.map,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
@@ -80,12 +110,21 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
             assert(table.value_context.count < value_count_max);
 
-            if (table.value_context.sorted) {
-                table.value_context.sorted = table.value_context.count == 0 or
-                    key_from_value(&table.values[table.value_context.count - 1]) <=
-                    key_from_value(value);
-            } else {
-                assert(table.value_context.count > 0);
+            switch (table.value_context.sorted) {
+                .sorted => {
+                    const sorted = table.value_context.count == 0 or
+                        key_from_value(&table.values[table.value_context.count - 1]) <=
+                        key_from_value(value);
+                    if (!sorted) table.value_context.sorted = .{ .unsorted = table.value_context.count };
+                },
+                .unsorted => |sorted_index_last| {
+                    assert(sorted_index_last > 0);
+                    assert(table.value_context.count > 0);
+                },
+            }
+
+            if (table.value_context.sorted == .unsorted) {
+                table.map.putAssumeCapacity(key_from_value(value), table.value_context.count);
             }
 
             table.values[table.value_context.count] = value.*;
@@ -95,16 +134,26 @@ pub fn TableMemoryType(comptime Table: type) type {
         /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
             assert(table.value_context.count <= value_count_max);
-            assert(table.value_context.sorted);
 
-            return binary_search.binary_search_values(
-                Key,
-                Value,
-                key_from_value,
-                table.values_used(),
-                key,
-                .{ .mode = .upper_bound },
-            );
+            return switch (table.value_context.sorted) {
+                .sorted => binary_search.binary_search_values(
+                    Key,
+                    Value,
+                    key_from_value,
+                    table.values_used(),
+                    key,
+                    .{ .mode = .upper_bound },
+                ),
+                .unsorted => |sorted_index_last| binary_search.binary_search_values(
+                    Key,
+                    Value,
+                    key_from_value,
+                    table.values[0..sorted_index_last],
+                    key,
+                    .{ .mode = .upper_bound },
+                ) orelse
+                    if (table.map.get(key)) |index| &table.values[index] else null,
+            };
         }
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
@@ -126,10 +175,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
             assert(table.value_context.count <= value_count_max);
-            assert(table.value_context.sorted);
+            assert(table.value_context.sorted == .sorted);
 
             table.* = .{
                 .values = table.values,
+                .map = table.map,
                 .value_context = .{},
                 .mutability = .mutable,
                 .name = table.name,
@@ -137,14 +187,15 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn sort(table: *TableMemory) void {
-            if (!table.value_context.sorted) {
+            if (table.value_context.sorted == .unsorted) {
                 std.mem.sort(
                     Value,
                     table.values_used(),
                     {},
                     sort_values_by_key_in_ascending_order,
                 );
-                table.value_context.sorted = true;
+                table.map.clearRetainingCapacity();
+                table.value_context.sorted = .sorted;
             }
         }
 
