@@ -55,6 +55,11 @@ const CliArgs = union(enum) {
     },
 
     benchmark: struct {
+        cache_accounts: ?[]const u8 = null,
+        cache_transfers: ?[]const u8 = null,
+        cache_transfers_posted: ?[]const u8 = null,
+        cache_account_history: ?[]const u8 = null,
+        cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_history: bool = false,
         transfer_count: usize = 10_000_000,
@@ -199,6 +204,11 @@ pub const Command = union(enum) {
         /// optimizations such as avoiding negative prefetch) while random/reversed can't.
         pub const IdOrder = enum { sequential, random, reversed };
 
+        cache_accounts: ?[]const u8 = null,
+        cache_transfers: ?[]const u8 = null,
+        cache_transfers_posted: ?[]const u8 = null,
+        cache_account_history: ?[]const u8 = null,
+        cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_history: bool = false,
         transfer_count: usize = 10_000_000,
@@ -387,6 +397,11 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
 
             return Command{
                 .benchmark = .{
+                    .cache_accounts = benchmark.cache_accounts,
+                    .cache_transfers = benchmark.cache_transfers,
+                    .cache_transfers_posted = benchmark.cache_transfers_posted,
+                    .cache_account_history = benchmark.cache_account_history,
+                    .cache_grid = benchmark.cache_grid,
                     .account_count = benchmark.account_count,
                     .transfer_count = benchmark.transfer_count,
                     .query_count = benchmark.query_count,
