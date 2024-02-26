@@ -20,7 +20,7 @@ if ($build) {
     echo ""
 
     curl.exe -Lo tigerbeetle.zip "https://github.com/tigerbeetle/tigerbeetle/releases/download/$version/tigerbeetle-x86_64-windows.zip"
-    Expand-Archive tigerbeetle.zip
+    Expand-Archive tigerbeetle.zip .
 }
 
 echo @"
