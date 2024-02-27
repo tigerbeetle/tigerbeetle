@@ -92,8 +92,8 @@ const config = {
                 href: 'https://linkedin.com/company/tigerbeetle',
               },
               {
-                label: 'Discord',
-                href: 'https://discord.gg/uWCGp46uG5',
+                label: 'Slack',
+                href: 'https://slack.tigerbeetle.com/invite',
               },
             ],
           },
