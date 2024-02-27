@@ -8368,6 +8368,7 @@ pub fn ReplicaType(
                 inline .commit, .ping => |h| .{
                     .checkpoint_id = h.checkpoint_id,
                     .checkpoint_op = h.checkpoint_op,
+                    .view = h.view,
                 },
                 else => return,
             };
@@ -8386,6 +8387,17 @@ pub fn ReplicaType(
 
                 // Either this replica, the header's replica, or both, have diverged.
                 @panic("checkpoint diverged");
+            }
+
+            if (candidate.view > self.view) {
+                log.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
+                    " (view={} candidate.view={})", .{
+                    self.replica,
+                    @tagName(header.command),
+                    self.view,
+                    candidate.view,
+                });
+                return;
             }
 
             // Don't sync backwards, or to our current checkpoint.
