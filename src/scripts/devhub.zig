@@ -152,7 +152,7 @@ fn upload_nyrkio(shell: *Shell, run: NyrkioRun) !void {
         \\curl -s -X POST --fail-with-body
         \\    -H {content_type}
         \\    -H {authorization}
-        \\    https://nyrk.io/api/v0/result/devhub
+        \\    https://nyrkio.com/api/v0/result/devhub
         \\    -d {payload}
     , .{
         .content_type = "Content-type: application/json",
