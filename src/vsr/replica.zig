@@ -8369,6 +8369,7 @@ pub fn ReplicaType(
                 inline .commit, .ping => |h| .{
                     .checkpoint_id = h.checkpoint_id,
                     .checkpoint_op = h.checkpoint_op,
+                    .view = h.view,
                 },
                 else => return,
             };
@@ -8387,6 +8388,25 @@ pub fn ReplicaType(
 
                 // Either this replica, the header's replica, or both, have diverged.
                 @panic("checkpoint diverged");
+            }
+
+            if (candidate.view > self.view) {
+                log.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
+                    " (view={} candidate.view={})", .{
+                    self.replica,
+                    @tagName(header.command),
+                    self.view,
+                    candidate.view,
+                });
+                return;
+            }
+
+            if (candidate.view > self.view_durable()) {
+                // For ignoring, it is correct to check only view and not view_durable. This can't
+                // lead to a situation where we crash and restart with an older view and a newer
+                // sync target, because superblock updates are serialized.
+                assert(self.view > self.view_durable());
+                assert(self.view_durable_updating());
             }
 
             // Don't sync backwards, or to our current checkpoint.
