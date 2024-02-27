@@ -149,10 +149,15 @@ pub const Network = struct {
             var it_target = core.iterator(.{});
             while (it_target.next()) |replica_target| {
                 if (replica_target != replica_source) {
-                    network.link_filter(.{
+                    const path = Path{
                         .source = .{ .replica = @intCast(replica_source) },
                         .target = .{ .replica = @intCast(replica_target) },
-                    }).* = LinkFilter.initFull();
+                    };
+
+                    // The Simulator doesn't use link_drop_packet_fn(), and replica_test.zig doesn't
+                    // use transition_to_liveness_mode().
+                    assert(network.link_drop_packet_fn(path).* == null);
+                    network.link_filter(path).* = LinkFilter.initFull();
                 }
             }
         }
