@@ -78,6 +78,6 @@ To understand TigerBeetle's data model, see:
 
 * [Twitter](https://twitter.com/tigerbeetledb)
 * [GitHub](https://github.com/tigerbeetle/tigerbeetle)
-* [Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)
+* [Slack](https://slack.tigerbeetle.com/invite)
 * [Monthly Newsletter](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 * [YouTube](https://www.youtube.com/@tigerbeetledb)
