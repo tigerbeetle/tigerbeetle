@@ -153,7 +153,7 @@ fn create(env: c.napi_env, cluster_id: u128, concurrency: u32, addresses: []cons
         on_completion,
     ) catch |err| switch (err) {
         error.OutOfMemory => return translate.throw(env, "Failed to allocate memory for Client."),
-        error.Unexpected => return translate.throw(env, "Unexpected error occured on Client."),
+        error.Unexpected => return translate.throw(env, "Unexpected error occurred on Client."),
         error.AddressInvalid => return translate.throw(env, "Invalid replica address."),
         error.AddressLimitExceeded => return translate.throw(env, "Too many replica addresses."),
         error.ConcurrencyMaxInvalid => return translate.throw(env, "Concurrency is too high."),
