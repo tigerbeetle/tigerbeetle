@@ -37,6 +37,7 @@ comptime {
     _ = @import("state_machine/auditor.zig");
     _ = @import("state_machine/workload.zig");
 
+    _ = @import("testing/covered.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/snaptest.zig");
     _ = @import("testing/storage.zig");
