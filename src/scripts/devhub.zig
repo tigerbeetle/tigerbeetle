@@ -13,6 +13,8 @@ const std = @import("std");
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
 
+const log = std.log;
+
 pub const CliArgs = struct {
     sha: []const u8,
 };
@@ -50,6 +52,40 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .label = "RSS", .value = rss_bytes, .unit = "bytes" },
         },
     });
+
+    upload_nyrkio(shell, NyrkioRun{
+        .timestamp = commit_timestamp,
+        .attributes = .{
+            .git_repo = "https://github.com/tigerbeetle/tigerbeetle",
+            .git_commit = cli_args.sha,
+            .branch = "main",
+        },
+        .metrics = &[_]NyrkioRun.Metric{
+            .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
+            .{ .name = "executable size", .value = executable_size_bytes, .unit = "bytes" },
+            .{ .name = "TPS", .value = tps, .unit = "count" },
+            .{ .name = "batch p90", .value = batch_p90_ms, .unit = "ms" },
+            .{ .name = "query p90", .value = query_p90_ms, .unit = "ms" },
+            .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
+        },
+    }) catch |err| {
+        log.err("failed to upload Nyrkiö metrics: {}", .{err});
+    };
+}
+
+fn get_measurement(
+    benchmark_stdout: []const u8,
+    comptime label: []const u8,
+    comptime unit: []const u8,
+) !u64 {
+    errdefer {
+        std.log.err("can't extract '" ++ label ++ "' measurement", .{});
+    }
+
+    var cut = stdx.cut(benchmark_stdout, label ++ " = ") orelse return error.BadMeasurement;
+    cut = stdx.cut(cut.suffix, " " ++ unit) orelse return error.BadMeasurement;
+
+    return try std.fmt.parseInt(u64, cut.prefix, 10);
 }
 
 const Measurement = struct {
@@ -94,17 +130,33 @@ fn upload_run(shell: *Shell, run: Run) !void {
     try shell.exec("git push", .{});
 }
 
-fn get_measurement(
-    benchmark_stdout: []const u8,
-    comptime label: []const u8,
-    comptime unit: []const u8,
-) !u64 {
-    errdefer {
-        std.log.err("can't extract '" ++ label ++ "' measurement", .{});
-    }
+const NyrkioRun = struct {
+    const Metric = struct {
+        name: []const u8,
+        unit: []const u8,
+        value: u64,
+    };
+    timestamp: u64,
+    metrics: []const Metric,
+    attributes: struct {
+        git_repo: []const u8,
+        branch: []const u8,
+        git_commit: []const u8,
+    },
+};
 
-    var cut = stdx.cut(benchmark_stdout, label ++ " = ") orelse return error.BadMeasurement;
-    cut = stdx.cut(cut.suffix, " " ++ unit) orelse return error.BadMeasurement;
-
-    return try std.fmt.parseInt(u64, cut.prefix, 10);
+fn upload_nyrkio(shell: *Shell, run: NyrkioRun) !void {
+    const token = try shell.env_get("NYRKIO_TOKEN");
+    const payload = try std.json.stringifyAlloc(shell.arena.allocator(), [_]NyrkioRun{run}, .{});
+    try shell.exec(
+        \\curl -s -X POST --fail-with-body
+        \\    -H {content_type}
+        \\    -H {authorization}
+        \\    https://nyrk.io/api/v0/result/devhub
+        \\    -d {payload}
+    , .{
+        .content_type = "Content-type: application/json",
+        .authorization = try shell.print("Authorization: Bearer {s}", .{token}),
+        .payload = payload,
+    });
 }

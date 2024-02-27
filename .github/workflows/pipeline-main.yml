@@ -24,6 +24,8 @@ jobs:
       - run: ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
+          NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
+
       - uses: actions/upload-pages-artifact@v1
         with:
           path: ./src/devhub
