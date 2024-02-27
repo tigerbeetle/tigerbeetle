@@ -143,7 +143,7 @@ we encourage you to [try out
 TigerBeetle](https://github.com/tigerbeetle/tigerbeetle#quickstart),
 [follow our
 development](https://github.com/tigerbeetle/tigerbeetle#short-term-roadmap),
-and [give feedback](https://join.slack.com/t/tigerbeetle/shared_invite/zt-1gf3qnvkz-GwkosudMCM3KGbGiSu87RQ)!
+and [give feedback](https://slack.tigerbeetle.com/invite)!
 
 ## Is TigerBeetle ACID-compliant?
 
