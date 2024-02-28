@@ -18,7 +18,7 @@ const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
-const covered = @import("../testing/covered.zig");
+const marks = @import("../testing/marks.zig");
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -30,7 +30,7 @@ const SyncStage = vsr.SyncStage;
 const SyncTarget = vsr.SyncTarget;
 const ClientSessions = vsr.ClientSessions;
 
-const log = covered.wrap_log(std.log.scoped(.replica));
+const log = marks.wrap_log(std.log.scoped(.replica));
 const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
@@ -4675,7 +4675,7 @@ pub fn ReplicaType(
                             // This SV is guaranteed to have originated after the replica crash,
                             // it is safe to use to determine the head op.
                         } else {
-                            log.covered.debug("{}: on_{s}: ignoring (recovering_head, nonce mismatch)", .{
+                            log.mark.debug("{}: on_{s}: ignoring (recovering_head, nonce mismatch)", .{
                                 self.replica,
                                 command,
                             });
