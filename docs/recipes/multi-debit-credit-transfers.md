@@ -1,10 +1,10 @@
-# Complex (Multi-Debit, Multi-Credit) Journal Entries
+# Multi-Debit, Multi-Credit Transfers
 
 TigerBeetle is designed for maximum performance. In order to keep it lean, the database only supports simple transfers with a single debit and a single credit.
 
 However, you'll probably run into cases where you want transactions with multiple debits and/or credits. If so, this page is for you!
 
-## 1-to-N
+## One-to-Many Journal Entries
 
 Transactions that involve multiple debits and a single credit OR a single debit and multiple credits are relatively straightforward.
 
@@ -36,7 +36,7 @@ This example debits multiple accounts and credits a single account. It uses the 
 |    USD |           `B` |            `X` |     50 |           true |
 |    USD |           `C` |            `X` |     10 |          false |
 
-## Many-to-Many Transactions
+## Many-to-Many Journal Entries
 
 Transactions with multiple debits and multiple credits are a bit more tricky.
 
@@ -44,7 +44,7 @@ To simplify the math, we can use a temporary "control account" as an intermediar
 
 In this example, we'll use the following accounts:
 
-- Three _source accounts_ `A` and `B` on the `USD` ledger.
+- Two _source accounts_ `A` and `B` on the `USD` ledger.
 - Three _destination accounts_ `X`, `Y`, and `Z`, on the `USD` ledger.
 - A _compound entry control account_ `Control` on the `USD` ledger.
 
