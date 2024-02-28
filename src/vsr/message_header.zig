@@ -11,13 +11,13 @@ const schema = @import("../lsm/schema.zig");
 
 const checksum_body_empty = vsr.checksum(&.{});
 
-/// Network message and journal entry header:
+/// Network message, prepare, and grid block header:
 /// We reuse the same header for both so that prepare messages from the primary can simply be
 /// journalled as is by the backups without requiring any further modification.
 pub const Header = extern struct {
     /// A checksum covering only the remainder of this header.
     /// This allows the header to be trusted without having to recv() or read() the associated body.
-    /// This checksum is enough to uniquely identify a network message or journal entry.
+    /// This checksum is enough to uniquely identify a network message or prepare.
     checksum: u128,
 
     // TODO(zig): When Zig supports u256 in extern-structs, merge this into `checksum`.

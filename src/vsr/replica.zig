@@ -200,7 +200,7 @@ pub fn ReplicaType(
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall clock:
         clock: Clock,
 
-        /// The persistent log of hash-chained journal entries:
+        /// The persistent log of hash-chained prepares:
         journal: Journal,
 
         /// ClientSessions records for each client the latest session and the latest committed reply.
