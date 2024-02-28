@@ -32,7 +32,7 @@ pub fn TreeTableInfoType(comptime Table: type) type {
         /// Address of the table's index block.
         address: u64,
 
-        /// The minimum snapshot that can see this table (with exclusive bounds).
+        /// The minimum snapshot that can see this table (with inclusive bounds).
         /// - This value is set to the current snapshot tick on table creation.
         snapshot_min: u64,
 
