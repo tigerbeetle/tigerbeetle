@@ -12,7 +12,7 @@ const vsr = @import("../vsr.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const parse_table = @import("../testing/table.zig").parse;
-const covered = @import("../testing/covered.zig");
+const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
@@ -258,7 +258,7 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     try expectEqual(b1.status(), .recovering_head);
     try expectEqual(b1.op_head(), 20);
 
-    const mark = covered.mark("ignoring (recovering_head, nonce mismatch)");
+    const mark = marks.check("ignoring (recovering_head, nonce mismatch)");
     a.stop();
     b1.replay_recorded();
     t.run();

@@ -1,5 +1,3 @@
-//! We'll get you covered!
-//!
 //! This file piggy-backs on the logging infrastructure to implement explicit coverage marks:
 //!     <https://ferrous-systems.com/blog/coverage-marks/>
 //!
@@ -8,27 +6,35 @@
 //! benefits are:
 //! - tests are more resilient to refactors
 //! - production code is more readable (you can immediately jump to a specific test)
+//!
+//! At the surface level, this resembles usual code coverage, but the idea is closer to traceability
+//! from safety-critical systems:
+//!     <https://en.wikipedia.org/wiki/Requirements_traceability>
+//!
+//! That is, the important part is not that a log line is covered at all, but that we can trace
+//! production code to a single minimal hand-written test which explains why the code needs to
+//! exist.
 test "tutorial" {
     // Import by a qualified name.
-    const covered = @import("./covered.zig");
+    const marks = @import("./marks.zig");
 
     const production_code = struct {
         // In production code, wrap the logger.
-        const log = covered.wrap_log(std.log.scoped(.my_module));
+        const log = marks.wrap_log(std.log.scoped(.my_module));
 
         fn function_under_test(x: u32) void {
             if (x % 2 == 0) {
                 // Both `log.info` and log.covered.info` are available.
                 // Only second version records coverage.
-                log.covered.info("x is even (x={})", .{x});
+                log.mark.info("x is even (x={})", .{x});
             }
         }
     };
 
     // Create a mark with the `mark` function...
-    const m = covered.mark("x is even");
+    const mark = marks.check("x is even");
     production_code.function_under_test(92);
-    try m.expect_hit(); // ... and don't forget to assert at the end!
+    try mark.expect_hit(); // ... and don't forget to assert at the end!
 }
 
 const std = @import("std");
@@ -47,19 +53,19 @@ var global_state: GlobalStateType = .{};
 pub const Mark = struct {
     name: []const u8,
 
-    pub fn expect_hit(m: Mark) !void {
+    pub fn expect_hit(mark: Mark) !void {
         comptime assert(builtin.is_test);
-        assert(global_state.mark_name.?.ptr == m.name.ptr);
+        assert(global_state.mark_name.?.ptr == mark.name.ptr);
         defer global_state = .{};
 
         if (global_state.mark_hit_count == 0) {
-            std.debug.print("mark '{s}' not hit", .{m.name});
+            std.debug.print("mark '{s}' not hit", .{mark.name});
             return error.MarkNotHit;
         }
     }
 };
 
-pub fn mark(name: []const u8) Mark {
+pub fn check(name: []const u8) Mark {
     comptime assert(builtin.is_test);
     assert(global_state.mark_name == null);
     assert(global_state.mark_hit_count == 0);
@@ -76,7 +82,7 @@ pub fn wrap_log(comptime base: anytype) type {
             pub const info = base.info;
             pub const debug = base.debug;
 
-            pub const covered = struct {
+            pub const mark = struct {
                 pub fn err(comptime fmt: []const u8, args: anytype) void {
                     record(fmt);
                     base.err(fmt, args);
@@ -105,7 +111,7 @@ pub fn wrap_log(comptime base: anytype) type {
             pub const info = base.info;
             pub const debug = base.debug;
 
-            pub const covered = base;
+            pub const mark = base;
         };
     }
 }
