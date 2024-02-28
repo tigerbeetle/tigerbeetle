@@ -8390,7 +8390,7 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            if (candidate.view > self.view) {
+            if (candidate.view > self.view_durable()) {
                 log.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
                     " (view={} candidate.view={})", .{
                     self.replica,
@@ -8399,14 +8399,6 @@ pub fn ReplicaType(
                     candidate.view,
                 });
                 return;
-            }
-
-            if (candidate.view > self.view_durable()) {
-                // For ignoring, it is correct to check only view and not view_durable. This can't
-                // lead to a situation where we crash and restart with an older view and a newer
-                // sync target, because superblock updates are serialized.
-                assert(self.view > self.view_durable());
-                assert(self.view_durable_updating());
             }
 
             // Don't sync backwards, or to our current checkpoint.
