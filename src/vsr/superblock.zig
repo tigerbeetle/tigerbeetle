@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3380]u8 = [_]u8{0} ** 3380,
+    reserved: [3172]u8 = [_]u8{0} ** 3172,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -143,7 +143,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
-            assert(@sizeOf(VSRState) == 608);
+            assert(@sizeOf(VSRState) == 816);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -299,9 +299,9 @@ pub const SuperBlockHeader = extern struct {
     /// This struct is sent in a `sync_checkpoint` message from a healthy replica to a syncing
     /// replica.
     pub const CheckpointState = extern struct {
-        /// The vsr.Header.checksum of commit_min's message.
-        commit_min_checksum: u128,
-        commit_min_checksum_padding: u128 = 0,
+        /// The last prepare of the checkpoint committed to the state machine.
+        /// At startup, replay the log hereafter.
+        header: vsr.Header.Prepare,
 
         free_set_last_block_checksum: u128,
         free_set_last_block_checksum_padding: u128 = 0,
@@ -336,9 +336,6 @@ pub const SuperBlockHeader = extern struct {
         manifest_newest_address: u64,
         snapshots_block_address: u64,
 
-        /// The last operation committed to the state machine. At startup, replay the log hereafter.
-        commit_min: u64,
-
         // Logical storage size in bytes.
         //
         // If storage_size is less than the data file size, then the grid blocks beyond storage_size
@@ -363,11 +360,11 @@ pub const SuperBlockHeader = extern struct {
         release: u16,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [18]u8 = [_]u8{0} ** 18,
+        reserved: [10]u8 = [_]u8{0} ** 10,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 352);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
+            assert(@sizeOf(CheckpointState) == 560);
             assert(stdx.no_padding(CheckpointState));
         }
     };
