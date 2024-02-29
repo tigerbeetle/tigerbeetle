@@ -467,6 +467,13 @@ const Environment = struct {
             checkpoint_superblock_callback,
             &env.superblock_context,
             .{
+                .header = header: {
+                    var header = vsr.Header.Prepare.root(0);
+                    header.op = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.header.op);
+                    header.set_checksum();
+                    break :header header;
+                },
+
                 .manifest_references = env.manifest_log.checkpoint_references(),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{
@@ -475,8 +482,6 @@ const Environment = struct {
                     .trailer_size = 0,
                     .checksum = vsr.checksum(&.{}),
                 },
-                .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum + 1,
-                .commit_min = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.commit_min),
                 .commit_max = vsr.Checkpoint.checkpoint_after(vsr_state.commit_max),
                 .sync_op_min = 0,
                 .sync_op_max = 0,
