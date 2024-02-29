@@ -63,7 +63,7 @@ TigerBeetle does all ledger validation, balance tracking, persistence and replic
 
 In theory, TigerBeetle is a replicated state machine that **takes an initial starting state** (account opening balances), and **applies a set of input events** (transfers) in deterministic order, after first replicating these input events safely, to **arrive at a final state** (account closing balances).
 
-In practice, TigerBeetle is based on the [LMAX Exchange Architecture](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java) and makes a few improvements.
+In practice, TigerBeetle is based on the [LMAX Exchange Architecture](https://www.infoq.com/presentations/LMAX/) and makes a few improvements.
 
 We take the same three classic LMAX steps:
 
@@ -140,10 +140,10 @@ Events are **immutable data structures** that **instantiate or mutate state data
           debits_pending: 16 bytes (128-bit)
            debits_posted: 16 bytes (128-bit)
          credits_pending: 16 bytes (128-bit)
-          credits_posted: 16 bytes (128-bit)                      
+          credits_posted: 16 bytes (128-bit)
            user_data_128: 16 bytes (128-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]
             user_data_64:  8 bytes ( 64-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]
-            user_data_32:  4 bytes ( 32-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]                      
+            user_data_32:  4 bytes ( 32-bit) [optional, opaque third-party identifier to link this account (many-to-one) to an external entity]
                 reserved:  4 bytes ( 32-bit) [reserved for future accounting policy primitives]
                   ledger:  4 bytes ( 32-bit) [required, to enforce isolation by ensuring that all transfers are between accounts of the same ledger]
                     code:  2 bytes ( 16-bit) [required, an opaque chart of accounts code describing the reason for the transfer, e.g. deposit, settlement]
