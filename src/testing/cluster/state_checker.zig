@@ -114,8 +114,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     (replica.view == head_max.view and replica.op >= head_max.op));
             }
 
-            const commit_root_op = replica.superblock.working.vsr_state.checkpoint.commit_min;
-            const commit_root = replica.superblock.working.vsr_state.checkpoint.commit_min_checksum;
+            const commit_root_op = replica.superblock.working.vsr_state.checkpoint.header.op;
+            const commit_root = replica.superblock.working.vsr_state.checkpoint.header.checksum;
 
             const commit_a = state_checker.commit_mins[replica_index];
             const commit_b = replica.commit_min;
@@ -130,7 +130,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             // committed (it might be left over from before sync).
             const checksum_b = if (commit_b == commit_root_op) commit_root else header_b.?.checksum;
 
-            assert(checksum_b != commit_root or replica.commit_min == replica.superblock.working.vsr_state.checkpoint.commit_min);
+            assert(checksum_b != commit_root or replica.commit_min == replica.superblock.working.vsr_state.checkpoint.header.op);
             assert((commit_a == commit_b) == (checksum_a == checksum_b));
 
             if (checksum_a == checksum_b) return;

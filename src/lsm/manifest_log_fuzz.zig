@@ -433,7 +433,7 @@ const Environment = struct {
         env.manifest_log.compact(
             manifest_log_compact_callback,
             vsr.Checkpoint.checkpoint_after(
-                env.manifest_log.superblock.working.vsr_state.checkpoint.commit_min,
+                env.manifest_log.superblock.working.vsr_state.checkpoint.header.op,
             ) + 1,
         );
         env.wait(&env.manifest_log);
