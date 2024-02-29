@@ -2,9 +2,13 @@
 
 TigerBeetle is designed for maximum performance. In order to keep it lean, the database only supports simple transfers with a single debit and a single credit.
 
-However, you'll probably run into cases where you want transactions with multiple debits and/or credits. If so, this page is for you!
+However, you'll probably run into cases where you want transactions with multiple debits and/or credits. For example, you might have a transfer where you want to extract fees and/or taxes.
 
-## One-to-Many Journal Entries
+Read on to see how to implement one-to-many and many-to-many transfers!
+
+> Note that all of these examples use the [Linked Transfers flag (`flags.linked`)](../reference/transfers.md#flagslinked) to ensure that all of the transfers succeed or fail together.
+
+## One-to-Many Transfers
 
 Transactions that involve multiple debits and a single credit OR a single debit and multiple credits are relatively straightforward.
 
@@ -36,7 +40,7 @@ This example debits multiple accounts and credits a single account. It uses the 
 |    USD |           `B` |            `X` |     50 |           true |
 |    USD |           `C` |            `X` |     10 |          false |
 
-## Many-to-Many Journal Entries
+## Many-to-Many Transfers
 
 Transactions with multiple debits and multiple credits are a bit more tricky.
 
