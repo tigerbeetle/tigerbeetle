@@ -521,8 +521,7 @@ pub const Simulator = struct {
         if (core_recovering_head == 0) return false;
 
         const quorums = vsr.quorums(simulator.options.cluster.replica_count);
-        assert(quorums.view_change > core_replicas - core_recovering_head);
-        return true;
+        return quorums.view_change > core_replicas - core_recovering_head;
     }
 
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
