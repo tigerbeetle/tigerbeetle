@@ -200,7 +200,7 @@ pub fn ReplicaType(
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall clock:
         clock: Clock,
 
-        /// The persistent log of hash-chained journal entries:
+        /// The persistent log of hash-chained prepares:
         journal: Journal,
 
         /// ClientSessions records for each client the latest session and the latest committed reply.
@@ -1790,25 +1790,25 @@ pub fn ReplicaType(
             );
             const op_head = switch (headers) {
                 .awaiting_quorum => {
-                    log.debug("{}: on_do_view_change: view={} waiting for quorum", .{
-                        self.replica,
-                        self.view,
-                    });
+                    log.debug(
+                        "{}: on_do_view_change: view={} waiting for quorum",
+                        .{ self.replica, self.view },
+                    );
                     return;
                 },
                 .awaiting_repair => {
-                    log.warn("{}: on_do_view_change: view={} quorum received, awaiting repair", .{
-                        self.replica,
-                        self.view,
-                    });
+                    log.mark.warn(
+                        "{}: on_do_view_change: view={} quorum received, awaiting repair",
+                        .{ self.replica, self.view },
+                    );
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
                 .complete_invalid => {
-                    log.err("{}: on_do_view_change: view={} quorum received, deadlocked", .{
-                        self.replica,
-                        self.view,
-                    });
+                    log.mark.err(
+                        "{}: on_do_view_change: view={} quorum received, deadlocked",
+                        .{ self.replica, self.view },
+                    );
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
                 },
@@ -1859,7 +1859,7 @@ pub fn ReplicaType(
                     }
                 } else unreachable;
 
-                log.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
+                log.mark.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
                     "(view={}..{} checkpoint={}..{})", .{
                     self.replica,
                     self.view,
@@ -2665,7 +2665,7 @@ pub fn ReplicaType(
                 assert(self.pipeline.queue.prepare_queue.count > 0);
                 assert(self.primary_pipeline_pending() != null);
 
-                log.debug("{}: on_commit_message_timeout: primary abdicating (view={})", .{
+                log.mark.debug("{}: on_commit_message_timeout: primary abdicating (view={})", .{
                     self.replica,
                     self.view,
                 });
@@ -8391,7 +8391,7 @@ pub fn ReplicaType(
             }
 
             if (candidate.view > self.view_durable()) {
-                log.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
+                log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
                     " (view={} candidate.view={})", .{
                     self.replica,
                     @tagName(header.command),

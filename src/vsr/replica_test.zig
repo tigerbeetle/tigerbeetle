@@ -38,7 +38,6 @@ const log_level = std.log.Level.err;
 //      causing unexpected/unaccounted-for commits. Maybe also don't tick clients at all during
 //      run(), so that new requests cannot be added "unexpectedly". (This will remove the need for
 //      the boilerplate c.request(20) == 20 at the beginning of most tests).
-// TODO Many of these would benefit from explicit code coverage marks.
 
 comptime {
     // The tests are written for these configuration values in particular.
@@ -367,8 +366,9 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" 
     try c.request(20, 20);
     t.replica(.A0).drop_all(.B1, .incoming);
     t.replica(.A0).drop_all(.B2, .incoming);
-    // TODO: Explicit coverage marks: This should hit the "primary abdicating" log line.
+    const mark = marks.check("on_commit_message_timeout: primary abdicating");
     try c.request(30, 30);
+    try mark.expect_hit();
 }
 
 test "Cluster: network: partition 1-2 (isolate primary, asymmetric, receive-only)" {
@@ -490,9 +490,9 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     a0.drop_all(.__, .bidirectional);
     // Block state sync to prove that B1 recovers via WAL repair.
     b1.drop(.__, .bidirectional, .sync_checkpoint);
-    // TODO: Explicit coverage marks: B1 should hit the
-    // "on_do_view_change: lagging primary; forfeiting" log line.
+    const mark = marks.check("on_do_view_change: lagging primary; forfeiting");
     t.run();
+    try mark.expect_hit();
 
     try expectEqual(b2.role(), .primary);
     try expectEqual(b2.index(), t.replica(.A0).index());
@@ -724,11 +724,11 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     // The cluster must wait form R2 before recovering.
     try t.replica(.R0).open();
     try t.replica(.R1).open();
-    // TODO Explicit code coverage marks: This should hit the "quorum received, awaiting repair"
-    // log line in on_do_view_change().
+    const mark = marks.check("quorum received, awaiting repair");
     t.run();
     try expectEqual(t.replica(.R0).status(), .view_change);
     try expectEqual(t.replica(.R1).status(), .view_change);
+    try mark.expect_hit();
 
     // R2 provides the missing header, allowing the view-change to succeed.
     try t.replica(.R2).open();
@@ -754,10 +754,10 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     t.replica(.R2).corrupt(.{ .wal_prepare = 22 });
 
     try t.replica(.R_).open();
-    // TODO Explicit code coverage marks: This should hit the "quorum received, deadlocked"
-    // log line in on_do_view_change().
+    const mark = marks.check("quorum received, deadlocked");
     t.run();
     try expectEqual(t.replica(.R_).status(), .view_change);
+    try mark.expect_hit();
 }
 
 test "Cluster: view-change: duel of the primaries" {
@@ -1190,18 +1190,20 @@ test "Cluster: sync: checkpoint from a newer view" {
         b1.drop(.R_, .incoming, .ping);
         b1.drop(.R_, .incoming, .pong);
 
-        // TODO: Explicit coverage marks: This should hit the
-        // "jump_sync_target: ignoring, newer view" log line.
         const b1_view_before = b1.view();
+        var mark = marks.check("jump_sync_target: ignoring, newer view");
         try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
         try expectEqual(b1_view_before, b1.view());
         try expectEqual(b1.op_checkpoint(), 0); // B1 ignores new checkpoint.
+        try mark.expect_hit();
 
+        mark = marks.check("jump_sync_target: ignoring, newer view");
         b1.stop(); // It should be ignored even after restart.
         try b1.open();
         t.run();
         try expectEqual(b1_view_before, b1.view());
         try expectEqual(b1.op_checkpoint(), 0);
+        try mark.expect_hit();
     }
 
     t.replica(.R_).pass_all(.R_, .bidirectional);
