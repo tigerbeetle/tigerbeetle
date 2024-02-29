@@ -42,9 +42,9 @@ This example debits multiple accounts and credits a single account. It uses the 
 
 ## Many-to-Many Transfers
 
-Transactions with multiple debits and multiple credits are a bit more tricky.
+Transactions with multiple debits and multiple credits are a bit more involved (but you got this!).
 
-To simplify the math, we can use a temporary "control account" as an intermediary.
+This is where the accounting concept of a Control Account comes in handy. We can use this as a temporary intermediary account, as illustrated below.
 
 In this example, we'll use the following accounts:
 
@@ -62,4 +62,8 @@ In this example, we'll use the following accounts:
 
 Here, we use two transfers to debit accounts `A` and `B` and credit the `Control` account, and another three transfers to credit accounts `X`, `Y`, and `Z`.
 
-If you look closely at this example, you may notice that we could technically have simply debited `B` and credited `Z` directly because the amounts happen to line up. That is true! However, since you probably don't want to program a lot of heuristics to figure out which debits and credits exactly match up, you'll probably find it easier to set up these complex journal entries using this type of control account.
+If you look closely at this example, you may notice that we could technically have simply debited `B` and credited `Z` directly because the amounts happen to line up. That is true!
+
+For performance reasons, you _might_ want to implement logic to circumvent the `Control` account and reduce the number of transfer to implement a certain compound journal entry.
+
+However, you also might want to try to avoid premature optimizations (we've all been there!). You'll probably find it easier to program these compound journal entries using this type of control account -- and you can always come back to squeeze this extra bit of performance out later!
