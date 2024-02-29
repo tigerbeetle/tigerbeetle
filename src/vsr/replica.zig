@@ -5523,10 +5523,10 @@ pub fn ReplicaType(
 
             if (header.op < self.op_repair_min()) {
                 // Slots too far back belong to the next wrap of the log.
-                log.debug("{}: repair_header: false (precedes op_repair_min={})", .{
-                    self.replica,
-                    self.op_repair_min(),
-                });
+                log.debug(
+                    "{}: repair_header: op={} checksum={} (precedes op_repair_min={})",
+                    .{ self.replica, header.op, header.checksum, self.op_repair_min() },
+                );
                 return false;
             }
 
