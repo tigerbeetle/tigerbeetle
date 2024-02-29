@@ -157,10 +157,9 @@ pub const SuperBlockHeader = extern struct {
         }) VSRState {
             return .{
                 .checkpoint = .{
+                    .header = vsr.Header.Prepare.root(options.cluster),
                     .parent_checkpoint_id = 0,
                     .grandparent_checkpoint_id = 0,
-                    .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
-                    .commit_min = 0,
                     .free_set_checksum = comptime vsr.checksum(&.{}),
                     .free_set_last_block_checksum = 0,
                     .free_set_last_block_address = 0,
@@ -212,7 +211,7 @@ pub const SuperBlockHeader = extern struct {
             if (state.checkpoint.free_set_last_block_address == 0) {
                 assert(state.checkpoint.free_set_last_block_checksum == 0);
                 assert(state.checkpoint.free_set_size == 0);
-                assert(state.checkpoint.free_set_checksum == vsr.checksum(&.{}));
+                assert(state.checkpoint.free_set_checksum == comptime vsr.checksum(&.{}));
             } else {
                 assert(state.checkpoint.free_set_size > 0);
             }
@@ -220,7 +219,7 @@ pub const SuperBlockHeader = extern struct {
             if (state.checkpoint.client_sessions_last_block_address == 0) {
                 assert(state.checkpoint.client_sessions_last_block_checksum == 0);
                 assert(state.checkpoint.client_sessions_size == 0);
-                assert(state.checkpoint.client_sessions_checksum == vsr.checksum(&.{}));
+                assert(state.checkpoint.client_sessions_checksum == comptime vsr.checksum(&.{}));
             } else {
                 assert(state.checkpoint.client_sessions_size == vsr.ClientSessions.encode_size);
             }
@@ -719,10 +718,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .parent = 0,
                 .vsr_state = .{
                     .checkpoint = .{
+                        .header = mem.zeroes(vsr.Header.Prepare),
                         .parent_checkpoint_id = 0,
                         .grandparent_checkpoint_id = 0,
-                        .commit_min_checksum = 0,
-                        .commit_min = 0,
                         .manifest_oldest_checksum = 0,
                         .manifest_oldest_address = 0,
                         .manifest_newest_checksum = 0,
@@ -796,8 +794,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         const UpdateCheckpoint = struct {
-            commit_min_checksum: u128,
-            commit_min: u64,
+            header: vsr.Header.Prepare,
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
@@ -815,9 +812,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update: UpdateCheckpoint,
         ) void {
             assert(superblock.opened);
-            assert(update.commit_min <= update.commit_max);
-            assert(update.commit_min > superblock.staging.vsr_state.checkpoint.header.op);
-            assert(update.commit_min_checksum !=
+            assert(update.header.op <= update.commit_max);
+            assert(update.header.op > superblock.staging.vsr_state.checkpoint.header.op);
+            assert(update.header.checksum !=
                 superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
 
@@ -833,10 +830,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
+                .header = update.header,
                 .parent_checkpoint_id = superblock.staging.checkpoint_id(),
                 .grandparent_checkpoint_id = vsr_state_staging.checkpoint.parent_checkpoint_id,
-                .commit_min = update.commit_min,
-                .commit_min_checksum = update.commit_min_checksum,
                 .free_set_checksum = update.free_set_reference.checksum,
                 .free_set_last_block_checksum = update.free_set_reference.last_block_checksum,
                 .free_set_last_block_address = update.free_set_reference.last_block_address,
@@ -934,6 +930,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update: UpdateSync,
         ) void {
             assert(superblock.opened);
+            assert(update.checkpoint.header.valid_checksum());
+            assert(update.checkpoint.header.command == .prepare);
             assert(update.checkpoint.header.op >=
                 superblock.staging.vsr_state.checkpoint.header.op);
             assert(update.checkpoint.header.op <= update.commit_max);

@@ -3720,8 +3720,7 @@ pub fn ReplicaType(
                 commit_op_checkpoint_superblock_callback,
                 &self.superblock_context,
                 .{
-                    .commit_min_checksum = self.journal.header_with_op(vsr_state_commit_min).?.checksum,
-                    .commit_min = vsr_state_commit_min,
+                    .header = self.journal.header_with_op(vsr_state_commit_min).?.*,
                     .commit_max = self.commit_max,
                     .sync_op_min = vsr_state_sync_op.min,
                     .sync_op_max = vsr_state_sync_op.max,
