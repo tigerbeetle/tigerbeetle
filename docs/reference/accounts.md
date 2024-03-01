@@ -178,9 +178,13 @@ unique error result. Other accounts in the chain will have their error
 result set to
 [`linked_event_failed`](./operations/create_accounts.md#linked_event_failed).
 
-After the link has executed, the association of each event is lost.
-To save the association, it must be
-[encoded into the data model](../design/data-modeling.md).
+
+After the chain of account operations has executed, the fact that they were
+linked will not be saved by default.
+To save the association between accounts, it must be
+[encoded into the data model](../design/data-modeling.md), for example by
+adding an ID to one of the [user data](../design/data-modeling.md#user_data)
+fields.
 
 #### `flags.debits_must_not_exceed_credits`
 

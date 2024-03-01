@@ -354,9 +354,12 @@ then `B`, `C`, and `D` will all fail. They are linked.
 Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`,
 and each other.
 
-After the link has executed, the association of each event is lost.
-To save the association, it must be
-[encoded into the data model](../design/data-modeling.md).
+After the chain of linked transfers has executed, the fact that they were
+linked will not be saved by default.
+To save the association between transfers, it must be
+[encoded into the data model](../design/data-modeling.md), for example by
+adding an ID to one of the [user data](../design/data-modeling.md#user_data)
+fields.
 
 ##### Examples
 
