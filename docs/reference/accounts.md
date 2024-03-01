@@ -7,9 +7,11 @@ sidebar_position: 1
 An `Account` is a record storing the cumulative effect of committed
 [transfers](./transfers.md).
 
-TigerBeetle uses the same data structures internally and
-externally. This means that sometimes you need to set temporary values
-for fields that TigerBeetle, not you (the user), are responsible.
+TigerBeetle uses the same data structures internally and externally. This means
+that when creating accounts, you will need to set temporary values for certain
+fields that TigerBeetle is responsible for. For example, you will set the
+[`timestamp`](#timestamp) field to `0` when creating an account and then
+TigerBeetle will set the field to the timestamp when the operation was executed.
 
 ### Updates
 
