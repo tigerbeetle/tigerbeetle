@@ -44,7 +44,7 @@ This example debits multiple accounts and credits a single account. It uses the 
 
 Transactions with multiple debits and multiple credits are a bit more involved (but you got this!).
 
-This is where the accounting concept of a Control Account comes in handy. We can use this as a temporary intermediary account, as illustrated below.
+This is where the accounting concept of a Control Account comes in handy. We can use this as an intermediary account, as illustrated below.
 
 In this example, we'll use the following accounts:
 
