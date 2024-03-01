@@ -16,6 +16,10 @@ Transfers *cannot be modified* after creation.
 
 ## Modes
 
+Transfers can either be Single-Phase, where they are executed immediately, or Two-Phase, where
+they are first put in a Pending state and then either Posted or Voided. For more details on the
+latter, see the [Two-Phase Transfer guide](../design/two-phase-transfers.md).
+
 Fields used by each mode of transfer:
 
 | Field                         | Single-Phase | Pending  | Post-Pending | Void-Pending |
@@ -44,81 +48,6 @@ that when creating transfers, you will need to set temporary values for certain
 fields that TigerBeetle is responsible for. For example, you will set the 
 [`timestamp`](#timestamp) field to `0` when creating a transfer and then
 TigerBeetle will set the field to the timestamp when the transfer was executed.
-
-### Single-phase transfer
-
-Single-phase transfers post funds to accounts immediately when they are created.
-
-### Two-phase transfer
-
-A pending transfer followed by a post-pending transfer, void-pending transfer, or a timeout is
-called a "two-phase transfer". Unlike a single-phase transfer, a two-phase transfer moves funds in
-stages:
-
-1. Reserve funds
-2. Resolve funds (post, void, or timeout)
-
-Attempting to resolve a pending transfer more than once will return the applicable error result:
-- [`pending_transfer_already_posted`](../reference/operations/create_transfers.md#pending_transfer_already_posted)
-- [`pending_transfer_already_voided`](../reference/operations/create_transfers.md#pending_transfer_already_voided)
-- [`pending_transfer_expired`](../reference/operations/create_transfers.md#pending_transfer_expired)
-
-#### Pending transfer
-
-A pending transfer, denoted by [`flags.pending`](#flagspending),
-reserves its `amount` in the debit/credit accounts'
-[`debits_pending`](./accounts.md#debits_pending)/[`credits_pending`](./accounts.md#credits_pending)
-fields respectively, leaving `debits_posted`/`credits_posted` unmodified.
-
-#### Post-pending transfer
-
-A post-pending transfer, denoted by [`flags.post_pending_transfer`](#flagspost_pending_transfer),
-causes the corresponding pending transfer (referenced by [`pending_id`](#pending_id)) to "post",
-transferring some or all of the pending transfer's reserved amount to its destination, and restoring
-(voiding) the remainder (if any) to its origin accounts.
-
-* If the posted `amount` is 0, the full pending transfer's amount is
-  posted.
-* If the posted `amount` is nonzero, then only this amount is posted,
-  and the remainder is restored to its original accounts. It must be
-  less than or equal to the pending transfer's amount.
-
-Additionally, when `flags.post_pending_transfer` is set:
-
-* `pending_id` must reference a [pending transfer](#pending-transfer).
-* `flags.void_pending_transfer` must not be set.
-
-And the following fields may either be zero, otherwise must match the
-value of the pending transfer's field:
-
-* `debit_account_id`
-* `credit_account_id`
-* `ledger`
-* `code`
-
-#### Void-pending transfer
-
-A void-pending transfer, denoted by [`flags.void_pending_transfer`](#flagsvoid_pending_transfer),
-causes the pending transfer (referenced by [`pending_id`](#pending_id)) to void. The pending amount
-is restored to its original accounts.
-Additionally, when this field is set:
-
-* `pending_id` must reference a [pending transfer](#pending-transfer).
-* `flags.post_pending_transfer` must not be set.
-
-And the following fields may either be zero, otherwise must match the
-value of the pending transfer's field:
-
-* `debit_account_id`
-* `credit_account_id`
-* `amount`
-* `ledger`
-* `code`
-
-#### Read more
-
-See the [Two-phase transfers](../design/two-phase-transfers.md) guide
-for details, examples, and sample code.
 
 ## Fields
 
