@@ -64,6 +64,6 @@ Here, we use two transfers to debit accounts `A` and `B` and credit the `Control
 
 If you looked closely at this example, you may have noticed that we could have debited `B` and credited `Z` directly because the amounts happened to line up. That is true!
 
-For performance reasons, you _might_ want to implement logic to circumvent the `Control` account and reduce the number of transfer to implement a certain compound journal entry.
+For a little more extreme performance, you _might_ consider implementing logic to circumvent the control account where possible, to reduce the number of transfers to implement a compound journal entry.
 
-However, you also might want to try to avoid premature optimizations (we've all been there!). You'll probably find it easier to program these compound journal entries using this type of control account -- and you can always come back to squeeze this extra bit of performance out later!
+However, if you're just getting started, you can avoid premature optimizations (we've all been there!). You may find it easier to program these compound journal entries _always_ using a control account -- and you can then come back to squeeze this performance out later!
