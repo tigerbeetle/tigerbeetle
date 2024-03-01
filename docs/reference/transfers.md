@@ -131,7 +131,8 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1`
-* Must not conflict with another transfer
+* Must not conflict with another transfer (note that a transfer MAY have the same `id` as an
+account, but we would recommend avoiding this)
 
 ### `debit_account_id`
 
