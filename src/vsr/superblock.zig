@@ -884,6 +884,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(superblock.staging.vsr_state.log_view <= update.log_view);
             assert(superblock.staging.vsr_state.log_view < update.log_view or
                 superblock.staging.vsr_state.view < update.view);
+            assert((update.headers.command == .start_view and update.log_view == update.view) or
+                (update.headers.command == .do_view_change and update.log_view < update.view));
             // Usually the op-head is ahead of the commit_min. But this may not be the case, due to
             // state sync that ran after the view_durable_update was queued, but before it executed.
             maybe(superblock.staging.vsr_state.checkpoint.commit_min >
