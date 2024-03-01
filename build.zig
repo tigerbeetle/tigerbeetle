@@ -438,8 +438,6 @@ pub fn build(b: *std.Build) !void {
         );
 
         const SimulatorLog = enum { full, short };
-        const default_simulator_log =
-            if (simulator_mode == .ReleaseSafe) SimulatorLog.short else .full;
         simulator_options.addOption(
             SimulatorLog,
             "log",
@@ -447,7 +445,7 @@ pub fn build(b: *std.Build) !void {
                 SimulatorLog,
                 "simulator-log",
                 "Log only state transitions (short) or everything (full).",
-            ) orelse default_simulator_log,
+            ) orelse .short,
         );
 
         const simulator = b.addExecutable(.{
