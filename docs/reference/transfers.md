@@ -275,6 +275,12 @@ Constraints:
 * Type is 32-bit unsigned integer (4 bytes)
 * Must be zero if `flags.pending` is *not* set
 
+The `timeout` is an interval in seconds rather than an absolute timestamp
+because this is more robust to clock skew between the cluster and the
+application. (Watch this talk on
+[Detecting Clock Sync Failure in Highly Available Systems](https://youtu.be/7R-Iz6sJG6Q?si=9sD2TpfD29AxUjOY)
+on YouTube for more details.)
+
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
