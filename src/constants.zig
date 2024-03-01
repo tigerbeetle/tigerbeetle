@@ -83,6 +83,17 @@ comptime {
     assert(clients_max >= Config.Cluster.clients_max_min);
 }
 
+/// The maximum number of release versions (upgrade candidates) that can be advertised by a replica
+/// in each ping message body.
+pub const vsr_releases_max = config.cluster.vsr_releases_max;
+
+comptime {
+    assert(vsr_releases_max >= 2);
+    assert(vsr_releases_max * @sizeOf(u16) <= message_body_size_max);
+    // The number of releases is encoded into ping headers as a u16.
+    assert(vsr_releases_max <= std.math.maxInt(u16));
+}
+
 /// The maximum number of nodes required to form a quorum for replication.
 /// Majority quorums are only required across view change and replication phases (not within).
 /// As per Flexible Paxos, provided `quorum_replication + quorum_view_change > replicas`:

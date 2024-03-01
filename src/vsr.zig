@@ -62,6 +62,8 @@ pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").Checkpoi
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u16 = 0;
 
+pub const ReleaseList = stdx.BoundedArray(u16, constants.vsr_releases_max);
+
 pub const ProcessType = enum { replica, client };
 
 pub const Zone = enum {
@@ -217,6 +219,8 @@ pub const Operation = enum(u8) {
     register = 2,
     /// The value 3 is reserved for reconfiguration request.
     reconfigure = 3,
+    /// The value 4 is is reserved for release-upgrade requests.
+    upgrade = 4,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
@@ -539,6 +543,15 @@ test "ReconfigurationRequest" {
         .configuration_applied,
     );
 }
+
+pub const UpgradeRequest = extern struct {
+    version_release: u16,
+
+    comptime {
+        assert(@sizeOf(UpgradeRequest) == 2);
+        assert(stdx.no_padding(UpgradeRequest));
+    }
+};
 
 pub const Timeout = struct {
     name: []const u8,
@@ -1044,6 +1057,18 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
     } else return null;
 }
 
+pub fn verify_release_list(releases: []const u16) void {
+    assert(releases.len >= 1);
+    assert(releases.len <= constants.vsr_releases_max);
+
+    for (
+        releases[0..releases.len - 1],
+        releases[1..],
+    ) |release_a, release_b| {
+        assert(release_a > release_b);
+    }
+}
+
 pub const Headers = struct {
     pub const Array = stdx.BoundedArray(Header.Prepare, constants.view_change_headers_max);
     /// The SuperBlock's persisted VSR headers.
@@ -1057,6 +1082,7 @@ pub const Headers = struct {
     fn dvc_blank(op: u64) Header.Prepare {
         return .{
             .command = .prepare,
+            .version_release = 0,
             .operation = .reserved,
             .op = op,
             .cluster = 0,

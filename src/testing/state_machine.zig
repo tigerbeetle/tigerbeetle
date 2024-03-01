@@ -23,6 +23,8 @@ pub fn StateMachineType(
         };
 
         pub const constants = struct {
+            pub const version: u16 = 1;
+            pub const version_min: u16 = 1;
             pub const message_body_size_max = config.message_body_size_max;
         };
 

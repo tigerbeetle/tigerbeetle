@@ -168,6 +168,7 @@ const Environment = struct {
             .cluster = cluster,
             .replica = replica,
             .replica_count = replica_count,
+            .release = 1,
         });
         try env.tick_until_state_change(.superblock_format, .superblock_open);
 

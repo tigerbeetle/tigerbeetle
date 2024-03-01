@@ -118,6 +118,8 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
                 .manifest_block_count = 0,
                 .commit_min = 0,
                 .storage_size = data_file_size_min,
+                .version_vsr = 0,
+                .release = 1,
             },
             .commit_max = 0,
             .sync_op_min = 0,
@@ -282,6 +284,7 @@ const Environment = struct {
             .cluster = cluster,
             .replica = replica,
             .replica_count = replica_count,
+            .release = 1,
         });
 
         var vsr_headers = vsr.Headers.Array{};
@@ -295,6 +298,7 @@ const Environment = struct {
                 .replica_id = env.members[replica],
                 .members = env.members,
                 .replica_count = replica_count,
+                .release = 1,
             }),
             .vsr_headers = vsr_headers,
         });
@@ -403,6 +407,8 @@ const Environment = struct {
                 .storage_size = data_file_size_min,
                 .snapshots_block_checksum = 0,
                 .snapshots_block_address = 0,
+                .version_vsr = vsr.Version,
+                .release = 1,
             },
             .commit_max = vsr_state_old.commit_max + 1,
             .sync_op_min = 0,

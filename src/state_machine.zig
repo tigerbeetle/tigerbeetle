@@ -47,6 +47,15 @@ pub fn StateMachineType(
         const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
 
         pub const constants = struct {
+            const version_minor: u12 = 1;
+            const version_patch: u4 = 0;
+
+            pub const version: u16 =
+                (@as(u16, version_minor) << 12) |
+                @as(u16, version_patch);
+            /// The minimum version of client that we accept requests from.
+            pub const version_min: u16 = version;
+
             pub const message_body_size_max = config.message_body_size_max;
 
             /// The maximum number of objects within a batch, by operation.

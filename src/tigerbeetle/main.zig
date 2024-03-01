@@ -58,6 +58,7 @@ pub fn main() !void {
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
+            .release = StateMachine.constants.version,
         }, args.path),
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
@@ -179,6 +180,13 @@ const Command = struct {
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
+            .release_running = StateMachine.constants.version,
+            .release_client_min = StateMachine.constants.version_min,
+            // TODO(Multiversioning) Include all available bundled releases, in descending order.
+            .releases_bundled = vsr.ReleaseList.from_slice(&[_]u16{
+                StateMachine.constants.version,
+            }) catch unreachable,
+            .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
@@ -314,6 +322,21 @@ const Command = struct {
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
 };
+
+fn replica_release_execute(replica: *Replica, release: u16) void {
+    assert(release != replica.release_running);
+
+    if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release) == null) {
+        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
+            replica.replica,
+            release,
+        });
+        @panic("release_execute: binary missing required version");
+    }
+
+    // TODO(Multiversioning) Exec into the new release.
+    unreachable;
+}
 
 fn print_value(
     writer: anytype,

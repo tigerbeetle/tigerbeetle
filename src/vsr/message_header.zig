@@ -1,3 +1,4 @@
+// TODO always zero version_release
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -48,7 +49,11 @@ pub const Header = extern struct {
     view: u32,
 
     /// The version of the protocol implementation that originated this message.
-    version: u16,
+    version_vsr: u16,
+
+    /// The release version set by the state machine.
+    /// (Not set for all message types.)
+    version_release: u16,
 
     /// The Viewstamped Replication protocol command for this message.
     command: Command,
@@ -58,7 +63,7 @@ pub const Header = extern struct {
     replica: u8,
 
     /// Reserved for future use by the header frame (i.e. to be shared by all message types).
-    reserved_frame: [16]u8,
+    reserved_frame: [14]u8,
 
     /// This data's schema is different depending on the `Header.command`.
     /// (No default value – `Header`s should not be constructed directly.)
@@ -167,9 +172,9 @@ pub const Header = extern struct {
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
 
         if (self.command == .block) {
-            if (self.version > vsr.Version) return "block: version > Version";
+            if (self.version_vsr > vsr.Version) return "block: version > Version";
         } else {
-            if (self.version != vsr.Version) return "version != Version";
+            if (self.version_vsr != vsr.Version) return "version != Version";
         }
 
         switch (self.into_any()) {
@@ -264,10 +269,11 @@ pub const Header = extern struct {
         size: u32,
         epoch: u32 = 0,
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [16]u8,
+        reserved_frame: [14]u8,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -286,15 +292,16 @@ pub const Header = extern struct {
         checksum_body_padding: u128 = 0,
         nonce_reserved: u128 = 0,
         cluster: u128,
-        size: u32 = @sizeOf(Header),
+        size: u32,
         epoch: u32 = 0,
         // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
         // view, to avoid disrupting clock synchronization while the view is being updated.
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16,
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// Current checkpoint id.
         checkpoint_id: u128,
@@ -302,15 +309,22 @@ pub const Header = extern struct {
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
+        release_count: u16,
 
-        reserved: [96]u8 = [_]u8{0} ** 96,
+        reserved: [94]u8 = [_]u8{0} ** 94,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
-            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.size <= @sizeOf(Header)) return "size <= @sizeOf(Header)";
+            if (self.size > @sizeOf(Header) + @sizeOf(u16) * constants.vsr_releases_max) {
+                return "size > limit";
+            }
+            if (self.size != @sizeOf(Header) + self.release_count * @sizeOf(u16)) {
+                return "size != @sizeOf(Header) + release_count * @sizeOf(u16)";
+            }
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
+            if (self.release_count == 0) return "release_count == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -330,10 +344,11 @@ pub const Header = extern struct {
         // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
         // view, to avoid disrupting clock synchronization while the view is being updated.
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         ping_timestamp_monotonic: u64,
         pong_timestamp_wall: u64,
@@ -363,10 +378,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         client: u128,
         reserved: [112]u8 = [_]u8{0} ** 112,
@@ -395,10 +411,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16,
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -423,10 +440,12 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        /// The client's release version.
+        version_release: u16,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
@@ -465,15 +484,15 @@ pub const Header = extern struct {
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
-            if (self.replica != 0) return "replica != 0";
             if (self.parent_padding != 0) return "parent_padding != 0";
-            if (self.client == 0) return "client == 0";
             if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
                 .root => return "operation == .root",
                 .register => {
                     // The first request a client makes must be to register with the cluster:
+                    if (self.replica != 0) return "register: replica != 0";
+                    if (self.client == 0) return "register: client == 0";
                     if (self.parent != 0) return "register: parent != 0";
                     if (self.session != 0) return "register: session != 0";
                     if (self.request != 0) return "register: request != 0";
@@ -481,7 +500,18 @@ pub const Header = extern struct {
                     if (self.checksum_body != checksum_body_empty) {
                         return "register: checksum_body != expected";
                     }
-                    if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+                    if (self.size != @sizeOf(Header)) return "register: size != @sizeOf(Header)";
+                },
+                .upgrade => {
+                    // These requests don't originate from a real client or session.
+                    if (self.client != 0) return "upgrade: client != 0";
+                    if (self.parent != 0) return "upgrade: parent != 0";
+                    if (self.session != 0) return "upgrade: session != 0";
+                    if (self.request != 0) return "upgrade: request != 0";
+
+                    if (self.size != @sizeOf(Header) + @sizeOf(u16)) {
+                        return "upgrade: size != @sizeOf(Header) + @sizeOf(u16)";
+                    }
                 },
                 else => {
                     if (self.operation == .reconfigure) {
@@ -491,6 +521,8 @@ pub const Header = extern struct {
                     } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                         return "operation is reserved";
                     }
+                    if (self.replica != 0) return "replica != 0";
+                    if (self.client == 0) return "client == 0";
                     // Thereafter, the client must provide the session number:
                     // These requests should set `parent` to the `checksum` of the previous reply.
                     if (self.session == 0) return "session == 0";
@@ -516,10 +548,12 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        /// The corresponding Request's release version.
+        version_release: u16,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// A backpointer to the previous prepare checksum for hash chain verification.
         /// This provides a cryptographic guarantee for linearizability across our distributed log
@@ -595,11 +629,17 @@ pub const Header = extern struct {
                     if (self.request != 0) return "root: request != 0";
                 },
                 else => {
-                    if (self.client == 0) return "client == 0";
+                    if (self.operation == .upgrade) {
+                        if (self.client != 0) return "client != 0";
+                    } else {
+                        if (self.client == 0) return "client == 0";
+                    }
                     if (self.op == 0) return "op == 0";
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
-                    if (self.operation == .register) {
+                    if (self.operation == .register or
+                        self.operation == .upgrade)
+                    {
                         if (self.request != 0) return "request != 0";
                     } else {
                         if (self.request == 0) return "request == 0";
@@ -616,6 +656,7 @@ pub const Header = extern struct {
             var header = Prepare{
                 .command = .prepare,
                 .cluster = cluster,
+                .version_release = 0,
                 .op = slot,
                 .operation = .reserved,
                 .view = 0,
@@ -633,10 +674,12 @@ pub const Header = extern struct {
             return header;
         }
 
+        // FIXME bundle release version! to guard against mismatched formats
         pub fn root(cluster: u128) Prepare {
             var header = Prepare{
                 .cluster = cluster,
                 .size = @sizeOf(Header),
+                .version_release = 0,
                 .command = .prepare,
                 .operation = .root,
                 .op = 0,
@@ -668,10 +711,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0,
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// The previous prepare's checksum.
         /// (Same as the corresponding Prepare's `parent`.)
@@ -694,6 +738,7 @@ pub const Header = extern struct {
             assert(self.command == .prepare_ok);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
@@ -710,11 +755,17 @@ pub const Header = extern struct {
                     if (self.timestamp != 0) return "root: timestamp != 0";
                 },
                 else => {
-                    if (self.client == 0) return "client == 0";
+                    if (self.operation == .upgrade) {
+                        if (self.client != 0) return "client != 0";
+                    } else {
+                        if (self.client == 0) return "client == 0";
+                    }
                     if (self.op == 0) return "op == 0";
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
-                    if (self.operation == .register) {
+                    if (self.operation == .register or
+                        self.operation == .upgrade)
+                    {
                         if (self.request != 0) return "request != 0";
                     } else {
                         if (self.request == 0) return "request == 0";
@@ -738,10 +789,12 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        /// The corresponding Request's release version.
+        version_release: u16,
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// The checksum of the corresponding Request.
         request_checksum: u128,
@@ -795,10 +848,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// The latest committed prepare's checksum.
         commit_checksum: u128,
@@ -821,6 +875,7 @@ pub const Header = extern struct {
             assert(self.command == .commit);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.commit < self.checkpoint_op) return "commit < checkpoint_op";
             if (self.timestamp_monotonic == 0) return "timestamp_monotonic == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -840,10 +895,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -868,10 +924,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
         /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
@@ -893,6 +950,7 @@ pub const Header = extern struct {
             if ((self.size - @sizeOf(Header)) % @sizeOf(Header) != 0) {
                 return "size multiple invalid";
             }
+            if (self.version_release != 0) return "version_release != 0";
             if (self.op < self.commit_min) return "op < commit_min";
             if (self.commit_min < self.checkpoint_op) return "commit_min < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -912,10 +970,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
         nonce: u128,
@@ -928,6 +987,7 @@ pub const Header = extern struct {
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
+            if (self.version_release != 0) return "version_release != 0";
             if (self.op < self.commit) return "op < commit_min";
             if (self.commit < self.checkpoint_op) return "commit_min < checkpoint_op";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -947,10 +1007,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         nonce: u128,
         reserved: [112]u8 = [_]u8{0} ** 112,
@@ -959,6 +1020,7 @@ pub const Header = extern struct {
             assert(self.command == .request_start_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.nonce == 0) return "nonce == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -977,10 +1039,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// The minimum op requested (inclusive).
         op_min: u64,
@@ -993,6 +1056,7 @@ pub const Header = extern struct {
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view == 0";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.op_min > self.op_max) return "op_min > op_max";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
@@ -1011,10 +1075,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         prepare_checksum: u128,
         prepare_checksum_padding: u128 = 0,
@@ -1025,6 +1090,7 @@ pub const Header = extern struct {
             assert(self.command == .request_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
             if (self.view != 0) return "view == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
@@ -1044,10 +1110,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         reply_checksum: u128,
         reply_checksum_padding: u128 = 0,
@@ -1059,6 +1126,7 @@ pub const Header = extern struct {
             assert(self.command == .request_reply);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.reply_checksum_padding != 0) return "reply_checksum_padding != 0";
             if (self.view != 0) return "view == 0";
             if (self.reply_client == 0) return "reply_client == 0";
@@ -1079,10 +1147,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -1106,22 +1175,46 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         client: u128,
-        reserved: [112]u8 = [_]u8{0} ** 112,
+        reserved: [111]u8 = [_]u8{0} ** 111,
+        reason: Reason,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.client == 0) return "client == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+
+            const reasons = comptime std.enums.values(Reason);
+            inline for (reasons) |reason| {
+                if (@intFromEnum(self.reason) == @intFromEnum(reason)) {
+                    return "reason invalid";
+                }
+            }
+            if (self.reason == .reserved) return "reason == reserved";
             return null;
         }
+
+        pub const Reason = enum(u8) {
+            reserved = 0,
+            no_session = 1,
+            version_too_low = 2,
+            version_too_high = 3,
+
+            comptime {
+                for (std.enums.values(Reason), 0..) |reason, index| {
+                    assert(@intFromEnum(reason) == index);
+                }
+            }
+        };
     };
 
     pub const RequestBlocks = extern struct {
@@ -1136,10 +1229,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -1150,6 +1244,7 @@ pub const Header = extern struct {
             if ((self.size - @sizeOf(Header)) % @sizeOf(vsr.BlockRequest) != 0) {
                 return "size multiple invalid";
             }
+            if (self.version_release != 0) return "version_release != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1168,10 +1263,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         // Schema is determined by `block_type`.
         metadata_bytes: [metadata_size]u8,
@@ -1208,10 +1304,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         checkpoint_id: u128,
         checkpoint_op: u64,
@@ -1222,6 +1319,7 @@ pub const Header = extern struct {
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.view != 0) return "view != 0";
+            if (self.version_release != 0) return "version_release != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -1239,10 +1337,11 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        version_vsr: u16 = vsr.Version,
+        version_release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
-        reserved_frame: [16]u8 = [_]u8{0} ** 16,
+        reserved_frame: [14]u8 = [_]u8{0} ** 14,
 
         /// Strictly speaking, this is identical to `checksum_body`.
         /// It is included separately to mirror the RequestSyncCheckpoint header.
@@ -1256,6 +1355,7 @@ pub const Header = extern struct {
                 return "size != @sizeOf(Header) + @sizeOf(CheckpointState)";
             }
             if (self.view != 0) return "view != 0";
+            if (self.version_release != 0) return "version_release != 0";
             if (self.checkpoint_id != self.checksum_body) return "checkpoint_id != checksum_body";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;

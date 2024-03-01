@@ -208,6 +208,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .cluster = cluster,
                 .replica = replica,
                 .replica_count = replica_count,
+                .release = 1,
             });
 
             env.tick_until_state_change(.superblock_format, .superblock_open);

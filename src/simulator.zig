@@ -20,6 +20,7 @@ const StateMachineType = switch (state_machine) {
 
 const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
+const Release = @import("testing/cluster.zig").Release;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
 const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
@@ -28,6 +29,18 @@ const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
+const releases_max = 3;
+
+const releases = releases: {
+    var releases_: []const Release = &[_]Release{};
+    for (0..releases_max) |i| {
+        releases_ = releases_ ++ .{.{
+            .release = StateMachine.constants.version + i,
+            .release_client_min = StateMachine.constants.version,
+        }};
+    }
+    break :releases releases_;
+};
 
 pub const output = std.log.scoped(.cluster);
 const log = std.log.scoped(.simulator);
@@ -101,6 +114,7 @@ pub fn main() !void {
             constants.storage_size_limit_max - random.uintLessThan(u64, constants.storage_size_limit_max / 10),
         ),
         .seed = random.int(u64),
+        .releases = releases,
         .network = .{
             .node_count = node_count,
             .client_count = client_count,
@@ -167,6 +181,8 @@ pub fn main() !void {
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
+        .replica_release_advance_probability = 0.0001,
+        .replica_release_catchup_probability = 0.001,
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
@@ -245,7 +261,7 @@ pub fn main() !void {
     // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
     // be crashed, but each replica restarts eventually. The cluster must process all requests
     // without split-brain.
-    const ticks_max_requests = 40_000_000;
+    const ticks_max_requests = 10_000_000;
     var tick_total: u64 = 0;
     var tick: u64 = 0;
     while (tick < ticks_max_requests) : (tick += 1) {
@@ -259,6 +275,7 @@ pub fn main() !void {
             break;
         }
     } else {
+        std.debug.print("RELEASES: limit={} {any}\n", .{simulator.replica_releases_limit, simulator.replica_releases});
         output.info(
             "no liveness, final cluster state (requests_max={} requests_replied={}):",
             .{ simulator.options.requests_max, simulator.requests_replied },
@@ -325,6 +342,11 @@ pub const Simulator = struct {
         replica_restart_probability: f64,
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
+        /// Probability per *replica restart* to increase the replica's maximum available release.
+        // FIXME
+        replica_release_advance_probability: f64,
+        // FIXME
+        replica_release_catchup_probability: f64,
 
         /// The total number of requests to send. Does not count `register` messages.
         requests_max: usize,
@@ -338,9 +360,16 @@ pub const Simulator = struct {
     cluster: *Cluster,
     workload: StateMachine.Workload,
 
+    /// The maximum number of releases available in a replica's "binary".
+    //releases: usize = 1,
+    // The number of releases in each replica's "binary".
+    replica_releases: []usize,
+    replica_releases_limit: usize = 1,
+
     /// Protect a replica from fast successive crash/restarts.
     replica_stability: []usize,
     reply_sequence: ReplySequence,
+    reply_op_next: u64 = 1, // Skip the root op.
 
     /// Fully-connected subgraph of replicas for liveness checking.
     core: Core = Core.initEmpty(),
@@ -369,6 +398,10 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
+        var replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        errdefer allocator.free(replica_releases);
+        @memset(replica_releases, 1);
+
         var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
         @memset(replica_stability, 0);
@@ -381,12 +414,14 @@ pub const Simulator = struct {
             .options = options,
             .cluster = cluster,
             .workload = workload,
+            .replica_releases = replica_releases,
             .replica_stability = replica_stability,
             .reply_sequence = reply_sequence,
         };
     }
 
     pub fn deinit(simulator: *Simulator, allocator: std.mem.Allocator) void {
+        allocator.free(simulator.replica_releases);
         allocator.free(simulator.replica_stability);
         simulator.reply_sequence.deinit(allocator);
         simulator.workload.deinit(allocator);
@@ -399,6 +434,24 @@ pub const Simulator = struct {
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client| {
             assert(client.request_queue.count == 0);
+        }
+
+        // Even though there are no client requests in progress, the cluster may be upgrading.
+        const release_max = simulator.core_release_max();
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                // (If down, the replica is waiting to be upgraded.)
+                maybe(simulator.cluster.replica_health[replica.replica] == .down);
+                //if (simulator.cluster.replica_health[replica.replica] != .up) {
+                //    std.debug.print("DOWN: {} ; limit={} {any}\n", .{replica.replica, simulator.replica_releases_limit, simulator.replica_releases});
+                //}
+                //assert(simulator.cluster.replica_health[replica.replica] == .up);
+
+                if (replica.release_running != release_max) {
+                    return false;
+                }
+                assert(simulator.cluster.replica_health[replica.replica] == .up);
+            }
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -458,9 +511,11 @@ pub const Simulator = struct {
             simulator.options.cluster.standby_count,
         );
         log.debug("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
+        std.debug.print("transition_to_liveness_mode: core={b}\n", .{simulator.core.mask});
 
         var it = simulator.core.iterator(.{});
         while (it.next()) |replica_index| {
+            std.debug.print("core: {}\n", .{replica_index});
             const fault = false;
             if (simulator.cluster.replica_health[replica_index] == .down) {
                 simulator.restart_replica(@intCast(replica_index), fault);
@@ -470,6 +525,7 @@ pub const Simulator = struct {
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
         simulator.options.replica_crash_probability = 0;
         simulator.options.replica_restart_probability = 0;
+        //simulator.options.replica_release_advance_probability = 0; // FIXME
     }
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,
@@ -532,19 +588,28 @@ pub const Simulator = struct {
     pub fn core_missing_prepare(simulator: *const Simulator) ?vsr.Header.Prepare {
         assert(simulator.core.count() > 0);
 
+        std.debug.print("MISSING???\n", .{});
+
         var missing_op: ?u64 = null;
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica)) {
+                // vopr-debug 1610632079476318046
+                std.debug.print("CORE={}", .{replica.replica});
+                if (simulator.cluster.replica_health[replica.replica] != .up) @panic("FIXME 2");
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
                 if (replica.op > replica.commit_min) {
+                    std.debug.print("{}: CHECK {}..{}\n", .{replica.replica, replica.commit_min+1, replica.op});
                     for (replica.commit_min + 1..replica.op + 1) |op| {
                         const header = simulator.cluster.state_checker.header_with_op(op);
                         if (!replica.journal.has_clean(&header)) {
+                            std.debug.print("{}: MISSING: {}\n", .{replica.replica, header.op});
                             if (missing_op == null or missing_op.? > op) {
                                 missing_op = op;
                             }
                         }
                     }
+                } else {
+                    std.debug.print("{}: CHECK= {}..{}\n", .{replica.replica, replica.commit_min, replica.op});
                 }
             }
         }
@@ -556,6 +621,7 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 if (replica.journal.has_clean(&missing_header)) {
+                    std.debug.print("{}: FOUND {}\n", .{replica.replica, missing_header.op});
                     // Prepare *was* found on an active core replica, so the header isn't
                     // actually missing.
                     return null;
@@ -657,6 +723,22 @@ pub const Simulator = struct {
         }
     }
 
+    fn core_release_max(simulator: *const Simulator) u16 {
+        assert(simulator.core.count() > 0);
+
+        var release_max: u16 = 0;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                release_max = @max(release_max, replica.release_running);
+                if (replica.upgrade_release) |release| {
+                    release_max = @max(release_max, release);
+                }
+            }
+        }
+        assert(release_max > 0);
+        return release_max;
+    }
+
     fn on_cluster_reply(
         cluster: *Cluster,
         reply_client: usize,
@@ -667,36 +749,55 @@ pub const Simulator = struct {
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         simulator.reply_sequence.insert(reply_client, request, reply);
 
-        while (simulator.reply_sequence.peek()) |commit| {
-            defer simulator.reply_sequence.next();
+        while (!simulator.reply_sequence.empty()) {
+            const op = simulator.reply_op_next;
+            const prepare_header = simulator.cluster.state_checker.commits.items[op].header;
+            assert(prepare_header.op == op);
 
-            const commit_client = simulator.cluster.clients[commit.client_index];
-            assert(commit.reply.references == 1);
-            assert(commit.reply.header.command == .reply);
-            assert(commit.reply.header.client == commit_client.id);
-            assert(commit.reply.header.request == commit.request.header.request);
-            assert(commit.reply.header.operation == commit.request.header.operation);
+            if (simulator.reply_sequence.peek(op)) |commit| {
+                defer simulator.reply_sequence.next();
 
-            assert(commit.request.references == 1);
-            assert(commit.request.header.command == .request);
-            assert(commit.request.header.client == commit_client.id);
+                assert(prepare_header.client != 0);
+                simulator.reply_op_next += 1;
 
-            log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
-                commit.reply.header.op,
-                commit.reply.header.operation,
-                commit.request.header.client,
-                commit.request.header.request,
-            });
+                const commit_client = simulator.cluster.clients[commit.client_index];
+                assert(commit.reply.references == 1);
+                assert(commit.reply.header.op == op);
+                assert(commit.reply.header.command == .reply);
+                assert(commit.reply.header.client == commit_client.id);
+                assert(commit.reply.header.request == commit.request.header.request);
+                assert(commit.reply.header.operation == commit.request.header.operation);
 
-            if (!commit.request.header.operation.vsr_reserved()) {
-                simulator.requests_replied += 1;
-                simulator.workload.on_reply(
-                    commit.client_index,
-                    commit.reply.header.operation.cast(StateMachine),
-                    commit.reply.header.timestamp,
-                    commit.request.body(),
-                    commit.reply.body(),
-                );
+                assert(commit.request.references == 1);
+                assert(commit.request.header.checksum == prepare_header.request_checksum);
+                assert(commit.request.header.command == .request);
+                assert(commit.request.header.client == commit_client.id);
+
+                log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
+                    commit.reply.header.op,
+                    commit.reply.header.operation,
+                    commit.request.header.client,
+                    commit.request.header.request,
+                });
+
+                if (!commit.request.header.operation.vsr_reserved()) {
+                    simulator.requests_replied += 1;
+                    simulator.workload.on_reply(
+                        commit.client_index,
+                        commit.reply.header.operation.cast(StateMachine),
+                        commit.reply.header.timestamp,
+                        commit.request.body(),
+                        commit.reply.body(),
+                    );
+                }
+            } else {
+                if (prepare_header.client == 0) {
+                    assert(prepare_header.operation.vsr_reserved());
+                    // We don't receive replies for requests that originated at the replicas.
+                    simulator.reply_op_next += 1;
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -774,18 +875,32 @@ pub const Simulator = struct {
                 replica.syncing == .idle);
         }
 
-        for (simulator.cluster.replicas) |*replica| {
+        for (
+            simulator.cluster.replicas,
+            simulator.cluster.storages,
+        ) |*replica, *replica_storage| {
             simulator.replica_stability[replica.replica] -|= 1;
             const stability = simulator.replica_stability[replica.replica];
             if (stability > 0) continue;
 
-            const replica_storage = &simulator.cluster.storages[replica.replica];
             switch (simulator.cluster.replica_health[replica.replica]) {
                 .up => {
                     const replica_writes = replica_storage.writes.count();
+
+                    const crash_upgrade =
+                        simulator.replica_releases[replica.replica] < releases.len and
+                        chance_f64(
+                            simulator.random,
+                            simulator.options.replica_release_advance_probability,
+                        );
+                    if (crash_upgrade) simulator.replica_upgrade(replica.replica);//simulator.replica_releases[replica.replica] += 1;
+                    if (crash_upgrade) std.debug.print("UPGRADE {} to {}\n", .{replica.replica, simulator.replica_releases[replica.replica]}); // FIXME
+
                     const crash_probability = simulator.options.replica_crash_probability *
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
-                    if (!chance_f64(simulator.random, crash_probability)) continue;
+                    const crash_random = chance_f64(simulator.random, crash_probability);
+
+                    if (!crash_upgrade and !crash_random) continue;
 
                     recoverable_count -= @intFromBool(!replica.standby() and
                         replica.status != .recovering_head and
@@ -798,12 +913,25 @@ pub const Simulator = struct {
                         simulator.options.replica_crash_stability;
                 },
                 .down => {
-                    if (!chance_f64(
-                        simulator.random,
-                        simulator.options.replica_restart_probability,
-                    )) {
-                        continue;
+                    // If we are in liveness mode, we need to make sure that all replicas
+                    // (eventually) make it to the same release.
+                    const restart_upgrade =
+                        simulator.replica_releases[replica.replica] <
+                        simulator.replica_releases_limit and
+                        (simulator.core.isSet(replica.replica) or chance_f64(
+                            simulator.random,
+                            simulator.options.replica_release_catchup_probability,
+                        ));
+
+                    if (restart_upgrade) {
+                        simulator.replica_upgrade(replica.replica);
+                        std.debug.print("{}: TRY upgrade to {}/{}\n", .{replica.replica, simulator.replica_releases[replica.replica], simulator.replica_releases_limit});
                     }
+
+                    const restart_random =
+                        chance_f64(simulator.random, simulator.options.replica_restart_probability);
+
+                    if (!restart_upgrade and !restart_random) continue;
 
                     const fault = recoverable_count >= recoverable_count_min or replica.standby();
                     simulator.restart_replica(replica.replica, fault);
@@ -816,6 +944,7 @@ pub const Simulator = struct {
         assert(simulator.cluster.replica_health[replica_index] == .down);
 
         const replica_storage = &simulator.cluster.storages[replica_index];
+        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
 
         if (!fault) {
             // The journal writes redundant headers of faulty ops as zeroes to ensure
@@ -836,15 +965,25 @@ pub const Simulator = struct {
             }
         }
 
-        log.debug("{}: restart replica (faults={})", .{
+        const replica_releases_count = simulator.replica_releases[replica_index];
+        log.debug("{}: restart replica (faults={} releases={})", .{
             replica_index,
             fault,
+            replica_releases_count,
         });
 
-        replica_storage.faulty = fault;
-        simulator.cluster.restart_replica(replica_index) catch unreachable;
+        var replica_releases = vsr.ReleaseList{};
+        for (0..replica_releases_count) |i| {
+            replica_releases.append_assume_capacity(
+                releases[replica_releases_count - i - 1].release,
+            );
+        }
 
-        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
+        replica_storage.faulty = fault;
+        simulator.cluster.restart_replica(replica_index, .{
+            .releases_bundled = replica_releases.const_slice(),
+        }) catch unreachable;
+
         if (replica.status == .recovering_head) {
             // Even with faults disabled, a replica that was syncing before it crashed
             // (or just recently finished syncing before it crashed) may wind up in
@@ -855,6 +994,13 @@ pub const Simulator = struct {
         replica_storage.faulty = true;
         simulator.replica_stability[replica_index] =
             simulator.options.replica_restart_stability;
+    }
+
+    fn replica_upgrade(simulator: *Simulator, replica_index: u8) void {
+        simulator.replica_releases[replica_index] =
+            @min(simulator.replica_releases[replica_index] + 1, releases.len);
+        simulator.replica_releases_limit =
+            @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
     }
 };
 

@@ -372,6 +372,7 @@ const Environment = struct {
             .cluster = 0,
             .replica = 0,
             .replica_count = 6,
+            .release = 1,
         });
     }
 

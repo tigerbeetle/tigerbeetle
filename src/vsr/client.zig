@@ -22,6 +22,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         const Self = @This();
 
         pub const StateMachine = StateMachine_;
+        const version_release: u16 = StateMachine.constants.version;
 
         pub const Request = struct {
             pub const Callback = *const fn (
@@ -373,6 +374,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .request = undefined,
                 .cluster = self.cluster,
                 .command = .request,
+                .version_release = version_release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
@@ -542,8 +544,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            log.err("{}: session evicted: too many concurrent client sessions", .{self.id});
-            @panic("session evicted: too many concurrent client sessions");
+            log.err("{}: session evicted: reason={s}", .{
+                self.id,
+                @tagName(eviction.header.reason),
+            });
+            @panic("session evicted");
         }
 
         fn on_pong_client(self: *Self, pong: *const Message.PongClient) void {
@@ -569,6 +574,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(reply.header.valid_checksum());
             assert(reply.header.valid_checksum_body(reply.body()));
             assert(reply.header.command == .reply);
+            assert(reply.header.version_release >= version_release);
 
             if (reply.header.client != self.id) {
                 log.debug("{}: on_reply: ignoring (wrong client={})", .{
@@ -695,6 +701,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const ping = Header.PingClient{
                 .command = .ping_client,
                 .cluster = self.cluster,
+                .version_release = version_release,
                 .client = self.id,
             };
 
@@ -765,6 +772,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = .register,
+                .version_release = version_release,
             };
 
             assert(self.request_number == 0);
@@ -1043,6 +1051,7 @@ test "Client Batching" {
                 .view = message.header.view,
                 .command = .reply,
                 .replica = message.header.replica,
+                .version_release = StateMachine.constants.version,
                 .request_checksum = message.header.checksum,
                 .client = message.header.client,
                 .context = undefined, // computed below.

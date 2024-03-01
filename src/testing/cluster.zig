@@ -1,8 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const mem = std.mem;
 const log = std.log.scoped(.cluster);
 
+const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const message_pool = @import("../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
@@ -29,6 +31,11 @@ const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_si
 
 pub const ReplicaHealth = enum { up, down };
 
+pub const Release = struct {
+    release: u16,
+    release_client_min: u16,
+};
+
 /// Integer values represent exit codes.
 // TODO This doesn't really belong in Cluster, but it is needed here so that StateChecker failures
 // use the particular exit code.
@@ -54,7 +61,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             StateMachine,
             MessageBus,
             Storage,
-            Time,
+            TimePointer,
             AOF,
         );
         pub const Client = vsr.Client(StateMachine, MessageBus);
@@ -69,6 +76,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             storage_size_limit: u64,
             storage_fault_atlas: StorageFaultAtlas.Options,
             seed: u64,
+            releases: []const Release,
 
             network: NetworkOptions,
             storage: Storage.Options,
@@ -91,7 +99,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// NB: includes both active replicas and standbys.
         replicas: []Replica,
         replica_pools: []MessagePool,
+        // Replica "owns" Time, but we want to own it too, so that we can tick time even while a
+        // replica is down, and thread it in between restarts. This is crucial to ensure that the
+        // cluster's clocks do not desynchronize too far to recover.
+        replica_times: []Time,
         replica_health: []ReplicaHealth,
+        replica_upgrades: []?u16,
         replica_count: u8,
         standby_count: u8,
 
@@ -124,6 +137,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage.replica_index == null);
             assert(options.storage.fault_atlas == null);
+            assert(options.releases.len > 0);
+
+            for (
+                options.releases[0..options.releases.len - 1],
+                options.releases[1..],
+            ) |release_a, release_b| {
+                assert(release_a.release < release_b.release);
+            }
 
             const node_count = options.replica_count + options.standby_count;
 
@@ -194,12 +215,25 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
+            var replica_times = try allocator.alloc(Time, node_count);
+            errdefer allocator.free(replica_times);
+            @memset(replica_times, .{
+                .resolution = constants.tick_ms * std.time.ns_per_ms,
+                .offset_type = .linear,
+                .offset_coefficient_A = 0,
+                .offset_coefficient_B = 0,
+            });
+
             const replicas = try allocator.alloc(Replica, node_count);
             errdefer allocator.free(replicas);
 
             const replica_health = try allocator.alloc(ReplicaHealth, node_count);
             errdefer allocator.free(replica_health);
             @memset(replica_health, .up);
+
+            const replica_upgrades = try allocator.alloc(?u16, node_count);
+            errdefer allocator.free(replica_upgrades);
+            @memset(replica_upgrades, null);
 
             var client_pools = try allocator.alloc(MessagePool, options.client_count);
             errdefer allocator.free(client_pools);
@@ -257,6 +291,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         // TODO(zig) It should be possible to remove the `@as(u8,...)`.
                         .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
+                        .release = options.releases[0].release,
                     },
                     storage,
                     &superblock,
@@ -278,7 +313,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .storage_fault_atlas = storage_fault_atlas,
                 .replicas = replicas,
                 .replica_pools = replica_pools,
+                .replica_times = replica_times,
                 .replica_health = replica_health,
+                .replica_upgrades = replica_upgrades,
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
                 .clients = clients,
@@ -295,11 +332,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
                 const nonce = 1 + @as(u128, replica_index) << 64;
-                try cluster.open_replica(@intCast(replica_index), nonce, .{
-                    .resolution = constants.tick_ms * std.time.ns_per_ms,
-                    .offset_type = .linear,
-                    .offset_coefficient_A = 0,
-                    .offset_coefficient_B = 0,
+                try cluster.replica_open(@intCast(replica_index), .{
+                    .nonce = nonce,
+                    .release = options.releases[0].release,
+                    .releases_bundled = &[_]u16{ options.releases[0].release },
                 });
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
@@ -335,7 +371,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.clients);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
+            cluster.allocator.free(cluster.replica_upgrades);
             cluster.allocator.free(cluster.replica_health);
+            cluster.allocator.free(cluster.replica_times);
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
             cluster.allocator.free(cluster.aofs);
@@ -352,35 +390,55 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (cluster.storages) |*storage| storage.tick();
             for (cluster.replicas, 0..) |*replica, i| {
                 switch (cluster.replica_health[i]) {
-                    .up => {
-                        replica.tick();
-                        cluster.state_checker.check_state(replica.replica) catch |err| {
-                            fatal(.correctness, "state checker error: {}", .{err});
-                        };
-                    },
+                    .up => replica.tick(),
                     // Keep ticking the time so that it won't have diverged too far to synchronize
                     // when the replica restarts.
-                    .down => replica.clock.time.tick(),
+                    .down => cluster.replica_times[i].tick(),
+                }
+
+                // TODO or move this into replica_open?
+                if (cluster.replica_upgrades[i]) |_| {
+                    cluster.replica_release_execute(replica.replica);
+                }
+
+                if (cluster.replica_health[i] == .up) {
+                    // Check health separately from the preceding switch, since executing the new
+                    // release might result in the replica crashing.
+                    cluster.state_checker.check_state(replica.replica) catch |err| {
+                        fatal(.correctness, "state checker error: {}", .{err});
+                    };
                 }
             }
         }
 
         /// Returns an error when the replica was unable to recover (open).
-        pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
+        pub fn restart_replica(cluster: *Self, replica_index: u8, options: struct {
+            // By default, run the "newest"/highest release.
+            //release: ?u16 = null,
+            releases_bundled: []const u16,
+        }) !void {
             assert(cluster.replica_health[replica_index] == .down);
+            assert(cluster.replica_upgrades[replica_index] == null);
+            vsr.verify_release_list(options.releases_bundled);
 
-            const nonce = cluster.replicas[replica_index].nonce + 1;
-            // Pass the old replica's Time through to the new replica.
-            // It will continue to tick while the replica is crashed, to ensure the clocks don't
-            // desynchronize too far to recover.
-            // Intentionally use `var` to force the compiler to make a copy here and not do a
-            // pass-by-reference.
-            var time: Time = undefined;
-            time = cluster.replicas[replica_index].time;
-            try cluster.open_replica(replica_index, nonce, time);
-            cluster.network.process_enable(.{ .replica = replica_index });
-            cluster.replica_health[replica_index] = .up;
-            cluster.log_replica(.recover, replica_index);
+            try cluster.replica_open(replica_index, .{
+                .nonce = cluster.replicas[replica_index].nonce + 1,
+                .release = options.releases_bundled[0],
+                .releases_bundled = options.releases_bundled,
+            });
+
+            if (cluster.replica_upgrades[replica_index]) |_| {
+                // vopr-debug 5420831288558822384 /tmp/log1.vopr
+                // Upgrade the replica promptly, rather than waiting until the next tick().
+                // This ensures that the restart completes synchronously, as the caller expects.
+                cluster.replica_release_execute(replica_index); // FIXME inline
+                assert(cluster.replica_upgrades[replica_index] == null);
+            } else {
+                cluster.replica_enable(replica_index);
+            }
+
+            //if (cluster.replica_upgrades[replica_index] == null) {
+            //}
         }
 
         /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -389,13 +447,93 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn crash_replica(cluster: *Self, replica_index: u8) void {
             assert(cluster.replica_health[replica_index] == .up);
 
+            cluster.replica_close(replica_index);
+            cluster.replica_disable(replica_index);
+
+            //// Reset the storage before the replica so that pending writes can (partially) finish.
+            //cluster.storages[replica_index].reset();
+            //
+            //cluster.replicas[replica_index].deinit(cluster.allocator);
+            //cluster.network.process_disable(.{ .replica = replica_index });
+            //cluster.replica_health[replica_index] = .down;
+            //
+            //if (cluster.replica_upgrades[replica_index] == null) {
+            //    cluster.log_replica(.crash, replica_index);
+            //}
+            //
+            //// Ensure that none of the replica's messages leaked when it was deinitialized.
+            //var messages_in_pool: usize = 0;
+            //const message_bus = cluster.network.get_message_bus(.{ .replica = replica_index });
+            //{
+            //    var it = message_bus.pool.free_list;
+            //    while (it) |message| : (it = message.next) messages_in_pool += 1;
+            //}
+            //assert(messages_in_pool == message_pool.messages_max_replica);
+        }
+
+        fn replica_enable(cluster: *Self, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .down);
+
+            cluster.network.process_enable(.{ .replica = replica_index });
+            cluster.replica_health[replica_index] = .up;
+            cluster.log_replica(.recover, replica_index);
+        }
+
+        fn replica_disable(cluster: *Self, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .up);
+
+            cluster.network.process_disable(.{ .replica = replica_index });
+            cluster.replica_health[replica_index] = .down;
+            cluster.log_replica(.crash, replica_index);
+        }
+
+        fn replica_open(cluster: *Self, replica_index: u8, options: struct {
+            nonce: u128,
+            release: u16,
+            releases_bundled: []const u16,
+        }) !void {
+            const release_client_min = for (cluster.options.releases) |release| {
+                if (release.release == options.release) {
+                    break release.release_client_min;
+                }
+            } else unreachable;
+
+            var replica = &cluster.replicas[replica_index];
+            try replica.open(
+                cluster.allocator,
+                .{
+                    .node_count = cluster.options.replica_count + cluster.options.standby_count,
+                    .storage = &cluster.storages[replica_index],
+                    .aof = &cluster.aofs[replica_index],
+                    // TODO Test restarting with a higher storage limit.
+                    .storage_size_limit = cluster.options.storage_size_limit,
+                    .message_pool = &cluster.replica_pools[replica_index],
+                    .nonce = options.nonce,
+                    .time = .{ .time = &cluster.replica_times[replica_index] },
+                    .state_machine_options = cluster.options.state_machine,
+                    .message_bus_options = .{ .network = cluster.network },
+                    .release_running = options.release,
+                    .release_client_min = release_client_min,
+                    .releases_bundled = vsr.ReleaseList.from_slice(options.releases_bundled)
+                        catch unreachable,
+                    .release_execute = replica_release_execute_soon,
+                    .test_context = cluster,
+                },
+            );
+            assert(replica.cluster == cluster.options.cluster_id);
+            assert(replica.replica == replica_index);
+            assert(replica.replica_count == cluster.replica_count);
+            assert(replica.standby_count == cluster.standby_count);
+
+            replica.event_callback = on_replica_event;
+            cluster.network.link(replica.message_bus.process, &replica.message_bus);
+        }
+
+        fn replica_close(cluster: *Self, replica_index: u8) void {
             // Reset the storage before the replica so that pending writes can (partially) finish.
             cluster.storages[replica_index].reset();
 
             cluster.replicas[replica_index].deinit(cluster.allocator);
-            cluster.network.process_disable(.{ .replica = replica_index });
-            cluster.replica_health[replica_index] = .down;
-            cluster.log_replica(.crash, replica_index);
 
             // Ensure that none of the replica's messages leaked when it was deinitialized.
             var messages_in_pool: usize = 0;
@@ -407,31 +545,65 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(messages_in_pool == message_pool.messages_max_replica);
         }
 
-        fn open_replica(cluster: *Self, replica_index: u8, nonce: u128, time: Time) !void {
-            var replica = &cluster.replicas[replica_index];
-            try replica.open(
-                cluster.allocator,
-                .{
-                    .node_count = cluster.options.replica_count + cluster.options.standby_count,
-                    .storage = &cluster.storages[replica_index],
-                    .aof = &cluster.aofs[replica_index],
-                    // TODO Test restarting with a higher storage limit.
-                    .storage_size_limit = cluster.options.storage_size_limit,
-                    .message_pool = &cluster.replica_pools[replica_index],
-                    .nonce = nonce,
-                    .time = time,
-                    .state_machine_options = cluster.options.state_machine,
-                    .message_bus_options = .{ .network = cluster.network },
-                },
-            );
-            assert(replica.cluster == cluster.options.cluster_id);
-            assert(replica.replica == replica_index);
-            assert(replica.replica_count == cluster.replica_count);
-            assert(replica.standby_count == cluster.standby_count);
+        fn replica_release_execute_soon(replica: *Replica, release: u16) void {
+            assert(replica.release_running != release);
 
-            replica.test_context = cluster;
-            replica.event_callback = on_replica_event;
-            cluster.network.link(replica.message_bus.process, &replica.message_bus);
+            const cluster: *Self = @ptrCast(@alignCast(replica.test_context.?));
+            assert(cluster.replica_upgrades[replica.replica] == null);
+
+            log.debug("{}: release_execute: release={}..{}", .{
+                replica.replica,
+                replica.release_running,
+                release,
+            });
+
+            if (cluster.replica_health[replica.replica] == .up) {
+                // The replica is trying to upgrade to a newer release at runtime.
+                assert(replica.journal.status != .init);
+                assert(replica.release_running < release);
+
+                cluster.replica_disable(replica.replica);
+            } else {
+                // The replica was restarted but immediately executed a new version.
+                assert(replica.journal.status == .init);
+                maybe(replica.release_running < release);
+            }
+
+            cluster.replica_upgrades[replica.replica] = release;
+        }
+
+        /// `replica_upgrades` defers upgrades to the next tick (rather than executing it
+        /// immediately in replica_release_execute_soon()). Since we don't actually exec() to a new
+        /// version, this allows the replica to clean up properly (e.g. release Message's via
+        /// `defer`).
+        // FIXME inline
+        fn replica_release_execute(cluster: *Self, replica_index: u8) void {
+            const replica = cluster.replicas[replica_index];
+            assert(cluster.replica_health[replica_index] == .down);
+
+            cluster.replica_close(replica_index);
+
+            const release = cluster.replica_upgrades[replica_index].?;
+            defer cluster.replica_upgrades[replica_index] = null;
+
+            if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release)) |_| {
+                cluster.replica_open(replica_index, .{
+                    .nonce = cluster.replicas[replica_index].nonce + 1,
+                    .release = release,
+                    .releases_bundled = replica.releases_bundled.const_slice(),
+                }) catch |err| {
+                    log.err("{}: release_execute failed: error={}", .{replica_index, err});
+                    @panic("release_execute failed");
+                };
+
+                cluster.replica_enable(replica_index);
+            } else {
+                // The cluster has upgraded to `release`, but this replica does not have that
+                // release available yet.
+                log.debug("{}: release_execute: target version not available", .{ replica_index });
+                assert(cluster.replica_health[replica_index] == .down);
+            }
+            // TODO log_replica?
         }
 
         pub fn request(
@@ -443,8 +615,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             const client = &cluster.clients[client_index];
             const message = request_message.build(.request);
+        std.debug.print("REQUEST client={}\n", .{client_index});
 
             message.header.* = .{
+                .version_release = StateMachine.constants.version,
                 .client = client.id,
                 .request = undefined, // Set by client.raw_request.
                 .cluster = client.cluster,
@@ -493,6 +667,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const client_index = for (cluster.clients, 0..) |*c, i| {
                 if (client == c) break i;
             } else unreachable;
+        std.debug.print("REQUEST {} done\n", .{client_index});
 
             cluster.on_client_reply(cluster, client_index, request_message, reply_message);
         }
@@ -567,6 +742,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             const replica = &cluster.replicas[replica_index];
 
+            // When a replica is trying to upgrade, it may be "up" but some of its fields (e.g.
+            // journal ops) are undefined.
+            //assert(cluster.replica_upgrades[replica_index] == null);
+
             var statuses = [_]u8{' '} ** constants.members_max;
             if (cluster.replica_health[replica_index] == .down) {
                 statuses[replica_index] = '#';
@@ -620,6 +799,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
                     "<{[sync_op_min]:_>3}:{[sync_op_max]:_>3}> " ++
+                    "v{[release_running]:_>4}:{[release_max]:_>4} " ++
                     "{[grid_blocks_acquired]?:>5}Ga " ++
                     "{[grid_blocks_global]:>2}G! " ++
                     "{[grid_blocks_repair]:>3}G?", .{
@@ -635,6 +815,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .wal_op_max = wal_op_max,
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
+                    .release_running = replica.release_running,
+                    .release_max = replica.releases_bundled.get(0),
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else
@@ -665,3 +847,23 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
     };
 }
+
+const TimePointer = struct {
+    time: *Time,
+
+    pub fn monotonic(self: *TimePointer) u64 {
+        return self.time.monotonic();
+    }
+
+    pub fn realtime(self: *TimePointer) i64 {
+        return self.time.realtime();
+    }
+
+    pub fn offset(self: *TimePointer, ticks: u64) i64 {
+        return self.time.offset(ticks);
+    }
+
+    pub fn tick(self: *TimePointer) void {
+        return self.time.tick();
+    }
+};
