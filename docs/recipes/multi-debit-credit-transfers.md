@@ -62,7 +62,7 @@ In this example, we'll use the following accounts:
 
 Here, we use two transfers to debit accounts `A` and `B` and credit the `Control` account, and another three transfers to credit accounts `X`, `Y`, and `Z`.
 
-If you look closely at this example, you may notice that we could technically have simply debited `B` and credited `Z` directly because the amounts happen to line up. That is true!
+If you looked closely at this example, you may have noticed that we could have debited `B` and credited `Z` directly because the amounts happened to line up. That is true!
 
 For performance reasons, you _might_ want to implement logic to circumvent the `Control` account and reduce the number of transfer to implement a certain compound journal entry.
 
