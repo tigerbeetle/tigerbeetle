@@ -1420,22 +1420,6 @@ pub fn ReplicaType(
         fn on_request(self: *Self, message: *Message.Request) void {
             if (self.ignore_request_message(message)) return;
 
-            if (self.upgrade_release) |_| {
-                if (message.header.operation != .upgrade) {
-                    // While we are trying to upgrade, ignore non-upgrade requests.
-                    //
-                    // The objective is to reach a checkpoint such that the last bar of messages
-                    // immediately prior to the checkpoint trigger are noops (operation=upgrade) so
-                    // that they will behave identically before and after the upgrade when they are
-                    // replayed.
-                    //
-                    // This is not part of ignore_request_message() because primary_pipeline_prepare()
-                    // asserts !ignore_request_message() before convering a request to a prepare.
-                    log.debug("{}: on_request: ignoring (upgrading)", .{self.replica});
-                    return;
-                }
-            }
-
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.syncing == .idle);
@@ -1512,6 +1496,13 @@ pub fn ReplicaType(
 
             if (message.header.view > self.view) {
                 log.debug("{}: on_prepare: ignoring (newer view)", .{self.replica});
+                return;
+            }
+
+            if (message.header.version_release > self.release_running) {
+                // This would probably be safe to prepare, but rejecting it simplifies assertions.
+                log.debug("{}: on_prepare: ignoring (newer release)", .{self.replica});
+                assert(message.header.op > self.op_checkpoint_next_trigger());
                 return;
             }
 
@@ -2986,8 +2977,13 @@ pub fn ReplicaType(
 
             self.upgrade_timeout.reset();
 
-            // Already upgrading.
-            if (self.upgrade_release) |_| return;
+            if (self.upgrade_release) |_| {
+                // Already upgrading.
+                // Normally we chain send-upgrade-to-self via the commit chain.
+                // But the request-to-self might have been dropped if the clock is not synchronized.
+                self.send_request_upgrade_to_self();
+                return;
+            }
 
             const release_target: ?u16 = release: {
                 for (self.releases_bundled.const_slice(), 0..) |release, i| {
@@ -3638,9 +3634,10 @@ pub fn ReplicaType(
                     }
                 }
 
-                if (self.commit_prepare.?.header.operation == .upgrade) {
+                //if (self.commit_prepare.?.header.operation == .upgrade) {
+                if (self.upgrade_release) |_| {
                     if (self.commit_min < self.op_checkpoint_next_trigger() or
-                        self.release_for_next_checkpoint() == self.release_running)
+                        self.release_for_next_checkpoint() == self.release_running) // FIXME remove?
                     {
                         //self.send_request_to_self(.upgrade, self.commit_prepare.?.body());
                         // FIXME since the prepare has already been popped, could another upgrade
@@ -4625,6 +4622,20 @@ pub fn ReplicaType(
             if (self.ignore_request_message_upgrade(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
+
+            // Don't accept more requests than will fit in the current checkpoint.
+            // (The request's op hasn't been assigned yet, but it will be `self.op + 1`
+            // when primary_pipeline_prepare() converts the request to a prepare.)
+            //if (self.op + self.pipeline.queue.request_queue.count ==
+            //    self.op_checkpoint_next_trigger())
+            //{
+            //    log.debug("{}: on_request: ignoring op={} (too far ahead, checkpoint={})", .{
+            //        self.replica,
+            //        self.op + self.pipeline.queue.request_queue.count,
+            //        self.op_checkpoint(),
+            //    });
+            //    return true;
+            //}
             return false;
         }
 
@@ -4653,7 +4664,23 @@ pub fn ReplicaType(
                     return true;
                 }
             } else {
-                //// Even though `operation=upgrade` hasn't committed, it may be in the pipeline.
+                if (self.upgrade_release) |_| {
+                    // While we are trying to upgrade, ignore non-upgrade requests.
+                    //
+                    // The objective is to reach a checkpoint such that the last bar of messages
+                    // immediately prior to the checkpoint trigger are noops (operation=upgrade) so
+                    // that they will behave identically before and after the upgrade when they are
+                    // replayed.
+                    log.debug("{}: on_request: ignoring (upgrading)", .{ self.replica });
+                    return true;
+                }
+
+                // Even though `operation=upgrade` hasn't committed, it may be in the pipeline.
+                if (self.pipeline.queue.message_by_operation(.upgrade)) |_| {
+                    log.debug("{}: on_request: ignoring (upgrade queued)", .{ self.replica });
+                    return true;
+                }
+
                 //if (self.pipeline.queue.message_by_operation(.upgrade)) |_| {
                 //    log.debug("{}: on_request: ignoring (upgrading)", .{self.replica});
                 //    return true;
@@ -5459,7 +5486,7 @@ pub fn ReplicaType(
             assert(!self.pipeline.queue.prepare_queue.full());
             self.pipeline.queue.verify();
 
-            assert(!self.ignore_request_message(request.message));
+            //assert(!self.ignore_request_message(request.message));
 
             defer self.message_bus.unref(request.message);
 
@@ -7574,6 +7601,7 @@ pub fn ReplicaType(
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
 
+            // FIXME remove; timeout can handle this
             if (self.upgrade_release) |_| self.send_request_upgrade_to_self();
         }
 
@@ -9099,10 +9127,12 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.upgrade_release.? > self.release_running);
             maybe(self.pipeline.queue.message_by_operation(.upgrade) != null);
-            defer assert(self.pipeline.queue.message_by_operation(.upgrade) != null);
 
             const upgrade = vsr.UpgradeRequest{ .version_release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
+
+            // If our clock is not synchronized, then the request-to-self might have been dropped.
+            maybe(self.pipeline.queue.message_by_operation(.upgrade) != null);
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {

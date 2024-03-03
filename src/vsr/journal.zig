@@ -1268,6 +1268,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
                 cases[index] = recovery_case(header, prepare, prepare_op_max);
 
+                if (journal.replica == 1 and index == 31) {
+                    std.debug.print("HEADER={}\n", .{journal.headers_redundant[index]});
+                }
+
                 // `prepare_checksums` improves the availability of `request_prepare` by being more
                 // flexible than `headers` regarding the prepares it references. It may hold a
                 // prepare whose redundant header is broken, as long as the prepare itself is valid.
@@ -2085,6 +2089,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 const slot = Slot{ .index = sector_slot.index + i };
 
                 if (journal.faulty.bit(slot)) {
+                    std.debug.print("{}: WRITE_INVALID: {}\n", .{journal.replica, slot.index});
                     // Redundant faulty headers are deliberately written as invalid.
                     // This ensures that faulty headers are still faulty when they are read back
                     // from disk during recovery. This prevents faulty entries from changing to

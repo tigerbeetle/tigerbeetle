@@ -388,7 +388,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             for (cluster.clients) |*client| client.tick();
             for (cluster.storages) |*storage| storage.tick();
+
+            // Upgrades immediately follow storage.tick(), since upgrades occur at checkpoint
+            // completion.
+            for (cluster.replica_upgrades, 0..) |release, i| {
+                if (release) |_| cluster.replica_release_execute(@intCast(i));
+            }
+
             for (cluster.replicas, 0..) |*replica, i| {
+                assert(cluster.replica_upgrades[i] == null);
                 switch (cluster.replica_health[i]) {
                     .up => replica.tick(),
                     // Keep ticking the time so that it won't have diverged too far to synchronize
@@ -397,9 +405,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }
 
                 // TODO or move this into replica_open?
-                if (cluster.replica_upgrades[i]) |_| {
-                    cluster.replica_release_execute(replica.replica);
-                }
+                //if (cluster.replica_upgrades[i]) |_| {
+                //    cluster.replica_release_execute(replica.replica);
+                //}
 
                 if (cluster.replica_health[i] == .up) {
                     // Check health separately from the preceding switch, since executing the new
@@ -413,32 +421,28 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         /// Returns an error when the replica was unable to recover (open).
         pub fn restart_replica(cluster: *Self, replica_index: u8, options: struct {
-            // By default, run the "newest"/highest release.
-            //release: ?u16 = null,
-            releases_bundled: []const u16,
+            releases_bundled: []const u16, // FIXME inline option
         }) !void {
             assert(cluster.replica_health[replica_index] == .down);
             assert(cluster.replica_upgrades[replica_index] == null);
             vsr.verify_release_list(options.releases_bundled);
+
+            defer maybe(cluster.replica_health[replica_index] == .up);
+            defer assert(cluster.replica_upgrades[replica_index] == null);
 
             try cluster.replica_open(replica_index, .{
                 .nonce = cluster.replicas[replica_index].nonce + 1,
                 .release = options.releases_bundled[0],
                 .releases_bundled = options.releases_bundled,
             });
+            cluster.replica_enable(replica_index);
 
             if (cluster.replica_upgrades[replica_index]) |_| {
-                // vopr-debug 5420831288558822384 /tmp/log1.vopr
                 // Upgrade the replica promptly, rather than waiting until the next tick().
                 // This ensures that the restart completes synchronously, as the caller expects.
                 cluster.replica_release_execute(replica_index); // FIXME inline
-                assert(cluster.replica_upgrades[replica_index] == null);
-            } else {
-                cluster.replica_enable(replica_index);
+                //assert(cluster.replica_upgrades[replica_index] == null);
             }
-
-            //if (cluster.replica_upgrades[replica_index] == null) {
-            //}
         }
 
         /// Reset a replica to its initial state, simulating a random crash/panic.
@@ -527,6 +531,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             replica.event_callback = on_replica_event;
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
+
+            // FIXME assert down at start of fn
+            //if (cluster.replica_upgrades[replica_index] == null) {
+            //    cluster.replica_enable(replica_index);
+            //}
         }
 
         fn replica_close(cluster: *Self, replica_index: u8) void {
@@ -551,7 +560,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const cluster: *Self = @ptrCast(@alignCast(replica.test_context.?));
             assert(cluster.replica_upgrades[replica.replica] == null);
 
-            log.debug("{}: release_execute: release={}..{}", .{
+            log.debug("{}: release_execute_soon: release={}..{}", .{
                 replica.replica,
                 replica.release_running,
                 release,
@@ -562,8 +571,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 assert(replica.journal.status != .init);
                 assert(replica.release_running < release);
 
-                cluster.replica_disable(replica.replica);
+                std.debug.print("A {}\n", .{replica.replica});
+                //cluster.replica_close(replica.replica);
+                //cluster.replica_disable(replica.replica);
             } else {
+                std.debug.print("B {}\n", .{replica.replica});
                 // The replica was restarted but immediately executed a new version.
                 assert(replica.journal.status == .init);
                 maybe(replica.release_running < release);
@@ -579,12 +591,25 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         // FIXME inline
         fn replica_release_execute(cluster: *Self, replica_index: u8) void {
             const replica = cluster.replicas[replica_index];
-            assert(cluster.replica_health[replica_index] == .down);
-
-            cluster.replica_close(replica_index);
+            //assert(cluster.replica_health[replica_index] == .down);
+            assert(cluster.replica_health[replica_index] == .up);
 
             const release = cluster.replica_upgrades[replica_index].?;
             defer cluster.replica_upgrades[replica_index] = null;
+
+            log.debug("{}: release_execute: release={}..{}", .{
+                replica_index,
+                replica.release_running,
+                release,
+            });
+
+            //cluster.replica_close(replica_index);
+
+            cluster.replica_close(replica_index);
+            cluster.replica_disable(replica_index);
+            //if (cluster.replica_health[replica_index] == .up) {
+                //cluster.replica_disable(replica.replica);
+            //}
 
             if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release)) |_| {
                 cluster.replica_open(replica_index, .{
@@ -595,8 +620,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     log.err("{}: release_execute failed: error={}", .{replica_index, err});
                     @panic("release_execute failed");
                 };
-
                 cluster.replica_enable(replica_index);
+
+                //assert(cluster.replica_health[replica_index] == .up);
+
             } else {
                 // The cluster has upgraded to `release`, but this replica does not have that
                 // release available yet.
@@ -615,7 +642,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             const client = &cluster.clients[client_index];
             const message = request_message.build(.request);
-        std.debug.print("REQUEST client={}\n", .{client_index});
 
             message.header.* = .{
                 .version_release = StateMachine.constants.version,
@@ -667,7 +693,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const client_index = for (cluster.clients, 0..) |*c, i| {
                 if (client == c) break i;
             } else unreachable;
-        std.debug.print("REQUEST {} done\n", .{client_index});
 
             cluster.on_client_reply(cluster, client_index, request_message, reply_message);
         }

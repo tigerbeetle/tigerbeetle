@@ -525,7 +525,7 @@ pub const Simulator = struct {
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
         simulator.options.replica_crash_probability = 0;
         simulator.options.replica_restart_probability = 0;
-        //simulator.options.replica_release_advance_probability = 0; // FIXME
+        simulator.options.replica_release_advance_probability = 0; // FIXME
     }
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,
@@ -947,9 +947,9 @@ pub const Simulator = struct {
         const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
 
         if (!fault) {
-            // The journal writes redundant headers of faulty ops as zeroes to ensure
-            // that they remain faulty after a crash/recover. Since that fault cannot
-            // be disabled by `storage.faulty`, we must manually repair it here to
+            // The journal writes redundant headers of faulty ops as invalid (zero-checksum)
+            // reserved headers to ensure that they remain faulty after a crash/recover. Since that
+            // fault cannot be disabled by `storage.faulty`, we must manually repair it here to
             // ensure a cluster cannot become stuck in status=recovering_head.
             // See recover_slots() for more detail.
             const headers_offset = vsr.Zone.wal_headers.offset(0);

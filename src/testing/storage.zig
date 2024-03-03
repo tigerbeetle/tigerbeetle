@@ -394,6 +394,26 @@ pub const Storage = struct {
             }
         }
 
+        // TODO 370812152451725941
+        if (read.zone == .wal_headers and !storage.faulty) {
+            // The journal writes redundant headers of faulty ops as invalid (zero-checksum)
+            // reserved headers to ensure that they remain faulty after a crash/recover. Since that
+            // fault cannot be disabled by `storage.faulty`, we must manually repair it here to
+            // ensure a cluster cannot become stuck in status=recovering_head.
+            // See recover_slots() for more detail.
+            const headers_offset = vsr.Zone.wal_headers.offset(0);
+            const headers_size = vsr.Zone.wal_headers.size().?;
+            const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
+            for (
+                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
+                replica_storage.wal_prepares(),
+            ) |*wal_header, *wal_prepare| {
+                if (wal_header.checksum == 0) {
+                    wal_header.* = wal_prepare.header;
+                }
+            }
+        }
+
         read.callback(read);
     }
 

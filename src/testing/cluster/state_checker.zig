@@ -10,6 +10,7 @@ const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
 const ReplicaSet = std.StaticBitSet(constants.members_max);
+// FIXME verify release version too
 const Commits = std.ArrayList(struct {
     header: vsr.Header.Prepare,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
