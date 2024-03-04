@@ -54,7 +54,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             StateMachine,
             MessageBus,
             Storage,
-            Time,
+            TimePointer,
             AOF,
         );
         pub const Client = vsr.Client(StateMachine, MessageBus);
@@ -91,6 +91,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// NB: includes both active replicas and standbys.
         replicas: []Replica,
         replica_pools: []MessagePool,
+        // Replica "owns" Time, but we want to own it too, so that we can tick time even while a
+        // replica is down, and thread it in between restarts. This is crucial to ensure that the
+        // cluster's clocks do not desynchronize too far to recover.
+        replica_times: []Time,
         replica_health: []ReplicaHealth,
         replica_count: u8,
         standby_count: u8,
@@ -194,6 +198,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
+            var replica_times = try allocator.alloc(Time, node_count);
+            errdefer allocator.free(replica_times);
+            @memset(replica_times, .{
+                .resolution = constants.tick_ms * std.time.ns_per_ms,
+                .offset_type = .linear,
+                .offset_coefficient_A = 0,
+                .offset_coefficient_B = 0,
+            });
+
             const replicas = try allocator.alloc(Replica, node_count);
             errdefer allocator.free(replicas);
 
@@ -278,6 +291,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .storage_fault_atlas = storage_fault_atlas,
                 .replicas = replicas,
                 .replica_pools = replica_pools,
+                .replica_times = replica_times,
                 .replica_health = replica_health,
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
@@ -295,12 +309,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
                 const nonce = 1 + @as(u128, replica_index) << 64;
-                try cluster.open_replica(@intCast(replica_index), nonce, .{
-                    .resolution = constants.tick_ms * std.time.ns_per_ms,
-                    .offset_type = .linear,
-                    .offset_coefficient_A = 0,
-                    .offset_coefficient_B = 0,
-                });
+                try cluster.open_replica(@intCast(replica_index), nonce);
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
@@ -336,6 +345,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
             cluster.allocator.free(cluster.replica_health);
+            cluster.allocator.free(cluster.replica_times);
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
             cluster.allocator.free(cluster.aofs);
@@ -360,7 +370,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     },
                     // Keep ticking the time so that it won't have diverged too far to synchronize
                     // when the replica restarts.
-                    .down => replica.clock.time.tick(),
+                    .down => cluster.replica_times[i].tick(),
                 }
             }
         }
@@ -370,14 +380,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(cluster.replica_health[replica_index] == .down);
 
             const nonce = cluster.replicas[replica_index].nonce + 1;
-            // Pass the old replica's Time through to the new replica.
-            // It will continue to tick while the replica is crashed, to ensure the clocks don't
-            // desynchronize too far to recover.
-            // Intentionally use `var` to force the compiler to make a copy here and not do a
-            // pass-by-reference.
-            var time: Time = undefined;
-            time = cluster.replicas[replica_index].time;
-            try cluster.open_replica(replica_index, nonce, time);
+            try cluster.open_replica(replica_index, nonce);
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
             cluster.log_replica(.recover, replica_index);
@@ -407,7 +410,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(messages_in_pool == message_pool.messages_max_replica);
         }
 
-        fn open_replica(cluster: *Self, replica_index: u8, nonce: u128, time: Time) !void {
+        fn open_replica(cluster: *Self, replica_index: u8, nonce: u128) !void {
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
@@ -419,7 +422,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .storage_size_limit = cluster.options.storage_size_limit,
                     .message_pool = &cluster.replica_pools[replica_index],
                     .nonce = nonce,
-                    .time = time,
+                    .time = .{ .time = &cluster.replica_times[replica_index] },
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
                 },
@@ -665,3 +668,23 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
     };
 }
+
+const TimePointer = struct {
+    time: *Time,
+
+    pub fn monotonic(self: *TimePointer) u64 {
+        return self.time.monotonic();
+    }
+
+    pub fn realtime(self: *TimePointer) i64 {
+        return self.time.realtime();
+    }
+
+    pub fn offset(self: *TimePointer, ticks: u64) i64 {
+        return self.time.offset(ticks);
+    }
+
+    pub fn tick(self: *TimePointer) void {
+        return self.time.tick();
+    }
+};
