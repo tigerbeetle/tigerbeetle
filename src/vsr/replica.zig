@@ -555,7 +555,7 @@ pub fn ReplicaType(
             // It is a possibility that the head can't be recovered from the local data.
             // In this case, the replica transitions to .recovering_head and waits for a .start_view
             // message from a primary to reset its head.
-            var op_head: ?u64 = null;
+            var op_head: u64 = self.superblock.working.vsr_state.checkpoint.header.op;
 
             if (self.log_view == self.view) {
                 for (self.journal.headers) |*header| {
@@ -564,7 +564,7 @@ pub fn ReplicaType(
                         assert(header.op <= self.op_prepare_max());
                         assert(header.view <= self.log_view);
 
-                        if (op_head == null or op_head.? < header.op) op_head = header.op;
+                        if (op_head < header.op) op_head = header.op;
                     }
                 }
             } else {
@@ -595,7 +595,7 @@ pub fn ReplicaType(
             for (vsr_headers.slice) |*vsr_header| {
                 if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
                     vsr_header.op <= self.op_prepare_max() and
-                    (op_head == null or op_head.? <= vsr_header.op))
+                    (op_head <= vsr_header.op))
                 {
                     op_head = vsr_header.op;
 
@@ -608,14 +608,21 @@ pub fn ReplicaType(
                 // This case can only occur if we loaded an SV for its hook header, then converted
                 // that SV to a DVC (dropping the hooks; see start_view_into_do_view_change()),
                 // but never finished the view change.
-                if (op_head == null) {
+                if (op_head == self.superblock.working.vsr_state.checkpoint.header.op) {
                     assert(self.view > self.log_view);
-                    op_head = self.journal.op_maximum();
                 }
             }
-            assert(op_head.? <= self.op_prepare_max());
+            assert(op_head <= self.op_prepare_max());
 
-            self.op = op_head.?;
+            if (op_head == self.superblock.working.vsr_state.checkpoint.header.op) {
+                if (!self.journal.has(&self.superblock.working.vsr_state.checkpoint.header)) {
+                    self.journal.set_header_as_dirty(
+                        &self.superblock.working.vsr_state.checkpoint.header,
+                    );
+                }
+            }
+
+            self.op = op_head;
             self.commit_max = @max(
                 self.commit_max,
                 self.op -| constants.pipeline_prepare_queue_max,
@@ -8024,8 +8031,16 @@ pub fn ReplicaType(
 
             self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
             assert(self.commit_min == self.op_checkpoint());
-            if (self.op < self.op_checkpoint()) {
+            assert(self.commit_min > 0);
+            if (self.op < self.op_checkpoint() and self.status != .recovering_head) {
                 self.transition_to_recovering_head();
+                self.set_op_and_commit_max(
+                    self.op_checkpoint(),
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?,
+                    @src(),
+                );
+                self.replace_header(&self.superblock.working.vsr_state.checkpoint.header);
+                self.transition_to_normal_from_recovering_head_status(self.view);
             }
 
             self.grid.open(grid_open_callback);
