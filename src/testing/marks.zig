@@ -77,10 +77,7 @@ pub fn check(name: []const u8) Mark {
 pub fn wrap_log(comptime base: anytype) type {
     if (builtin.is_test) {
         return struct {
-            pub const err = warn;
-            pub const warn = base.warn;
-            pub const info = base.info;
-            pub const debug = base.debug;
+            pub usingnamespace base;
 
             pub const mark = struct {
                 pub fn err(comptime fmt: []const u8, args: anytype) void {
@@ -106,11 +103,7 @@ pub fn wrap_log(comptime base: anytype) type {
         };
     } else {
         return struct {
-            pub const err = warn;
-            pub const warn = base.warn;
-            pub const info = base.info;
-            pub const debug = base.debug;
-
+            pub usingnamespace base;
             pub const mark = base;
         };
     }
