@@ -4,54 +4,161 @@ sidebar_position: 4
 
 # Three-node cluster with Docker Compose
 
-First, provision the data file for each node:
+First, create the following `tigerbeetle-entrypoint.sh` file:
 
-```console
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
-docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
+```sh
+#!/bin/sh
+
+##
+# This is used as an entrypoint script in an init container.
+# It provisions data files if they don't already exist, based on a few flags.
+#
+# | Flag | Accepts  | Comment                                      |
+# | ---- | -------- | -------------------------------------------- |
+# | `-f` | `string` | The directory to store the data files within |
+# | `-c` | `number` | The cluster number                           |
+# | `-r` | `number` | The amount of replicas                       |
+#
+# The files generated are named using a template "{cluster}_{replica}.tigerbeetle".
+#
+# When the script is executed with "-f /data -c 0 -r 3" flags, it generates 3 data files.
+#
+# /data/
+# ├─ 0_0.tigerbeetle
+# ├─ 0_1.tigerbeetle
+# ├─ 0_2.tigerbeetle
+##
+
+while getopts "f:c:r:" opt; do
+  case $opt in
+    f)
+      folder="$OPTARG"
+      ;;
+    c)
+      cluster="$OPTARG"
+      ;;
+    r)
+      replica_count="$OPTARG"
+      ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
+    :)
+      echo "Option -$OPTARG requires an argument." >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ -n "$folder" ]; then
+    if [ ! -d "$folder" ]; then
+        echo "The folder $folder does not exist."
+        exit 1
+    fi
+else
+    echo "Option -f is required."
+    exit 1
+fi
+
+if [ -z "$cluster" ]; then
+  echo "Option -c is required."
+  exit 1
+fi
+
+if [ -z "$replica_count" ]; then
+  echo "Option -r is required."
+  exit 1
+fi
+
+counter=0
+while [ "$counter" -lt "$replica_count" ]; do
+  
+  target="${folder}/${cluster}_${counter}.tigerbeetle"
+  
+  if [ -e "$target" ]; then
+    echo "$target already exists"
+  else
+    /tigerbeetle format --cluster="$cluster" --replica="$counter" --replica-count="$replica_count" "$target"
+  fi
+  
+  counter=$((counter + 1))
+done
 ```
 
-Then create a docker-compose.yml file:
+Then create a `docker-compose.yml` file:
 
-```docker-compose
+```yaml
 version: "3.7"
 
-##
-# Note: this example might only work with linux + using `network_mode:host` because of 2 reasons:
-#
-# 1. When specifying an internal docker network, other containers are only available using dns based routing:
-#    e.g. from tigerbeetle_0, the other replicas are available at `tigerbeetle_1:3002` and
-#    `tigerbeetle_2:3003` respectively.
-#
-# 2. Tigerbeetle performs some validation of the ip address provided in the `--addresses` parameter
-#    and won't let us specify a custom domain name.
-#
-# The workaround for now is to use `network_mode:host` in the containers instead of specifying our
-# own internal docker network
-##
-
 services:
-  tigerbeetle_0:
+  # this the init container that runs the entrypoint script.
+  tigerbeetle-init:
     image: ghcr.io/tigerbeetle/tigerbeetle
-    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
-    network_mode: host
     volumes:
-      - ./data:/data
+      - tigerbeetle-data:/data
+      - ./tigerbeetle-entrypoint.sh:/tigerbeetle-entrypoint.sh
+    entrypoint: /tigerbeetle-entrypoint.sh -f /data -c 0 -r 3
 
-  tigerbeetle_1:
+  0_0-tigerbeetle:
     image: ghcr.io/tigerbeetle/tigerbeetle
-    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_1.tigerbeetle"
-    network_mode: host
     volumes:
-      - ./data:/data
+      - tigerbeetle-data:/data
+    # make sure to add additional addresses to the --addresses flag, if you add more nodes
+    # also notice the data file specified is "/data/0_0.tigerbeetle"
+    command: "start --addresses=172.16.100.10:3000,172.16.100.20:3000,172.16.100.30:3000 /data/0_0.tigerbeetle"
+    networks:
+      tigerbeetle:
+        # the specific ip for this node
+        ipv4_address: 172.16.100.10
+    depends_on:
+      tigerbeetle-init:
+        # this condition ensures that this instance only starts up, when the tigerbeetle-init container has finished
+        condition: service_completed_successfully
 
-  tigerbeetle_2:
+  0_1-tigerbeetle:
     image: ghcr.io/tigerbeetle/tigerbeetle
-    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_2.tigerbeetle"
-    network_mode: host
     volumes:
-      - ./data:/data
+      - tigerbeetle-data:/data
+    # make sure to add additional addresses to the --addresses flag, if you add more nodes
+    # also notice the data file specified is "/data/0_1.tigerbeetle"
+    command: "start --addresses=172.16.100.10:3000,172.16.100.20:3000,172.16.100.30:3000 /data/0_1.tigerbeetle"
+    networks:
+      tigerbeetle:
+        # the specific ip for this node
+        ipv4_address: 172.16.100.20
+    depends_on:
+      tigerbeetle-init:
+        # this condition ensures that this instance only starts up, when the tigerbeetle-init container has finished
+        condition: service_completed_successfully
+
+  0_2-tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle
+    volumes:
+      - tigerbeetle-data:/data
+    # make sure to add additional addresses to the --addresses flag, if you add more nodes
+    # also notice the data file specified is "/data/0_2.tigerbeetle"
+    command: "start --addresses=172.16.100.10:3000,172.16.100.20:3000,172.16.100.30:3000 /data/0_2.tigerbeetle"
+    networks:
+      tigerbeetle:
+        # the specific ip for this node
+        ipv4_address: 172.16.100.30
+    depends_on:
+      tigerbeetle-init:
+        # this condition ensures that this instance only starts up, when the tigerbeetle-init container has finished
+        condition: service_completed_successfully
+
+volumes:
+  # using a volume allows you to persist the data files
+  tigerbeetle-data:
+
+
+networks:
+  tigerbeetle:
+    ipam:
+      config:
+        # you may want to use a different CIDR subnet range
+        - subnet: 172.16.100.0/24
 ```
 
 And run it:
@@ -59,27 +166,39 @@ And run it:
 ```console
 docker-compose up
 ```
+
 ```console
-docker-compose up
-Starting tigerbeetle_0   ... done
-Starting tigerbeetle_2   ... done
-Recreating tigerbeetle_1 ... done
-Attaching to tigerbeetle_0, tigerbeetle_2, tigerbeetle_1
-tigerbeetle_1    | info(io): opening "0_1.tigerbeetle"...
-tigerbeetle_2    | info(io): opening "0_2.tigerbeetle"...
-tigerbeetle_0    | info(io): opening "0_0.tigerbeetle"...
-tigerbeetle_0    | info(main): 0: cluster=0: listening on 0.0.0.0:3001
-tigerbeetle_2    | info(main): 2: cluster=0: listening on 0.0.0.0:3003
-tigerbeetle_1    | info(main): 1: cluster=0: listening on 0.0.0.0:3002
-tigerbeetle_0    | info(message_bus): connected to replica 1
-tigerbeetle_0    | info(message_bus): connected to replica 2
-tigerbeetle_1    | info(message_bus): connected to replica 2
-tigerbeetle_1    | info(message_bus): connection from replica 0
-tigerbeetle_2    | info(message_bus): connection from replica 0
-tigerbeetle_2    | info(message_bus): connection from replica 1
-tigerbeetle_0    | info(clock): 0: system time is 83ns ahead
-tigerbeetle_2    | info(clock): 2: system time is 83ns ahead
-tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
+docker compose up
+[+] Running 7/7
+ ✔ Network tigerbeetle-docker_tigerbeetle           Created                                                                                                                                       0.0s 
+ ✔ Network tigerbeetle-docker_default               Created                                                                                                                                       0.0s 
+ ✔ Volume "tigerbeetle-docker_tigerbeetle-data"     Created                                                                                                                                       0.0s 
+ ✔ Container tigerbeetle-docker-tigerbeetle-init-1  Created                                                                                                                                       0.1s 
+ ✔ Container tigerbeetle-docker-0_0-tigerbeetle-1   Created                                                                                                                                       0.1s 
+ ✔ Container tigerbeetle-docker-0_1-tigerbeetle-1   Created                                                                                                                                       0.1s 
+ ✔ Container tigerbeetle-docker-0_2-tigerbeetle-1   Created                                                                                                                                       0.1s 
+Attaching to 0_0-tigerbeetle-1, 0_1-tigerbeetle-1, 0_2-tigerbeetle-1, tigerbeetle-init-1
+tigerbeetle-init-1  | info(io): creating "0_0.tigerbeetle"...
+tigerbeetle-init-1  | info(io): allocating 1.0322265625GiB...
+tigerbeetle-init-1  | info(main): 0: formatted: cluster=0 replica_count=3
+tigerbeetle-init-1  | info(io): creating "0_1.tigerbeetle"...
+tigerbeetle-init-1  | info(io): allocating 1.0322265625GiB...
+tigerbeetle-init-1  | info(main): 1: formatted: cluster=0 replica_count=3
+tigerbeetle-init-1  | info(io): creating "0_2.tigerbeetle"...
+tigerbeetle-init-1  | info(io): allocating 1.0322265625GiB...
+tigerbeetle-init-1  | info(main): 2: formatted: cluster=0 replica_count=3
+0_0-tigerbeetle-1   | info(io): opening "0_0.tigerbeetle"...
+0_1-tigerbeetle-1   | info(io): opening "0_1.tigerbeetle"...
+0_2-tigerbeetle-1   | info(io): opening "0_2.tigerbeetle"...
+0_0-tigerbeetle-1   | info(main): 0: cluster=0: listening on 172.16.100.10:3000
+0_1-tigerbeetle-1   | info(main): 1: cluster=0: listening on 172.16.100.20:3000
+0_2-tigerbeetle-1   | info(main): 2: cluster=0: listening on 172.16.100.30:3000
+0_0-tigerbeetle-1   | info(message_bus): connected to replica 1
+0_1-tigerbeetle-1   | info(message_bus): connection from replica 0
+0_0-tigerbeetle-1   | info(message_bus): connected to replica 2
+0_2-tigerbeetle-1   | info(message_bus): connection from replica 0
+0_1-tigerbeetle-1   | info(message_bus): connected to replica 2
+0_2-tigerbeetle-1   | info(message_bus): connection from replica 1
 
 ... and so on ...
 ```
@@ -98,15 +217,19 @@ on macOS, you will need to add the `IPC_LOCK` capability.
 ```yaml
 ... rest of docker-compose.yml ...
 
-services:
-  tigerbeetle_0:
+  0_0-tigerbeetle:
     image: ghcr.io/tigerbeetle/tigerbeetle
-    command: "start --addresses=0.0.0.0:3001,0.0.0.0:3002,0.0.0.0:3003 /data/0_0.tigerbeetle"
-    network_mode: host
+    volumes:
+      - tigerbeetle-data:/data
+    command: "start --addresses=172.16.100.10:3000,172.16.100.20:3000,172.16.100.30:3000 /data/0_0.tigerbeetle"
+    networks:
+      tigerbeetle:
+        ipv4_address: 172.16.100.10
     cap_add:       # HERE
       - IPC_LOCK   # HERE
-    volumes:
-      - ./data:/data
+    depends_on:
+      tigerbeetle-init:
+        condition: service_completed_successfully
 
 ... rest of docker-compose.yml ...
 ```
