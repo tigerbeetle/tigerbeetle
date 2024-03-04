@@ -4,7 +4,7 @@ sidebar_position: 3
 
 # Single-Node Cluster with Docker
 
-First provision TigerBeetle's data directory.
+First provision TigerBeetle's [data file](../internals/data_file.md):
 
 ```console
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
@@ -15,7 +15,7 @@ info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```
 
-Then run the server.
+Then run the server:
 
 ```console
 docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \

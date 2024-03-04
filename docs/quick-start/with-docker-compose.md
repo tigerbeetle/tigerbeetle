@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Three-Node Cluster with Docker Compose
 
-First, provision the data file for each node:
+First, provision the [data file](../internals/data_file.md) for each node:
 
 ```console
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
