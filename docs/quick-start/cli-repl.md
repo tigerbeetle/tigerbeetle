@@ -73,3 +73,9 @@ lookup_accounts id=1, id=2;
 And indeed you can see that account `1` has `debits_posted` as `10`
 and account `2` has `credits_posted` as `10`. The `10` amount is fully
 accounted for!
+
+You can take a look at the [`Accounts` reference](../reference/accounts.md) to understand all of the fields on the accounts.
+
+## Next: Designing for TigerBeetle
+
+Now that you've created some accounts and transfers, you may want to dig into the [data model](../design/data-modeling.md) to learn more about how to build with TigerBeetle.
