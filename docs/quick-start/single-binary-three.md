@@ -2,7 +2,7 @@
 sidebar_position: 2
 ---
 
-# Three-node cluster with a single binary
+# Three-Node Cluster
 
 First, download a prebuilt copy of TigerBeetle.
 

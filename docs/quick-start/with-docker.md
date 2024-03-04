@@ -2,7 +2,7 @@
 sidebar_position: 3
 ---
 
-# Single-node cluster with Docker
+# Single-Node Cluster with Docker
 
 First provision TigerBeetle's data directory.
 

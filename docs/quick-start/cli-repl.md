@@ -1,8 +1,8 @@
 ---
-sidebar_position: 4
+sidebar_position: 5
 ---
 
-# Creating accounts and transfers with the CLI repl
+# Use the CLI REPL to Create Accounts and Transfers
 
 Once you've got some TigerBeetle replicas running, let's connect to the
 replicas and do some accounting!

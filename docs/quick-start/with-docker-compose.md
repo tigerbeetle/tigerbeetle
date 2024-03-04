@@ -2,7 +2,7 @@
 sidebar_position: 4
 ---
 
-# Three-node cluster with Docker Compose
+# Three-Node Cluster with Docker Compose
 
 First, provision the data file for each node:
 
