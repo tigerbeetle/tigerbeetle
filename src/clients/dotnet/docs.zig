@@ -25,7 +25,7 @@ pub const DotnetDocs = Docs{
     \\And if you do not already have NuGet.org as a package
     \\source, make sure to add it:
     \\
-    \\```console
+    \\```shell
     \\dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org
     \\```
     ,

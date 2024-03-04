@@ -61,14 +61,14 @@ ping the next person to pass the baton.
 Before triggering a release, update CHANGELOG.md with the changes since the last release. Run the
 following command to create a release branch and generate changelog skeleton:
 
-```console
+```shell
 $ ./zig/zig build scripts -- changelog
 ```
 
-After the changelog PR is merged, trigger a release  by pushing a commit from `origin/main` to
+After the changelog PR is merged, trigger a release by pushing a commit from `origin/main` to
 `origin/release`:
 
-```console
+```shell
 $ git fetch origin && git push origin origin/main:release
 ```
 

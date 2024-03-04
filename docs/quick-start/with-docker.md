@@ -6,22 +6,24 @@ sidebar_position: 3
 
 First provision TigerBeetle's data directory.
 
-```console
+```shell
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
 ```
-```console
+
+```shell
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
 ```
 
 Then run the server.
 
-```console
+```shell
 docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 ```
-```console
+
+```shell
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 0.0.0.0:3000
 ```
@@ -63,7 +65,7 @@ If TigerBeetle panics and you can reproduce the panic, you can get a
 better stack trace by switching to a debug image (by using the `:debug`
 Docker image tag).
 
-```console
+```shell
 docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle:debug \
     start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
 ```
