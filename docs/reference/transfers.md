@@ -39,9 +39,11 @@ Fields used by each mode of transfer:
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `timestamp`                   | none         | none     | none         | none         |
 
-TigerBeetle uses the same data structures internally and
-externally. This means that sometimes you need to set temporary values
-for fields that TigerBeetle, not you (the user), are responsible.
+TigerBeetle uses the same data structures internally and externally. This means 
+that when creating transfers, you will need to set temporary values for certain 
+fields that TigerBeetle is responsible for. For example, you will set the 
+[`timestamp`](#timestamp) field to `0` when creating a transfer and then
+TigerBeetle will set the field to the timestamp when the transfer was executed.
 
 ### Single-phase transfer
 
@@ -131,7 +133,8 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1`
-* Must not conflict with another transfer
+* Must not conflict with another transfer (note that a transfer MAY have the same `id` as an
+account, but we would recommend avoiding this)
 
 ### `debit_account_id`
 
@@ -272,6 +275,12 @@ Constraints:
 * Type is 32-bit unsigned integer (4 bytes)
 * Must be zero if `flags.pending` is *not* set
 
+The `timeout` is an interval in seconds rather than an absolute timestamp
+because this is more robust to clock skew between the cluster and the
+application. (Watch this talk on
+[Detecting Clock Sync Failure in Highly Available Systems](https://youtu.be/7R-Iz6sJG6Q?si=9sD2TpfD29AxUjOY)
+on YouTube for more details.)
+
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
@@ -325,7 +334,8 @@ transfer in the batch, to create a chain of transfers, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first transfer without this flag. The last
 transfer in a batch may therefore never have `flags.linked` set as
-this would leave a chain open-ended (see `linked_event_chain_open`).
+this would leave a chain open-ended (see
+[`linked_event_chain_open`](./operations/create_transfers.md#linked_event_chain_open)).
 
 Multiple chains of individual transfers may coexist within a batch to
 succeed or fail independently. Transfers within a chain are executed
@@ -354,9 +364,12 @@ then `B`, `C`, and `D` will all fail. They are linked.
 Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`,
 and each other.
 
-After the link has executed, the association of each event is lost.
-To save the association, it must be
-[encoded into the data model](../design/data-modeling.md).
+After the chain of linked transfers has executed, the fact that they were
+linked will not be saved by default.
+To save the association between transfers, it must be
+[encoded into the data model](../design/data-modeling.md), for example by
+adding an ID to one of the [user data](../design/data-modeling.md#user_data)
+fields.
 
 ##### Examples
 

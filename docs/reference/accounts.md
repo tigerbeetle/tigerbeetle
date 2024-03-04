@@ -7,9 +7,11 @@ sidebar_position: 1
 An `Account` is a record storing the cumulative effect of committed
 [transfers](./transfers.md).
 
-TigerBeetle uses the same data structures internally and
-externally. This means that sometimes you need to set temporary values
-for fields that TigerBeetle, not you (the user), are responsible.
+TigerBeetle uses the same data structures internally and externally. This means
+that when creating accounts, you will need to set temporary values for certain
+fields that TigerBeetle is responsible for. For example, you will set the
+[`timestamp`](#timestamp) field to `0` when creating an account and then
+TigerBeetle will set the field to the timestamp when the operation was executed.
 
 ### Updates
 
@@ -27,7 +29,11 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
-* Must not conflict with another account
+* Must not conflict with another account (note that an account MAY have the same `id` as a transfer,
+but we would recommend avoiding this)
+
+See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
+recommendations on choosing an ID scheme.
 
 ### `debits_pending`
 
@@ -166,7 +172,8 @@ account in the batch, to create a chain of accounts, of arbitrary
 length, which all succeed or fail in creation together. The tail of a
 chain is denoted by the first account without this flag. The last
 account in a batch may therefore never have `flags.linked` set as
-this would leave a chain open-ended (see `linked_event_chain_open`).
+this would leave a chain open-ended (see
+[`linked_event_chain_open`](./operations/create_accounts.md#linked_event_chain_open)).
 
 Multiple chains or individual accounts may coexist within a batch to
 succeed or fail independently. Accounts within a chain are executed
@@ -178,9 +185,13 @@ unique error result. Other accounts in the chain will have their error
 result set to
 [`linked_event_failed`](./operations/create_accounts.md#linked_event_failed).
 
-After the link has executed, the association of each event is lost.
-To save the association, it must be
-[encoded into the data model](../design/data-modeling.md).
+
+After the chain of account operations has executed, the fact that they were
+linked will not be saved by default.
+To save the association between accounts, it must be
+[encoded into the data model](../design/data-modeling.md), for example by
+adding an ID to one of the [user data](../design/data-modeling.md#user_data)
+fields.
 
 #### `flags.debits_must_not_exceed_credits`
 
