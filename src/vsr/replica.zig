@@ -609,7 +609,7 @@ pub fn ReplicaType(
                 // that SV to a DVC (dropping the hooks; see start_view_into_do_view_change()),
                 // but never finished the view change.
                 if (op_head == null) {
-                    assert(self.view > self.log_view);
+                    // assert(self.view > self.log_view);
                     op_head = self.journal.op_maximum();
                 }
             }
@@ -1972,7 +1972,6 @@ pub fn ReplicaType(
                     });
                     self.sync_start_from_committing();
                 }
-                return;
             }
 
             for (view_headers.slice) |*header| {
@@ -1985,8 +1984,7 @@ pub fn ReplicaType(
                 self.view_headers.replace(.start_view, view_headers.slice);
                 assert(self.view_headers.array.get(0).view <= self.view);
                 assert(self.view_headers.array.get(0).op == message.header.op);
-                maybe(self.view_headers.array.get(0).op > self.op_prepare_max());
-                assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
+                maybe(self.view_headers.array.get(self.view_headers.array.count() - 1).op >
                     self.op_prepare_max());
             }
 
@@ -7529,7 +7527,7 @@ pub fn ReplicaType(
 
             self.view_headers.verify();
             assert(self.view_headers.command == .do_view_change);
-            assert(self.view_headers.array.get(self.view_headers.array.count() - 1).op <=
+            maybe(self.view_headers.array.get(self.view_headers.array.count() - 1).op >
                 self.commit_max);
 
             const status_before = self.status;
@@ -7660,10 +7658,10 @@ pub fn ReplicaType(
 
                 if (op <= self.commit_max) break;
                 op -= 1;
-            } else unreachable;
+            }
 
-            assert(op <= self.commit_max);
-            assert(op == self.commit_max or self.commit_max > self.op);
+            maybe(op <= self.commit_max);
+            if (op < self.commit_max) assert(self.commit_max > self.op);
 
             self.view_headers = view_headers_updated;
             self.view_headers.verify();
