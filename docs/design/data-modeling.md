@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# Data modeling
+# Data Modeling
 
 TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md)
 and [`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
