@@ -27,6 +27,7 @@ Now create the TigerBeetle [data file](../internals/data_file.md):
 ```console
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
 ```
+
 ```console
 info(io): creating "0_0.tigerbeetle"...
 info(io): allocating 660.140625MiB...
@@ -37,6 +38,7 @@ And start the server:
 ```console
 ./tigerbeetle start --addresses=3000 0_0.tigerbeetle
 ```
+
 ```console
 info(io): opening "0_0.tigerbeetle"...
 info(main): 0: cluster=0: listening on 127.0.0.1:3000
@@ -44,6 +46,5 @@ info(main): 0: cluster=0: listening on 127.0.0.1:3000
 
 ### Connect with the CLI
 
-Now you can connect to the running server with any client. For a quick
-start, try creating accounts and transfers [using the TigerBeetle CLI
-client](./cli-repl.md).
+Now you can connect to the running server with any client. For a quick start, try creating accounts
+and transfers [using the TigerBeetle CLI client](./cli-repl.md).

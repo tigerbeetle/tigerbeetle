@@ -49,6 +49,5 @@ provided.
 
 ### Connect with the CLI
 
-Now you can connect to the running server with any client. For a quick
-start, try creating accounts and transfers [using the TigerBeetle CLI
-client](./cli-repl.md).
+Now you can connect to the running server with any client. For a quick start, try creating accounts
+and transfers [using the TigerBeetle CLI client](./cli-repl.md).

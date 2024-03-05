@@ -59,6 +59,7 @@ And run it:
 ```console
 docker-compose up
 ```
+
 ```console
 docker-compose up
 Starting tigerbeetle_0   ... done
@@ -86,14 +87,13 @@ tigerbeetle_1    | info(clock): 1: system time is 78ns ahead
 
 ### Connect with the CLI
 
-Now you can connect to the running server with any client. For a quick
-start, try creating accounts and transfers [using the TigerBeetle CLI
-client](./cli-repl.md).
+Now you can connect to the running server with any client. For a quick start, try creating accounts
+and transfers [using the TigerBeetle CLI client](./cli-repl.md).
 
 ## `error: SystemResources` on macOS
 
-If you get `error: SystemResources` when running TigerBeetle in Docker
-on macOS, you will need to add the `IPC_LOCK` capability.
+If you get `error: SystemResources` when running TigerBeetle in Docker on macOS, you will need to
+add the `IPC_LOCK` capability.
 
 ```yaml
 ... rest of docker-compose.yml ...
@@ -115,20 +115,17 @@ See https://github.com/tigerbeetle/tigerbeetle/issues/92 for discussion.
 
 ## `exited with code 137`
 
-If you see this error without any logs from TigerBeetle, it is likely
-that the Linux OOMKiller is killing the process. If you are running
-Docker inside a virtual machine (such as is required on Docker or
-Podman for macOS), try increasing the virtual machine memory limit.
+If you see this error without any logs from TigerBeetle, it is likely that the Linux OOMKiller is
+killing the process. If you are running Docker inside a virtual machine (such as is required on
+Docker or Podman for macOS), try increasing the virtual machine memory limit.
 
-Alternatively, in a development environment, you can lower the size of
-the cache so TigerBeetle uses less memory. For example, set
-`--cache-grid=512MB` when running `tigerbeetle start`.
+Alternatively, in a development environment, you can lower the size of the cache so TigerBeetle uses
+less memory. For example, set `--cache-grid=512MB` when running `tigerbeetle start`.
 
 ## Debugging panics
 
-If TigerBeetle panics and you can reproduce the panic, you can get a
-better stack trace by switching to a debug image (by using the `:debug`
-Docker image tag).
+If TigerBeetle panics and you can reproduce the panic, you can get a better stack trace by switching
+to a debug image (by using the `:debug` Docker image tag).
 
 ```bash
 ghcr.io/tigerbeetle/tigerbeetle:debug
