@@ -1162,10 +1162,10 @@ pub fn ReplicaType(
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
-                    log.debug("{}: on_message: view={} status={} {}", .{
+                    log.debug("{}: on_message: view={} status={s} {}", .{
                         self.replica,
                         self.view,
-                        self.status,
+                        @tagName(self.status),
                         header,
                     });
                 },
