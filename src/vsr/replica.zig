@@ -30,7 +30,7 @@ const SyncStage = vsr.SyncStage;
 const SyncTarget = vsr.SyncTarget;
 const ClientSessions = vsr.ClientSessions;
 
-const log = marks.wrap_log(std.log.scoped(.replica));
+const log = marks.wrap_log(stdx.log.scoped(.replica));
 const tracer = @import("../tracer.zig");
 
 pub const Status = enum {
