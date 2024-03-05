@@ -8392,10 +8392,11 @@ pub fn ReplicaType(
 
             if (candidate.view > self.view_durable()) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
-                    " (view={} candidate.view={})", .{
+                    " (view={} view_durable={} candidate.view={})", .{
                     self.replica,
                     @tagName(header.command),
                     self.view,
+                    self.view_durable(),
                     candidate.view,
                 });
                 return;
