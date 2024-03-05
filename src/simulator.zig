@@ -341,6 +341,7 @@ pub const Simulator = struct {
     /// Protect a replica from fast successive crash/restarts.
     replica_stability: []usize,
     reply_sequence: ReplySequence,
+    reply_op_next: u64 = 1, // Skip the root op.
 
     /// Fully-connected subgraph of replicas for liveness checking.
     core: Core = Core.initEmpty(),
@@ -666,36 +667,48 @@ pub const Simulator = struct {
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
         simulator.reply_sequence.insert(reply_client, request, reply);
 
-        while (simulator.reply_sequence.peek()) |commit| {
-            defer simulator.reply_sequence.next();
+        while (!simulator.reply_sequence.empty()) {
+            const op = simulator.reply_op_next;
+            const prepare_header = simulator.cluster.state_checker.commits.items[op].header;
+            assert(prepare_header.op == op);
 
-            const commit_client = simulator.cluster.clients[commit.client_index];
-            assert(commit.reply.references == 1);
-            assert(commit.reply.header.command == .reply);
-            assert(commit.reply.header.client == commit_client.id);
-            assert(commit.reply.header.request == commit.request.header.request);
-            assert(commit.reply.header.operation == commit.request.header.operation);
+            if (simulator.reply_sequence.peek(op)) |commit| {
+                defer simulator.reply_sequence.next();
 
-            assert(commit.request.references == 1);
-            assert(commit.request.header.command == .request);
-            assert(commit.request.header.client == commit_client.id);
+                simulator.reply_op_next += 1;
 
-            log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
-                commit.reply.header.op,
-                commit.reply.header.operation,
-                commit.request.header.client,
-                commit.request.header.request,
-            });
+                const commit_client = simulator.cluster.clients[commit.client_index];
+                assert(commit.reply.references == 1);
+                assert(commit.reply.header.op == op);
+                assert(commit.reply.header.command == .reply);
+                assert(commit.reply.header.client == commit_client.id);
+                assert(commit.reply.header.request == commit.request.header.request);
+                assert(commit.reply.header.operation == commit.request.header.operation);
 
-            if (!commit.request.header.operation.vsr_reserved()) {
-                simulator.requests_replied += 1;
-                simulator.workload.on_reply(
-                    commit.client_index,
-                    commit.reply.header.operation.cast(StateMachine),
-                    commit.reply.header.timestamp,
-                    commit.request.body(),
-                    commit.reply.body(),
-                );
+                assert(commit.request.references == 1);
+                assert(commit.request.header.checksum == prepare_header.request_checksum);
+                assert(commit.request.header.command == .request);
+                assert(commit.request.header.client == commit_client.id);
+
+                log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
+                    commit.reply.header.op,
+                    commit.reply.header.operation,
+                    commit.request.header.client,
+                    commit.request.header.request,
+                });
+
+                if (!commit.request.header.operation.vsr_reserved()) {
+                    simulator.requests_replied += 1;
+                    simulator.workload.on_reply(
+                        commit.client_index,
+                        commit.reply.header.operation.cast(StateMachine),
+                        commit.reply.header.timestamp,
+                        commit.request.body(),
+                        commit.reply.body(),
+                    );
+                }
+            } else {
+                break;
             }
         }
     }
