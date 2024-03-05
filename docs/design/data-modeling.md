@@ -181,3 +181,17 @@ Random identifiers are not recommended – they can't take advantage of all of t
 
 For maximum throughput, use [time-based identifiers](#time-based-identifiers) instead.
 (Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
+
+## `ledger`
+
+The `ledger` identifier on [`Account`s](../reference/accounts.md#ledger) partitions sets of accounts
+that can directly transact with one another. This is used to separate accounts representing
+different currencies or other asset types.
+
+[Currency exchange](../recipes/currency-exchange.md) or cross-ledger transfers are implemented with
+two or more linked transfers.
+
+You can also use different ledgers to further partition accounts, beyond asset type. For example, if
+you have a multi-tenant setup where you are tracking balances for your customers' end-users, you
+might have a ledger for each of your customers. If customers have end-user accounts in multiple
+currencies, each of your customers would have multiple ledgers.

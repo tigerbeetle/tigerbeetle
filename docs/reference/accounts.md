@@ -120,16 +120,10 @@ Constraints:
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
-transact with each other. Put another way, money cannot transfer
-between two accounts with different `ledger` values. See:
-[`accounts_must_have_the_same_ledger`](./operations/create_transfers.md#accounts_must_have_the_same_ledger).
+transact with each other.
 
-[Currency exchange](../recipes/currency-exchange.md) is implemented with two or more linked
-transfers.
-
-In a typical use case:
-* Map each asset or currency tracked within the database to a distinct ledger. And,
-* Tag each account with the `ledger` indicating the currency in which the balance is denominated.
+See [data modeling](../design/data-modeling.md#ledger) for more details
+about how to think about setting up your ledgers.
 
 Constraints:
 * Type is 32-bit unsigned integer (4 bytes)
