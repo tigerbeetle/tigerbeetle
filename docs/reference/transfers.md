@@ -43,12 +43,6 @@ Fields used by each mode of transfer:
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `timestamp`                   | none         | none     | none         | none         |
 
-TigerBeetle uses the same data structures internally and externally. This means 
-that when creating transfers, you will need to set temporary values for certain 
-fields that TigerBeetle is responsible for. For example, you will set the 
-[`timestamp`](#timestamp) field to `0` when creating a transfer and then
-TigerBeetle will set the field to the timestamp when the transfer was executed.
-
 ## Fields
 
 ### `id`
