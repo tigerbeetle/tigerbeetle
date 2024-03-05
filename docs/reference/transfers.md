@@ -43,12 +43,6 @@ Fields used by each mode of transfer:
 | `flags.balancing_credit`      | optional     | optional | false        | false        |
 | `timestamp`                   | none         | none     | none         | none         |
 
-TigerBeetle uses the same data structures internally and externally. This means 
-that when creating transfers, you will need to set temporary values for certain 
-fields that TigerBeetle is responsible for. For example, you will set the 
-[`timestamp`](#timestamp) field to `0` when creating a transfer and then
-TigerBeetle will set the field to the timestamp when the transfer was executed.
-
 ## Fields
 
 ### `id`
@@ -62,8 +56,10 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1`
-* Must not conflict with another transfer (note that a transfer MAY have the same `id` as an
-account, but we would recommend avoiding this)
+* Must not conflict with another transfer
+
+See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
+recommendations on choosing an ID scheme.
 
 ### `debit_account_id`
 
@@ -210,12 +206,10 @@ on YouTube for more details.)
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
-transact with each other. Put another way, money cannot transfer
-between two accounts with different `ledger` values. See:
-[`accounts_must_have_the_same_ledger`](./operations/create_transfers.md#accounts_must_have_the_same_ledger).
+transact with each other.
 
-[Currency exchange](../recipes/currency-exchange.md) is implemented with two or more linked
-transfers.
+See [data modeling](../design/data-modeling.md#ledger) for more details
+about how to think about setting up your ledgers.
 
 Constraints:
 
@@ -291,7 +285,7 @@ Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`,
 and each other.
 
 After the chain of linked transfers has executed, the fact that they were
-linked will not be saved by default.
+linked will not be saved.
 To save the association between transfers, it must be
 [encoded into the data model](../design/data-modeling.md), for example by
 adding an ID to one of the [user data](../design/data-modeling.md#user_data)

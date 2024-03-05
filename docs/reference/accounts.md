@@ -7,12 +7,6 @@ sidebar_position: 1
 An `Account` is a record storing the cumulative effect of committed
 [transfers](./transfers.md).
 
-TigerBeetle uses the same data structures internally and externally. This means
-that when creating accounts, you will need to set temporary values for certain
-fields that TigerBeetle is responsible for. For example, you will set the
-[`timestamp`](#timestamp) field to `0` when creating an account and then
-TigerBeetle will set the field to the timestamp when the operation was executed.
-
 ### Updates
 
 Account fields *cannot be changed by the user* after
@@ -29,8 +23,7 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
-* Must not conflict with another account (note that an account MAY have the same `id` as a transfer,
-but we would recommend avoiding this)
+* Must not conflict with another account
 
 See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
@@ -127,16 +120,10 @@ Constraints:
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
-transact with each other. Put another way, money cannot transfer
-between two accounts with different `ledger` values. See:
-[`accounts_must_have_the_same_ledger`](./operations/create_transfers.md#accounts_must_have_the_same_ledger).
+transact with each other.
 
-[Currency exchange](../recipes/currency-exchange.md) is implemented with two or more linked
-transfers.
-
-In a typical use case:
-* Map each asset or currency tracked within the database to a distinct ledger. And,
-* Tag each account with the `ledger` indicating the currency in which the balance is denominated.
+See [data modeling](../design/data-modeling.md#ledger) for more details
+about how to think about setting up your ledgers.
 
 Constraints:
 * Type is 32-bit unsigned integer (4 bytes)
@@ -187,7 +174,7 @@ result set to
 
 
 After the chain of account operations has executed, the fact that they were
-linked will not be saved by default.
+linked will not be saved.
 To save the association between accounts, it must be
 [encoded into the data model](../design/data-modeling.md), for example by
 adding an ID to one of the [user data](../design/data-modeling.md#user_data)
