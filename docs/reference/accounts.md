@@ -187,7 +187,7 @@ result set to
 
 
 After the chain of account operations has executed, the fact that they were
-linked will not be saved by default.
+linked will not be saved.
 To save the association between accounts, it must be
 [encoded into the data model](../design/data-modeling.md), for example by
 adding an ID to one of the [user data](../design/data-modeling.md#user_data)
