@@ -74,7 +74,7 @@ What specific guarantees does TigerBeetle provide to applications?
 
 - Transfers are immutable — once created, they are never modified.
 - There is at most one `Transfer` with a particular `id`.
-- A [pending transfer](../reference/transfers.md#pending-transfer) resolves at most once.
+- A [pending transfer](./two-phase-transfers.md#reserve-funds-pending-transfer) resolves at most once.
 - Transfer [timeouts](../reference/transfers.md#timeout) are deterministic, driven
   by the cluster's timestamp.
 

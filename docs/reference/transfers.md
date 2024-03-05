@@ -137,10 +137,7 @@ If this transfer will post or void a pending transfer, `pending_id`
 references that pending transfer. If this is not a post or void
 transfer, it must be zero.
 
-See also:
-* [Pending Transfer](#pending-transfer)
-* [Post-Pending Transfer](#post-pending-transfer)
-* [Void-Pending Transfer](#void-pending-transfer)
+See the section on [Two-Phase Transfers](../design/two-phase-transfers.md) for more information on how the `pending_id` is used.
 
 Constraints:
 
@@ -306,15 +303,15 @@ fields.
 
 #### `flags.pending`
 
-Mark the transfer as a [pending transfer](#pending-transfer).
+Mark the transfer as a [pending transfer](../design/two-phase-transfers.md#reserve-funds-pending-transfer).
 
 #### `flags.post_pending_transfer`
 
-Mark the transfer as a [post-pending transfer](#post-pending-transfer).
+Mark the transfer as a [post-pending transfer](../design/two-phase-transfers.md#post-pending-transfer).
 
 #### `flags.void_pending_transfer`
 
-Mark the transfer as a [void-pending transfer](#void-pending-transfer).
+Mark the transfer as a [void-pending transfer](../design/two-phase-transfers.md#void-pending-transfer).
 
 #### `flags.balancing_debit`
 
