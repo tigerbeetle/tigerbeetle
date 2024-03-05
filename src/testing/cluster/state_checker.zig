@@ -140,7 +140,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             // If some other replica has already reached this state, then it will be in the commit history:
             if (replica.commit_min < state_checker.commits.items.len) {
-                state_checker.commits.items[replica.commit_min].replicas.set(replica_index);
+                const commit = &state_checker.commits.items[commit_b];
+                if (header_b) |b| assert(commit.header.checksum == b.checksum);
+
+                commit.replicas.set(replica_index);
 
                 assert(replica.commit_min < state_checker.commits.items.len);
                 // A replica may transition more than once to the same state, for example, when
