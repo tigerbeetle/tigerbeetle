@@ -2,7 +2,7 @@
 sidebar_position: 2
 ---
 
-# Three-node cluster with a single binary
+# Three-Node Cluster
 
 First, download a prebuilt copy of TigerBeetle.
 
@@ -22,7 +22,7 @@ Want to build from source locally? Add `-build` as an argument to the bootstrap 
 
 ## Running TigerBeetle
 
-Now create the TigerBeetle data file for each replica
+Now create the TigerBeetle [data file](../internals/data_file.md) for each replica:
 
 ```console
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
@@ -49,6 +49,5 @@ provided.
 
 ### Connect with the CLI
 
-Now you can connect to the running server with any client. For a quick
-start, try creating accounts and transfers [using the TigerBeetle CLI
-client](./cli-repl.md).
+Now you can connect to the running server with any client. For a quick start, try creating accounts
+and transfers [using the TigerBeetle CLI client](./cli-repl.md).

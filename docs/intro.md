@@ -10,14 +10,16 @@ for mission critical safety and performance.
 
 ## Quickstart
 
-First, get TigerBeetle running:
+First, let's get TigerBeetle running!
 
-- [Run a single-node cluster with a single binary](./quick-start/single-binary.md)
-- Or [run a three-node cluster with a single binary](./quick-start/single-binary-three.md)
-- Or [run a single-node cluster with Docker](./quick-start/with-docker.md)
-- Or [run a three-node cluster with docker-compose](./quick-start/with-docker-compose.md)
+* [Single-node cluster with a single binary](./quick-start/single-binary.md)
+* [Three-node cluster with a single binary](./quick-start/single-binary-three.md)
 
-Then, try creating accounts and transfers [using the TigerBeetle CLI](./quick-start/cli-repl.md).
+Or, you can run TigerBeetle with Docker:
+* [Single-node cluster with Docker](./quick-start/with-docker.md)
+* [Three-node cluster with Docker Compose](./quick-start/with-docker-compose.md)
+
+Then, let's [use the TigerBeetle CLI](./quick-start/cli-repl.md) to create accounts and transfers.
 
 ## Designing for TigerBeetle
 
