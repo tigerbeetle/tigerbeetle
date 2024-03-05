@@ -35,34 +35,34 @@ the skew of their clock with respect to the other replicas. The system ensures t
 is within an acceptable window and may choose to stop processing transactions if the clocks are far
 out of sync.
 
-Importantly, the goal is not to reimplement clock synchronization protocols, but to verify that the
+Importantly, the goal is not to reimplement or replace clock synchronization protocols, but to verify that the
 cluster is operating within acceptable error bounds.
 
 ## Why TigerBeetle Manages Timestamps
 
 Timestamps on [`Transfer`s](../reference/transfers.md#timestamp) and
-[`Account`s](../reference/accounts.md#timestamp) are **set by the Primary node** in the TigerBeetle
+[`Account`s](../reference/accounts.md#timestamp) are **set by the primary node** in the TigerBeetle
 cluster when it receives the operation.
 
-The Primary then propagates the operations to all replicas, including the timestamps it determined.
-All replicas process the state machine transitions deterministically, based on the Primary's
+The primary then propagates the operations to all replicas, including the timestamps it determined.
+All replicas process the state machine transitions deterministically, based on the primary's
 timestamp -- _not_ based on their own system time.
 
 Primary nodes monitor their clock skew with respect to the other replicas and may abdicate their
 role as primary if they appear to be far off the rest of the cluster.
 
 This is why the `timestamp` field must be set to `0` when operations are submitted, and it is then
-set by the Primary.
+set by the primary.
 
 Similarly, the [`Transfer.timeout`](../reference/transfers.md#timeout) is given as an interval in
-seconds, rather than as an absolute timestamp, because it is also managed by the Primary. The
-`timeout` is calculated relative to the `timestamp` when the operation arrives at the Primary.
+seconds, rather than as an absolute timestamp, because it is also managed by the primary. The
+`timeout` is calculated relative to the `timestamp` when the operation arrives at the primary.
 
 ### Timestamps are Totally Ordered
 
 All `timestamp`s within TigerBeetle are unique, immutable and [totally
 ordered](http://book.mixu.net/distsys/time.html). A transfer that is created before another transfer
-is guaranteed to have an earlier `timestamp` (even if they were created by the same Operation).
+is guaranteed to have an earlier `timestamp` (even if they were created in the same request).
 
 In other systems this is also called a "physical" timestamp, "ingestion" timestamp, "record"
 timestamp, or "system" timestamp.
