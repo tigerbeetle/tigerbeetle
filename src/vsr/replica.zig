@@ -1972,6 +1972,19 @@ pub fn ReplicaType(
                     });
                     self.sync_start_from_committing();
                 }
+
+                if (self.status == .recovering_head and self.op >= self.commit_min) {
+                    // All the ops that could have been in this replica's journal are already
+                    // committed by the cluster, it is safe to transition away from recovering_head.
+                    if (message.header.view == self.log_view) {
+                        self.transition_to_normal_from_recovering_head_status(message.header.view);
+                        self.commit_journal();
+                        self.repair();
+                    } else {
+                        self.transition_to_view_change_status(message.header.view);
+                    }
+                }
+
                 return;
             }
 
@@ -7491,12 +7504,10 @@ pub fn ReplicaType(
         /// based on its own timer, or because it receives a start_view_change or do_view_change
         /// message for a view with a larger number than its own view.
         fn transition_to_view_change_status(self: *Self, view_new_min: u32) void {
-            assert(self.status == .normal or
-                self.status == .view_change or
-                self.status == .recovering);
             assert(view_new_min >= self.log_view);
             assert(view_new_min >= self.view);
-            assert(view_new_min > self.view or self.status == .recovering);
+            assert(view_new_min > self.view or self.status == .recovering or
+                (self.status == .recovering_head and self.log_view < self.view));
             assert(view_new_min > self.log_view);
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
             defer assert(self.view_headers.command == .do_view_change);
@@ -7520,7 +7531,7 @@ pub fn ReplicaType(
                 Status.view_change,
             });
 
-            if (self.status == .normal or
+            if (self.status == .normal or self.status == .recovering_head or
                 (self.status == .recovering and self.log_view == self.view) or
                 (self.status == .view_change and self.log_view == self.view))
             {
@@ -7586,9 +7597,11 @@ pub fn ReplicaType(
             // - Transition from normal status.
             // - Recovering from normal status.
             // - Retired primary that didn't finish repair.
+            // - Recovering head replica got an SV too far in the future.
             assert(self.status == .normal or
                 (self.status == .recovering and self.log_view == self.view) or
-                (self.status == .view_change and self.log_view == self.view));
+                (self.status == .view_change and self.log_view == self.view) or
+                self.status == .recovering_head);
 
             const primary_repairing =
                 self.status == .view_change and self.log_view == self.view;
