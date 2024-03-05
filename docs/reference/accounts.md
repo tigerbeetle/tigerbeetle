@@ -29,8 +29,7 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
-* Must not conflict with another account (note that an account MAY have the same `id` as a transfer,
-but we would recommend avoiding this)
+* Must not conflict with another account
 
 See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
