@@ -1,3 +1,7 @@
+---
+sidebar_position: 4
+---
+
 # Client Sessions
 
 A _client session_ is a sequence of alternating [requests](./client-requests.md) and replies between a

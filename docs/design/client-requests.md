@@ -1,3 +1,7 @@
+---
+sidebar_position: 3
+---
+
 # Client Requests
 
 A _request_ is a [batch](#batching-events) of one or more

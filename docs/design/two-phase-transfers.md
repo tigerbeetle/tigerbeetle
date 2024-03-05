@@ -1,3 +1,7 @@
+---
+sidebar_position: 2
+---
+
 # Two-Phase Transfers
 
 A two-phase transfer moves funds in stages:

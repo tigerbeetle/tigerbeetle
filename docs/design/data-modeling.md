@@ -1,9 +1,14 @@
+---
+sidebar_position: 1
+---
+
 # Data modeling
 
 TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md)
 and [`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
 design, it provides excellent performance, integrated business logic, and powerful invariants.
-This section is a sample of techniques for mapping an application's requirements onto TigerBeetle's
+
+This section is a sample of techniques for mapping your application's requirements onto TigerBeetle's
 data model. Which (if any) of these techniques are suitable is highly application-specific.
 
 When possible, round trips and coordination can be minimized by encoding application invariants

@@ -1,3 +1,7 @@
+---
+sidebar_position: 5
+---
+
 # Consistency
 
 TigerBeetle is designed to guard against bugs not only in its
