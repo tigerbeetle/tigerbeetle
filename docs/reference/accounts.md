@@ -208,17 +208,12 @@ UNIX epoch.
 It is set by TigerBeetle to the moment the account arrives at
 the cluster.
 
-Additionally, all timestamps are unique, immutable and [totally
-ordered](http://book.mixu.net/distsys/time.html). So an account that
-is created before another account is guaranteed to have an earlier
-timestamp. In other systems this is also called a "physical"
-timestamp, "ingestion" timestamp, "record" timestamp, or "system"
-timestamp.
+You can read more about [Time in TigerBeetle](../design/time.md).
 
 Constraints:
 
-* Type is 64-bit unsigned integer (8 bytes)
-* User sets to zero on creation
+- Type is 64-bit unsigned integer (8 bytes)
+- Must be set to `0` by the user when the `Account` is created
 
 ## Internals
 
