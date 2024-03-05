@@ -8,13 +8,13 @@ First, download a prebuilt copy of TigerBeetle.
 
 On macOS/Linux:
 
-```console
+```shell
 git clone https://github.com/tigerbeetle/tigerbeetle; ./tigerbeetle/bootstrap.sh
 ```
 
 On Windows:
 
-```console
+```powershell
 git clone https://github.com/tigerbeetle/tigerbeetle; .\tigerbeetle\bootstrap.ps1
 ```
 
@@ -24,7 +24,7 @@ Want to build from source locally? Add `-build` as an argument to the bootstrap 
 
 Now create the TigerBeetle data file for each replica
 
-```console
+```shell
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
 ./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
 ./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
@@ -32,15 +32,15 @@ Now create the TigerBeetle data file for each replica
 
 And start each server in a new terminal window:
 
-```console
+```shell
 ./tigerbeetle start --addresses=3000,3001,3002 0_0.tigerbeetle
 ```
 
-```console
+```shell
 ./tigerbeetle start --addresses=3000,3001,3002 0_1.tigerbeetle
 ```
 
-```console
+```shell
 ./tigerbeetle start --addresses=3000,3001,3002 0_2.tigerbeetle
 ```
 

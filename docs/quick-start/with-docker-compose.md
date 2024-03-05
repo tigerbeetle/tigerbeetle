@@ -6,7 +6,7 @@ sidebar_position: 4
 
 First, provision the data file for each node:
 
-```console
+```shell
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=0 --replica-count=3 /data/0_0.tigerbeetle
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=1 --replica-count=3 /data/0_1.tigerbeetle
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle format --cluster=0 --replica=2 --replica-count=3 /data/0_2.tigerbeetle
@@ -56,10 +56,11 @@ services:
 
 And run it:
 
-```console
+```shell
 docker-compose up
 ```
-```console
+
+```shell
 docker-compose up
 Starting tigerbeetle_0   ... done
 Starting tigerbeetle_2   ... done

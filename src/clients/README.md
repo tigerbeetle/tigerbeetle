@@ -13,10 +13,10 @@ The template for the README is in code in
 
 Existing `Docs` struct implementations are in:
 
-* [dotnet/docs.zig](./dotnet/docs.zig), which generates [dotnet/README.md](./dotnet/README.md)
-* [go/docs.zig](./go/docs.zig), which generates [go/README.md](./go/README.md)
-* [java/docs.zig](./java/docs.zig), which generates [java/README.md](./java/README.md)
-* [node/docs.zig](./node/docs.zig), which generates [node/README.md](./node/README.md)
+- [dotnet/docs.zig](./dotnet/docs.zig), which generates [dotnet/README.md](./dotnet/README.md)
+- [go/docs.zig](./go/docs.zig), which generates [go/README.md](./go/README.md)
+- [java/docs.zig](./java/docs.zig), which generates [java/README.md](./java/README.md)
+- [node/docs.zig](./node/docs.zig), which generates [node/README.md](./node/README.md)
 
 ### Run
 
@@ -24,7 +24,7 @@ Go to the repo root.
 
 If you don't already have the TigerBeetle version of `zig` run:
 
-```console
+```shell
 ./scripts/install_zig.[sh|bat]
 ```
 
@@ -33,7 +33,7 @@ script on Windows.
 
 To build and run the client docs generator:
 
-```console
+```shell
 ./zig/zig build scripts -- ci
 ```
 
@@ -41,7 +41,7 @@ To build and run the client docs generator:
 
 To run the generator only for a certain language (defined by `.markdown_name`):
 
-```console
+```shell
 ./zig/zig build scripts -- ci --language=go
 ```
 
@@ -52,6 +52,6 @@ mtime of each README changes only as needed.
 
 To format all Zig files (again, run from the repo root):
 
-```console
+```shell
 ./zig/zig fmt .
 ```

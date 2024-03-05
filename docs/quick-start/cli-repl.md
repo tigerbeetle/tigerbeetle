@@ -10,10 +10,11 @@ replicas and do some accounting!
 First let's create two accounts. (Don't worry about the details, you
 can read about them later.)
 
-```console
+```shell title="Start the REPL"
 ./tigerbeetle repl --cluster=0 --addresses=3000
 ```
-```
+
+```shell
 TigerBeetle Client
   Hit enter after a semicolon to run a command.
 
@@ -24,17 +25,19 @@ Examples:
   lookup_accounts id=1;
   lookup_accounts id=1, id=2;
 ```
-```console
+
+```shell title="Create two accounts"
 create_accounts id=1 code=10 ledger=700,
                 id=2 code=10 ledger=700;
 ```
-```console
+
+```shell
 info(message_bus): connected to replica 0
 ```
 
 Now create a transfer of `10` (of some amount/currency) between the two accounts.
 
-```console
+```shell title="Create transfer"
 create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
 ```
 
@@ -42,9 +45,10 @@ Now, the amount of `10` has been credited to account `2` and debited
 from account `1`. Let's query TigerBeetle for these two accounts to
 verify!
 
-```console
+```shell title="Query accounts"
 lookup_accounts id=1, id=2;
 ```
+
 ```json
 {
   "id": "1",
