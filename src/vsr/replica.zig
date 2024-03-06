@@ -1162,10 +1162,10 @@ pub fn ReplicaType(
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
-                    log.debug("{}: on_message: view={} status={} {}", .{
+                    log.debug("{}: on_message: view={} status={s} {}", .{
                         self.replica,
                         self.view,
-                        self.status,
+                        @tagName(self.status),
                         header,
                     });
                 },
@@ -8392,10 +8392,11 @@ pub fn ReplicaType(
 
             if (candidate.view > self.view_durable()) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
-                    " (view={} candidate.view={})", .{
+                    " (view={} view_durable={} candidate.view={})", .{
                     self.replica,
                     @tagName(header.command),
                     self.view,
+                    self.view_durable(),
                     candidate.view,
                 });
                 return;
