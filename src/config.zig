@@ -143,10 +143,10 @@ const ConfigCluster = struct {
     lsm_snapshots_max: usize = 32,
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
 
-    // Arbitrary value.
+    // Minimal value.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
     // since each scan can read from `lsm_levels` in parallel.
-    lsm_scans_max: comptime_int = 8,
+    lsm_scans_max: comptime_int = 2,
 
     /// The WAL requires at least two sectors of redundant headers — otherwise we could lose them all to
     /// a single torn write. A replica needs at least one valid redundant header to determine an
