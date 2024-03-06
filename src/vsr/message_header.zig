@@ -48,7 +48,7 @@ pub const Header = extern struct {
     view: u32,
 
     /// The version of the protocol implementation that originated this message.
-    version: u16,
+    protocol: u16,
 
     /// The Viewstamped Replication protocol command for this message.
     command: Command,
@@ -162,7 +162,7 @@ pub const Header = extern struct {
         if (self.checksum_padding != 0) return "checksum_padding != 0";
         if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
         if (self.nonce_reserved != 0) return "nonce_reserved != 0";
-        if (self.version != vsr.Version) return "version != Version";
+        if (self.protocol != vsr.Version) return "protocol != Version";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
@@ -259,7 +259,7 @@ pub const Header = extern struct {
         size: u32,
         epoch: u32 = 0,
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
         reserved_frame: [16]u8,
@@ -286,7 +286,7 @@ pub const Header = extern struct {
         // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
         // view, to avoid disrupting clock synchronization while the view is being updated.
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -325,7 +325,7 @@ pub const Header = extern struct {
         // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
         // view, to avoid disrupting clock synchronization while the view is being updated.
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -358,7 +358,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -390,7 +390,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -418,7 +418,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -511,7 +511,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -663,7 +663,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -733,7 +733,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -790,7 +790,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -835,7 +835,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -863,7 +863,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -907,7 +907,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -942,7 +942,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -972,7 +972,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1006,7 +1006,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1039,7 +1039,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1074,7 +1074,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1101,7 +1101,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32,
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1149,7 +1149,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1181,7 +1181,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1221,7 +1221,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
@@ -1252,7 +1252,7 @@ pub const Header = extern struct {
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
-        version: u16 = vsr.Version,
+        protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
