@@ -675,9 +675,17 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             switch (inflight_vsr_operation.cast(StateMachine)) {
                 inline else => |operation| {
                     const Result = StateMachine.Result(operation);
-                    // TODO: Pulse operations are not supposed to go through the client,
-                    // although we might want to support the general case of having `void` results.
-                    if (@sizeOf(Result) == 0) unreachable;
+                    // Pulse operations are not supposed to go through the client,
+                    // although when using `aof` they are replayed.
+                    if (@sizeOf(Result) == 0) {
+                        const demux = inflight.demux_queue.pop().?;
+                        const user_data = demux.user_data;
+                        const callback = demux.callback.?;
+                        self.demux_pool.release(demux);
+
+                        callback(user_data, operation, &.{});
+                        return;
+                    }
 
                     var demuxer = StateMachine.DemuxerType(operation).init(
                         std.mem.bytesAsSlice(Result, reply.body()),

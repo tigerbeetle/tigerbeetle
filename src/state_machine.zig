@@ -540,6 +540,7 @@ pub fn StateMachineType(
         }
 
         pub fn pulse_operation(self: *StateMachine) ?Operation {
+            comptime assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
             stdx.maybe(self.expire_pending_transfers_pulse_timestamp == TimestampRange.timestamp_max);
 
@@ -550,6 +551,7 @@ pub fn StateMachineType(
         }
 
         pub fn pulse_input(self: *StateMachine, operation: Operation, input: []align(16) u8) usize {
+            comptime assert(!global_constants.aof_recovery);
             assert(operation == .expire_pending_transfers);
             assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
             assert(self.expire_pending_transfers_pulse_timestamp != TimestampRange.timestamp_max);
