@@ -1057,6 +1057,7 @@ pub const Headers = struct {
     fn dvc_blank(op: u64) Header.Prepare {
         return .{
             .command = .prepare,
+            .release = 0,
             .operation = .reserved,
             .op = op,
             .cluster = 0,
@@ -1214,6 +1215,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .client = 6,
             .request = 7,
             .command = .prepare,
+            .release = 1,
             .operation = @as(Operation, @enumFromInt(constants.vsr_operations_reserved + 8)),
             .op = 9,
             .view = 10,
@@ -1226,6 +1228,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .client = 3,
             .request = 4,
             .command = .prepare,
+            .release = 1,
             .operation = @as(Operation, @enumFromInt(constants.vsr_operations_reserved + 5)),
             .op = 6,
             .view = 7,

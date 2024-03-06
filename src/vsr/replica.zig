@@ -1259,6 +1259,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view_durable(), // Don't drop pongs while the view is being updated.
+                .release = 1, // TODO Use the real release number.
                 // Copy the ping's monotonic timestamp to our pong and add our wall clock sample:
                 .ping_timestamp_monotonic = message.header.ping_timestamp_monotonic,
                 .pong_timestamp_wall = @bitCast(self.clock.realtime()),
@@ -1294,6 +1295,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view,
+                .release = 1, // TODO Use the real release number.
             }));
         }
 
@@ -2540,6 +2542,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view_durable(), // Don't drop pings while the view is being updated.
+                .release = 1, // TODO Use the real release number.
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic(),
@@ -3793,6 +3796,7 @@ pub fn ReplicaType(
                 .cluster = prepare.header.cluster,
                 .replica = prepare.header.replica,
                 .view = prepare.header.view,
+                .release = 1, // TODO Use the real release number.
                 .op = prepare.header.op,
                 .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
@@ -5187,6 +5191,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .size = request_header.size,
                 .view = self.view,
+                .release = 1, // TODO Use the real release number.
                 .command = .prepare,
                 .replica = self.replica,
                 .parent = latest_entry.checksum,

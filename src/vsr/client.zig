@@ -373,6 +373,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .request = undefined,
                 .cluster = self.cluster,
                 .command = .request,
+                .release = 1, // TODO Use the real release number.
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
@@ -698,6 +699,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const ping = Header.PingClient{
                 .command = .ping_client,
                 .cluster = self.cluster,
+                .release = 1, // TODO Use the real release number.
                 .client = self.id,
             };
 
@@ -768,6 +770,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = .register,
+                .release = 1, // TODO Use the real release number.
             };
 
             assert(self.request_number == 0);
@@ -1046,6 +1049,7 @@ test "Client Batching" {
                 .view = message.header.view,
                 .command = .reply,
                 .replica = message.header.replica,
+                .release = 1, // TODO Use the real release number.
                 .request_checksum = message.header.checksum,
                 .client = message.header.client,
                 .context = undefined, // computed below.

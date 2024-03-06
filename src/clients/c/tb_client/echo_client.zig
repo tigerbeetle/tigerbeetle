@@ -96,6 +96,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
                 .command = .request,
                 .operation = vsr.Operation.from(Self.StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + body_size),
+                .release = 1, // TODO Use the real release number.
             };
 
             return Batch{ .message = message_request };
