@@ -152,9 +152,8 @@ pub fn StateMachineType(
             callback(state_machine);
         }
 
-        pub fn pulse_operation(state_machine: *StateMachine, operation: Operation) ?Operation {
+        pub fn pulse_operation(state_machine: *StateMachine) ?Operation {
             _ = state_machine;
-            _ = operation;
             return null;
         }
 
