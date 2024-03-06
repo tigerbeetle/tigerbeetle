@@ -539,8 +539,7 @@ pub fn StateMachineType(
             };
         }
 
-        pub fn pulse_operation(self: *StateMachine, current_operation: Operation) ?Operation {
-            assert(current_operation != .expire_pending_transfers);
+        pub fn pulse_operation(self: *StateMachine) ?Operation {
             assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
             stdx.maybe(self.expire_pending_transfers_pulse_timestamp == TimestampRange.timestamp_max);
 
