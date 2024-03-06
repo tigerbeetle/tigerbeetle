@@ -336,7 +336,7 @@ public class IntegrationTests
     }
 
     [TestMethod]
-    public void CreatePendingTransfers()
+    public void CreatePendingTransfersAndPost()
     {
         var accounts = GenerateAccounts();
         var accountResults = client.CreateAccounts(accounts);
@@ -400,7 +400,7 @@ public class IntegrationTests
     }
 
     [TestMethod]
-    public async Task CreatePendingTransfersAsync()
+    public async Task CreatePendingTransfersAndPostAsync()
     {
         var accounts = GenerateAccounts();
         var accountResults = await client.CreateAccountsAsync(accounts);
@@ -628,7 +628,7 @@ public class IntegrationTests
         Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
 
         // Waiting for the transfer to expire:
-        Thread.Sleep(1000);
+        Thread.Sleep(TimeSpan.FromSeconds(transfer.Timeout).Add(TimeSpan.FromMilliseconds(1)));
 
         var postTransfer = new Transfer
         {
@@ -644,6 +644,19 @@ public class IntegrationTests
 
         var postResult = client.CreateTransfer(postTransfer);
         Assert.IsTrue(postResult == CreateTransferResult.PendingTransferExpired);
+
+        lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
     }
 
     [TestMethod]
@@ -683,7 +696,8 @@ public class IntegrationTests
 
         // Waiting for the transfer to expire:
         // Do not use Task.Delay here as it seems to be less precise.
-        Thread.Sleep(1000);
+        // Waiting for the transfer to expire:
+        Thread.Sleep(TimeSpan.FromSeconds(transfer.Timeout).Add(TimeSpan.FromMilliseconds(1)));
 
         var postTransfer = new Transfer
         {
@@ -699,6 +713,19 @@ public class IntegrationTests
 
         var postResult = await client.CreateTransferAsync(postTransfer);
         Assert.IsTrue(postResult == CreateTransferResult.PendingTransferExpired);
+
+        lookupAccounts = await client.LookupAccountsAsync(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, (UInt128)0);
+
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, (UInt128)0);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (UInt128)0);
     }
 
 

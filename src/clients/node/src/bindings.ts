@@ -721,5 +721,6 @@ export enum Operation {
   lookup_transfers = 131,
   get_account_transfers = 132,
   get_account_history = 133,
+  expire_pending_transfers = 134,
 }
 

@@ -926,6 +926,8 @@ internal enum TBOperation : byte
 
     GetAccountHistory = 133,
 
+    ExpirePendingTransfers = 134,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
