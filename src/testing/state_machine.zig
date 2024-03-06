@@ -152,6 +152,23 @@ pub fn StateMachineType(
             callback(state_machine);
         }
 
+        pub fn pulse_operation(state_machine: *StateMachine, operation: Operation) ?Operation {
+            _ = state_machine;
+            _ = operation;
+            return null;
+        }
+
+        pub fn pulse_input(
+            state_machine: *StateMachine,
+            operation: Operation,
+            input: []align(16) u8,
+        ) usize {
+            _ = state_machine;
+            _ = operation;
+            _ = input;
+            unreachable;
+        }
+
         pub fn prepare(
             state_machine: *StateMachine,
             operation: Operation,

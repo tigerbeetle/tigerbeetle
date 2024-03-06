@@ -39,6 +39,25 @@ pub const Failure = enum(u8) {
     correctness = 129,
 };
 
+pub const ClusterReply = union(enum) {
+    // Reply from a client request.
+    client: struct {
+        index: usize,
+        request: *Message.Request,
+        reply: *Message.Reply,
+    },
+    // There's no reply for a message sent by the primary,
+    // but it still counts as a commited reply.
+    no_reply: *Message.Prepare,
+
+    pub fn op(self: ClusterReply) u64 {
+        return switch (self) {
+            .client => |client| client.reply.header.op,
+            .no_reply => |prepare| prepare.header.op,
+        };
+    }
+};
+
 /// Shift the id-generating index because the simulator network expects client ids to never collide
 /// with a replica index.
 const client_id_permutation_shift = constants.members_max;
@@ -79,9 +98,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         options: Options,
         on_client_reply: *const fn (
             cluster: *Self,
-            client: usize,
-            request: *Message.Request,
-            reply: *Message.Reply,
+            reply: ClusterReply,
         ) void,
 
         network: *Network,
@@ -115,9 +132,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             /// Includes command=register messages.
             on_client_reply: *const fn (
                 cluster: *Self,
-                client: usize,
-                request: *Message.Request,
-                reply: *Message.Reply,
+                reply: ClusterReply,
             ) void,
             options: Options,
         ) !*Self {
@@ -502,7 +517,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 if (client == c) break i;
             } else unreachable;
 
-            cluster.on_client_reply(cluster, client_index, request_message, reply_message);
+            cluster.on_client_reply(cluster, .{
+                .client = .{
+                    .index = client_index,
+                    .request = request_message,
+                    .reply = reply_message,
+                },
+            });
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
@@ -516,11 +537,20 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_machine_opened => {
                     cluster.manifest_checker.forest_open(&replica.state_machine.forest);
                 },
-                .committed => {
+                .committed => |prepare| {
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
+
+                    if (prepare.header.client == 0) {
+                        // The primary commiting a message from itself counts as a simulator reply,
+                        // since it bumps the `op` number of the next expected reply.
+                        const primary = replica.status == .normal and replica.primary();
+                        if (primary) {
+                            cluster.on_client_reply(cluster, .{ .no_reply = @constCast(prepare) });
+                        }
+                    }
                 },
                 .compaction_completed => {},
                 .checkpoint_commenced => {

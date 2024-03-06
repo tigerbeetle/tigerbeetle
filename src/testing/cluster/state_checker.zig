@@ -159,24 +159,28 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             // The replica has transitioned to state `b` that is not yet in the commit history.
             // Check if this is a valid new state based on the originating client's inflight request.
-            const client = for (state_checker.clients) |*client| {
-                if (client.id == header_b.?.client) break client;
-            } else unreachable;
+            for (state_checker.clients) |*client| {
+                if (client.id == header_b.?.client) {
+                    if (client.request_queue.empty()) {
+                        return error.ReplicaTransitionedToInvalidState;
+                    }
 
-            if (client.request_queue.empty()) {
-                return error.ReplicaTransitionedToInvalidState;
+                    const request = client.request_queue.head_ptr_const().?;
+                    assert(request.message.header.client == header_b.?.client);
+                    assert(request.message.header.checksum == header_b.?.request_checksum);
+                    assert(request.message.header.request == header_b.?.request);
+                    assert(request.message.header.command == .request);
+                    assert(request.message.header.operation == header_b.?.operation);
+                    assert(request.message.header.size == header_b.?.size);
+                    break;
+                }
+            } else {
+                assert(header_b.?.client == 0);
+                assert(header_b.?.request == 0);
             }
 
-            const request = client.request_queue.head_ptr_const().?;
-            assert(request.message.header.client == header_b.?.client);
-            assert(request.message.header.checksum == header_b.?.request_checksum);
-            assert(request.message.header.request == header_b.?.request);
-            assert(request.message.header.command == .request);
-            assert(request.message.header.operation == header_b.?.operation);
-            assert(request.message.header.size == header_b.?.size);
             // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
             // prepare body's accounts/transfers.
-
             state_checker.requests_committed += 1;
             assert(state_checker.requests_committed == header_b.?.op);
 

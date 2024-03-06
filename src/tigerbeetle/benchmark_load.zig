@@ -155,6 +155,7 @@ pub fn main(
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
+        .transfer_pending = cli_args.transfer_pending,
         .transfer_count_per_second = cli_args.transfer_count_per_second,
         .transfer_arrival_rate_ns = transfer_arrival_rate_ns,
         .batch_index = 0,
@@ -195,6 +196,7 @@ const Benchmark = struct {
     batch_start_ns: usize,
     transfers_sent: usize,
     transfer_count: usize,
+    transfer_pending: bool,
     transfer_count_per_second: usize,
     transfer_arrival_rate_ns: usize,
     batch_index: usize,
@@ -297,6 +299,9 @@ const Benchmark = struct {
             const credit_account_id = b.account_id_permutation.encode(credit_account_index + 1);
             assert(debit_account_index != credit_account_index);
 
+            // 30% of pending transfers.
+            const pending = b.transfer_pending and random.intRangeAtMost(u8, 0, 9) < 3;
+
             b.batch_transfers.appendAssumeCapacity(.{
                 .id = b.account_id_permutation.encode(b.transfer_index + 1),
                 .debit_account_id = debit_account_id,
@@ -306,10 +311,10 @@ const Benchmark = struct {
                 .user_data_32 = random.int(u32),
                 // TODO Benchmark posting/voiding pending transfers.
                 .pending_id = 0,
-                .timeout = 0,
                 .ledger = 2,
                 .code = random.int(u16) +| 1,
-                .flags = .{},
+                .flags = .{ .pending = pending },
+                .timeout = if (pending) random.intRangeAtMost(u32, 1, 60) else 0,
                 .amount = random_int_exponential(random, u64, 10_000) +| 1,
                 .timestamp = 0,
             });
@@ -476,6 +481,7 @@ const Benchmark = struct {
 
         const event_count = switch (operation) {
             inline else => |op| @divExact(payload.len, @sizeOf(StateMachine.Event(op))),
+            .expire_pending_transfers => unreachable,
         };
 
         const batch = b.client.batch_get(operation, event_count) catch unreachable;

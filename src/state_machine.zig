@@ -22,6 +22,7 @@ const AccountBalance = tb.AccountBalance;
 
 const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
+const TransferPendingStatus = tb.TransferPendingStatus;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
@@ -95,18 +96,19 @@ pub fn StateMachineType(
                     .user_data_128 = 13,
                     .user_data_64 = 14,
                     .user_data_32 = 15,
-                    .timeout = 16,
-                    .ledger = 17,
-                    .code = 18,
-                    .timestamp = 19,
+                    .ledger = 16,
+                    .code = 17,
+                    .timestamp = 18,
+                    .expires_at = 19,
+                    .pending_status = 20,
                 };
 
                 pub const posted = .{
-                    .timestamp = 20,
+                    .timestamp = 21,
                 };
 
                 pub const account_history = .{
-                    .timestamp = 21,
+                    .timestamp = 22,
                 };
             };
         };
@@ -121,9 +123,13 @@ pub fn StateMachineType(
             .lookup_transfers = false,
             .get_account_transfers = false,
             .get_account_history = false,
+            .expire_pending_transfers = false,
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
+            assert(@bitSizeOf(Event(operation)) > 0);
+            assert(@bitSizeOf(Result(operation)) > 0);
+
             return struct {
                 const Demuxer = @This();
                 const DemuxerResult = Result(operation);
@@ -210,12 +216,27 @@ pub fn StateMachineType(
                     .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .timeout = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .pending_status = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
-                .ignored = &[_][]const u8{"flags"},
-                .derived = .{},
+                .ignored = &[_][]const u8{ "timeout", "flags" },
+                .derived = .{
+                    .expires_at = struct {
+                        fn expires_at(object: *const Transfer) u64 {
+                            if (object.flags.pending and object.timeout > 0) {
+                                return object.timestamp + object.timeout_ns();
+                            }
+                            return 0;
+                        }
+                    }.expires_at,
+                    .pending_status = struct {
+                        fn pending_status(object: *const Transfer) TransferPendingStatus {
+                            return if (object.flags.pending) .pending else .none;
+                        }
+                    }.pending_status,
+                },
             },
         );
 
@@ -237,8 +258,9 @@ pub fn StateMachineType(
             fulfillment: enum(u8) {
                 posted = 0,
                 voided = 1,
+                expired = 2,
             },
-            padding: [7]u8,
+            padding: [7]u8 = [_]u8{0} ** 7,
 
             comptime {
                 // Assert that there is no implicit padding.
@@ -323,6 +345,7 @@ pub fn StateMachineType(
             lookup_transfers = config.vsr_operations_reserved + 3,
             get_account_transfers = config.vsr_operations_reserved + 4,
             get_account_history = config.vsr_operations_reserved + 5,
+            expire_pending_transfers = config.vsr_operations_reserved + 6,
         };
 
         pub const Options = struct {
@@ -409,6 +432,8 @@ pub fn StateMachineType(
         scan_result_count: u32 = 0,
         scan_next_tick: Grid.NextTick = undefined,
 
+        expire_pending_transfers_pulse_timestamp: u64 = TimestampRange.timestamp_min,
+
         open_callback: ?*const fn (*StateMachine) void = null,
         compact_callback: ?*const fn (*StateMachine) void = null,
         checkpoint_callback: ?*const fn (*StateMachine) void = null,
@@ -469,6 +494,7 @@ pub fn StateMachineType(
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
                 .get_account_history => AccountFilter,
+                .expire_pending_transfers => u64,
             };
         }
 
@@ -480,6 +506,7 @@ pub fn StateMachineType(
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
                 .get_account_history => AccountBalance,
+                .expire_pending_transfers => void,
             };
         }
 
@@ -508,7 +535,30 @@ pub fn StateMachineType(
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
                 .get_account_history => 0,
+                .expire_pending_transfers => 0,
             };
+        }
+
+        pub fn pulse_operation(self: *StateMachine, current_operation: Operation) ?Operation {
+            assert(current_operation != .expire_pending_transfers);
+            assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
+            stdx.maybe(self.expire_pending_transfers_pulse_timestamp == TimestampRange.timestamp_max);
+
+            return if (self.expire_pending_transfers_pulse_timestamp <= self.prepare_timestamp)
+                .expire_pending_transfers
+            else
+                null;
+        }
+
+        pub fn pulse_input(self: *StateMachine, operation: Operation, input: []align(16) u8) usize {
+            assert(operation == .expire_pending_transfers);
+            assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
+            assert(self.expire_pending_transfers_pulse_timestamp != TimestampRange.timestamp_max);
+
+            self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_max;
+
+            std.mem.writeIntNative(u64, input[0..@sizeOf(u64)], self.prepare_timestamp);
+            return @sizeOf(u64);
         }
 
         pub fn prefetch(
@@ -554,6 +604,10 @@ pub fn StateMachineType(
                 },
                 .get_account_history => {
                     self.prefetch_get_account_history(parse_filter_from_input(input));
+                },
+                .expire_pending_transfers => {
+                    const expire_timestamp = mem.bytesToValue(u64, input[0..@sizeOf(u64)]);
+                    self.prefetch_expire_pending_transfers(expire_timestamp);
                 },
             };
         }
@@ -891,6 +945,207 @@ pub fn StateMachineType(
             self.prefetch_finish();
         }
 
+        fn prefetch_expire_pending_transfers(self: *StateMachine, expire_timestamp: u64) void {
+            assert(self.scan_result_count == 0);
+
+            assert(expire_timestamp >= TimestampRange.timestamp_min);
+            assert(expire_timestamp != TimestampRange.timestamp_max);
+
+            var scan_buffer = std.mem.bytesAsSlice(
+                Transfer,
+                self.scan_buffer[0..@sizeOf(Transfer)],
+            );
+            // We only need the first result.
+            assert(scan_buffer.len == 1);
+
+            const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
+            const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
+
+            // WHERE `expires_at > expire_timestamp`
+            // Scanning `Transfers` that _will_ expire, so we can determine the _next_ timestamp
+            // it will require to execute `expire_pending_transfers` again.
+            // We must do it before scanning for expired transfers to reuse the same buffer.
+            var scan = scan_builder.scan_range(
+                .expires_at,
+                self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                transfers_groove.prefetch_snapshot.?,
+                .{
+                    .timestamp = TimestampRange.timestamp_min,
+                    .field = expire_timestamp + 1,
+                },
+                .{
+                    .timestamp = TimestampRange.timestamp_max,
+                    .field = TimestampRange.timestamp_max,
+                },
+                .ascending,
+            );
+
+            var scan_lookup = self.scan_lookup.get(.transfer);
+            scan_lookup.* = TransfersScanLookup.init(
+                &self.forest.grooves.transfers,
+                scan,
+            );
+
+            scan_lookup.read(
+                scan_buffer,
+                &prefetch_expire_pending_transfers_scan_next_callback,
+            );
+        }
+
+        fn prefetch_expire_pending_transfers_scan_next_callback(scan_lookup: *TransfersScanLookup) void {
+            const self: *StateMachine = ScanLookup.parent(.transfer, scan_lookup);
+            const results = scan_lookup.slice();
+
+            if (results.len == 0) {
+                // If there is no transfer to expire, set the value as `timestamp_max`.
+                self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_max;
+            } else {
+                assert(results.len == 1);
+
+                const t = &results[0];
+                assert(t.flags.pending);
+                assert(t.timeout > 0);
+
+                const expires_at = t.timestamp + t.timeout_ns();
+                log.debug("expire_pending_transfers_pulse_timestamp: {}", .{expires_at});
+
+                self.expire_pending_transfers_pulse_timestamp = expires_at;
+            }
+
+            self.scan_result_count = 0;
+            self.scan_lookup = .null;
+            self.forest.scan_buffer_pool.reset();
+            self.forest.grooves.transfers.scan_builder.reset();
+
+            self.prefetch_expire_pending_transfers_scan();
+        }
+
+        fn prefetch_expire_pending_transfers_scan(self: *StateMachine) void {
+            assert(self.scan_result_count == 0);
+
+            const expire_timestamp = std.mem.bytesToValue(u64, self.prefetch_input.?[0..@sizeOf(u64)]);
+
+            var scan_buffer = std.mem.bytesAsSlice(
+                Transfer,
+                self.scan_buffer[0 .. @sizeOf(Transfer) *
+                    // We must be constrained to the same limit as `create_transfers`.
+                    constants.batch_max.create_transfers],
+            );
+            assert(scan_buffer.len == constants.batch_max.create_transfers);
+
+            const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
+            const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
+
+            // WHERE `expires_at <= expire_timestamp`
+            // Scanning `Transfers` already expired at `expire_timestamp`.
+            var scan = scan_builder.scan_range(
+                .expires_at,
+                self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                transfers_groove.prefetch_snapshot.?,
+                .{
+                    .timestamp = TimestampRange.timestamp_min,
+                    .field = TimestampRange.timestamp_min,
+                },
+                .{
+                    .timestamp = TimestampRange.timestamp_max,
+                    .field = expire_timestamp,
+                },
+                .ascending,
+            );
+
+            var scan_lookup = self.scan_lookup.get(.transfer);
+            scan_lookup.* = TransfersScanLookup.init(
+                &self.forest.grooves.transfers,
+                scan,
+            );
+
+            scan_lookup.read(
+                scan_buffer,
+                &prefetch_expire_pending_transfers_scan_callback,
+            );
+        }
+
+        fn prefetch_expire_pending_transfers_scan_callback(scan_lookup: *TransfersScanLookup) void {
+            const self: *StateMachine = ScanLookup.parent(.transfer, scan_lookup);
+            self.scan_result_count = @intCast(scan_lookup.slice().len);
+
+            switch (scan_lookup.state) {
+                .buffer_finished => {
+                    // Case the buffer was completely filled with expired transfers,
+                    // then the next pulse will resume from the last one.
+                    const transfers = scan_lookup.slice();
+                    assert(transfers.len == constants.batch_max.create_transfers);
+
+                    const t = &transfers[transfers.len - 1];
+                    const timestamp_last = t.timestamp + t.timeout_ns();
+
+                    self.expire_pending_transfers_pulse_timestamp = timestamp_last + 1;
+                },
+                .scan_finished => {},
+                else => unreachable,
+            }
+
+            self.scan_lookup = .null;
+            self.forest.scan_buffer_pool.reset();
+            self.forest.grooves.transfers.scan_builder.reset();
+
+            self.prefetch_expire_pending_transfers_accounts();
+        }
+
+        fn prefetch_expire_pending_transfers_accounts(self: *StateMachine) void {
+            const transfers: []const Transfer = std.mem.bytesAsSlice(
+                Transfer,
+                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(Transfer)],
+            );
+
+            const expire_timestamp = std.mem.bytesToValue(u64, self.prefetch_input.?[0..@sizeOf(u64)]);
+
+            const grooves = &self.forest.grooves;
+            for (transfers) |expired| {
+                assert(expired.flags.pending == true);
+                const expires_at = expired.timestamp + expired.timeout_ns();
+
+                assert(expires_at <= expire_timestamp);
+
+                grooves.accounts.prefetch_enqueue(expired.debit_account_id);
+                grooves.accounts.prefetch_enqueue(expired.credit_account_id);
+
+                if (global_constants.verify) {
+                    // We prefetch `Posted` only to check that it's null.
+                    grooves.posted.prefetch_enqueue(expired.timestamp);
+                }
+            }
+
+            self.forest.grooves.accounts.prefetch(
+                prefetch_expire_pending_transfers_accounts_callback,
+                self.prefetch_context.get(.accounts),
+            );
+        }
+
+        fn prefetch_expire_pending_transfers_accounts_callback(completion: *AccountsGroove.PrefetchContext) void {
+            const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
+            self.prefetch_context = .null;
+
+            if (global_constants.verify) {
+                // We prefetch `Posted` only to check that it's null.
+                self.forest.grooves.posted.prefetch(
+                    prefetch_expire_pending_transfers_posted_callback,
+                    self.prefetch_context.get(.posted),
+                );
+            } else {
+                self.prefetch_finish();
+            }
+        }
+
+        fn prefetch_expire_pending_transfers_posted_callback(completion: *PostedGroove.PrefetchContext) void {
+            comptime assert(global_constants.verify);
+
+            const self: *StateMachine = PrefetchContext.parent(.posted, completion);
+            self.prefetch_context = .null;
+
+            self.prefetch_finish();
+        }
+
         pub fn commit(
             self: *StateMachine,
             client: u128,
@@ -917,6 +1172,11 @@ pub fn StateMachineType(
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 .get_account_transfers => self.execute_get_account_transfers(input, output),
                 .get_account_history => self.execute_get_account_history(input, output),
+                .expire_pending_transfers => result: {
+                    const expire_timestamp = std.mem.bytesToValue(u64, input[0..@sizeOf(u64)]);
+                    self.execute_expire_pending_transfers(expire_timestamp);
+                    break :result 0;
+                },
             };
 
             tracer.end(
@@ -1345,6 +1605,14 @@ pub fn StateMachineType(
                 .cr_account = &cr_account_new,
             });
 
+            if (t.timeout > 0) {
+                const expires_at = t.timestamp + t.timeout_ns();
+                if (expires_at <= self.expire_pending_transfers_pulse_timestamp) {
+                    assert(self.expire_pending_transfers_pulse_timestamp != expires_at);
+                    self.expire_pending_transfers_pulse_timestamp = expires_at;
+                }
+            }
+
             self.commit_timestamp = t.timestamp;
             return .ok;
         }
@@ -1423,16 +1691,15 @@ pub fn StateMachineType(
                 switch (posted.fulfillment) {
                     .posted => return .pending_transfer_already_posted,
                     .voided => return .pending_transfer_already_voided,
+                    .expired => {
+                        assert(p.timeout > 0);
+                        assert(t.timestamp >= p.timestamp + p.timeout_ns());
+                        return .pending_transfer_expired;
+                    },
                 }
             }
 
             assert(p.timestamp < t.timestamp);
-            if (p.timeout > 0) {
-                // TODO: After implementing the actual transfer expiration,
-                // this check could be turned into an assertion.
-                const timeout_ns = @as(u64, @intCast(p.timeout)) * std.time.ns_per_s;
-                if (t.timestamp >= p.timestamp + timeout_ns) return .pending_transfer_expired;
-            }
 
             const t2 = Transfer{
                 .id = t.id,
@@ -1458,8 +1725,39 @@ pub fn StateMachineType(
                     if (t.flags.void_pending_transfer) break :fulfillment .voided;
                     unreachable;
                 },
-                .padding = [_]u8{0} ** 7,
             });
+
+            self.transfer_update_pending_status(p.timestamp, status: {
+                if (t.flags.post_pending_transfer) break :status .posted;
+                if (t.flags.void_pending_transfer) break :status .voided;
+                unreachable;
+            });
+
+            if (p.timeout > 0) {
+                // If we are posting/voiding a pending transfer with timeout,
+                // it cannot be set to `timestamp_max`, which means no transfers to expire.
+                assert(self.expire_pending_transfers_pulse_timestamp != TimestampRange.timestamp_max);
+
+                const expires_at = p.timestamp + p.timeout_ns();
+                if (expires_at <= t.timestamp) {
+                    // TODO: It's still possible for an operation to see an expired transfer
+                    // if there's more than one batch of transfers to expire in a single `pulse`
+                    // and the current operation was pipelined before the expiration commits.
+                    return .pending_transfer_expired;
+                }
+
+                // Removing the pending `expires_at` index.
+                self.forest.grooves.transfers.indexes.expires_at.remove(&.{
+                    .field = expires_at,
+                    .timestamp = p.timestamp,
+                });
+
+                // In case the pending transfer's timeout is exactly the one we are using
+                // as flag, we need zero the valut to run the next `pulse`.
+                if (self.expire_pending_transfers_pulse_timestamp == expires_at) {
+                    self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_min;
+                }
+            }
 
             var dr_account_new = dr_account.*;
             var cr_account_new = cr_account.*;
@@ -1599,6 +1897,82 @@ pub fn StateMachineType(
             return self.forest.grooves.posted.get(pending_timestamp);
         }
 
+        fn transfer_update_pending_status(
+            self: *StateMachine,
+            timestamp: u64,
+            status: TransferPendingStatus,
+        ) void {
+            assert(timestamp != 0);
+            assert(status != .none and status != .pending);
+
+            self.forest.grooves.transfers.indexes.pending_status.remove(&.{
+                .timestamp = timestamp,
+                .field = @intFromEnum(TransferPendingStatus.pending),
+            });
+            self.forest.grooves.transfers.indexes.pending_status.put(&.{
+                .timestamp = timestamp,
+                .field = @intFromEnum(status),
+            });
+        }
+
+        fn execute_expire_pending_transfers(self: *StateMachine, expire_timestamp: u64) void {
+            assert(self.scan_result_count <= constants.batch_max.create_transfers);
+            if (self.scan_result_count == 0) return;
+            defer self.scan_result_count = 0;
+
+            const grooves = &self.forest.grooves;
+            const transfers: []const Transfer = std.mem.bytesAsSlice(
+                Transfer,
+                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(Transfer)],
+            );
+
+            log.debug("expire_pending_transfers: len={}", .{transfers.len});
+
+            for (transfers) |expired| {
+                assert(expired.flags.pending);
+                assert(expired.timeout > 0);
+
+                const expires_at = expired.timestamp + expired.timeout_ns();
+                assert(expires_at <= expire_timestamp);
+
+                if (global_constants.verify) {
+                    assert(grooves.posted.get(expired.timestamp) == null);
+                }
+
+                const dr_account = grooves.accounts.get(
+                    expired.debit_account_id,
+                ).?;
+                assert(dr_account.debits_pending >= expired.amount);
+
+                const cr_account = grooves.accounts.get(
+                    expired.credit_account_id,
+                ).?;
+                assert(cr_account.credits_pending >= expired.amount);
+
+                var dr_account_new = dr_account.*;
+                var cr_account_new = cr_account.*;
+                dr_account_new.debits_pending -= expired.amount;
+                cr_account_new.credits_pending -= expired.amount;
+
+                grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+
+                // Expire the transfer.
+                grooves.posted.insert(&.{
+                    .timestamp = expired.timestamp,
+                    .fulfillment = .expired,
+                });
+
+                self.transfer_update_pending_status(expired.timestamp, .expired);
+
+                // Removing the `expires_at` index.
+                grooves.transfers.indexes.expires_at.remove(&.{
+                    .timestamp = expired.timestamp,
+                    .field = expires_at,
+                });
+            }
+        }
+
         pub fn forest_options(options: Options) Forest.GroovesOptions {
             const batch_accounts_max: u32 = @intCast(constants.batch_max.create_accounts);
             const batch_transfers_max: u32 = @intCast(constants.batch_max.create_transfers);
@@ -1607,7 +1981,7 @@ pub fn StateMachineType(
 
             return .{
                 .accounts = .{
-                    // lookup_account() looks up 1 AccountImmutable per item.
+                    // lookup_account() looks up 1 Account per item.
                     .prefetch_entries_for_read_max = batch_accounts_max,
                     .prefetch_entries_for_update_max = @max(
                         batch_accounts_max, // create_account()
@@ -1640,15 +2014,15 @@ pub fn StateMachineType(
                         .user_data_64 = .{},
                         .user_data_32 = .{},
                         .pending_id = .{},
-                        .timeout = .{},
                         .ledger = .{},
                         .code = .{},
                         .amount = .{},
+                        .expires_at = .{},
+                        .pending_status = .{},
                     },
                 },
                 .posted = .{
-                    // Nothing lookups posted groove.
-                    .prefetch_entries_for_read_max = 0,
+                    .prefetch_entries_for_read_max = batch_transfers_max,
                     // create_transfer() posts/voids at most one transfer.
                     .prefetch_entries_for_update_max = batch_transfers_max,
                     .cache_entries_max = options.cache_entries_posted,
@@ -1881,7 +2255,7 @@ const TestCreateTransfer = struct {
     flags_void_pending_transfer: ?enum { VOI } = null,
     flags_balancing_debit: ?enum { BDR } = null,
     flags_balancing_credit: ?enum { BCR } = null,
-    flags_padding: u10 = 0,
+    flags_padding: u7 = 0,
     timestamp: u64 = 0,
     result: CreateTransferResult,
 
@@ -2193,6 +2567,7 @@ fn check(test_table: []const u8) !void {
                             mem.bytesAsSlice(Result, reply_actual),
                         );
                     },
+                    .expire_pending_transfers => {},
                 }
 
                 request.clearRetainingCapacity();

@@ -15,6 +15,7 @@ const parse_table = @import("../testing/table.zig").parse;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
+const ClusterReply = @import("../testing/cluster.zig").ClusterReply;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -1376,14 +1377,15 @@ const TestContext = struct {
 
     fn on_client_reply(
         cluster: *Cluster,
-        client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        reply: ClusterReply,
     ) void {
-        _ = request;
-        _ = reply;
-        const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));
-        t.client_replies[client] += 1;
+        switch (reply) {
+            .client => |client| {
+                const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));
+                t.client_replies[client.index] += 1;
+            },
+            .no_reply => {},
+        }
     }
 
     const ProcessList = stdx.BoundedArray(Process, constants.members_max + constants.clients_max);

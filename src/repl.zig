@@ -686,6 +686,9 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             const batch = repl.client.batch_get(operation, switch (operation) {
                 inline else => |op| @divExact(arguments.len, @sizeOf(StateMachine.Event(op))),
+                .get_account_transfers => unreachable,
+                .get_account_history => unreachable,
+                .expire_pending_transfers => unreachable,
             }) catch unreachable;
 
             stdx.copy_disjoint(
@@ -831,6 +834,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 },
                 .get_account_transfers => unreachable,
                 .get_account_history => unreachable,
+                .expire_pending_transfers => unreachable,
             }
         }
 

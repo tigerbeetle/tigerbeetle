@@ -79,7 +79,7 @@ pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
     state_machine_opened,
     /// Called immediately after a prepare is committed by the state machine.
-    committed,
+    committed: *const Message.Prepare,
     /// Called immediately after a compaction.
     compaction_completed,
     /// Called immediately before a checkpoint.
@@ -3820,7 +3820,14 @@ pub fn ReplicaType(
             assert(self.commit_min == prepare.header.op);
             self.advance_commit_max(self.commit_min, @src());
 
-            if (self.event_callback) |hook| hook(self, .committed);
+            if (self.event_callback) |hook| hook(self, .{ .committed = prepare });
+
+            if (prepare.header.client == 0) {
+                // This prepare was sent by the primary, tere's no reply to the client.
+                assert(reply_body_size == 0);
+                assert(prepare.header.request == 0);
+                return;
+            }
 
             reply.header.* = .{
                 .command = .reply,
@@ -5222,10 +5229,24 @@ pub fn ReplicaType(
                 .reserved, .root => unreachable,
                 .register => {},
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
-                else => self.state_machine.prepare(
-                    request.message.header.operation.cast(StateMachine),
-                    request.message.body(),
-                ),
+                else => {
+                    const operation = request.message.header.operation.cast(StateMachine);
+                    self.state_machine.prepare(
+                        operation,
+                        request.message.body(),
+                    );
+
+                    // Check if the StateMachine needs to execute something before
+                    // the request.
+                    // Note that `prepare` must be called before so the StateMachine can
+                    // correctly assure that time-dependant tasks (e.g. expiring transfers)
+                    // will never intersect with a request batch.
+                    if (self.state_machine.pulse_operation(operation)) |pulse_operation| {
+                        self.pulse_inject(pulse_operation);
+                        self.pipeline.queue.delay_request(request);
+                        return;
+                    }
+                },
             }
             const prepare_timestamp = self.state_machine.prepare_timestamp;
 
@@ -5234,15 +5255,6 @@ pub fn ReplicaType(
 
             // Copy the header to the stack before overwriting it to avoid UB.
             const request_header: Header.Request = request.message.header.*;
-
-            const checkpoint_id = checkpoint_id: {
-                if (self.op + 1 <= self.op_checkpoint_next()) {
-                    break :checkpoint_id self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
-                } else {
-                    break :checkpoint_id self.superblock.working.checkpoint_id();
-                }
-            };
-
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
                 .cluster = self.cluster,
@@ -5254,7 +5266,7 @@ pub fn ReplicaType(
                 .parent = latest_entry.checksum,
                 .client = request_header.client,
                 .request_checksum = request_header.checksum,
-                .checkpoint_id = checkpoint_id,
+                .checkpoint_id = self.checkpoint_id_now(),
                 .op = self.op + 1,
                 .commit = self.commit_max,
                 .timestamp = timestamp: {
@@ -5276,6 +5288,10 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
+            self.push_prepare(message);
+        }
+
+        fn push_prepare(self: *Self, message: *Message.Prepare) void {
             log.debug("{}: primary_pipeline_prepare: prepare {}", .{ self.replica, message.header.checksum });
 
             if (self.primary_pipeline_pending()) |_| {
@@ -5298,6 +5314,14 @@ pub fn ReplicaType(
             assert(self.op == message.header.op);
         }
 
+        fn checkpoint_id_now(self: *Self) u128 {
+            if (self.op + 1 <= self.op_checkpoint_next()) {
+                return self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
+            } else {
+                return self.superblock.working.checkpoint_id();
+            }
+        }
+
         fn primary_prepare_reconfiguration(
             self: *const Self,
             request: *Message.Request,
@@ -5317,6 +5341,49 @@ pub fn ReplicaType(
                 .standby_count = self.standby_count,
             });
             assert(reconfiguration_request.result != .reserved);
+        }
+
+        fn pulse_inject(self: *Self, operation: StateMachine.Operation) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            const message = self.message_bus.get_message(.prepare);
+            defer self.message_bus.unref(message);
+
+            const input = message.buffer[@sizeOf(Header)..];
+            const input_len = self.state_machine.pulse_input(operation, input);
+
+            const prepare_timestamp = self.state_machine.prepare_timestamp;
+            const latest_entry = self.journal.header_with_op(self.op).?;
+            message.header.* = Header.Prepare{
+                .cluster = self.cluster,
+                .size = @intCast(@sizeOf(Header) + input_len),
+                .view = self.view,
+                .release = self.release,
+                .command = .prepare,
+                .replica = self.replica,
+                .parent = latest_entry.checksum,
+                .request_checksum = 0,
+                .checkpoint_id = self.checkpoint_id_now(),
+                .op = self.op + 1,
+                .commit = self.commit_max,
+                .timestamp = prepare_timestamp,
+                .operation = vsr.Operation.from(StateMachine, operation),
+                .client = 0,
+                .request = 0,
+            };
+
+            maybe(message.body().len == 0);
+            const sector_ceil = vsr.sector_ceil(message.header.size);
+            if (message.header.size != sector_ceil) {
+                assert(message.header.size < sector_ceil);
+                @memset(message.buffer[message.header.size..sector_ceil], 0);
+            }
+
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            self.push_prepare(message);
         }
 
         /// Returns the next prepare in the pipeline waiting for a quorum.
@@ -9256,12 +9323,14 @@ const PipelineQueue = struct {
         while (pipeline.prepare_queue.pop()) |p| message_pool.unref(p.message);
     }
 
-    fn verify(pipeline: PipelineQueue) void {
+    fn verify(pipeline: *PipelineQueue) void {
         assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
         assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
+
         assert(pipeline.request_queue.empty() or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
-            constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1);
+            constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1 or
+            pipeline.has_pulse());
 
         if (pipeline.prepare_queue.head_ptr_const()) |head| {
             var op = head.message.header.op;
@@ -9284,14 +9353,25 @@ const PipelineQueue = struct {
         }
     }
 
-    fn full(pipeline: PipelineQueue) bool {
+    fn full(pipeline: *PipelineQueue) bool {
         if (pipeline.prepare_queue.full()) {
             return pipeline.request_queue.full();
         } else {
             assert(pipeline.request_queue.empty() or
-                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max);
+                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
+                pipeline.has_pulse());
             return false;
         }
+    }
+
+    fn has_pulse(pipeline: *PipelineQueue) bool {
+        return inline for (0..constants.pipeline_prepare_queue_max) |index| {
+            if (pipeline.prepare_queue.get_ptr(index)) |prepare| {
+                if (prepare.message.header.client == 0) break true;
+            } else {
+                break false;
+            }
+        } else false;
     }
 
     /// Searches the pipeline for a prepare for a given op and checksum.
@@ -9366,7 +9446,9 @@ const PipelineQueue = struct {
     fn pop_prepare(pipeline: *PipelineQueue) ?Prepare {
         if (pipeline.prepare_queue.pop()) |prepare| {
             assert(pipeline.request_queue.empty() or
-                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max);
+                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
+                prepare.message.header.client == 0 or
+                pipeline.has_pulse());
             return prepare;
         } else {
             assert(pipeline.request_queue.empty());
@@ -9380,13 +9462,28 @@ const PipelineQueue = struct {
 
     fn push_request(pipeline: *PipelineQueue, request: Request) void {
         assert(request.message.header.command == .request);
+        pipeline.assert_request_queue(request);
+
+        pipeline.request_queue.push_assume_capacity(request);
+        if (constants.verify) pipeline.verify();
+    }
+
+    fn delay_request(pipeline: *PipelineQueue, request: Request) void {
+        assert(request.message.header.command == .request);
+        pipeline.assert_request_queue(request);
+
+        pipeline.request_queue.push_head_assume_capacity(.{
+            .realtime = request.realtime,
+            .message = request.message.ref(),
+        });
+        if (constants.verify) pipeline.verify();
+    }
+
+    fn assert_request_queue(pipeline: *const PipelineQueue, request: Request) void {
         var queue_iterator = pipeline.request_queue.iterator();
         while (queue_iterator.next()) |queue_request| {
             assert(queue_request.message.header.client != request.message.header.client);
         }
-
-        pipeline.request_queue.push_assume_capacity(request);
-        if (constants.verify) pipeline.verify();
     }
 
     fn push_prepare(pipeline: *PipelineQueue, message: *Message.Prepare) void {

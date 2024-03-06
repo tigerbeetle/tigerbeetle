@@ -674,8 +674,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(!inflight_vsr_operation.vsr_reserved());
             switch (inflight_vsr_operation.cast(StateMachine)) {
                 inline else => |operation| {
+                    const Result = StateMachine.Result(operation);
+                    // TODO: Pulse operations are not supposed to go through the client,
+                    // although we might want to support the general case of having `void` results.
+                    if (@sizeOf(Result) == 0) unreachable;
+
                     var demuxer = StateMachine.DemuxerType(operation).init(
-                        std.mem.bytesAsSlice(StateMachine.Result(operation), reply.body()),
+                        std.mem.bytesAsSlice(Result, reply.body()),
                     );
 
                     while (inflight.demux_queue.pop()) |demux| {

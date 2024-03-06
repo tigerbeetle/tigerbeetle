@@ -20,6 +20,7 @@ const StateMachineType = switch (state_machine) {
 
 const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
+const ClusterReply = @import("testing/cluster.zig").ClusterReply;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
 const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
@@ -658,44 +659,52 @@ pub const Simulator = struct {
 
     fn on_cluster_reply(
         cluster: *Cluster,
-        reply_client: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
+        reply: ClusterReply,
     ) void {
         // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
-        simulator.reply_sequence.insert(reply_client, request, reply);
+        simulator.reply_sequence.insert(reply);
 
         while (simulator.reply_sequence.peek()) |commit| {
             defer simulator.reply_sequence.next();
 
-            const commit_client = simulator.cluster.clients[commit.client_index];
-            assert(commit.reply.references == 1);
-            assert(commit.reply.header.command == .reply);
-            assert(commit.reply.header.client == commit_client.id);
-            assert(commit.reply.header.request == commit.request.header.request);
-            assert(commit.reply.header.operation == commit.request.header.operation);
+            switch (commit) {
+                .client => |client| {
+                    const commit_client = simulator.cluster.clients[client.index];
+                    assert(client.reply.references == 1);
+                    assert(client.reply.header.command == .reply);
+                    assert(client.reply.header.client == commit_client.id);
+                    assert(client.reply.header.request == commit.client.request.header.request);
+                    assert(client.reply.header.operation == commit.client.request.header.operation);
 
-            assert(commit.request.references == 1);
-            assert(commit.request.header.command == .request);
-            assert(commit.request.header.client == commit_client.id);
+                    assert(client.request.references == 1);
+                    assert(client.request.header.command == .request);
+                    assert(client.request.header.client == commit_client.id);
 
-            log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
-                commit.reply.header.op,
-                commit.reply.header.operation,
-                commit.request.header.client,
-                commit.request.header.request,
-            });
+                    log.debug("consume_stalled_replies: op={} operation={} client={} request={}", .{
+                        client.reply.header.op,
+                        client.reply.header.operation,
+                        client.request.header.client,
+                        client.request.header.request,
+                    });
 
-            if (!commit.request.header.operation.vsr_reserved()) {
-                simulator.requests_replied += 1;
-                simulator.workload.on_reply(
-                    commit.client_index,
-                    commit.reply.header.operation.cast(StateMachine),
-                    commit.reply.header.timestamp,
-                    commit.request.body(),
-                    commit.reply.body(),
-                );
+                    if (!commit.client.request.header.operation.vsr_reserved()) {
+                        simulator.requests_replied += 1;
+                        simulator.workload.on_reply(
+                            client.index,
+                            client.reply.header.operation.cast(StateMachine),
+                            client.reply.header.timestamp,
+                            client.request.body(),
+                            client.reply.body(),
+                        );
+                    }
+                },
+                .no_reply => |prepare| {
+                    assert(prepare.references == 1);
+                    assert(prepare.header.command == .prepare);
+                    assert(prepare.header.client == 0);
+                    assert(prepare.header.request == 0);
+                },
             }
         }
     }
