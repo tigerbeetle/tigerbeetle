@@ -72,6 +72,9 @@ A pending transfer may optionally be created with a
 [timeout](../reference/transfers.md#timeout). If the timeout interval passes
 before the transfer is either posted or voided, the full amount will be voided.
 
+Note that `timeout`s are given as intervals, specified in seconds, rather than as absolute
+timestamps. For more details on why, read the page about [Time in TigerBeetle](./time.md).
+
 ### Errors
 
 A pending transfer can only be posted or voided once. It cannot be
