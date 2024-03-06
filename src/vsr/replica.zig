@@ -4428,7 +4428,7 @@ pub fn ReplicaType(
                 // partitioned and don't yet know about a session. We solve this by having clients
                 // include the view number and rejecting messages from clients with newer views.
                 log.err("{}: on_request: no session", .{self.replica});
-                self.send_eviction_message_to_client(message.header.client);
+                self.send_eviction_message_to_client(message.header.client, .no_session);
                 return true;
             }
         }
@@ -6422,13 +6422,18 @@ pub fn ReplicaType(
             }
         }
 
-        fn send_eviction_message_to_client(self: *Self, client: u128) void {
+        fn send_eviction_message_to_client(
+            self: *Self,
+            client: u128,
+            reason: vsr.Header.Eviction.Reason,
+        ) void {
             assert(self.status == .normal);
             assert(self.primary());
 
-            log.err("{}: too many sessions, sending eviction message to client={}", .{
+            log.err("{}: sending eviction message to client={} reason={s}", .{
                 self.replica,
                 client,
+                @tagName(reason),
             });
 
             self.send_header_to_client(client, @bitCast(Header.Eviction{
@@ -6437,6 +6442,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .view = self.view,
                 .client = client,
+                .reason = reason,
             }));
         }
 

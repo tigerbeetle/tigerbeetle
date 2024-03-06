@@ -1107,7 +1107,8 @@ pub const Header = extern struct {
         reserved_frame: [16]u8 = [_]u8{0} ** 16,
 
         client: u128,
-        reserved: [112]u8 = [_]u8{0} ** 112,
+        reserved: [111]u8 = [_]u8{0} ** 111,
+        reason: Reason,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
@@ -1115,8 +1116,25 @@ pub const Header = extern struct {
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.client == 0) return "client == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
+
+            const reasons = comptime std.enums.values(Reason);
+            inline for (reasons) |reason| {
+                if (@intFromEnum(self.reason) == @intFromEnum(reason)) break;
+            } else return "reason invalid";
+            if (self.reason == .reserved) return "reason == reserved";
             return null;
         }
+
+        pub const Reason = enum(u8) {
+            reserved = 0,
+            no_session = 1,
+
+            comptime {
+                for (std.enums.values(Reason), 0..) |reason, index| {
+                    assert(@intFromEnum(reason) == index);
+                }
+            }
+        };
     };
 
     pub const RequestBlocks = extern struct {

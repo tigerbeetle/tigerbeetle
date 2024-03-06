@@ -542,8 +542,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            log.err("{}: session evicted: too many concurrent client sessions", .{self.id});
-            @panic("session evicted: too many concurrent client sessions");
+            log.err("{}: session evicted: reason={s}", .{
+                self.id,
+                @tagName(eviction.header.reason),
+            });
+            @panic("session evicted");
         }
 
         fn on_pong_client(self: *Self, pong: *const Message.PongClient) void {
