@@ -2662,6 +2662,43 @@ test "get_account_history: single-phase" {
         \\ get_account_history_result T3 0 22 0 11
         \\ get_account_history_result T4 0 22 0 24
         \\ commit get_account_history
+        \\
+        \\ get_account_history A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
+        \\ get_account_history_result T1 0 10 0  0
+        \\ get_account_history_result T2 0 10 0 11
+        \\ commit get_account_history
+        \\
+        \\ get_account_history A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
+        \\ get_account_history_result T3 0 22 0 11
+        \\ get_account_history_result T4 0 22 0 24
+        \\ commit get_account_history
+        \\
+        \\ get_account_history A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
+        \\ get_account_history_result T1 0 10 0  0
+        \\ get_account_history_result T2 0 10 0 11
+        \\ commit get_account_history
+        \\
+        \\ get_account_history A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        \\ get_account_history_result T2 0 10 0 11
+        \\ get_account_history_result T3 0 22 0 11
+        \\ commit get_account_history
+        \\
+        \\ get_account_history A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
+        \\ get_account_history_result T4 0 22 0 24
+        \\ get_account_history_result T3 0 22 0 11
+        \\ get_account_history_result T2 0 10 0 11
+        \\ get_account_history_result T1 0 10 0  0
+        \\ commit get_account_history
+        \\
+        \\ get_account_history A1  _  _ 10 DR  _  _ // Debits only.
+        \\ get_account_history_result T1 0 10 0  0
+        \\ get_account_history_result T3 0 22 0 11
+        \\ commit get_account_history
+        \\
+        \\ get_account_history A1  _  _ 10  _ CR  _ // Credits only.
+        \\ get_account_history_result T2 0 10 0 11
+        \\ get_account_history_result T4 0 22 0 24
+        \\ commit get_account_history
     );
 }
 
