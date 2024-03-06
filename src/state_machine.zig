@@ -1688,6 +1688,7 @@ const TestContext = struct {
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
+    busy: bool = false,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
@@ -1735,6 +1736,12 @@ const TestContext = struct {
         ctx.grid.deinit(allocator);
         ctx.state_machine.deinit(allocator);
         ctx.* = undefined;
+    }
+
+    fn callback(state_machine: *StateMachine) void {
+        const ctx = @fieldParentPtr(TestContext, "state_machine", state_machine);
+        assert(ctx.busy);
+        ctx.busy = false;
     }
 };
 
@@ -1886,6 +1893,7 @@ fn check(test_table: []const u8) !void {
     var reply = std.ArrayListAligned(u8, 16).init(allocator);
     defer reply.deinit();
 
+    var op: u64 = 1;
     var operation: ?TestContext.StateMachine.Operation = null;
 
     const test_actions = parse_table(TestAction, test_table);
@@ -1986,6 +1994,7 @@ fn check(test_table: []const u8) !void {
 
             .commit => |commit_operation| {
                 assert(operation == null or operation.? == commit_operation);
+                assert(!context.busy);
 
                 context.state_machine.prepare_timestamp += 1;
                 context.state_machine.prepare(commit_operation, request.items);
@@ -1993,6 +2002,15 @@ fn check(test_table: []const u8) !void {
 
                 const reply_actual_buffer = try allocator.alignedAlloc(u8, 16, 4096);
                 defer allocator.free(reply_actual_buffer);
+
+                context.busy = true;
+                context.state_machine.prefetch(
+                    TestContext.callback,
+                    op,
+                    commit_operation,
+                    request.items,
+                );
+                while (context.busy) context.storage.tick();
 
                 const reply_actual_size = context.state_machine.commit(
                     0,
@@ -2018,6 +2036,7 @@ fn check(test_table: []const u8) !void {
                 request.clearRetainingCapacity();
                 reply.clearRetainingCapacity();
                 operation = null;
+                op += 1;
             },
         }
     }
