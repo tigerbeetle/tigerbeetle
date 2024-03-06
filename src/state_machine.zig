@@ -2644,6 +2644,27 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
     );
 }
 
+test "get_account_history: single-phase" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ get_account_history A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
+        \\ get_account_history_result T1 0 10 0  0
+        \\ get_account_history_result T2 0 10 0 11
+        \\ get_account_history_result T3 0 22 0 11
+        \\ get_account_history_result T4 0 22 0 24
+        \\ commit get_account_history
+    );
+}
+
 test "StateMachine: Demuxer" {
     const StateMachine = StateMachineType(
         @import("testing/storage.zig").Storage,
