@@ -2702,6 +2702,23 @@ test "get_account_history: single-phase" {
     );
 }
 
+test "get_account_history: two-phase" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2    1   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ ok
+        \\ transfer T2 A1 A2    _  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ get_account_history A1 _ _ 10 DR CR  _
+        \\ get_account_history_result T1 1 0 0 0
+        \\ get_account_history_result T2 0 1 0 0
+        \\ commit get_account_history
+    );
+}
+
 test "StateMachine: Demuxer" {
     const StateMachine = StateMachineType(
         @import("testing/storage.zig").Storage,
