@@ -1777,6 +1777,15 @@ const TestAction = union(enum) {
             amount: u128,
         },
     },
+
+    get_account_history: TestGetAccountHistory,
+    get_account_history_result: struct {
+        transfer_id: u128,
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
+    },
 };
 
 const TestCreateAccount = struct {
@@ -1871,6 +1880,18 @@ const TestCreateTransfer = struct {
             .timestamp = timestamp orelse t.timestamp,
         };
     }
+};
+
+const TestGetAccountHistory = struct {
+    account_id: u128,
+    // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
+    // created.
+    timestamp_min_transfer_id: ?u128 = null,
+    timestamp_max_transfer_id: ?u128 = null,
+    limit: u32,
+    flags_debits: ?enum { DR } = null,
+    flags_credits: ?enum { CR } = null,
+    flags_reversed: ?enum { REV } = null,
 };
 
 fn check(test_table: []const u8) !void {
@@ -1990,6 +2011,38 @@ fn check(test_table: []const u8) !void {
                         try reply.appendSlice(std.mem.asBytes(&transfer));
                     },
                 }
+            },
+            .get_account_history => |f| {
+                assert(operation == null or operation.? == .get_account_history);
+                operation = .get_account_history;
+
+                const timestamp_min = if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_max = if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+
+                const event = AccountFilter{
+                    .account_id = f.account_id,
+                    .timestamp_min = timestamp_min,
+                    .timestamp_max = timestamp_max,
+                    .limit = f.limit,
+                    .flags = .{
+                        .debits = f.flags_debits != null,
+                        .credits = f.flags_credits != null,
+                        .reversed = f.flags_reversed != null,
+                    },
+                };
+                try request.appendSlice(std.mem.asBytes(&event));
+            },
+            .get_account_history_result => |r| {
+                assert(operation.? == .get_account_history);
+
+                const balance = AccountBalance{
+                    .debits_pending = r.debits_pending,
+                    .debits_posted = r.debits_posted,
+                    .credits_pending = r.credits_pending,
+                    .credits_posted = r.credits_posted,
+                    .timestamp = transfers.get(r.transfer_id).?.timestamp,
+                };
+                try reply.appendSlice(std.mem.asBytes(&balance));
             },
 
             .commit => |commit_operation| {
