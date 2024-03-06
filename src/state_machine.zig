@@ -1791,7 +1791,7 @@ const TestCreateAccount = struct {
     timestamp: u64 = 0,
     result: CreateAccountResult,
 
-    fn event(a: TestCreateAccount) Account {
+    fn event(a: TestCreateAccount, timestamp: ?u64) Account {
         return .{
             .id = a.id,
             .debits_pending = a.debits_pending,
@@ -1810,7 +1810,7 @@ const TestCreateAccount = struct {
                 .credits_must_not_exceed_debits = a.flags_credits_must_not_exceed_debits != null,
                 .padding = a.flags_padding,
             },
-            .timestamp = a.timestamp,
+            .timestamp = timestamp orelse a.timestamp,
         };
     }
 };
@@ -1837,7 +1837,7 @@ const TestCreateTransfer = struct {
     timestamp: u64 = 0,
     result: CreateTransferResult,
 
-    fn event(t: TestCreateTransfer) Transfer {
+    fn event(t: TestCreateTransfer, timestamp: ?u64) Transfer {
         return .{
             .id = t.id,
             .debit_account_id = t.debit_account_id,
@@ -1859,7 +1859,7 @@ const TestCreateTransfer = struct {
                 .balancing_credit = t.flags_balancing_credit != null,
                 .padding = t.flags_padding,
             },
-            .timestamp = t.timestamp,
+            .timestamp = timestamp orelse t.timestamp,
         };
     }
 };
@@ -1916,10 +1916,12 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .create_accounts);
                 operation = .create_accounts;
 
-                const event = a.event();
+                const event = a.event(null);
                 try request.appendSlice(std.mem.asBytes(&event));
                 if (a.result == .ok) {
-                    try accounts.put(a.id, event);
+                    const timestamp = context.state_machine.prepare_timestamp + 1 +
+                        @divExact(request.items.len, @sizeOf(Account));
+                    try accounts.put(a.id, a.event(if (a.timestamp == 0) timestamp else null));
                 } else {
                     const result = CreateAccountsResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
@@ -1932,10 +1934,12 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .create_transfers);
                 operation = .create_transfers;
 
-                const event = t.event();
+                const event = t.event(null);
                 try request.appendSlice(std.mem.asBytes(&event));
                 if (t.result == .ok) {
-                    try transfers.put(t.id, event);
+                    const timestamp = context.state_machine.prepare_timestamp + 1 +
+                        @divExact(request.items.len, @sizeOf(Transfer));
+                    try transfers.put(t.id, t.event(if (t.timestamp == 0) timestamp else null));
                 } else {
                     const result = CreateTransfersResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
@@ -1997,14 +2001,6 @@ fn check(test_table: []const u8) !void {
                     reply_actual_buffer[0..TestContext.message_body_size_max],
                 );
                 const reply_actual = reply_actual_buffer[0..reply_actual_size];
-
-                if (commit_operation == .lookup_accounts) {
-                    for (std.mem.bytesAsSlice(Account, reply_actual)) |*a| a.timestamp = 0;
-                }
-
-                if (commit_operation == .lookup_transfers) {
-                    for (std.mem.bytesAsSlice(Transfer, reply_actual)) |*t| t.timestamp = 0;
-                }
 
                 switch (commit_operation) {
                     inline else => |commit_operation_comptime| {
