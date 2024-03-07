@@ -1434,7 +1434,7 @@ pub fn StateMachineType(
                 if (t.timestamp >= p.timestamp + timeout_ns) return .pending_transfer_expired;
             }
 
-            self.forest.grooves.transfers.insert(&Transfer{
+            const t2 = Transfer{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
@@ -1448,7 +1448,8 @@ pub fn StateMachineType(
                 .timestamp = t.timestamp,
                 .flags = t.flags,
                 .amount = amount,
-            });
+            };
+            self.forest.grooves.transfers.insert(&t2);
 
             self.forest.grooves.posted.insert(&PostedGrooveValue{
                 .timestamp = p.timestamp,
@@ -1476,7 +1477,7 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
             self.account_history(.{
-                .transfer = t,
+                .transfer = &t2,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
             });
@@ -1557,6 +1558,10 @@ pub fn StateMachineType(
                 cr_account: *const Account,
             },
         ) void {
+            assert(args.transfer.timestamp > 0);
+            assert(args.transfer.debit_account_id == args.dr_account.id);
+            assert(args.transfer.credit_account_id == args.cr_account.id);
+
             if (args.dr_account.flags.history or args.cr_account.flags.history) {
                 var history = std.mem.zeroInit(AccountHistoryGrooveValue, .{
                     .timestamp = args.transfer.timestamp,
