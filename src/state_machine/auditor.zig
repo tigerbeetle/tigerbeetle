@@ -230,9 +230,6 @@ pub const AccountingAuditor = struct {
             assert(!dr.credits_exceed_debits(0));
             assert(!cr.debits_exceed_credits(0));
             assert(!cr.credits_exceed_debits(0));
-
-            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this unimplemented.
-            stdx.unimplemented("timeouts");
         }
 
         self.timestamp = timestamp;
