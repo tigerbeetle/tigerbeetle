@@ -1339,29 +1339,11 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
-            if (dr_account_new.flags.history or cr_account_new.flags.history) {
-                var history = std.mem.zeroInit(AccountHistoryGrooveValue, .{
-                    .timestamp = t2.timestamp,
-                });
-
-                if (dr_account_new.flags.history) {
-                    history.dr_account_id = dr_account_new.id;
-                    history.dr_debits_pending = dr_account_new.debits_pending;
-                    history.dr_debits_posted = dr_account_new.debits_posted;
-                    history.dr_credits_pending = dr_account_new.credits_pending;
-                    history.dr_credits_posted = dr_account_new.credits_posted;
-                }
-
-                if (cr_account_new.flags.history) {
-                    history.cr_account_id = cr_account_new.id;
-                    history.cr_debits_pending = cr_account_new.debits_pending;
-                    history.cr_debits_posted = cr_account_new.debits_posted;
-                    history.cr_credits_pending = cr_account_new.credits_pending;
-                    history.cr_credits_posted = cr_account_new.credits_posted;
-                }
-
-                self.forest.grooves.account_history.insert(&history);
-            }
+            self.account_history(.{
+                .transfer = &t2,
+                .dr_account = &dr_account_new,
+                .cr_account = &cr_account_new,
+            });
 
             self.commit_timestamp = t.timestamp;
             return .ok;
@@ -1493,7 +1475,14 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
+            self.account_history(.{
+                .transfer = t,
+                .dr_account = &dr_account_new,
+                .cr_account = &cr_account_new,
+            });
+
             self.commit_timestamp = t.timestamp;
+
             return .ok;
         }
 
@@ -1558,6 +1547,39 @@ pub fn StateMachineType(
             }
 
             return .exists;
+        }
+
+        fn account_history(
+            self: *StateMachine,
+            args: struct {
+                transfer: *const Transfer,
+                dr_account: *const Account,
+                cr_account: *const Account,
+            },
+        ) void {
+            if (args.dr_account.flags.history or args.cr_account.flags.history) {
+                var history = std.mem.zeroInit(AccountHistoryGrooveValue, .{
+                    .timestamp = args.transfer.timestamp,
+                });
+
+                if (args.dr_account.flags.history) {
+                    history.dr_account_id = args.dr_account.id;
+                    history.dr_debits_pending = args.dr_account.debits_pending;
+                    history.dr_debits_posted = args.dr_account.debits_posted;
+                    history.dr_credits_pending = args.dr_account.credits_pending;
+                    history.dr_credits_posted = args.dr_account.credits_posted;
+                }
+
+                if (args.cr_account.flags.history) {
+                    history.cr_account_id = args.cr_account.id;
+                    history.cr_debits_pending = args.cr_account.debits_pending;
+                    history.cr_debits_posted = args.cr_account.debits_posted;
+                    history.cr_credits_pending = args.cr_account.credits_pending;
+                    history.cr_credits_posted = args.cr_account.credits_posted;
+                }
+
+                self.forest.grooves.account_history.insert(&history);
+            }
         }
 
         fn get_transfer(self: *const StateMachine, id: u128) ?*const Transfer {
@@ -1786,6 +1808,9 @@ const TestAction = union(enum) {
         credits_pending: u128,
         credits_posted: u128,
     },
+
+    get_account_transfers: TestGetAccountTransfers,
+    get_account_transfers_result: TestGetAccountTransfersResult,
 };
 
 const TestCreateAccount = struct {
@@ -1882,7 +1907,7 @@ const TestCreateTransfer = struct {
     }
 };
 
-const TestGetAccountHistory = struct {
+const TestAccounFilter = struct {
     account_id: u128,
     // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
     // created.
@@ -1892,6 +1917,58 @@ const TestGetAccountHistory = struct {
     flags_debits: ?enum { DR } = null,
     flags_credits: ?enum { CR } = null,
     flags_reversed: ?enum { REV } = null,
+};
+
+// Both operations share the same input.
+const TestGetAccountHistory = TestAccounFilter;
+const TestGetAccountTransfers = TestAccounFilter;
+
+const TestGetAccountTransfersResult = struct {
+    id: u128,
+    debit_account_id: u128,
+    credit_account_id: u128,
+    amount: u128 = 0,
+    pending_id: u128 = 0,
+    user_data_128: u128 = 0,
+    user_data_64: u64 = 0,
+    user_data_32: u32 = 0,
+    timeout: u32 = 0,
+    ledger: u32,
+    code: u16,
+    flags_linked: ?enum { LNK } = null,
+    flags_pending: ?enum { PEN } = null,
+    flags_post_pending_transfer: ?enum { POS } = null,
+    flags_void_pending_transfer: ?enum { VOI } = null,
+    flags_balancing_debit: ?enum { BDR } = null,
+    flags_balancing_credit: ?enum { BCR } = null,
+    flags_padding: u10 = 0,
+    timestamp: u64 = 0,
+
+    fn result(t: TestGetAccountTransfersResult, timestamp: ?u64) Transfer {
+        return .{
+            .id = t.id,
+            .debit_account_id = t.debit_account_id,
+            .credit_account_id = t.credit_account_id,
+            .amount = t.amount,
+            .pending_id = t.pending_id,
+            .user_data_128 = t.user_data_128,
+            .user_data_64 = t.user_data_64,
+            .user_data_32 = t.user_data_32,
+            .timeout = t.timeout,
+            .ledger = t.ledger,
+            .code = t.code,
+            .flags = .{
+                .linked = t.flags_linked != null,
+                .pending = t.flags_pending != null,
+                .post_pending_transfer = t.flags_post_pending_transfer != null,
+                .void_pending_transfer = t.flags_void_pending_transfer != null,
+                .balancing_debit = t.flags_balancing_debit != null,
+                .balancing_credit = t.flags_balancing_credit != null,
+                .padding = t.flags_padding,
+            },
+            .timestamp = timestamp orelse t.timestamp,
+        };
+    }
 };
 
 fn check(test_table: []const u8) !void {
@@ -2043,6 +2120,33 @@ fn check(test_table: []const u8) !void {
                     .timestamp = transfers.get(r.transfer_id).?.timestamp,
                 };
                 try reply.appendSlice(std.mem.asBytes(&balance));
+            },
+
+            .get_account_transfers => |f| {
+                assert(operation == null or operation.? == .get_account_transfers);
+                operation = .get_account_transfers;
+
+                const timestamp_min = if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+                const timestamp_max = if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
+
+                const event = AccountFilter{
+                    .account_id = f.account_id,
+                    .timestamp_min = timestamp_min,
+                    .timestamp_max = timestamp_max,
+                    .limit = f.limit,
+                    .flags = .{
+                        .debits = f.flags_debits != null,
+                        .credits = f.flags_credits != null,
+                        .reversed = f.flags_reversed != null,
+                    },
+                };
+                try request.appendSlice(std.mem.asBytes(&event));
+            },
+            .get_account_transfers_result => |r| {
+                assert(operation.? == .get_account_transfers);
+
+                const transfer = r.result(transfers.get(r.id).?.timestamp);
+                try reply.appendSlice(std.mem.asBytes(&transfer));
             },
 
             .commit => |commit_operation| {
@@ -2641,6 +2745,82 @@ test "create_transfers: balancing_debit/balancing_credit + pending" {
         \\ lookup_transfer T3 amount  3
         \\ lookup_transfer T4 amount  5
         \\ commit lookup_transfers
+    );
+}
+
+test "get_account_transfers: single-phase" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ get_account_transfers A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
+        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
+        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
+        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
+        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
+        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1  _  _ 10 DR  _  _ // Debits only.
+        \\ get_account_transfers_result T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T3 A1 A2   12   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+        \\ get_account_transfers A1  _  _ 10  _ CR  _ // Credits only.
+        \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
+        \\ commit get_account_transfers
+        \\
+    );
+}
+
+test "get_account_transfers: two-phase" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2    2   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ ok
+        \\ transfer T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ get_account_transfers A1 _ _ 10 DR CR  _
+        \\ get_account_transfers_result T1 A1 A2    2   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _
+        \\ get_account_transfers_result T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _
+        \\ commit get_account_transfers
     );
 }
 
