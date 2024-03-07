@@ -1925,8 +1925,8 @@ const TestAccountFilter = struct {
 };
 
 // Both operations share the same input.
-const TestGetAccountHistory = TestAccounFilter;
-const TestGetAccountTransfers = TestAccounFilter;
+const TestGetAccountHistory = TestAccountFilter;
+const TestGetAccountTransfers = TestAccountFilter;
 
 const TestGetAccountTransfersResult = struct {
     id: u128,
