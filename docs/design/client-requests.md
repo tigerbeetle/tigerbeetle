@@ -32,18 +32,18 @@ the client instead).
 
 In the default configuration, the batch sizes are:
 
-| Operation               | Batch Size (Bytes) |
-| ----------------------- | -----------------: |
-| `lookup_accounts`       |               8190 |
-| `lookup_transfers`      |               8190 |
-| `create_accounts`       |               8190 |
-| `create_transfers`      |               8190 |
-| `get_account_transfers` |               8190 |
-| `get_account_history`   |               8190 |
+| Operation               | Request Batch Size (Events) | Reply Batch Size (Events) |
+| ----------------------- | --------------------------: | ------------------------: |
+| `lookup_accounts`       |                        8190 |                      8190 |
+| `lookup_transfers`      |                        8190 |                      8190 |
+| `create_accounts`       |                        8190 |                      8190 |
+| `create_transfers`      |                        8190 |                      8190 |
+| `get_account_transfers` |                           1 |                      8190 |
+| `get_account_history`   |                           1 |                      8190 |
 
-The application layer can batch events by itself, however, when the same client instance is shared
-by multiple threads/tasks, it is able to transparently batch requests of the same operation type in
-a single message.
+You can design your application to batch events manually. However, client instances automatically
+batch requests of the same operation type. Therefore, sharing the same client instance between
+multiple threads or tasks enables events to be batched transparently.
 
 - [Node](/src/clients/node/README.md#batching)
 - [Go](/src/clients/go/README.md#batching)
@@ -63,7 +63,10 @@ This is primarily applicable if the number of services that need to query TigerB
 Rather than each service connecting to TigerBeetle directly, you can set up your application
 services to forward their requests to a pool of intermediate services, as illustrated below. This
 API layer can coalesce events from many application services into requests, and forward back the
-respective replies. 
+respective replies.
+
+(Note that TigerBeetle does not currently provide such an intermediate service layer or a client to
+pool or connect to them.)
 
 One downside of this approach is that events submitted by the application may be applied out of
 order. Without this intermediary API layer, TigerBeetle clients ensure that operations are applied
