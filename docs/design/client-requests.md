@@ -26,8 +26,8 @@ operation events in each request.
 For the best performance, each request should batch as many events as possible. Typically this means
 funneling events through fewer client instances (e.g. a single client instance per process).
 
-The maximum number of events per batch depends on the maximum message size
-(`config.message_size_max`, specified in bytes) and the operation type.
+The maximum number of events per batch depends on the maximum message size and the operation type.
+(TODO: Expose each operation's batch sizes in the client).
 
 In the default configuration, the batch sizes are:
 
