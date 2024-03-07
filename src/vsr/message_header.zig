@@ -585,6 +585,7 @@ pub const Header = extern struct {
                         return "reserved: checksum_body != expected";
                     }
                     if (self.view != 0) return "reserved: view != 0";
+                    if (self.release != 0) return "reserved: release != 0";
                     if (self.replica != 0) return "reserved: replica != 0";
                     if (self.parent != 0) return "reserved: parent != 0";
                     if (self.client != 0) return "reserved: client != 0";
@@ -601,6 +602,7 @@ pub const Header = extern struct {
                         return "root: checksum_body != expected";
                     }
                     if (self.view != 0) return "root: view != 0";
+                    if (self.release != 0) return "root: release != 0";
                     if (self.replica != 0) return "root: replica != 0";
                     if (self.parent != 0) return "root: parent != 0";
                     if (self.client != 0) return "root: client != 0";
@@ -689,7 +691,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         protocol: u16 = vsr.Version,
-        release: u16 = 0,
+        release: u16 = 0, // Always 0.
         command: Command,
         replica: u8,
         reserved_frame: [14]u8 = [_]u8{0} ** 14,
@@ -761,7 +763,11 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         protocol: u16 = vsr.Version,
-        /// The corresponding Request's release version.
+        /// The corresponding Request's (and Prepare's, and client's) release version.
+        /// `Reply.release` matches `Request.release` (rather than the cluster release):
+        /// - to serve as an escape hatch if state machines ever need to branch on client release.
+        /// - to emphasize that the reply's format must be compatible with the client's version –
+        ///   which is potentially behind the cluster's version when the prepare commits.
         release: u16,
         command: Command,
         replica: u8,
@@ -1150,7 +1156,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32,
         protocol: u16 = vsr.Version,
-        release: u16 = 0, // Always 0.
+        release: u16,
         command: Command,
         replica: u8,
         reserved_frame: [14]u8 = [_]u8{0} ** 14,
@@ -1163,7 +1169,7 @@ pub const Header = extern struct {
             assert(self.command == .eviction);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
-            if (self.release != 0) return "release != 0";
+            if (self.release == 0) return "release == 0";
             if (self.client == 0) return "client == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
 

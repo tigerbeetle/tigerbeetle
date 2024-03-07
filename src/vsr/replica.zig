@@ -6446,6 +6446,7 @@ pub fn ReplicaType(
             self.send_header_to_client(client, @bitCast(Header.Eviction{
                 .command = .eviction,
                 .cluster = self.cluster,
+                .release = 1, // TODO Use the real release number.
                 .replica = self.replica,
                 .view = self.view,
                 .client = client,

@@ -543,9 +543,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            log.err("{}: session evicted: reason={s}", .{
+            log.err("{}: session evicted: reason={s} (cluster_release={})", .{
                 self.id,
                 @tagName(eviction.header.reason),
+                eviction.header.release,
             });
             @panic("session evicted");
         }
