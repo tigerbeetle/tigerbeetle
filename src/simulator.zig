@@ -38,13 +38,13 @@ pub const std_options = struct {
     /// "full" mode is the usual logging according to the level.
     pub const log_level: std.log.Level = if (vsr_simulator_options.log == .short) .info else .debug;
     pub const logFn = log_override;
-};
 
-// Uncomment if you need per-scope control over the log levels.
-// pub const scope_levels = [_]std.log.ScopeLevel{
-//     .{ .scope = .cluster, .level = .info },
-//     .{ .scope = .replica, .level = .debug },
-// };
+    // Uncomment if you need per-scope control over the log levels.
+    // pub const log_scope_levels: []const std.log.ScopeLevel = &.{
+    //     .{ .scope = .cluster, .level = .info },
+    //     .{ .scope = .replica, .level = .debug },
+    // };
+};
 
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
