@@ -27,19 +27,18 @@ For the best performance, each request should batch as many events as possible. 
 funneling events through fewer client instances (e.g. a single client instance per process).
 
 The maximum number of events per batch depends on the maximum message size
-(`config.message_size_max`, specified in bytes) and the operation type. (TODO: Expose batch size in
-the client instead).
+(`config.message_size_max`, specified in bytes) and the operation type.
 
 In the default configuration, the batch sizes are:
 
-| Operation               | Request Batch Size (Events) | Reply Batch Size (Events) |
-| ----------------------- | --------------------------: | ------------------------: |
-| `lookup_accounts`       |                        8190 |                      8190 |
-| `lookup_transfers`      |                        8190 |                      8190 |
-| `create_accounts`       |                        8190 |                      8190 |
-| `create_transfers`      |                        8190 |                      8190 |
-| `get_account_transfers` |                           1 |                      8190 |
-| `get_account_history`   |                           1 |                      8190 |
+| Operation               | Request Batch Size (Events) | Reply Batch Size (Results) |
+| ----------------------- | --------------------------: | -------------------------: |
+| `lookup_accounts`       |                        8190 |                       8190 |
+| `lookup_transfers`      |                        8190 |                       8190 |
+| `create_accounts`       |                        8190 |                       8190 |
+| `create_transfers`      |                        8190 |                       8190 |
+| `get_account_transfers` |                           1 |                       8190 |
+| `get_account_history`   |                           1 |                       8190 |
 
 You can design your application to batch events manually. However, client instances automatically
 batch requests of the same operation type. Therefore, sharing the same client instance between
