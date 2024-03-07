@@ -140,6 +140,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// The number of replicas in the cluster.
         replica_count: u8,
 
+        /// Only tests should ever override the release.
+        release: u16 = 1, // TODO Use real release number.
+
         /// The total number of ticks elapsed since the client was initialized.
         ticks: u64 = 0,
 
@@ -373,7 +376,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .request = undefined,
                 .cluster = self.cluster,
                 .command = .request,
-                .release = 1, // TODO Use the real release number.
+                .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
@@ -574,6 +577,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(reply.header.valid_checksum());
             assert(reply.header.valid_checksum_body(reply.body()));
             assert(reply.header.command == .reply);
+            assert(reply.header.release == self.release);
 
             if (reply.header.client != self.id) {
                 log.debug("{}: on_reply: ignoring (wrong client={})", .{
@@ -700,7 +704,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const ping = Header.PingClient{
                 .command = .ping_client,
                 .cluster = self.cluster,
-                .release = 1, // TODO Use the real release number.
+                .release = self.release,
                 .client = self.id,
             };
 
@@ -771,7 +775,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = .register,
-                .release = 1, // TODO Use the real release number.
+                .release = self.release,
             };
 
             assert(self.request_number == 0);

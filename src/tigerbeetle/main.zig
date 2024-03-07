@@ -179,6 +179,9 @@ const Command = struct {
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
+            // TODO Use real release numbers.
+            .release = 1,
+            .release_client_min = 1,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,

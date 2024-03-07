@@ -425,6 +425,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .time = .{ .time = &cluster.replica_times[replica_index] },
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
+                    // TODO Use "real" release numbers.
+                    .release = 1,
+                    .release_client_min = 1,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
@@ -448,7 +451,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const message = request_message.build(.request);
 
             message.header.* = .{
-                .release = 1, // TODO Use the real release number.
+                .release = client.release,
                 .client = client.id,
                 .request = undefined, // Set by client.raw_request.
                 .cluster = client.cluster,
