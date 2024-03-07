@@ -349,7 +349,7 @@ pub const AOFReplayClient = struct {
             if (header.operation.vsr_reserved()) continue;
 
             const message = self.client.get_message().build(.request);
-            errdefer self.client.release(message.base());
+            errdefer self.client.release_message(message.base());
 
             assert(self.inflight_message == null);
             self.inflight_message = message;
