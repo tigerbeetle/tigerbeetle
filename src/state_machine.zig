@@ -1912,7 +1912,7 @@ const TestCreateTransfer = struct {
     }
 };
 
-const TestAccounFilter = struct {
+const TestAccountFilter = struct {
     account_id: u128,
     // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
     // created.
@@ -2808,7 +2808,6 @@ test "get_account_transfers: single-phase" {
         \\ get_account_transfers_result T2 A2 A1   11   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
         \\ get_account_transfers_result T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _
         \\ commit get_account_transfers
-        \\
     );
 }
 
