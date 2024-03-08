@@ -675,6 +675,7 @@ pub const Simulator = struct {
             if (simulator.reply_sequence.peek(op)) |commit| {
                 defer simulator.reply_sequence.next();
 
+                assert(prepare_header.client != 0);
                 simulator.reply_op_next += 1;
 
                 const commit_client = simulator.cluster.clients[commit.client_index];
@@ -708,7 +709,13 @@ pub const Simulator = struct {
                     );
                 }
             } else {
-                break;
+                if (prepare_header.client == 0) {
+                    assert(prepare_header.operation.vsr_reserved());
+                    // We don't receive replies for requests that originated at the replicas.
+                    simulator.reply_op_next += 1;
+                } else {
+                    break;
+                }
             }
         }
     }

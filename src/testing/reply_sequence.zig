@@ -84,9 +84,11 @@ pub const ReplySequence = struct {
         reply_message: *Message.Reply,
     ) void {
         assert(request_message.header.invalid() == null);
+        assert(request_message.header.client != 0);
         assert(request_message.header.command == .request);
 
         assert(reply_message.header.invalid() == null);
+        assert(reply_message.header.client != 0);
         assert(reply_message.header.request == request_message.header.request);
         assert(reply_message.header.command == .reply);
         assert(reply_message.header.operation == request_message.header.operation);

@@ -3921,7 +3921,9 @@ pub fn ReplicaType(
                     assert(entry.header.command == .reply);
                     assert(entry.header.op >= prepare.header.op);
                 } else {
-                    assert(self.client_sessions.count() == self.client_sessions.capacity());
+                    if (prepare.header.client != 0) {
+                        assert(self.client_sessions.count() == self.client_sessions.capacity());
+                    }
                 }
 
                 log.debug("{}: commit_op: skip client table update: prepare.op={} checkpoint={}", .{
@@ -3938,8 +3940,12 @@ pub fn ReplicaType(
             }
 
             if (self.primary_index(self.view) == self.replica) {
-                log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
-                self.send_reply_message_to_client(reply);
+                if (reply.header.client == 0) {
+                    log.debug("{}: commit_op: no reply to client: {}", .{ self.replica, reply.header });
+                } else {
+                    log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
+                    self.send_reply_message_to_client(reply);
+                }
             }
         }
 
@@ -4486,7 +4492,6 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
 
             assert(message.header.command == .request);
-            assert(message.header.client > 0);
             assert(message.header.view <= self.view); // See ignore_request_message_backup().
             assert(message.header.session == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
@@ -4494,6 +4499,7 @@ pub fn ReplicaType(
             if (self.client_sessions.get(message.header.client)) |entry| {
                 assert(entry.header.command == .reply);
                 assert(entry.header.client == message.header.client);
+                assert(entry.header.client != 0);
 
                 if (message.header.operation == .register) {
                     // Fall through below to check if we should resend the .register session reply.
@@ -4549,16 +4555,24 @@ pub fn ReplicaType(
                 // reloaded into the pipeline to be driven to completion by the new primary, which
                 // now receives a request from the client that appears to have no session.
                 // However, the session is about to be registered, so we must wait for it to commit.
-                log.debug("{}: on_request: waiting for session to commit", .{self.replica});
+                log.debug(
+                    "{}: on_request: waiting for session to commit (client={})",
+                    .{ self.replica, message.header.client },
+                );
                 return true;
             } else {
-                // We must have all commits to know whether a session has been evicted. For example,
-                // there is the risk of sending an eviction message (even as the primary) if we are
-                // partitioned and don't yet know about a session. We solve this by having clients
-                // include the view number and rejecting messages from clients with newer views.
-                log.err("{}: on_request: no session", .{self.replica});
-                self.send_eviction_message_to_client(message.header.client, .no_session);
-                return true;
+                if (message.header.client == 0) {
+                    assert(message.header.request == 0);
+                    return false;
+                } else {
+                    // We must have all commits to know whether a session has been evicted. For example,
+                    // there is the risk of sending an eviction message (even as the primary) if we are
+                    // partitioned and don't yet know about a session. We solve this by having clients
+                    // include the view number and rejecting messages from clients with newer views.
+                    log.err("{}: on_request: no session", .{self.replica});
+                    self.send_eviction_message_to_client(message.header.client, .no_session);
+                    return true;
+                }
             }
         }
 
@@ -4691,12 +4705,12 @@ pub fn ReplicaType(
             assert(self.primary());
 
             assert(message.header.command == .request);
-            assert(message.header.client > 0);
             assert(message.header.view <= self.view); // See ignore_request_message_backup().
 
             if (self.pipeline.queue.message_by_client(message.header.client)) |pipeline_message| {
                 assert(pipeline_message.header.command == .request or
                     pipeline_message.header.command == .prepare);
+                assert(message.header.client != 0);
 
                 switch (pipeline_message.header.into_any()) {
                     .request => |pipeline_message_header| {
@@ -6580,6 +6594,7 @@ pub fn ReplicaType(
         fn send_reply_message_to_client(self: *Self, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.view <= self.view);
+            assert(reply.header.client != 0);
 
             // If the request committed in a different view than the one it was originally prepared
             // in, we must inform the client about this newer view before we send it a reply.
@@ -8764,6 +8779,37 @@ pub fn ReplicaType(
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
             self.send_message_to_replica(parameters.replica, reply);
+        }
+
+        fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            const request = self.message_bus.get_message(.request);
+            defer self.message_bus.unref(request);
+
+            request.header.* = .{
+                .cluster = self.cluster,
+                .command = .request,
+                .replica = self.replica,
+                .release = self.release,
+                .size = @intCast(@sizeOf(Header) + body.len),
+                .view = self.view,
+                .operation = operation,
+                .request = 0,
+                .parent = 0,
+                .client = 0,
+                .session = 0,
+            };
+
+            stdx.copy_disjoint(.exact, u8, request.body(), body);
+            @memset(request.buffer[request.header.size..vsr.sector_ceil(request.header.size)], 0);
+
+            request.header.set_checksum_body(request.body());
+            request.header.set_checksum();
+
+            self.send_message_to_replica(self.replica, request);
+            defer self.flush_loopback_queue();
         }
     };
 }
