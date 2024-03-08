@@ -1098,14 +1098,12 @@ test "Cluster: sync: view-change with lagging replica in recovering_head" {
 
     // try expectEqual(b1.role(), .primary);
     try expectEqual(b1.status(), .normal);
-    try expectEqual(b2.status(), .recovering_head);
-    // try expectEqual(t.replica(.R_).status(), .normal);
+    try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).sync_status(), .idle);
-    try expectEqual(b2.commit(), checkpoint_2);
-    // try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
 
-    // try TestReplicas.expect_sync_done(t.replica(.R_));
+    try TestReplicas.expect_sync_done(t.replica(.R_));
 }
 
 test "Cluster: sync: slightly lagging replica" {

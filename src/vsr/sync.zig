@@ -31,6 +31,10 @@ pub const Stage = union(enum) {
     pub const UpdatingSuperBlock = struct {
         target: Target,
         checkpoint_state: vsr.CheckpointState,
+        // Used to assert that the replica's state doesn't change while the superblock is updating. 
+        view: u32,
+        log_view: u32,
+        status: vsr.Status,
     };
 
     pub fn valid_transition(from: std.meta.Tag(Stage), to: std.meta.Tag(Stage)) bool {

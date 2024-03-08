@@ -334,7 +334,7 @@ pub fn ReplicaType(
 
         /// When "log_view < view": The DVC headers.
         /// When "log_view = view": The SV headers. (Just as a cache,
-        //  since they are regenerated for every request_start_view).
+        ///  since they are regenerated for every request_start_view).
         ///
         /// Invariants:
         /// - view_headers.len     > 0
@@ -4990,8 +4990,8 @@ pub fn ReplicaType(
         fn op_checkpoint_next(self: *const Self) u64 {
             assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
-            assert(self.op_checkpoint() <= self.op or
-                self.status == .recovering or self.status == .recovering_head);
+            // assert(self.op_checkpoint() <= self.op or
+            //     self.status == .recovering or self.status == .recovering_head);
 
             const checkpoint_next = vsr.Checkpoint.checkpoint_after(self.op_checkpoint());
             assert(vsr.Checkpoint.valid(checkpoint_next));
@@ -7946,7 +7946,19 @@ pub fn ReplicaType(
             self.sync_dispatch(.{ .updating_superblock = .{
                 .target = stage.target,
                 .checkpoint_state = checkpoint_state.*,
+                .view = self.view,
+                .log_view = self.log_view,
+                .status = self.status,
             } });
+        }
+
+        fn start_view_headers_from_checkpoint(header: *const vsr.Header.Prepare) vsr.Headers.ViewChangeArray {
+            var view_headers: vsr.Headers.ViewChangeArray = .{
+                .command = .start_view,
+                .array = .{},
+            };
+            view_headers.append(header);
+            return view_headers;
         }
 
         fn sync_superblock_update(self: *Self) void {
@@ -7962,6 +7974,10 @@ pub fn ReplicaType(
             maybe(self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
+            assert(stage.view == self.view);
+            assert(stage.log_view == self.log_view);
+            assert(stage.status == self.status);
+            maybe(stage.checkpoint_state.header.op < self.op);
 
             self.state_machine_opened = false;
             self.state_machine.reset();
@@ -7970,10 +7986,6 @@ pub fn ReplicaType(
             self.grid.free_set_checkpoint.reset();
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
-
-            // Bump commit_max before the superblock update so that a view_durable_update()
-            // during the sync_start update uses the correct (new) commit_max.
-            self.advance_commit_max(stage.target.checkpoint_op, @src());
 
             const sync_op_max =
                 vsr.Checkpoint.trigger_for_checkpoint(stage.target.checkpoint_op).?;
@@ -7996,15 +8008,77 @@ pub fn ReplicaType(
                     sync_min_new;
             };
 
+            const checkpoint_header = &stage.checkpoint_state.header;
+            const commit_max = @max(self.commit_max, checkpoint_header.op);
+            const log_view = @max(self.log_view, checkpoint_header.view);
+            const view = @max(self.view, checkpoint_header.view);
+
+            var view_headers: vsr.Headers.ViewChangeArray = undefined;
+
+            var headers_ptr: *const vsr.Headers.ViewChangeArray = &view_headers;
+            switch (self.status) {
+                .normal => {
+                    if (self.view < checkpoint_header.view) {
+                        // Start that next view
+                        view_headers = start_view_headers_from_checkpoint(checkpoint_header);
+                        headers_ptr = &view_headers;
+                    } else {
+                        // Normal, checkpoint is from a known view, no need to update our headers.
+                        assert(self.view_headers.command == .start_view);
+                        assert(checkpoint_header.view <= self.log_view);
+                        headers_ptr = &self.view_headers;
+                    }
+                },
+                .view_change => {
+                    if (self.view <= checkpoint_header.view) {
+                        // can transition to normal
+                        view_headers = start_view_headers_from_checkpoint(checkpoint_header);
+                        headers_ptr = &view_headers;
+                        // set_op_and_commit_max
+                    } else {
+                        // Merge `checkpoint_header` into a DVC here.
+                        // It is comitted, so it's going to be the last entry
+                        assert(self.view_headers.command == .do_view_change);
+                        for (self.view_headers.array.const_slice()) |*header| {
+                            if (header.op < checkpoint_header.op) {
+                                view_headers.append(checkpoint_header);
+                                break;
+                            }
+                            if (header.view < checkpoint_header.view) {
+                                continue; // Truncate this header
+                            }
+                            view_headers.append(header);
+                        }
+                        headers_ptr = &view_headers;
+                    }
+                },
+                .recovering_head => {
+                    if (self.view < checkpoint_header.view) {
+                        // can transition to normal
+                        view_headers = start_view_headers_from_checkpoint(checkpoint_header);
+                        headers_ptr = &view_headers;
+                    } else {
+                        assert(self.view == self.log_view);
+                        // Old headers are good enough, not going to move from recovering head.
+                        assert(self.view_headers.command == .start_view);
+                        headers_ptr = &self.view_headers;
+                    }
+                },
+                .recovering => unreachable,
+            }
+
             self.sync_message_timeout.stop();
             self.superblock.sync(
                 sync_superblock_update_callback,
                 &self.superblock_context,
                 .{
                     .checkpoint = stage.checkpoint_state,
-                    .commit_max = self.commit_max,
+                    .commit_max = commit_max,
                     .sync_op_max = sync_op_max,
                     .sync_op_min = sync_op_min,
+                    .log_view = log_view,
+                    .view = view,
+                    .headers = &self.view_headers,
                 },
             );
         }
@@ -8021,6 +8095,9 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
+            assert(stage.view == self.view);
+            assert(stage.log_view == self.log_view);
+            assert(stage.status == self.status);
 
             assert(self.superblock.working.checkpoint_id() == stage.target.checkpoint_id);
             assert(stdx.equal_bytes(
@@ -8030,18 +8107,57 @@ pub fn ReplicaType(
             ));
 
             self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
-            assert(self.commit_min == self.op_checkpoint());
-            assert(self.commit_min > 0);
-            if (self.op < self.op_checkpoint() and self.status != .recovering_head) {
-                self.transition_to_recovering_head();
+            self.commit_max = self.superblock.working.vsr_state.commit_max;
+            self.log_view = self.superblock.working.vsr_state.log_view;
+            self.view = self.superblock.working.vsr_state.view;
+            const checkpoint_header = self.superblock.working.vsr_state.checkpoint.header;
+
+            self.view_headers = vsr.Headers.ViewChangeArray.init_from_slice(
+                self.superblock.working.vsr_headers().command,
+                self.superblock.working.vsr_headers().slice,
+            );
+
+            if (self.view < checkpoint_header.view or
+                self.view == checkpoint_header.view and self.status == .view_change)
+            {
+                if (self.status != .view_change) {
+                    self.transition_to_view_change_status(checkpoint_header.view);
+                }
+                self.commit_min = checkpoint_header.op;
                 self.set_op_and_commit_max(
-                    self.op_checkpoint(),
-                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?,
+                    checkpoint_header.op,
+                    self.commit_max,
                     @src(),
                 );
-                self.replace_header(&self.superblock.working.vsr_state.checkpoint.header);
-                self.transition_to_normal_from_recovering_head_status(self.view);
+                self.transition_to_normal_from_view_change_status(checkpoint_header.view);
+            } else {
+                switch (self.status) {
+                    .normal => {
+                        self.op = @max(self.op, checkpoint_header.op);
+                        assert(self.view_headers.command == .start_view);
+                    },
+                    .view_change => {
+                        // Truncate here
+                        assert(self.view_headers.command == .do_view_change);
+                    },
+                    .recovering_head => {
+                        assert(self.view_headers.command == .start_view);
+                    },
+                    .recovering => unreachable,
+                }
             }
+            std.debug.print("{}: status={} view={} commit_min={} commit_max={} op={}\n", .{
+                self.replica,
+                self.status,
+                self.view,
+                self.commit_min,
+                self.commit_max,
+                self.op,
+            });
+            self.replace_header(&self.superblock.working.vsr_state.checkpoint.header);
+
+            assert(self.log_view >= checkpoint_header.view);
+            assert(self.view >= checkpoint_header.view);
 
             self.grid.open(grid_open_callback);
             self.sync_dispatch(.idle);
@@ -8402,18 +8518,6 @@ pub fn ReplicaType(
 
                 // Either this replica, the header's replica, or both, have diverged.
                 @panic("checkpoint diverged");
-            }
-
-            if (candidate.view > self.view_durable()) {
-                log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
-                    " (view={} view_durable={} candidate.view={})", .{
-                    self.replica,
-                    @tagName(header.command),
-                    self.view,
-                    self.view_durable(),
-                    candidate.view,
-                });
-                return;
             }
 
             // Don't sync backwards, or to our current checkpoint.

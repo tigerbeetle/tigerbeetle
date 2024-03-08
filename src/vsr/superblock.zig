@@ -908,6 +908,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
+            log_view: u32,
+            view: u32,
+            headers: *const vsr.Headers.ViewChangeArray,
         };
 
         pub fn sync(
@@ -934,6 +937,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
+            vsr_state.commit_max = update.commit_max;
+            vsr_state.log_view = update.log_view;
+            vsr_state.view = update.view;
 
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 
@@ -942,6 +948,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .sync,
                 .vsr_state = vsr_state,
+                .vsr_headers = update.headers.*,
             };
             superblock.log_context(context);
             superblock.acquire(context);
@@ -1450,7 +1457,7 @@ pub const Caller = enum {
             .open => unreachable,
             .checkpoint => false,
             .view_change => true,
-            .sync => false,
+            .sync => true,
         };
     }
 };
