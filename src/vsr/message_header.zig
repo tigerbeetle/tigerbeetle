@@ -1184,6 +1184,7 @@ pub const Header = extern struct {
         pub const Reason = enum(u8) {
             reserved = 0,
             no_session = 1,
+            release_too_low = 2,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
