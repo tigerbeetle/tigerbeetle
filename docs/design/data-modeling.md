@@ -4,12 +4,13 @@ sidebar_position: 1
 
 # Data Modeling
 
-TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md)
-and [`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
+TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md) and
+[`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
 design, it provides excellent performance, integrated business logic, and powerful invariants.
 
-This section is a sample of techniques for mapping your application's requirements onto TigerBeetle's
-data model. Which (if any) of these techniques are suitable is highly application-specific.
+This section is a sample of techniques for mapping your application's requirements onto
+TigerBeetle's data model. Which (if any) of these techniques are suitable is highly
+application-specific.
 
 When possible, round trips and coordination can be minimized by encoding application invariants
 directly in TigerBeetle rather than implementing them in the application itself (or with a foreign
@@ -17,9 +18,9 @@ database). This is useful for both maintaining consistency and performance.
 
 ## Debits vs Credits
 
-TigerBeetle tracks each account's cumulative posted debits and cumulative posted credits.
-In double-entry accounting, an account balance is the difference between the two — computed as
-either `debits - credits` or `credits - debits` depending on the type of account. It is up to the
+TigerBeetle tracks each account's cumulative posted debits and cumulative posted credits. In
+double-entry accounting, an account balance is the difference between the two — computed as either
+`debits - credits` or `credits - debits` depending on the type of account. It is up to the
 application to compute the balance from the cumulative debits/credits.
 
 From the database's perspective the distinction is arbitrary, but accounting conventions recommend
@@ -52,8 +53,8 @@ to ensure that the balance cannot go negative.
 
 ### Example
 
-For example, if TigerBeetle is operated by a bank, with customers Alice and Bob, its
-ledger might look something like this:
+For example, if TigerBeetle is operated by a bank, with customers Alice and Bob, its ledger might
+look something like this:
 
 | Account Owner | Debits Posted | Credits Posted | Flags                            |
 | :------------ | ------------: | -------------: | :------------------------------- |
@@ -105,9 +106,9 @@ The 128-bit representation defines the precision, but not the scale.
 
 ## `user_data`
 
-`user_data_128`, `user_data_64` and `user_data_32` are the most flexible fields in the schema (for both
-[accounts](../reference/accounts.md) and [transfers](../reference/transfers.md)).
-Each `user_data` field's contents are arbitrary, interpreted only by the application.
+`user_data_128`, `user_data_64` and `user_data_32` are the most flexible fields in the schema (for
+both [accounts](../reference/accounts.md) and [transfers](../reference/transfers.md)). Each
+`user_data` field's contents are arbitrary, interpreted only by the application.
 
 Each `user_data` field is indexed for efficient point and range queries.
 
@@ -139,9 +140,9 @@ exchange](../recipes/currency-exchange.md).
 The `id` field uniquely identifies each [`Account`](../reference/accounts.md#id) and
 [`Transfer`](../reference/transfers.md#id) within the cluster.
 
-The primary purpose of an `id` is to serve as an "idempotency key" — to avoid
-executing an event twice. For example, if a client creates a transfer but the server's reply is
-lost, the client (or application) will retry — the database must not transfer the money twice.
+The primary purpose of an `id` is to serve as an "idempotency key" — to avoid executing an event
+twice. For example, if a client creates a transfer but the server's reply is lost, the client (or
+application) will retry — the database must not transfer the money twice.
 
 Note that `id`s are unique per cluster -- not per ledger. You should attach a separate identifier in
 the [`user_data`](#user_data) field if you want to store a connection between multiple `Account`s or
@@ -153,18 +154,18 @@ exchange](../recipes/currency-exchange.md).
 
 When selecting an `id` scheme:
 
-- Idempotency is particularly important (and difficult) in the context of
-  [application crash recovery](./consistency.md#consistency-with-foreign-databases).
+- Idempotency is particularly important (and difficult) in the context of [application crash
+  recovery](./consistency.md#consistency-with-foreign-databases).
 - Be careful to [avoid `id` collisions](https://en.wikipedia.org/wiki/Birthday_problem).
-- An account and a transfer may share the same `id` (they belong to different "namespaces"),
-  but this is not recommended because other systems (that you may later connect to TigerBeetle)
-  may use a single "namespace" for all objects.
-- Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in SQL).
-  A central oracle may become a performance bottleneck when creating accounts/transfers.
+- An account and a transfer may share the same `id` (they belong to different "namespaces"), but
+  this is not recommended because other systems (that you may later connect to TigerBeetle) may use
+  a single "namespace" for all objects.
+- Avoid requiring a central oracle to generate each unique `id` (e.g. an auto-increment field in
+  SQL). A central oracle may become a performance bottleneck when creating accounts/transfers.
 - Sequences of identifiers with long runs of strictly increasing (or strictly decreasing) values are
   amenable to optimization, leading to higher database throughput.
-- Random identifiers are not recommended – they can't take advantage of all of the LSM's optimizations.
-  (Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
+- Random identifiers are not recommended – they can't take advantage of all of the LSM's
+  optimizations. (Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
 
 ### Time-Based Identifiers (Recommended)
 
@@ -194,8 +195,8 @@ See also: [ULID specification](https://github.com/ulid/spec).
 
 ### Reuse Foreign Identifier
 
-This technique is most appropriate when integrating TigerBeetle with an existing application
-where TigerBeetle accounts or transfers map one-to-one with an entity in the foreign database.
+This technique is most appropriate when integrating TigerBeetle with an existing application where
+TigerBeetle accounts or transfers map one-to-one with an entity in the foreign database.
 
 Set `id` to a "foreign key" — that is, reuse an identifier of a corresponding object from another
 database. For example, if every user (within the application's database) has a single account, then
