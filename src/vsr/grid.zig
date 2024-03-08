@@ -669,6 +669,7 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             const header = schema.header_from_block(block.*);
             assert(header.cluster == grid.superblock.working.cluster);
+            assert(header.release <= grid.superblock.working.vsr_state.checkpoint.release);
 
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);

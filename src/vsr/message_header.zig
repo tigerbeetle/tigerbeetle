@@ -1242,7 +1242,8 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         view: u32 = 0, // Always 0.
         protocol: u16 = vsr.Version,
-        release: u16 = 0,
+        /// The release that generated this block.
+        release: u16,
         command: Command,
         replica: u8 = 0, // Always 0.
         reserved_frame: [14]u8 = [_]u8{0} ** 14,
@@ -1261,7 +1262,7 @@ pub const Header = extern struct {
             if (self.size > constants.block_size) return "size > block_size";
             if (self.size == @sizeOf(Header)) return "size = @sizeOf(Header)";
             if (self.view != 0) return "view != 0";
-            if (self.release != 0) return "release != 0";
+            if (self.release == 0) return "release == 0";
             if (self.replica != 0) return "replica != 0";
             if (self.address == 0) return "address == 0"; // address ≠ 0
             if (!self.block_type.valid()) return "block_type invalid";

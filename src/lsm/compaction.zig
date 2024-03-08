@@ -816,8 +816,11 @@ pub fn CompactionType(
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.data_block_empty()))
             {
+                const release =
+                    compaction.context.grid.superblock.working.vsr_state.checkpoint.release;
                 table_builder.data_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
+                    .release = release,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                     .tree_id = compaction.tree_config.id,
@@ -830,8 +833,11 @@ pub fn CompactionType(
                 // If the input is exhausted then we need to flush all blocks before finishing.
                 (input_exhausted and !table_builder.index_block_empty()))
             {
+                const release =
+                    compaction.context.grid.superblock.working.vsr_state.checkpoint.release;
                 const table = table_builder.index_block_finish(.{
                     .cluster = compaction.context.grid.superblock.working.cluster,
+                    .release = release,
                     .address = compaction.context.grid.acquire(compaction.grid_reservation.?),
                     .snapshot_min = snapshot_min_for_table_output(compaction.context.op_min),
                     .tree_id = compaction.tree_config.id,
