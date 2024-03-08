@@ -118,6 +118,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
                 .manifest_block_count = 0,
                 .commit_min = 0,
                 .storage_size = data_file_size_min,
+                .release = 1,
             },
             .commit_max = 0,
             .sync_op_min = 0,
@@ -280,6 +281,7 @@ const Environment = struct {
         env.pending.insert(.format);
         env.superblock.format(format_callback, &env.context_format, .{
             .cluster = cluster,
+            .release = 1,
             .replica = replica,
             .replica_count = replica_count,
         });
@@ -292,6 +294,7 @@ const Environment = struct {
         try env.sequence_states.append(.{
             .vsr_state = VSRState.root(.{
                 .cluster = cluster,
+                .release = 1,
                 .replica_id = env.members[replica],
                 .members = env.members,
                 .replica_count = replica_count,
@@ -404,6 +407,7 @@ const Environment = struct {
                 .storage_size = data_file_size_min,
                 .snapshots_block_checksum = 0,
                 .snapshots_block_address = 0,
+                .release = 1,
             },
             .commit_max = vsr_state_old.commit_max + 1,
             .sync_op_min = 0,

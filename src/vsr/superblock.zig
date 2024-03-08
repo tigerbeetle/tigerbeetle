@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3396]u8 = [_]u8{0} ** 3396,
+    reserved: [3380]u8 = [_]u8{0} ** 3380,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -143,7 +143,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
-            assert(@sizeOf(VSRState) == 592);
+            assert(@sizeOf(VSRState) == 608);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -153,6 +153,7 @@ pub const SuperBlockHeader = extern struct {
             replica_id: u128,
             members: vsr.Members,
             replica_count: u8,
+            release: u16,
         }) VSRState {
             return .{
                 .checkpoint = .{
@@ -176,6 +177,7 @@ pub const SuperBlockHeader = extern struct {
                     .snapshots_block_checksum = 0,
                     .snapshots_block_address = 0,
                     .storage_size = data_file_size_min,
+                    .release = options.release,
                 },
                 .replica_id = options.replica_id,
                 .members = options.members,
@@ -354,11 +356,13 @@ pub const SuperBlockHeader = extern struct {
         /// The number of manifest blocks in the manifest log.
         manifest_block_count: u32,
 
+        release: u16,
+
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [4]u8 = [_]u8{0} ** 4,
+        reserved: [18]u8 = [_]u8{0} ** 18,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 336);
+            assert(@sizeOf(CheckpointState) == 352);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
             assert(stdx.no_padding(CheckpointState));
         }
@@ -681,6 +685,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const FormatOptions = struct {
             cluster: u128,
+            release: u16,
             replica: u8,
             replica_count: u8,
         };
@@ -694,6 +699,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
             assert(superblock.replica_index == null);
 
+            assert(options.release > 0);
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
@@ -733,6 +739,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .storage_size = 0,
                         .snapshots_block_checksum = 0,
                         .snapshots_block_address = 0,
+                        .release = 0,
                     },
                     .replica_id = replica_id,
                     .members = members,
@@ -757,6 +764,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .caller = .format,
                 .vsr_state = SuperBlockHeader.VSRState.root(.{
                     .cluster = options.cluster,
+                    .release = options.release,
                     .replica_id = replica_id,
                     .members = members,
                     .replica_count = options.replica_count,
@@ -845,6 +853,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .storage_size = update.storage_size,
                 .snapshots_block_checksum = vsr_state_staging.checkpoint.snapshots_block_checksum,
                 .snapshots_block_address = vsr_state_staging.checkpoint.snapshots_block_address,
+                .release = vsr_state_staging.checkpoint.release,
             };
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
@@ -1183,6 +1192,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     "{[replica]?}: " ++
                         "{[caller]s}: installed working superblock: checksum={[checksum]x:0>32} " ++
                         "sequence={[sequence]} " ++
+                        "release={[release]} " ++
                         "cluster={[cluster]x:0>32} replica_id={[replica_id]} " ++
                         "size={[size]} free_set_size={[free_set_size]} " ++
                         "client_sessions_size={[client_sessions_size]} " ++
@@ -1201,6 +1211,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .caller = @tagName(context.caller),
                         .checksum = superblock.working.checksum,
                         .sequence = superblock.working.sequence,
+                        .release = superblock.working.vsr_state.checkpoint.release,
                         .cluster = superblock.working.cluster,
                         .replica_id = superblock.working.vsr_state.replica_id,
                         .size = superblock.working.vsr_state.checkpoint.storage_size,

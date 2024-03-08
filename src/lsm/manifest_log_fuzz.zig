@@ -370,6 +370,7 @@ const Environment = struct {
         env.pending += 1;
         env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
             .cluster = 0,
+            .release = 1,
             .replica = 0,
             .replica_count = 6,
         });

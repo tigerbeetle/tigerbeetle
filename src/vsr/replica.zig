@@ -3719,6 +3719,8 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.writes.available() > 0);
+            assert(self.superblock.working.vsr_state.checkpoint.release ==
+                self.release);
             assert(prepare.header.command == .prepare);
             assert(prepare.header.operation != .root);
             assert(prepare.header.operation != .reserved);

@@ -206,6 +206,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.init, .superblock_format);
             env.superblock.format(superblock_format_callback, &env.superblock_context, .{
                 .cluster = cluster,
+                .release = 1,
                 .replica = replica,
                 .replica_count = replica_count,
             });

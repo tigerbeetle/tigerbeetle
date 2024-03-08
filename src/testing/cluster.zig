@@ -267,6 +267,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     allocator,
                     .{
                         .cluster = options.cluster_id,
+                        .release = 1, // TODO Use real release number.
                         // TODO(zig) It should be possible to remove the `@as(u8,...)`.
                         .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
