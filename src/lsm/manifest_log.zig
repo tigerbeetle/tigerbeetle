@@ -895,6 +895,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
                 .snapshot = 0, // TODO(snapshots): Set this properly; it is useful for debugging.
                 .size = undefined,
                 .command = .block,
+                .release = manifest_log.superblock.working.vsr_state.checkpoint.release,
                 .metadata_bytes = undefined, // Set by close_block().
                 .block_type = .manifest,
             };
