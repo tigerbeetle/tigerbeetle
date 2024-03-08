@@ -629,6 +629,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     "{[journal_faulty]:>2}/{[journal_dirty]:_>2}J! " ++
                     "{[wal_op_min]:>3}:{[wal_op_max]:_>3}Wo " ++
                     "<{[sync_op_min]:_>3}:{[sync_op_max]:_>3}> " ++
+                    "v{[release]}:{[release_max]} " ++
                     "{[grid_blocks_acquired]?:>5}Ga " ++
                     "{[grid_blocks_global]:>2}G! " ++
                     "{[grid_blocks_repair]:>3}G?", .{
@@ -644,6 +645,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .wal_op_max = wal_op_max,
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
+                    .release = replica.release,
+                    .release_max = replica.releases_bundled.get(0),
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else
