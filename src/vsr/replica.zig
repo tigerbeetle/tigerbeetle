@@ -3831,7 +3831,7 @@ pub fn ReplicaType(
                 .cluster = prepare.header.cluster,
                 .replica = prepare.header.replica,
                 .view = prepare.header.view,
-                .release = self.release,
+                .release = prepare.header.release,
                 .op = prepare.header.op,
                 .timestamp = prepare.header.timestamp,
                 .commit = prepare.header.op,
