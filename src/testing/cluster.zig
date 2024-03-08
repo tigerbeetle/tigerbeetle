@@ -448,6 +448,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const message = request_message.build(.request);
 
             message.header.* = .{
+                .release = 1, // TODO Use the real release number.
                 .client = client.id,
                 .request = undefined, // Set by client.raw_request.
                 .cluster = client.cluster,
