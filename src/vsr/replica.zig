@@ -2589,8 +2589,12 @@ pub fn ReplicaType(
         fn on_ping_timeout(self: *Self) void {
             self.ping_timeout.reset();
 
-            var ping = Header.Ping{
+            const message = self.message_bus.pool.get_message(.ping);
+            defer self.message_bus.unref(message);
+
+            message.header.* = Header.Ping{
                 .command = .ping,
+                .size = @intCast(@sizeOf(Header) + @sizeOf(u16) * self.releases_bundled.count()),
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view_durable(), // Don't drop pings while the view is being updated.
@@ -2598,10 +2602,17 @@ pub fn ReplicaType(
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic(),
+                .release_count = @intCast(self.releases_bundled.count()),
             };
-            assert(ping.view <= self.view);
 
-            self.send_header_to_other_replicas_and_standbys(ping.frame_const().*);
+            const ping_versions = std.mem.bytesAsSlice(u16, message.body());
+            stdx.copy_disjoint(.exact, u16, ping_versions, self.releases_bundled.const_slice());
+            message.header.set_checksum_body(message.body());
+            message.header.set_checksum();
+
+            assert(message.header.view <= self.view);
+
+            self.send_message_to_other_replicas_and_standbys(message.base());
         }
 
         fn on_prepare_timeout(self: *Self) void {
@@ -6612,6 +6623,15 @@ pub fn ReplicaType(
             assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
 
             self.send_message_to_other_replicas_base(message.base());
+        }
+
+        fn send_message_to_other_replicas_and_standbys(self: *Self, message: *Message) void {
+            var replica: u8 = 0;
+            while (replica < self.node_count) : (replica += 1) {
+                if (replica != self.replica) {
+                    self.send_message_to_replica_base(replica, message);
+                }
+            }
         }
 
         fn send_message_to_other_replicas_base(self: *Self, message: *Message) void {
