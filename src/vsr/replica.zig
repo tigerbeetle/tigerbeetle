@@ -274,6 +274,17 @@ pub fn ReplicaType(
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
 
+        /// The latest release list from every other replica. (Constructed from pings.)
+        ///
+        /// Invariants:
+        /// - upgrade_targets[self.replica] = null
+        /// - upgrade_targets[*].releases > release
+        upgrade_targets: [constants.replicas_max]?struct {
+            checkpoint: u64,
+            timestamp: u64,
+            releases: vsr.ReleaseList,
+        } = .{null} ** constants.replicas_max,
+
         /// The current view.
         /// Initialized from the superblock's VSRState.
         ///
@@ -1314,6 +1325,30 @@ pub fn ReplicaType(
                 .ping_timestamp_monotonic = message.header.ping_timestamp_monotonic,
                 .pong_timestamp_wall = @bitCast(self.clock.realtime()),
             }));
+
+            if (message.header.replica < self.replica_count) {
+                const upgrade_targets = &self.upgrade_targets[message.header.replica];
+                if (upgrade_targets.* == null or
+                    upgrade_targets.*.?.timestamp > message.header.ping_timestamp_monotonic)
+                {
+                    upgrade_targets.* = .{
+                        .checkpoint = message.header.checkpoint_op,
+                        .timestamp = message.header.ping_timestamp_monotonic,
+                        .releases = .{},
+                    };
+
+                    const releases = std.mem.bytesAsSlice(u16, message.body());
+                    assert(releases.len == message.header.release_count);
+                    for (releases, 0..) |release, i| {
+                        if (i > 0) {
+                            assert(release < releases[i - 1]);
+                        }
+                        if (release > self.release) {
+                            upgrade_targets.*.?.releases.append_assume_capacity(release);
+                        }
+                    }
+                }
+            }
         }
 
         fn on_pong(self: *Self, message: *const Message.Pong) void {
