@@ -111,13 +111,28 @@ Each `user_data` field's contents are arbitrary, interpreted only by the applica
 
 Each `user_data` field is indexed for efficient point and range queries.
 
-Example uses:
+While the usage of each field is entirely up to you, one way of thinking about each of the fields
+is:
 
-- Set `user_data_128` or `user_data_64` to a "foreign key" — that is, the identifier of a corresponding object within
-  a [control plane](https://en.wikipedia.org/wiki/Control_plane) database.
-- Set `user_data_64` to an external timestamp if you need to model [bitemporality](https://en.wikipedia.org/wiki/Bitemporal_modeling).
-- Set `user_data_32` to the identifier of a timezone or locale where the event originated.
-- Set `user_data_128`, `user_data_64` or `user_data_32` to a group identifier for objects that will be queried together.
+- `user_data_128` - this might store the "who" and/or "what" of a transfer. For example, it could be
+  a pointer to a business entity stored within the [control
+  plane](https://en.wikipedia.org/wiki/Control_plane) database.
+- `user_data_64` - this might store a second timestamp for "when" the transaction originated in the
+  real world, rather than when the transfer was [timestamped by
+  TigerBeetle](./time.md#why-tigerbeetle-manages-timestamps). This can be used if you need to model
+  [bitemporality](https://en.wikipedia.org/wiki/Bitemporal_modeling). Alternatively, if you do not
+  need this to be used for a timestamp, you could use this field in place of the `user_data_128` to
+  store the "who"/"what".
+- `user_data_32` - this might store the "where" of a transfer. For example, it could store the
+  jurisdiction where the transaction originated in the real world. In certain cases, such as for
+  cross-border remittances, it might not be enough to have the UTC timestamp and you may want to
+  know the transfer's locale.
+
+(Note that the [`code`](#code) can be used to encode the "why" of a transfer.)
+
+Any of the `user_data` fields can be used as a group identifier for objects that will be queried
+together. For example, for multiple transfers used for [currency
+exchange](../recipes/currency-exchange.md).
 
 ## `id`
 
@@ -262,15 +277,13 @@ currencies, each of your customers would have multiple ledgers.
 
 ## `code`
 
-[`Account`s](../reference/accounts.md#code) and [`Transfer`s](../reference/transfers.md#code) both
-have a `code` field. While they have slightly different meanings, both can be used to represent
-different types of `Account`s and `Transfer`s within your system.
+The `code` identifier represents the "why" for an Account or Transfer.
 
-The `code` on an `Account` can be used to indicate the type, such as assets, liabilities, equity,
-income, or expenses, and subcategories within those classifications.
+On an [`Account`](../reference/accounts.md#code), the `code` indicates the account type, such as
+assets, liabilities, equity, income, or expenses, and subcategories within those classification.
 
-The `code` on a `Transfer` can be used to indicate the reason why a given transfer is happening,
-such as a purchase, refund, currency exchange, etc.
+On a [`Transfer`](../reference/transfers.md#code), the `code` indicates why a given transfer is
+happening, such as a purchase, refund, currency exchange, etc.
 
 When you start building out your application on top of TigerBeetle, you may find it helpful to list
 out all of the known types of accounts and movements of funds and mapping each of these to `code`
