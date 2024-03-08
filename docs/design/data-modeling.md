@@ -152,17 +152,20 @@ When selecting an `id` scheme:
 ### Examples (Recommended)
 #### Time-Based Identifiers
 
-A time-based identifier (such as ULID or UUIDv7) are recommended for most applications.
+A time-based identifier (such as ULID or UUIDv7) is recommended for most applications.
+
+TigerBeetle clients include an `id()` function to generate IDs using these recommendations.
 
 A ULID ("Universally Unique Lexicographically Sortable identifier") consists of:
 
 - 48 bits of (millisecond) timestamp (high-order bits)
 - 80 bits of randomness (low-order bits)
 
-**Important**: When creating multiple objects during the same millisecond, increment the random bytes
-(instead of generating new random bytes). Make sure to also store random bytes first, timestamp bytes 
-second, and both in little-endian. These details ensure that a sequence of objects have strictly 
-increasing ids according to the server. (Such ids are amenable to LSM optimizations, 
+**Important**: If you generate IDs yourself instead of using the `id()` function provided by the
+client libraries, **increment the random bytes** when creating multiple objects during the same
+millisecond (instead of generating new random bytes). Make sure to also store random bytes first,
+timestamp bytes second, and both in little-endian. These details ensure that a sequence of objects
+have strictly increasing ids according to the server. (Such ids are amenable to LSM optimizations,
 leading to higher database throughput).
 
 - ULIDs have an insignificant risk of collision.
