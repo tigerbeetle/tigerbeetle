@@ -356,6 +356,10 @@ pub const SuperBlockHeader = extern struct {
         /// The number of manifest blocks in the manifest log.
         manifest_block_count: u32,
 
+        /// All prepares between `CheckpointState.commit_min` (i.e. `op_checkpoint`) and
+        /// `trigger_for_checkpoint(checkpoint_after(commit_min))` must be executed by this release.
+        /// (Prepares with `operation=upgrade` are the exception – upgrades in the last
+        /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
         release: u16,
 
         // TODO Reserve some more extra space before locking in storage layout.
