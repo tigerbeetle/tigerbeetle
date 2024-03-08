@@ -22,17 +22,33 @@ In double-entry accounting, an account balance is the difference between the two
 either `debits - credits` or `credits - debits` depending on the type of account. It is up to the
 application to compute the balance from the cumulative debits/credits.
 
-From the database's perspective the distinction is arbitrary, but by convention:
+From the database's perspective the distinction is arbitrary, but accounting conventions recommend
+using a certain balance type for certain types of accounts.
 
-  - `balance = debits - credits` for accounts representing the database operator's assets.
-    - Known as a "debit balance".
-    - Accounts with limits use
-      [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits).
-  - `balance = credits - debits` for accounts representing the database operator's liabilities.
-    - Known as a "credit balance".
-    - Accounts with limits use
-      [`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
-  - A transfer "from" account `A` "to" account `B` credits account `A` and debits account `B`.
+### Debit Balances
+
+`balance = debits - credits`
+
+By convention, debit balances are used to represent:
+- Operator's Assets
+- Operator's Expenses
+
+To limit the balance for this type of account, use
+[`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits).
+
+### Credit Balances
+
+`balance = credits - debits`
+
+By convention, credit balances are used to represent:
+- Operators's Liabilities
+- Equity in the Operator's Business
+- Operator's Income
+
+To limit the balance for this type of account, use
+[`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
+For example, a customer account that is represented as an Operator's Liability would use this flag
+to ensure that the balance cannot go negative.
 
 ### Example
 
@@ -49,6 +65,8 @@ ledger might look something like this:
 - Alice and Bob have deposited money ($20 and $10 respectively) in the bank — from the bank's
   perspective this is a liability.
 - Alice and Bob cannot "overdraw" their account — that is, their balance will never be negative.
+- A transfer from Alice to Bob would debit Alice's account and credit Bob's (decreasing the bank's
+  liability to Alice while increasing the bank's liability to Bob).
 
 ## Fractional Amounts and Asset Scale
 
