@@ -165,9 +165,6 @@
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
               <exclude>com/tigerbeetle/AccountFilterFlags.class</exclude>
-
-              <!-- Excluding the benchmark -->
-              <exclude>benchmark/Benchmark.class</exclude>
             </excludes>
           </configuration>
         </plugin>
