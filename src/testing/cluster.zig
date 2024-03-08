@@ -429,6 +429,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     // TODO Use "real" release numbers.
                     .release = 1,
                     .release_client_min = 1,
+                    .releases_bundled = vsr.ReleaseList.from_slice(&[_]u16{1}) catch unreachable,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
