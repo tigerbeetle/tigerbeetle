@@ -163,9 +163,10 @@ When selecting an `id` scheme:
   A central oracle may become a performance bottleneck when creating accounts/transfers.
 - Sequences of identifiers with long runs of strictly increasing (or strictly decreasing) values are
   amenable to optimization, leading to higher database throughput.
+- Random identifiers are not recommended – they can't take advantage of all of the LSM's optimizations.
+  (Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
 
-### Examples (Recommended)
-#### Time-Based Identifiers
+### Time-Based Identifiers (Recommended)
 
 A time-based identifier (such as ULID or UUIDv7) is recommended for most applications.
 
@@ -191,7 +192,7 @@ cryptography library).
 
 See also: [ULID specification](https://github.com/ulid/spec).
 
-#### Reuse Foreign Identifier
+### Reuse Foreign Identifier
 
 This technique is most appropriate when integrating TigerBeetle with an existing application
 where TigerBeetle accounts or transfers map one-to-one with an entity in the foreign database.
@@ -202,64 +203,6 @@ the identifier within the foreign database can be used as the `Account.id` withi
 
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 [constraints](../reference/accounts.md#id).
-
-### Examples (Advanced)
-
-[Time-based identifiers](#time-based-identifiers) are recommended for most applications.
-
-`id` is mostly accessed by point queries, but it is indexed for efficient iteration by range
-queries as well. The schemes described in this section take advantage of that index ordering.
-
-#### Logically Grouped Objects
-
-Often accounts or transfers are logically grouped together from the application's perspective.
-For example, a [simple currency exchange](../recipes/currency-exchange.md) transaction is one
-logical transfer conducted between four accounts — two physical transfers.
-
-A non-random identifier scheme can:
-
-  - leave `user_data` free for a different purpose, and
-  - allow a group's members and roles to be derived by the application code,
-
-without relying on a [foreign database](#reuse-foreign-identifier) to store metadata for each
-member of the group.
-
-A group may (but does not necessarily) correspond to objects chained by
-[`flags.linked`](../reference/transfers.md#flagslinked).
-
-##### Identifier Offsets
-
-For each group, generate a single "root" `id`, and set group member's `id`s relative to that root.
-
-- From the root, use known offsets to derive member identifiers (e.g. `root + 1`).
-- From a group member, use `code`, `ledger`, or both to determine the object's role and derive the
-  root identifier.
-
-This technique enables a simple range query to iterate every member of a target group.
-
-If groups are large (or variable-sized), it may be be preferable to rely on
-[`user_data` for grouping](#user_data) to sidestep the risk of `id` collisions.
-
-##### Identifier Prefixes
-
-When a group consists of a fixed number of heterogeneous members (each with a distinct role),
-`id`s with the same role could be created with a common, application-known prefix.
-In this arrangement, the suffix could be randomized, but shared by a group's members.
-
-- A group's role is derived from its `id`'s prefix.
-- A group's members are derived by swapping the `id` prefix.
-
-This technique enables a simple range query to iterate every object
-with a target role. While you can't yet do prefix queries within
-TigerBeetle, you could do a prefix query in an external database to
-resolve `id`s and pass the resolved `id`s into TigerBeetle.
-
-#### Random Identifier
-
-Random identifiers are not recommended – they can't take advantage of all of the LSM's optimizations.
-
-For maximum throughput, use [time-based identifiers](#time-based-identifiers) instead.
-(Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
 
 ## `ledger`
 
