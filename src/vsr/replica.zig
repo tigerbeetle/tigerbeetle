@@ -4373,6 +4373,17 @@ pub fn ReplicaType(
                 return true;
             }
 
+            if (message.header.release > self.release) {
+                log.warn("{}: on_request: ignoring invalid version (client={} version={}>{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release,
+                });
+                self.send_eviction_message_to_client(message.header.client, .release_too_high);
+                return true;
+            }
+
             if (!message.header.operation.valid(StateMachine)) {
                 // Some possible causes:
                 // - client bug

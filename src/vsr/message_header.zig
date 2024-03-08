@@ -1185,6 +1185,7 @@ pub const Header = extern struct {
             reserved = 0,
             no_session = 1,
             release_too_low = 2,
+            release_too_high = 3,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
