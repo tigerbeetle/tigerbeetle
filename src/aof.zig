@@ -349,7 +349,7 @@ pub const AOFReplayClient = struct {
             if (header.operation.vsr_reserved()) continue;
 
             const message = self.client.get_message().build(.request);
-            errdefer self.client.release(message.base());
+            errdefer self.client.release_message(message.base());
 
             assert(self.inflight_message == null);
             self.inflight_message = message;
@@ -367,6 +367,7 @@ pub const AOFReplayClient = struct {
                 .parent = 0,
                 .session = 0,
                 .request = 0,
+                .release = 1, // TODO Use the real release number.
             };
 
             self.client.raw_request(@intFromPtr(self), AOFReplayClient.replay_callback, message);
@@ -612,6 +613,7 @@ test "aof write / read" {
         .cluster = 0,
         .timestamp = 0,
         .checkpoint_id = 0,
+        .release = 1, // TODO Use the real release number.
         .command = .prepare,
         .operation = @enumFromInt(4),
         .size = @intCast(@sizeOf(Header) + demo_payload.len),

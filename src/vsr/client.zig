@@ -140,6 +140,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// The number of replicas in the cluster.
         replica_count: u8,
 
+        /// Only tests should ever override the release.
+        release: u16 = 1, // TODO Use real release number.
+
         /// The total number of ticks elapsed since the client was initialized.
         ticks: u64 = 0,
 
@@ -245,7 +248,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             while (self.request_queue.pop()) |inflight| {
-                self.release(inflight.message.base());
+                self.release_message(inflight.message.base());
             }
             assert(self.messages_available == constants.client_request_queue_max);
             self.demux_pool.deinit(allocator);
@@ -364,7 +367,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             // Unable to batch the events to an existing Message so reserve a new one.
             if (self.messages_available == 0) return error.TooManyOutstanding;
             const message = self.get_message();
-            errdefer self.release(message);
+            errdefer self.release_message(message);
 
             // We will set parent, session, view and checksums only when sending for the first time:
             const message_request = message.build(.request);
@@ -373,6 +376,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .request = undefined,
                 .cluster = self.cluster,
                 .command = .request,
+                .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + body_size),
             };
@@ -501,7 +505,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Acquires a message from the message bus.
         /// The caller must ensure that a message is available.
         ///
-        /// Either use it in `client.raw_request()` or discard via `client.release()`,
+        /// Either use it in `client.raw_request()` or discard via `client.release_message()`,
         /// the reference is not guaranteed to be valid after both actions.
         /// Do NOT use the reference counter function `message.ref()` for storing the message.
         pub fn get_message(self: *Self) *Message {
@@ -512,7 +516,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         /// Releases a message back to the message bus.
-        pub fn release(self: *Self, message: *Message) void {
+        pub fn release_message(self: *Self, message: *Message) void {
             assert(self.messages_available < constants.client_request_queue_max);
             self.messages_available += 1;
 
@@ -542,9 +546,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(eviction.header.client == self.id);
             assert(eviction.header.view >= self.view);
 
-            log.err("{}: session evicted: reason={s}", .{
+            log.err("{}: session evicted: reason={s} (cluster_release={})", .{
                 self.id,
                 @tagName(eviction.header.reason),
+                eviction.header.release,
             });
             @panic("session evicted");
         }
@@ -572,6 +577,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(reply.header.valid_checksum());
             assert(reply.header.valid_checksum_body(reply.body()));
             assert(reply.header.command == .reply);
+            assert(reply.header.release == self.release);
 
             if (reply.header.client != self.id) {
                 log.debug("{}: on_reply: ignoring (wrong client={})", .{
@@ -606,7 +612,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Eagerly release request message, to ensure that user's callback can submit a new
             // request.
-            self.release(inflight.message.base());
+            self.release_message(inflight.message.base());
             assert(self.messages_available > 0);
 
             // Even though we release our reference to the message, we might have another one
@@ -698,6 +704,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             const ping = Header.PingClient{
                 .command = .ping_client,
                 .cluster = self.cluster,
+                .release = self.release,
                 .client = self.id,
             };
 
@@ -759,7 +766,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             };
 
             const message = self.get_message().build(.request);
-            errdefer self.release(message);
+            errdefer self.release_message(message);
 
             // We will set parent, session, view and checksums only when sending for the first time:
             message.header.* = .{
@@ -768,6 +775,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 .cluster = self.cluster,
                 .command = .request,
                 .operation = .register,
+                .release = self.release,
             };
 
             assert(self.request_number == 0);
@@ -1046,6 +1054,7 @@ test "Client Batching" {
                 .view = message.header.view,
                 .command = .reply,
                 .replica = message.header.replica,
+                .release = 1, // TODO Use the real release number.
                 .request_checksum = message.header.checksum,
                 .client = message.header.client,
                 .context = undefined, // computed below.

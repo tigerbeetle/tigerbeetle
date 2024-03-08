@@ -267,6 +267,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     allocator,
                     .{
                         .cluster = options.cluster_id,
+                        .release = 1, // TODO Use real release number.
                         // TODO(zig) It should be possible to remove the `@as(u8,...)`.
                         .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
@@ -425,6 +426,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .time = .{ .time = &cluster.replica_times[replica_index] },
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
+                    // TODO Use "real" release numbers.
+                    .release = 1,
+                    .release_client_min = 1,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
@@ -448,6 +452,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const message = request_message.build(.request);
 
             message.header.* = .{
+                .release = client.release,
                 .client = client.id,
                 .request = undefined, // Set by client.raw_request.
                 .cluster = client.cluster,

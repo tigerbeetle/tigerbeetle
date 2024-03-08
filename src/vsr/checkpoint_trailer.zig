@@ -400,6 +400,7 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
                 .snapshot = 0, // TODO(snapshots): Set this properly; it is useful for debugging.
                 .size = @sizeOf(vsr.Header) + chunk_size,
                 .command = .block,
+                .release = trailer.grid.?.superblock.working.vsr_state.checkpoint.release,
                 .block_type = trailer.trailer_type.block_type(),
             };
             trailer.size_transferred += chunk_size;

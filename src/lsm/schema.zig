@@ -47,6 +47,7 @@ pub inline fn header_from_block(block: BlockPtrConst) *const vsr.Header.Block {
     assert(header.size <= block.len);
     assert(header.block_type.valid());
     assert(header.block_type != .reserved);
+    assert(header.release > 0);
     return header;
 }
 
