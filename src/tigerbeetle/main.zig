@@ -58,6 +58,7 @@ pub fn main() !void {
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
+            .release = 1, // TODO Use real release number.
         }, args.path),
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
@@ -179,6 +180,9 @@ const Command = struct {
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
+            // TODO Use real release numbers.
+            .release = 1,
+            .release_client_min = 1,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,

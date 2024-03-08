@@ -238,6 +238,7 @@ test "format" {
 
     try format(Storage, allocator, .{
         .cluster = cluster,
+        .release = 1,
         .replica = replica,
         .replica_count = replica_count,
     }, &storage, &superblock);
