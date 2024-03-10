@@ -79,7 +79,7 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle format --cluster=<integer> --replica=<index> --replica-count=<integer> <path>
         \\
-        \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KB|MB|GB>] <path>
+        \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KiB|MiB|GiB>] <path>
         \\
         \\  tigerbeetle version [--verbose]
         \\
@@ -126,18 +126,18 @@ const CliArgs = union(enum) {
         \\        will be used.
         \\        "addresses[i]" corresponds to replica "i".
         \\
-        \\  --cache-grid=<size><KB|MB|GB>
+        \\  --cache-grid=<size><KiB|MiB|GiB>
         \\        Set the grid cache size. The grid cache acts like a page cache for TigerBeetle,
         \\        and should be set as large as possible.
         \\        On a machine running only TigerBeetle, this is somewhere around
-        \\        (Total RAM) - 3GB (TigerBeetle) - 1GB (System), eg 12GB for a 16GB machine.
-        \\        Defaults to {[default_cache_grid_gb]d}GB.
+        \\        (Total RAM) - 3GiB (TigerBeetle) - 1GiB (System), eg 12GiB for a 16GiB machine.
+        \\        Defaults to {[default_cache_grid_gb]d}GiB.
         \\
-        \\  --memory-lsm-manifest=<size><KB|MB|GB>
+        \\  --memory-lsm-manifest=<size><KiB|MiB|GiB>
         \\        Sets the amount of memory allocated for LSM-tree manifests. When the
         \\        number or size of LSM-trees would become too large for their manifests to fit
         \\        into memory the server will terminate.
-        \\        Defaults to {[default_memory_lsm_manifest_mb]d}MB.
+        \\        Defaults to {[default_memory_lsm_manifest_mb]d}MiB.
         \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.

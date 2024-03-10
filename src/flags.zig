@@ -307,10 +307,10 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     const units = .{
-        .{ &[_][]const u8{ "TiB", "tib", "TB", "tb" }, 1024 * 1024 * 1024 * 1024 },
-        .{ &[_][]const u8{ "GiB", "gib", "GB", "gb" }, 1024 * 1024 * 1024 },
-        .{ &[_][]const u8{ "MiB", "mib", "MB", "mb" }, 1024 * 1024 },
-        .{ &[_][]const u8{ "KiB", "kib", "KB", "kb" }, 1024 },
+        .{ &[_][]const u8{ "TiB", "tib", "TiB", "tb" }, 1024 * 1024 * 1024 * 1024 },
+        .{ &[_][]const u8{ "GiB", "gib", "GiB", "gb" }, 1024 * 1024 * 1024 },
+        .{ &[_][]const u8{ "MiB", "mib", "MiB", "mb" }, 1024 * 1024 },
+        .{ &[_][]const u8{ "KiB", "kib", "KiB", "kb" }, 1024 },
     };
 
     const unit: struct { suffix: []const u8, scale: u64 } = unit: inline for (units) |unit| {
@@ -359,20 +359,20 @@ test parse_value_size {
         .{ 140737488355328, "128TiB" },
         .{ 1 * tib, "1TiB" },
         .{ 10 * tib, "10tib" },
-        .{ 100 * tib, "100TB" },
-        .{ 1000 * tib, "1000tb" },
+        .{ 100 * tib, "100TiB" },
+        .{ 1000 * tib, "1000tib" },
         .{ 1 * gib, "1GiB" },
         .{ 10 * gib, "10gib" },
-        .{ 100 * gib, "100GB" },
-        .{ 1000 * gib, "1000gb" },
+        .{ 100 * gib, "100GiB" },
+        .{ 1000 * gib, "1000gib" },
         .{ 1 * mib, "1MiB" },
         .{ 10 * mib, "10mib" },
-        .{ 100 * mib, "100MB" },
+        .{ 100 * mib, "100MiB" },
         .{ 1000 * mib, "1000mb" },
         .{ 1 * kib, "1KiB" },
         .{ 10 * kib, "10kib" },
-        .{ 100 * kib, "100KB" },
-        .{ 1000 * kib, "1000kb" },
+        .{ 100 * kib, "100KiB" },
+        .{ 1000 * kib, "1000kib" },
     };
 
     inline for (cases) |case| {
