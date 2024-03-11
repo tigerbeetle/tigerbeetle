@@ -1,5 +1,47 @@
 # TigerBeetle Changelog
 
+## 2024-03-11
+
+### Safety And Performance
+
+- [#1663](https://github.com/tigerbeetle/tigerbeetle/pull/1663)
+
+  Fetching account history and transfers now has unit tests, helping detect and fix a reported bug
+  with posting and voiding transfers.
+
+### Internals
+
+- [#1648](https://github.com/tigerbeetle/tigerbeetle/pull/1648),
+  [#1665](https://github.com/tigerbeetle/tigerbeetle/pull/1665),
+  [#1654](https://github.com/tigerbeetle/tigerbeetle/pull/1654),
+  [#1651](https://github.com/tigerbeetle/tigerbeetle/pull/1651)
+
+  Testing and Timer logic was subject to some spring cleaning.
+
+### Features
+
+- [#1656](https://github.com/tigerbeetle/tigerbeetle/pull/1656),
+  [#1659](https://github.com/tigerbeetle/tigerbeetle/pull/1659),
+  [#1666](https://github.com/tigerbeetle/tigerbeetle/pull/1666),
+  [#1667](https://github.com/tigerbeetle/tigerbeetle/pull/1667)
+
+  VSR is prepping for an *upgrade* to soon support version detection.
+
+- [#1633](https://github.com/tigerbeetle/tigerbeetle/pull/1633),
+  [#1661](https://github.com/tigerbeetle/tigerbeetle/pull/1661),
+  [#1652](https://github.com/tigerbeetle/tigerbeetle/pull/1652),
+  [#1647](https://github.com/tigerbeetle/tigerbeetle/pull/1647),
+  [#1637](https://github.com/tigerbeetle/tigerbeetle/pull/1637),
+  [#1638](https://github.com/tigerbeetle/tigerbeetle/pull/1638),
+  [#1655](https://github.com/tigerbeetle/tigerbeetle/pull/1655)
+  
+  [Documentation](https://docs.tigerbeetle.com/) has received some very welcome organizational
+  and clarity changes. Go check them out!
+
+### TigerTracks 🎧
+
+- [Você Chegou](https://open.spotify.com/track/5Ns9a6JKX4sdUlaAh4SSGy)
+
 ## 2024-03-04
 
 ### Safety And Performance
