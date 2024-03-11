@@ -1336,7 +1336,8 @@ pub fn ReplicaType(
                         .releases = .{},
                     };
 
-                    const releases = std.mem.bytesAsSlice(u16, message.body());
+                    const releases_all = std.mem.bytesAsSlice(u16, message.body());
+                    const releases = releases_all[0..message.header.release_count];
                     assert(releases.len == message.header.release_count);
                     vsr.verify_release_list(releases);
                     for (releases) |release| {
@@ -2626,7 +2627,7 @@ pub fn ReplicaType(
 
             message.header.* = Header.Ping{
                 .command = .ping,
-                .size = @sizeOf(Header) + @sizeOf(u16) * self.releases_bundled.count_as(u16),
+                .size = @sizeOf(Header) + @sizeOf(u16) * constants.vsr_releases_max,
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view_durable(), // Don't drop pings while the view is being updated.
@@ -2638,7 +2639,8 @@ pub fn ReplicaType(
             };
 
             const ping_versions = std.mem.bytesAsSlice(u16, message.body());
-            stdx.copy_disjoint(.exact, u16, ping_versions, self.releases_bundled.const_slice());
+            stdx.copy_disjoint(.inexact, u16, ping_versions, self.releases_bundled.const_slice());
+            @memset(ping_versions[self.releases_bundled.count()..], 0);
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
