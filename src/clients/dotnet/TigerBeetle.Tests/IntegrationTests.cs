@@ -1591,7 +1591,7 @@ internal class TBServer : IDisposable
 
         process = new Process();
         process.StartInfo.FileName = TB_SERVER;
-        process.StartInfo.Arguments = $"start --addresses=0 --cache-grid=512MB ./{dataFile}";
+        process.StartInfo.Arguments = $"start --addresses=0 --cache-grid=512MiB ./{dataFile}";
         process.StartInfo.RedirectStandardInput = true;
         process.StartInfo.RedirectStandardOutput = true;
         process.Start();

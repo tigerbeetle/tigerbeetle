@@ -281,10 +281,10 @@ need a reliable way to know the size of the data to expect before we start recei
 Here is an example showing the risk of a single checksum for the recipient:
 
 1. We receive a header with a single checksum protecting both header and data.
-2. We extract the SIZE of the data from the header (4 GB in this case).
+2. We extract the SIZE of the data from the header (4 GiB in this case).
 3. We cannot tell if this SIZE value is corrupt until we receive the data.
 4. We wait for 4 GB of data to arrive before calculating/comparing checksums.
-5. Except the SIZE was corrupted in transit from 16 MB to 4 GB (2-bit flips).
+5. Except the SIZE was corrupted in transit from 16 MiB to 4 GiB (2-bit flips).
 6. We never detect the corruption, the connection times out, and we miss our SLA.
 
 ## Why C/Zig?
