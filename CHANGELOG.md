@@ -23,9 +23,10 @@
 - [#1656](https://github.com/tigerbeetle/tigerbeetle/pull/1656),
   [#1659](https://github.com/tigerbeetle/tigerbeetle/pull/1659),
   [#1666](https://github.com/tigerbeetle/tigerbeetle/pull/1666),
-  [#1667](https://github.com/tigerbeetle/tigerbeetle/pull/1667)
+  [#1667](https://github.com/tigerbeetle/tigerbeetle/pull/1667),
+  [#1667](https://github.com/tigerbeetle/tigerbeetle/pull/1670)
 
-  VSR is prepping for an *upgrade* to soon support version detection.
+  Preparation for in-place upgrade support.
 
 - [#1633](https://github.com/tigerbeetle/tigerbeetle/pull/1633),
   [#1661](https://github.com/tigerbeetle/tigerbeetle/pull/1661),
