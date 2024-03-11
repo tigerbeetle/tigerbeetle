@@ -584,6 +584,12 @@ pub fn ReplicaType(
             // Disable all dynamic allocation from this point onwards.
             self.static_allocator.transition_from_init_to_static();
 
+            const release_target = self.superblock.working.vsr_state.checkpoint.release;
+            if (release_target != self.release) {
+                self.release_transition(@src());
+                return;
+            }
+
             initialized = true;
             errdefer self.deinit(allocator);
 
@@ -8344,6 +8350,33 @@ pub fn ReplicaType(
                     self.sync_enqueue_tables();
                 }
             }
+        }
+
+        fn release_transition(self: *Self, source: SourceLocation) void {
+            const release_target = self.superblock.working.vsr_state.checkpoint.release;
+            assert(release_target != self.release);
+
+            if (self.release > release_target) {
+                // Downgrading to old release.
+                // The replica just started in the newest available release, but discovered that its
+                // superblock has not upgraded to that release yet.
+                assert(self.commit_min == self.op_checkpoint());
+                assert(self.release == self.releases_bundled.get(0));
+                assert(self.journal.status == .init);
+            }
+
+            log.info("{}: release_transition: release={}..{} (reason={s})", .{
+                self.replica,
+                self.release,
+                release_target,
+                source.fn_name,
+            });
+
+            self.release_execute(self, release_target);
+            // At this point, depending on the implementation of release_execute():
+            // - For testing/cluster.zig: `self` is no longer valid – the replica has been
+            //   deinitialized and re-opened on the new version.
+            // - For tigerbeetle/main.zig: This is unreachable (release_execute() will not return).
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
