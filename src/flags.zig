@@ -307,10 +307,10 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
 
     const units = .{
-        .{ &[_][]const u8{ "TiB", "tib", "TiB", "tb" }, 1024 * 1024 * 1024 * 1024 },
-        .{ &[_][]const u8{ "GiB", "gib", "GiB", "gb" }, 1024 * 1024 * 1024 },
-        .{ &[_][]const u8{ "MiB", "mib", "MiB", "mb" }, 1024 * 1024 },
-        .{ &[_][]const u8{ "KiB", "kib", "KiB", "kb" }, 1024 },
+        .{ &[_][]const u8{ "TiB", "tib" }, 1024 * 1024 * 1024 * 1024 },
+        .{ &[_][]const u8{ "GiB", "gib" }, 1024 * 1024 * 1024 },
+        .{ &[_][]const u8{ "MiB", "mib" }, 1024 * 1024 },
+        .{ &[_][]const u8{ "KiB", "kib" }, 1024 },
     };
 
     const unit: struct { suffix: []const u8, scale: u64 } = unit: inline for (units) |unit| {
