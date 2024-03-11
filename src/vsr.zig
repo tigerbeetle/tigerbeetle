@@ -62,7 +62,7 @@ pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").Checkpoi
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u16 = 0;
 
-/// A ReleaseList is ordered from highest-to-lowest(i.e. newest-to-oldest) version.
+/// A ReleaseList is ordered from lowest-to-highest version.
 pub const ReleaseList = stdx.BoundedArray(u16, constants.vsr_releases_max);
 
 pub const ProcessType = enum { replica, client };
@@ -1055,7 +1055,7 @@ pub fn verify_release_list(releases: []const u16) void {
         releases[0 .. releases.len - 1],
         releases[1..],
     ) |release_a, release_b| {
-        assert(release_a > release_b);
+        assert(release_a < release_b);
     }
 }
 

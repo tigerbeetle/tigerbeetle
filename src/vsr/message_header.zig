@@ -318,13 +318,16 @@ pub const Header = extern struct {
             if (self.size > @sizeOf(Header) + @sizeOf(u16) * constants.vsr_releases_max) {
                 return "size > limit";
             }
+            if (self.release_count == 0) return "release_count == 0";
+            if (self.release_count > constants.vsr_releases_max) {
+                return "release_count > vsr_releases_max";
+            }
             if (self.size != @sizeOf(Header) + self.release_count * @sizeOf(u16)) {
                 return "size != @sizeOf(Header) + release_count * @sizeOf(u16)";
             }
             if (self.release == 0) return "release == 0";
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
-            if (self.release_count == 0) return "release_count == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }

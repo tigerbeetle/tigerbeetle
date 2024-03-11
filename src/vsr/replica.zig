@@ -212,7 +212,7 @@ pub fn ReplicaType(
 
         /// A list of all versions of code that are available in the current binary.
         /// Includes the current version, newer versions, and older versions.
-        /// Ordered from highest/newest to lowest/oldest.
+        /// Ordered from lowest/oldest to highest/newest.
         ///
         /// Note that this is a property (rather than a constant) for the purpose of testing.
         /// It should never be modified for a running replica.
@@ -281,7 +281,7 @@ pub fn ReplicaType(
         /// - upgrade_targets[*].releases > release
         upgrade_targets: [constants.replicas_max]?struct {
             checkpoint: u64,
-            timestamp: u64,
+            view: u32,
             releases: vsr.ReleaseList,
         } = .{null} ** constants.replicas_max,
 
@@ -506,7 +506,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: u16,
             release_client_min: u16,
-            releases_bundled: vsr.ReleaseList,
+            releases_bundled: []const u16,
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -868,7 +868,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32,
             release: u16,
             release_client_min: u16,
-            releases_bundled: vsr.ReleaseList,
+            releases_bundled: []const u16,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -911,12 +911,8 @@ pub fn ReplicaType(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            vsr.verify_release_list(options.releases_bundled.const_slice());
-            assert(std.mem.indexOfScalar(
-                u16,
-                options.releases_bundled.const_slice(),
-                options.release,
-            ) != null);
+            vsr.verify_release_list(options.releases_bundled);
+            assert(std.mem.indexOfScalar(u16, options.releases_bundled, options.release) != null);
 
             self.time = options.time;
 
@@ -1005,7 +1001,9 @@ pub fn ReplicaType(
                 .quorum_majority = quorum_majority,
                 .release = options.release,
                 .release_client_min = options.release_client_min,
-                .releases_bundled = options.releases_bundled,
+                .releases_bundled = vsr.ReleaseList.from_slice(
+                    options.releases_bundled,
+                ) catch unreachable,
                 .nonce = options.nonce,
                 // Copy the (already-initialized) time back, to avoid regressing the monotonic
                 // clock guard.
@@ -1329,20 +1327,19 @@ pub fn ReplicaType(
             if (message.header.replica < self.replica_count) {
                 const upgrade_targets = &self.upgrade_targets[message.header.replica];
                 if (upgrade_targets.* == null or
-                    upgrade_targets.*.?.timestamp > message.header.ping_timestamp_monotonic)
+                    (upgrade_targets.*.?.checkpoint <= message.header.checkpoint_op and
+                    upgrade_targets.*.?.view <= message.header.view))
                 {
                     upgrade_targets.* = .{
                         .checkpoint = message.header.checkpoint_op,
-                        .timestamp = message.header.ping_timestamp_monotonic,
+                        .view = message.header.view,
                         .releases = .{},
                     };
 
                     const releases = std.mem.bytesAsSlice(u16, message.body());
                     assert(releases.len == message.header.release_count);
-                    for (releases, 0..) |release, i| {
-                        if (i > 0) {
-                            assert(release < releases[i - 1]);
-                        }
+                    vsr.verify_release_list(releases);
+                    for (releases) |release| {
                         if (release > self.release) {
                             upgrade_targets.*.?.releases.append_assume_capacity(release);
                         }
@@ -2629,7 +2626,7 @@ pub fn ReplicaType(
 
             message.header.* = Header.Ping{
                 .command = .ping,
-                .size = @intCast(@sizeOf(Header) + @sizeOf(u16) * self.releases_bundled.count()),
+                .size = @sizeOf(Header) + @sizeOf(u16) * self.releases_bundled.count_as(u16),
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .view = self.view_durable(), // Don't drop pings while the view is being updated.
@@ -2637,7 +2634,7 @@ pub fn ReplicaType(
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic(),
-                .release_count = @intCast(self.releases_bundled.count()),
+                .release_count = self.releases_bundled.count_as(u16),
             };
 
             const ping_versions = std.mem.bytesAsSlice(u16, message.body());
