@@ -283,7 +283,7 @@ Here is an example showing the risk of a single checksum for the recipient:
 1. We receive a header with a single checksum protecting both header and data.
 2. We extract the SIZE of the data from the header (4 GiB in this case).
 3. We cannot tell if this SIZE value is corrupt until we receive the data.
-4. We wait for 4 GB of data to arrive before calculating/comparing checksums.
+4. We wait for 4 GiB of data to arrive before calculating/comparing checksums.
 5. Except the SIZE was corrupted in transit from 16 MiB to 4 GiB (2-bit flips).
 6. We never detect the corruption, the connection times out, and we miss our SLA.
 
@@ -294,7 +294,7 @@ We want:
 * **C ABI compatibility** to embed the TigerBeetle leader library or TigerBeetle network client directly into any language, to match the portability and ease of use of the [SQLite library](https://www.sqlite.org/index.html), the most used database engine in the world.
 * **Control the memory layout, alignment, and padding of data structures** to avoid cache misses and unaligned accesses and allow zero-copy parsing of data structures from off the network.
 * **Explicit static memory allocation** from the network all the way to the disk with **no hidden memory allocations**.
-* **OOM safety** as the TigerBeetle leader library needs to manage GBs of in-memory state without crashing.
+* **OOM safety** as the TigerBeetle leader library needs to manage GiBs of in-memory state without crashing.
 * Direct access to **io_uring** for fast, simple networking and file system operations.
 * Direct access to **fast CPU instructions** such as `POPCNT`, which are essential for the hash table implementation we want to use.
 * Direct access to **existing C libraries** without the overhead of FFI.

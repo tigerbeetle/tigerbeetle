@@ -11,7 +11,7 @@ ProtectHome=true
 StateDirectory=tigerbeetle
 StateDirectoryMode=700
 
-Environment=TIGERBEETLE_CACHE_GRID_SIZE=1GB
+Environment=TIGERBEETLE_CACHE_GRID_SIZE=1GiB
 Environment=TIGERBEETLE_ADDRESSES=3001
 Environment=TIGERBEETLE_REPLICA_COUNT=1
 Environment=TIGERBEETLE_REPLICA_INDEX=0

@@ -1055,9 +1055,9 @@ pub const Options = struct {
 /// - After compacting `T+2` blocks, we must have freed at least 2 whole blocks.
 /// - Etc.
 ///
-/// Then the upper-bound number of manifest blocks (`MB(b)`) at any half-bar boundary (`b`) is:
+/// Then the upper-bound number of manifest blocks (`MiB(b)`) at any half-bar boundary (`b`) is:
 ///
-///   MB(b) = min(T, MB(b-1)) + A×⌈M(b-1)/C⌉ + A×⌈(T+1)/C⌉
+///   MiB(b) = min(T, MiB(b-1)) + A×⌈M(b-1)/C⌉ + A×⌈(T+1)/C⌉
 ///
 /// As `b` approaches infinity, this recurrence relation converges (iff `C > A`) to the absolute
 /// upper-bound number of manifest blocks.
@@ -1066,7 +1066,7 @@ pub const Options = struct {
 /// compaction work performed increases.
 ///
 /// If, for any half-bar that the manifest log contains at least `MC(∞)` blocks we compact at least
-/// `C` blocks, then the total size of the manifest log will never exceed `MB(∞)` blocks.
+/// `C` blocks, then the total size of the manifest log will never exceed `MiB(∞)` blocks.
 ///
 /// NOTE: Both the algorithm above and the implementation below make several simplifications:
 ///
@@ -1105,7 +1105,7 @@ const Pace = struct {
 
     /// "limit of MC(c) as c approaches ∞"
     log_blocks_cycle_max: u32,
-    /// "limit of MB(b) as b approaches ∞"
+    /// "limit of MiB(b) as b approaches ∞"
     log_blocks_max: u32,
 
     tables_max: u32,
@@ -1185,7 +1185,7 @@ const Pace = struct {
         const log_blocks_burst_max = half_bar_append_blocks_max *
             stdx.div_ceil(log_blocks_full_max + 1, half_bar_compact_blocks_max);
 
-        // "limit of MB(b) as b approaches ∞":
+        // "limit of MiB(b) as b approaches ∞":
         const log_blocks_max = log_blocks_cycle_max + log_blocks_burst_max;
 
         assert(log_blocks_cycle_max > log_blocks_full_max);
