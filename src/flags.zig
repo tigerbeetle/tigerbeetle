@@ -961,10 +961,10 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=100000000000000000kb" }, snap(@src(),
+    try t.check(&.{ "values", "--size=100000000000000000kib" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: size in bytes exceeds 64-bit unsigned integer: '100000000000000000kb'
+        \\error: --size: size in bytes exceeds 64-bit unsigned integer: '100000000000000000kib'
         \\
     ));
 
