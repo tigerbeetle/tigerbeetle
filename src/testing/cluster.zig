@@ -29,6 +29,11 @@ const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_si
 
 pub const ReplicaHealth = enum { up, down };
 
+pub const Release = struct {
+    release: u16,
+    release_client_min: u16,
+};
+
 /// Integer values represent exit codes.
 // TODO This doesn't really belong in Cluster, but it is needed here so that StateChecker failures
 // use the particular exit code.
@@ -69,6 +74,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             storage_size_limit: u64,
             storage_fault_atlas: StorageFaultAtlas.Options,
             seed: u64,
+            /// A monotonically-increasing list of releases.
+            /// Initially:
+            /// - All replicas are formatted and started with releases[0].
+            /// - Only releases[0] is "bundled" in each replica. (Use `restart_replica()` to add
+            ///   more).
+            releases: []const Release,
 
             network: NetworkOptions,
             storage: Storage.Options,
@@ -128,6 +139,16 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage.replica_index == null);
             assert(options.storage.fault_atlas == null);
+            assert(options.releases.len > 0);
+
+            for (
+                options.releases[0 .. options.releases.len - 1],
+                options.releases[1..],
+            ) |release_a, release_b| {
+                assert(release_a.release < release_b.release);
+                assert(release_a.release_client_min <= release_b.release);
+                assert(release_a.release_client_min <= release_b.release_client_min);
+            }
 
             const node_count = options.replica_count + options.standby_count;
 
@@ -237,6 +258,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     &client_pools[i],
                     .{ .network = network },
                 );
+                client.release = options.releases[0].release;
             }
             errdefer for (clients) |*client| client.deinit(allocator);
 
@@ -267,7 +289,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     allocator,
                     .{
                         .cluster = options.cluster_id,
-                        .release = 1, // TODO Use real release number.
+                        .release = options.releases[0].release,
                         // TODO(zig) It should be possible to remove the `@as(u8,...)`.
                         .replica = @as(u8, @intCast(replica_index)),
                         .replica_count = options.replica_count,
@@ -310,7 +332,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
                 const nonce = 1 + @as(u128, replica_index) << 64;
-                try cluster.open_replica(@intCast(replica_index), nonce);
+                try cluster.replica_open(@intCast(replica_index), .{
+                    .nonce = nonce,
+                    .release = options.releases[0].release,
+                    .releases_bundled = &[_]u16{options.releases[0].release},
+                });
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
@@ -377,11 +403,19 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         /// Returns an error when the replica was unable to recover (open).
-        pub fn restart_replica(cluster: *Self, replica_index: u8) !void {
+        pub fn restart_replica(
+            cluster: *Self,
+            replica_index: u8,
+            releases_bundled: []const u16,
+        ) !void {
             assert(cluster.replica_health[replica_index] == .down);
+            vsr.verify_release_list(releases_bundled);
 
-            const nonce = cluster.replicas[replica_index].nonce + 1;
-            try cluster.open_replica(replica_index, nonce);
+            try cluster.replica_open(replica_index, .{
+                .nonce = cluster.replicas[replica_index].nonce + 1,
+                .release = releases_bundled[0],
+                .releases_bundled = releases_bundled,
+            });
             cluster.network.process_enable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .up;
             cluster.log_replica(.recover, replica_index);
@@ -411,7 +445,17 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(messages_in_pool == message_pool.messages_max_replica);
         }
 
-        fn open_replica(cluster: *Self, replica_index: u8, nonce: u128) !void {
+        fn replica_open(cluster: *Self, replica_index: u8, options: struct {
+            nonce: u128,
+            release: u16,
+            releases_bundled: []const u16,
+        }) !void {
+            const release_client_min = for (cluster.options.releases) |release| {
+                if (release.release == options.release) {
+                    break release.release_client_min;
+                }
+            } else unreachable;
+
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
@@ -422,14 +466,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
                     .message_pool = &cluster.replica_pools[replica_index],
-                    .nonce = nonce,
+                    .nonce = options.nonce,
                     .time = .{ .time = &cluster.replica_times[replica_index] },
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
-                    // TODO Use "real" release numbers.
-                    .release = 1,
-                    .release_client_min = 1,
-                    .releases_bundled = &[_]u16{1},
+                    .release = options.release,
+                    .release_client_min = release_client_min,
+                    .releases_bundled = options.releases_bundled,
                     .test_context = cluster,
                 },
             );

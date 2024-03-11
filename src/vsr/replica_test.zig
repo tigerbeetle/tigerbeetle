@@ -31,6 +31,10 @@ const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
 const log_level = std.log.Level.err;
 
+const releases = .{
+    .{ .release = 1, .release_client_min = 1 },
+};
+
 // TODO Test client eviction once it no longer triggers a client panic.
 // TODO Detect when cluster has stabilized and stop run() early, rather than just running for a
 //      fixed number of ticks.
@@ -1289,6 +1293,7 @@ const TestContext = struct {
             .client_count = options.client_count,
             .storage_size_limit = vsr.sector_floor(constants.storage_size_limit_max),
             .seed = random.int(u64),
+            .releases = &releases,
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
@@ -1452,7 +1457,10 @@ const TestReplicas = struct {
     pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r) catch |err| {
+            t.cluster.restart_replica(
+                r,
+                t.cluster.replicas[r].releases_bundled.const_slice(),
+            ) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,

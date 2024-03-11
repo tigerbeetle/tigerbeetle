@@ -20,6 +20,7 @@ const StateMachineType = switch (state_machine) {
 
 const Client = @import("testing/cluster.zig").Client;
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
+const Release = @import("testing/cluster.zig").Release;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
 const PartitionMode = @import("testing/packet_simulator.zig").PartitionMode;
@@ -28,6 +29,10 @@ const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
+
+const releases = [_]Release{
+    .{ .release = 1, .release_client_min = 1 },
+};
 
 pub const output = std.log.scoped(.cluster);
 const log = std.log.scoped(.simulator);
@@ -101,6 +106,7 @@ pub fn main() !void {
             constants.storage_size_limit_max - random.uintLessThan(u64, constants.storage_size_limit_max / 10),
         ),
         .seed = random.int(u64),
+        .releases = &releases,
         .network = .{
             .node_count = node_count,
             .client_count = client_count,
@@ -835,6 +841,7 @@ pub const Simulator = struct {
         assert(simulator.cluster.replica_health[replica_index] == .down);
 
         const replica_storage = &simulator.cluster.storages[replica_index];
+        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
 
         if (!fault) {
             // The journal writes redundant headers of faulty ops as zeroes to ensure
@@ -861,9 +868,11 @@ pub const Simulator = struct {
         });
 
         replica_storage.faulty = fault;
-        simulator.cluster.restart_replica(replica_index) catch unreachable;
+        simulator.cluster.restart_replica(
+            replica_index,
+            &[_]u16{ releases[0].release },
+        ) catch unreachable;
 
-        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
         if (replica.status == .recovering_head) {
             // Even with faults disabled, a replica that was syncing before it crashed
             // (or just recently finished syncing before it crashed) may wind up in
