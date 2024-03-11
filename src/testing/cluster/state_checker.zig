@@ -12,6 +12,8 @@ const Message = MessagePool.Message;
 const ReplicaSet = std.StaticBitSet(constants.members_max);
 const Commits = std.ArrayList(struct {
     header: vsr.Header.Prepare,
+    // null for operation=root and operation=upgrade
+    release: ?u16,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
 });
 
@@ -55,6 +57,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             for (options.replicas, 0..) |_, i| commit_replicas.set(i);
             try commits.append(.{
                 .header = root_prepare,
+                .release = null,
                 .replicas = commit_replicas,
             });
 
@@ -140,7 +143,16 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             // If some other replica has already reached this state, then it will be in the commit history:
             if (replica.commit_min < state_checker.commits.items.len) {
-                state_checker.commits.items[replica.commit_min].replicas.set(replica_index);
+                const commit = &state_checker.commits.items[commit_b];
+                if (replica.op_checkpoint() < replica.commit_min) {
+                    if (commit.release) |release| assert(release == replica.release);
+                } else {
+                    // When op_checkpoint==commit_min, we recovered from checkpoint, so it is ok if
+                    // the release doesn't match. (commit_min is not actually being executed.)
+                    assert(replica.op_checkpoint() == replica.commit_min);
+                }
+
+                commit.replicas.set(replica_index);
 
                 assert(replica.commit_min < state_checker.commits.items.len);
                 // A replica may transition more than once to the same state, for example, when
@@ -182,8 +194,19 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             state_checker.requests_committed += 1;
             assert(state_checker.requests_committed == header_b.?.op);
 
+            const release = release: {
+                if (header_b.?.operation == .root) {
+                    break :release null;
+                } else {
+                    break :release replica.release;
+                }
+            };
+
             assert(state_checker.commits.items.len == header_b.?.op);
-            state_checker.commits.append(.{ .header = header_b.?.* }) catch unreachable;
+            state_checker.commits.append(.{
+                .header = header_b.?.*,
+                .release = release,
+            }) catch unreachable;
             state_checker.commits.items[header_b.?.op].replicas.set(replica_index);
         }
 
