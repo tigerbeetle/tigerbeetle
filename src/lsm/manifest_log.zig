@@ -136,7 +136,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
         /// not yet been encountered. Given that the maximum number of tables in the forest at any
         /// given moment is `table_count_max`, there are likewise at most `table_count_max`
         /// "unpaired" removes to track.
-        // TODO(Optimization) This memory (~35MB) is only needed during open() – maybe borrow it
+        // TODO(Optimization) This memory (~35MiB) is only needed during open() – maybe borrow it
         // from the grid cache or node pool instead so that we don't pay for it during normal
         // operation.
         tables_removed: TablesRemoved,
