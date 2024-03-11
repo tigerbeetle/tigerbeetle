@@ -34,7 +34,7 @@
   [#1637](https://github.com/tigerbeetle/tigerbeetle/pull/1637),
   [#1638](https://github.com/tigerbeetle/tigerbeetle/pull/1638),
   [#1655](https://github.com/tigerbeetle/tigerbeetle/pull/1655)
-  
+
   [Documentation](https://docs.tigerbeetle.com/) has received some very welcome organizational
   and clarity changes. Go check them out!
 
