@@ -481,7 +481,7 @@ pub fn ReplicaType(
         prng: std.rand.DefaultPrng,
 
         /// Used by `Cluster` in the simulator.
-        test_context: ?*anyopaque = null,
+        test_context: ?*anyopaque,
         /// Simulator hooks.
         event_callback: ?*const fn (replica: *const Self, event: ReplicaEvent) void = null,
 
@@ -507,6 +507,7 @@ pub fn ReplicaType(
             release: u16,
             release_client_min: u16,
             releases_bundled: []const u16,
+            test_context: ?*anyopaque = null,
         };
 
         /// Initializes and opens the provided replica using the options.
@@ -569,6 +570,7 @@ pub fn ReplicaType(
                 .release = options.release,
                 .release_client_min = options.release_client_min,
                 .releases_bundled = options.releases_bundled,
+                .test_context = options.test_context,
             });
 
             // Disable all dynamic allocation from this point onwards.
@@ -869,6 +871,7 @@ pub fn ReplicaType(
             release: u16,
             release_client_min: u16,
             releases_bundled: []const u16,
+            test_context: ?*anyopaque,
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
@@ -1101,6 +1104,7 @@ pub fn ReplicaType(
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
+                .test_context = options.test_context,
                 .aof = options.aof,
             };
 

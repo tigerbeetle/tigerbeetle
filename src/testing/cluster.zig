@@ -430,6 +430,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .release = 1,
                     .release_client_min = 1,
                     .releases_bundled = &[_]u16{1},
+                    .test_context = cluster,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
@@ -437,7 +438,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(replica.replica_count == cluster.replica_count);
             assert(replica.standby_count == cluster.standby_count);
 
-            replica.test_context = cluster;
             replica.event_callback = on_replica_event;
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
