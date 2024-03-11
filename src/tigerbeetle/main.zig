@@ -183,6 +183,7 @@ const Command = struct {
             // TODO Use real release numbers.
             .release = 1,
             .release_client_min = 1,
+            .releases_bundled = &[_]u16{1},
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
