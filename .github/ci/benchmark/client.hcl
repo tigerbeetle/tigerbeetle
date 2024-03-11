@@ -70,13 +70,14 @@ git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
+zig build install -Dconfig=production -Drelease
 
-cmd="./zig/zig build benchmark -Drelease -- --account-count=10000 --transfer-count=100000000000 --transfer-count-per-second=1000000 --addresses=${var.addresses} --statsd --print-batch-timings"
+cmd="./tigerbeetle benchmark --account-count=10_000 --transfer-count=10_000_000_000 --transfer-count-per-second=1_000_000 --addresses=${var.addresses} --statsd --print-batch-timings"
 echo "TigerBeetle Benchmark Command: ${cmd}"
 $cmd
 
 # Ensure time for results to have shipped
-sleep 10
+sleep 60
     EOF
 
         destination = "local/tigerbeetle-client.sh"

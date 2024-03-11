@@ -35,7 +35,7 @@ variable "git_url" {
 
 variable "git_ref" {
   type = string
-  default = "cb22/scale-tests-2"
+  default = "main"
 }
 
 job "tigerbeetle-replica" {
@@ -93,12 +93,12 @@ git clone ${var.git_url}
 cd tigerbeetle
 git checkout ${var.git_ref}
 ./scripts/install_zig.sh
-./zig/zig build install -Drelease
+./zig/zig build install -Drelease -Dconfig=production
 
 rm -f "/tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle"
 ./tigerbeetle format --cluster=${var.cluster_id} --replica=${var.replica} --replica-count=${var.replica_count} /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
 
-exec ./tigerbeetle start --addresses=${var.addresses} --cache-grid=128GB /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
+exec ./tigerbeetle start --addresses=${var.addresses} --cache-grid=256GB --memory-lsm-manifest=4293918720 /tank/{{ env "NOMAD_JOB_ID" }}.tigerbeetle
     EOF
 
         destination = "local/tigerbeetle.sh"
@@ -107,7 +107,7 @@ exec ./tigerbeetle start --addresses=${var.addresses} --cache-grid=128GB /tank/{
 
       resources {
         cores = 1
-        memory = 256000
+        memory = 512000
       }
     }
   }
