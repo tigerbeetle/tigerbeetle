@@ -2613,10 +2613,15 @@ pub fn ReplicaType(
                 stage.target.checkpoint_id,
             });
 
-            self.sync_requesting_checkpoint_callback(std.mem.bytesAsValue(
+            assert(message.body().len == @sizeOf(vsr.CheckpointState));
+            const checkpoint_state = std.mem.bytesAsValue(
                 vsr.CheckpointState,
                 message.body()[0..@sizeOf(vsr.CheckpointState)],
-            ));
+            );
+            assert(checkpoint_state.header.valid_checksum());
+            assert(checkpoint_state.header.command == .prepare);
+            assert(checkpoint_state.header.invalid() == null);
+            self.sync_requesting_checkpoint_callback(checkpoint_state);
         }
 
         fn on_ping_timeout(self: *Self) void {
