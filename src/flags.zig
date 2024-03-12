@@ -368,7 +368,7 @@ test parse_value_size {
         .{ 1 * mib, "1MiB" },
         .{ 10 * mib, "10mib" },
         .{ 100 * mib, "100MiB" },
-        .{ 1000 * mib, "1000mb" },
+        .{ 1000 * mib, "1000mib" },
         .{ 1 * kib, "1KiB" },
         .{ 10 * kib, "10kib" },
         .{ 100 * kib, "100KiB" },
