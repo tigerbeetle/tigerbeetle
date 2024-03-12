@@ -663,7 +663,8 @@ pub const Simulator = struct {
     ) void {
         // TODO(Zig) Use @returnAddress to initialzie the cluster, then this can just use @fieldParentPtr().
         const simulator: *Simulator = @ptrCast(@alignCast(cluster.context.?));
-        simulator.reply_sequence.insert(reply);
+        const inserted = simulator.reply_sequence.insert(reply);
+        if (!inserted) return;
 
         while (simulator.reply_sequence.peek()) |commit| {
             defer simulator.reply_sequence.next();
@@ -704,6 +705,15 @@ pub const Simulator = struct {
                     assert(prepare.header.command == .prepare);
                     assert(prepare.header.client == 0);
                     assert(prepare.header.request == 0);
+
+                    switch (prepare.header.operation.cast(StateMachine)) {
+                        .expire_pending_transfers => {
+                            simulator.workload.auditor.expire_pending_transfers(
+                                prepare.header.timestamp,
+                            );
+                        },
+                        else => unreachable,
+                    }
                 },
             }
         }

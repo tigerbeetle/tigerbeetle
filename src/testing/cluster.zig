@@ -40,14 +40,13 @@ pub const Failure = enum(u8) {
 };
 
 pub const ClusterReply = union(enum) {
-    // Reply from a client request.
+    /// Replies sent to clients, including `command=register` messages.
     client: struct {
         index: usize,
         request: *Message.Request,
         reply: *Message.Reply,
     },
-    // There's no reply for a message sent by the primary,
-    // but it still counts as a commited reply.
+    /// Committed prepares sent by the `primary' with no reply to clients.
     no_reply: *Message.Prepare,
 
     pub fn op(self: ClusterReply) u64 {
@@ -96,7 +95,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         allocator: mem.Allocator,
         options: Options,
-        on_client_reply: *const fn (
+        on_cluster_reply: *const fn (
             cluster: *Self,
             reply: ClusterReply,
         ) void,
@@ -129,8 +128,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn init(
             allocator: mem.Allocator,
-            /// Includes command=register messages.
-            on_client_reply: *const fn (
+            on_cluster_reply: *const fn (
                 cluster: *Self,
                 reply: ClusterReply,
             ) void,
@@ -300,7 +298,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.* = Self{
                 .allocator = allocator,
                 .options = options,
-                .on_client_reply = on_client_reply,
+                .on_cluster_reply = on_cluster_reply,
                 .network = network,
                 .storages = storages,
                 .aofs = aofs,
@@ -517,7 +515,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 if (client == c) break i;
             } else unreachable;
 
-            cluster.on_client_reply(cluster, .{
+            cluster.on_cluster_reply(cluster, .{
                 .client = .{
                     .index = client_index,
                     .request = request_message,
@@ -544,11 +542,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     };
 
                     if (prepare.header.client == 0) {
-                        // The primary commiting a message from itself counts as a simulator reply,
-                        // since it bumps the `op` number of the next expected reply.
-                        const primary = replica.status == .normal and replica.primary();
-                        if (primary) {
-                            cluster.on_client_reply(cluster, .{ .no_reply = @constCast(prepare) });
+                        assert(prepare.header.request == 0);
+                        if (!replica.standby()) {
+                            var prepare_ptr: *Message.Prepare = @constCast(prepare);
+                            cluster.on_cluster_reply(cluster, .{ .no_reply = prepare_ptr });
                         }
                     }
                 },

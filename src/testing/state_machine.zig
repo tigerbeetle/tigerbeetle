@@ -94,6 +94,7 @@ pub fn StateMachineType(
         options: Options,
         forest: Forest,
 
+        prefetch_timestamp: u64 = 0,
         prepare_timestamp: u64 = 0,
         commit_timestamp: u64 = 0,
 
@@ -152,20 +153,13 @@ pub fn StateMachineType(
             callback(state_machine);
         }
 
+        pub fn pulse_reset(state_machine: *StateMachine) void {
+            _ = state_machine;
+        }
+
         pub fn pulse_operation(state_machine: *StateMachine) ?Operation {
             _ = state_machine;
             return null;
-        }
-
-        pub fn pulse_input(
-            state_machine: *StateMachine,
-            operation: Operation,
-            input: []align(16) u8,
-        ) usize {
-            _ = state_machine;
-            _ = operation;
-            _ = input;
-            unreachable;
         }
 
         pub fn prepare(

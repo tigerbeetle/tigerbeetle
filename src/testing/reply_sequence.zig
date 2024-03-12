@@ -47,6 +47,10 @@ pub const ReplySequence = struct {
     /// Includes `register` messages.
     stalled_queue: PendingReplyQueue,
 
+    /// The last `no_reply` op received.
+    /// Since each replica reports commits, this field is used for deduplicating by op number.
+    no_reply_op_last: u64 = 0,
+
     pub fn init(allocator: std.mem.Allocator) !ReplySequence {
         // *2 for PendingReply.request and PendingReply.reply.
         var message_pool = try MessagePool.init_capacity(allocator, stalled_queue_capacity * 2);
@@ -81,7 +85,7 @@ pub const ReplySequence = struct {
     pub fn insert(
         sequence: *ReplySequence,
         reply: ClusterReply,
-    ) void {
+    ) bool {
         switch (reply) {
             .client => |client| {
                 assert(client.request.header.invalid() == null);
@@ -98,10 +102,15 @@ pub const ReplySequence = struct {
                 assert(prepare.header.command == .prepare);
                 assert(prepare.header.client == 0);
                 assert(prepare.header.request == 0);
+
+                // Deduplicating `header.op` before inserting into the queue.
+                if (prepare.header.op <= sequence.no_reply_op_last) return false;
+                sequence.no_reply_op_last = prepare.header.op;
             },
         }
 
         sequence.stalled_queue.add(sequence.clone(reply)) catch unreachable;
+        return true;
     }
 
     fn clone(

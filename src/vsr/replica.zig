@@ -2935,10 +2935,11 @@ pub fn ReplicaType(
             );
 
             if (self.state_machine.pulse_operation()) |pulse_operation| {
-                self.pulse_inject(pulse_operation);
-            } else {
-                self.pulse_timeout.reset();
+                if (!self.pipeline.queue.pulse_in_progress()) {
+                    self.pulse_inject(pulse_operation);
+                }
             }
+            self.pulse_timeout.reset();
         }
 
         fn primary_receive_do_view_change(
@@ -3478,6 +3479,7 @@ pub fn ReplicaType(
                 // `.setup_client_replies`, is always async.
                 commit_op_prefetch_callback(&self.state_machine);
             } else {
+                self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_op_prefetch_callback,
                     prepare.header.op,
@@ -5266,9 +5268,8 @@ pub fn ReplicaType(
                 .register => {},
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
                 else => {
-                    const operation = request.message.header.operation.cast(StateMachine);
                     self.state_machine.prepare(
-                        operation,
+                        request.message.header.operation.cast(StateMachine),
                         request.message.body(),
                     );
 
@@ -5279,9 +5280,11 @@ pub fn ReplicaType(
                         // correctly assure that time-dependant tasks (e.g. expiring transfers)
                         // will never intersect with a request batch.
                         if (self.state_machine.pulse_operation()) |pulse_operation| {
-                            self.pulse_inject(pulse_operation);
-                            self.pipeline.queue.delay_request(request);
-                            return;
+                            if (!self.pipeline.queue.pulse_in_progress()) {
+                                self.pulse_inject(pulse_operation);
+                                self.pipeline.queue.delay_request(request);
+                                return;
+                            }
                         }
                     }
                 },
@@ -5394,14 +5397,11 @@ pub fn ReplicaType(
             const message = self.message_bus.get_message(.prepare);
             defer self.message_bus.unref(message);
 
-            const input = message.buffer[@sizeOf(Header)..];
-            const input_len = self.state_machine.pulse_input(operation, input);
-
             const prepare_timestamp = self.state_machine.prepare_timestamp;
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
                 .cluster = self.cluster,
-                .size = @intCast(@sizeOf(Header) + input_len),
+                .size = @intCast(@sizeOf(Header)),
                 .view = self.view,
                 .release = self.release,
                 .command = .prepare,
@@ -5417,7 +5417,7 @@ pub fn ReplicaType(
                 .request = 0,
             };
 
-            maybe(message.body().len == 0);
+            assert(message.body().len == 0);
             const sector_ceil = vsr.sector_ceil(message.header.size);
             if (message.header.size != sector_ceil) {
                 assert(message.header.size < sector_ceil);
@@ -7409,6 +7409,8 @@ pub fn ReplicaType(
             assert(self.view_durable_updating());
             assert(self.log_view > self.log_view_durable());
 
+            self.state_machine.pulse_reset();
+
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
         }
@@ -8585,7 +8587,10 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            if (candidate.view > self.view_durable()) {
+            // TODO: This fix introduced by the PR #1598 causes a liveness issue
+            // when a replica cannot start the sync.
+            const fix_me = true;
+            if (fix_me and candidate.view > self.view_durable()) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
                     " (view={} view_durable={} candidate.view={})", .{
                     self.replica,
@@ -9382,7 +9387,7 @@ const PipelineQueue = struct {
         assert(pipeline.request_queue.empty() or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1 or
-            pipeline.has_pulse());
+            pipeline.pulse_in_progress());
 
         if (pipeline.prepare_queue.head_ptr_const()) |head| {
             var op = head.message.header.op;
@@ -9411,12 +9416,12 @@ const PipelineQueue = struct {
         } else {
             assert(pipeline.request_queue.empty() or
                 pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
-                pipeline.has_pulse());
+                pipeline.pulse_in_progress());
             return false;
         }
     }
 
-    fn has_pulse(pipeline: *PipelineQueue) bool {
+    fn pulse_in_progress(pipeline: *PipelineQueue) bool {
         return inline for (0..constants.pipeline_prepare_queue_max) |index| {
             if (pipeline.prepare_queue.get_ptr(index)) |prepare| {
                 if (prepare.message.header.client == 0) break true;
@@ -9500,7 +9505,7 @@ const PipelineQueue = struct {
             assert(pipeline.request_queue.empty() or
                 pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
                 prepare.message.header.client == 0 or
-                pipeline.has_pulse());
+                pipeline.pulse_in_progress());
             return prepare;
         } else {
             assert(pipeline.request_queue.empty());
