@@ -1,3 +1,16 @@
+//! Parse and validate command-line arguments for the tigerbeetle binary.
+//!
+//! Everything that can be validated without reading the data file must be validated here.
+//! Caller must additionally assert validity of arguments as a defense in depth.
+//!
+//! Some flags are experimental: intentionally undocumented and are not a part of the official
+//! surface area. Even experimental features must adhere to the same strict standard of safety,
+//! but they come without any performance or usability guarantees.
+//!
+//! Experimental features are not gated by comptime option for safety: it is much easier to review
+//! code for correctness when it is initially added to the main branch, rather when a comptime flag
+//! is lifted.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
@@ -18,7 +31,7 @@ const CliArgs = union(enum) {
     format: struct {
         cluster: u128,
         replica: ?u8 = null,
-        // Intentionally undocumented: standbys don't have a concrete practical use-case yet.
+        // Experimental: standbys don't have a concrete practical use-case yet.
         standby: ?u8 = null,
         replica_count: u8,
 
@@ -56,6 +69,7 @@ const CliArgs = union(enum) {
         command: []const u8 = "",
     },
 
+    // Experimental: the interface is subject to change.
     benchmark: struct {
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
@@ -87,8 +101,6 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle repl --cluster=<integer> --addresses=<addresses>
         \\
-        \\  tigerbeetle benchmark [<args>]
-        \\
         \\Commands:
         \\
         \\  format     Create a TigerBeetle replica data file at <path>.
@@ -100,9 +112,6 @@ const CliArgs = union(enum) {
         \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
         \\  repl       Enter the TigerBeetle client REPL.
-        \\
-        \\  benchmark  Measure performance of TigerBeetle on the current hardware.
-        \\             Benchmark options and output format are subject to change.
         \\
         \\Options:
         \\
