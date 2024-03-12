@@ -63,8 +63,6 @@ const Table = @import("table.zig").TableType(
     .general,
 );
 
-pub const tigerbeetle_config = @import("../config.zig").configs.test_min;
-
 pub fn main(args: fuzz.FuzzArgs) !void {
     var prng = std.rand.DefaultPrng.init(args.seed);
     const random = prng.random();
