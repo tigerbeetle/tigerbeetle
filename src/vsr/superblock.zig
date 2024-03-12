@@ -802,6 +802,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             free_set_reference: TrailerReference,
             client_sessions_reference: TrailerReference,
             storage_size: u64,
+            release: u16,
         };
 
         /// Must update the commit_min and commit_min_checksum.
@@ -817,6 +818,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.header.checksum !=
                 superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
+            assert(update.release >= superblock.staging.vsr_state.checkpoint.release);
 
             assert(update.storage_size <= superblock.storage_size_limit);
             assert(update.storage_size >= data_file_size_min);
@@ -849,7 +851,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .storage_size = update.storage_size,
                 .snapshots_block_checksum = vsr_state_staging.checkpoint.snapshots_block_checksum,
                 .snapshots_block_address = vsr_state_staging.checkpoint.snapshots_block_address,
-                .release = vsr_state_staging.checkpoint.release,
+                .release = update.release,
             };
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;

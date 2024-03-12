@@ -326,6 +326,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .sync_op_max = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
+                .release = 1,
             });
 
             env.change_state(.fuzzing, .superblock_checkpoint);

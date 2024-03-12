@@ -3753,6 +3753,7 @@ pub fn ReplicaType(
                     .free_set_reference = self.grid.free_set_checkpoint.checkpoint_reference(),
                     .client_sessions_reference = self.client_sessions_checkpoint.checkpoint_reference(),
                     .storage_size = storage_size,
+                    .release = self.release,
                 },
             );
         }
@@ -8107,6 +8108,7 @@ pub fn ReplicaType(
 
             log.debug("{[replica]}: sync_requesting_checkpoint_callback: " ++
                 "checkpoint_op={[checkpoint_op]} checkpoint_id={[checkpoint_id]x:0>32} " ++
+                "release={[release]} " ++
                 "manifest_oldest_checksum={[manifest_oldest_checksum]} " ++
                 "manifest_oldest_address={[manifest_oldest_address]} " ++
                 "manifest_newest_checksum={[manifest_newest_checksum]} " ++
@@ -8114,6 +8116,7 @@ pub fn ReplicaType(
                 .replica = self.replica,
                 .checkpoint_op = stage.target.checkpoint_op,
                 .checkpoint_id = stage.target.checkpoint_id,
+                .release = checkpoint_state.release,
                 .manifest_oldest_checksum = checkpoint_state.manifest_oldest_checksum,
                 .manifest_oldest_address = checkpoint_state.manifest_oldest_address,
                 .manifest_newest_checksum = checkpoint_state.manifest_newest_checksum,
@@ -8201,6 +8204,7 @@ pub fn ReplicaType(
             assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             assert(self.syncing == .updating_superblock);
             assert(!self.state_machine_opened);
+            assert(self.release <= self.superblock.working.vsr_state.checkpoint.release);
 
             const stage: *const SyncStage.UpdatingSuperBlock = &self.syncing.updating_superblock;
 
