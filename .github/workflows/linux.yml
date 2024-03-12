@@ -21,9 +21,14 @@ jobs:
 
   test_on_alpine:
     runs-on: ubuntu-latest
+    container: alpine
     steps:
+      - run: apk add -U git
+      # https://github.com/actions/checkout/issues/1169
+      - run: git config --system --add safe.directory '*'
       - uses: actions/checkout@v4
-      - run: ./.github/ci/tests_on_alpine.sh
+      - run: ./scripts/install_zig.sh
+      - run: zig/zig build test
 
   test_on_ubuntu:
     runs-on: ubuntu-latest
