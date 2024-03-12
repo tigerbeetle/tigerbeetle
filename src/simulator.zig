@@ -853,12 +853,14 @@ pub const Simulator = struct {
                 replica.syncing == .idle);
         }
 
-        for (simulator.cluster.replicas) |*replica| {
+        for (
+            simulator.cluster.replicas,
+            simulator.cluster.storages,
+        ) |*replica, *replica_storage| {
             simulator.replica_stability[replica.replica] -|= 1;
             const stability = simulator.replica_stability[replica.replica];
             if (stability > 0) continue;
 
-            const replica_storage = &simulator.cluster.storages[replica.replica];
             switch (simulator.cluster.replica_health[replica.replica]) {
                 .up => {
                     const replica_writes = replica_storage.writes.count();
