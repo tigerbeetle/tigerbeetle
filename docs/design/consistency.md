@@ -45,8 +45,10 @@ applications?
 > Note that a request refers to a batch, rather than a single event.
 
 - A request executes within the cluster at most once.
-- Requests do not [time out](#retries). A timeout typically implies failure, which cannot be
-  conclusively determined in the context of network faults. Note that individual [pending
+- Requests do not [time out](#retries). Clients will continuously retry requests until they receive
+  a reply from the cluster. This is because in the case of a network partition, a lack of response
+  from the cluster could either indicate that the request was dropped before it was processed or
+  that the reply was dropped after the request was processed. Note that individual [pending
   transfers](./two-phase-transfers.md) within a request may have
   [timeouts](../reference/transfers.md#timeout).
 - Requests retried by their original client session receive identical replies.
