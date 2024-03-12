@@ -185,10 +185,11 @@ Constraints:
 
 This is the interval in seconds after a
 [`pending`](#flagspending) transfer's [arrival at the cluster](#timestamp)
-that it may be posted or voided. Zero denotes absence of timeout.
+that it may be [posted](#flagspost_pending_transfer) or [voided](#flagsvoid_pending_transfer).
+Zero denotes absence of timeout.
 
 If the timeout expires and the pending transfer has not already been
-posted or voided, the pending transfer is voided automatically.
+posted or voided, the pending balance is removed automatically.
 
 Non-pending transfers cannot have a timeout.
 
