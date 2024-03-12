@@ -32,5 +32,5 @@ if [ "$debug" = "true" ]; then
     zig/zig build install $target
 else
     echo "Building TigerBeetle..."
-    zig/zig build install -Drelease $target
+    zig/zig build install -Drelease -Dconfig=production $target
 fi

@@ -241,6 +241,11 @@ const Command = struct {
                 "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
         }
 
+        if (constants.verify) {
+            log_main.warn("{}: started with constants.verify - expect reduced performance. " ++
+                "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
+        }
+
         // It is possible to start tigerbeetle passing `0` as an address:
         //     $ tigerbeetle start --addresses=0 0_0.tigerbeetle
         // This enables a couple of special behaviors, useful in tests:
