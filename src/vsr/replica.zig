@@ -1815,8 +1815,6 @@ pub fn ReplicaType(
                 // checkpoint (which is on a higher version) via a `start_view`.
                 // This would be safe to prepare, but rejecting it simplifies assertions.
                 assert(message.header.op > self.op_checkpoint_next_trigger());
-                assert(self.view_headers.array.get(0).op > self.op_checkpoint_next_trigger());
-                assert(self.view_headers.array.get(0).release > self.release);
 
                 log.debug("{}: on_repair: ignoring (newer release)", .{self.replica});
                 return;
