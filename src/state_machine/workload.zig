@@ -354,6 +354,20 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
+        /// `on_pulse` is called for pulse operations in commit order.
+        pub fn on_pulse(
+            self: *Self,
+            operation: AccountingStateMachine.Operation,
+            timestamp: u64,
+        ) void {
+            assert(timestamp != 0);
+
+            switch (operation) {
+                .expire_pending_transfers => self.auditor.expire_pending_transfers(timestamp),
+                else => unreachable,
+            }
+        }
+
         fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {
             const results = self.auditor.expect_create_accounts(client_index);
             for (accounts, 0..) |*account, i| {

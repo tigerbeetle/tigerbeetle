@@ -706,14 +706,10 @@ pub const Simulator = struct {
                     assert(prepare.header.client == 0);
                     assert(prepare.header.request == 0);
 
-                    switch (prepare.header.operation.cast(StateMachine)) {
-                        .expire_pending_transfers => {
-                            simulator.workload.auditor.expire_pending_transfers(
-                                prepare.header.timestamp,
-                            );
-                        },
-                        else => unreachable,
-                    }
+                    simulator.workload.on_pulse(
+                        prepare.header.operation.cast(StateMachine),
+                        prepare.header.timestamp,
+                    );
                 },
             }
         }

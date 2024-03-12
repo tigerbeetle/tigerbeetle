@@ -339,6 +339,19 @@ fn WorkloadType(comptime StateMachine: type) type {
             assert(std.mem.eql(u8, request_body, reply_body));
         }
 
+        pub fn on_pulse(
+            workload: *Workload,
+            operation: StateMachine.Operation,
+            timestamp: u64,
+        ) void {
+            _ = workload;
+            _ = operation;
+            _ = timestamp;
+
+            // This state machine does not implement a pulse operation.
+            unreachable;
+        }
+
         pub const Options = struct {
             pub fn generate(random: std.rand.Random, options: struct {
                 client_count: usize,
