@@ -2141,6 +2141,35 @@ const TestContext = struct {
         assert(ctx.busy);
         ctx.busy = false;
     }
+
+    fn execute(
+        context: *TestContext,
+        op: u64,
+        operation: TestContext.StateMachine.Operation,
+        input: []align(16) const u8,
+        output: *align(16) [message_body_size_max]u8,
+    ) usize {
+        const timestamp = context.state_machine.prepare_timestamp;
+
+        context.busy = true;
+        context.state_machine.prefetch_timestamp = timestamp;
+        context.state_machine.prefetch(
+            TestContext.callback,
+            op,
+            operation,
+            input,
+        );
+        while (context.busy) context.storage.tick();
+
+        return context.state_machine.commit(
+            0,
+            1,
+            timestamp,
+            operation,
+            input,
+            output,
+        );
+    }
 };
 
 const TestAction = union(enum) {
@@ -2529,26 +2558,26 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == commit_operation);
                 assert(!context.busy);
 
-                context.state_machine.prepare_timestamp += 1;
-                context.state_machine.prepare(commit_operation, request.items);
-                const timestamp = context.state_machine.prepare_timestamp;
-
                 const reply_actual_buffer = try allocator.alignedAlloc(u8, 16, 4096);
                 defer allocator.free(reply_actual_buffer);
 
-                context.busy = true;
-                context.state_machine.prefetch(
-                    TestContext.callback,
-                    op,
-                    commit_operation,
-                    request.items,
-                );
-                while (context.busy) context.storage.tick();
+                context.state_machine.prepare_timestamp += 1;
+                context.state_machine.prepare(commit_operation, request.items);
 
-                const reply_actual_size = context.state_machine.commit(
-                    0,
-                    1,
-                    timestamp,
+                if (context.state_machine.pulse_operation()) |pulse_operation| {
+                    const pulse_size = context.execute(
+                        op,
+                        pulse_operation,
+                        &.{},
+                        reply_actual_buffer[0..TestContext.message_body_size_max],
+                    );
+                    assert(pulse_size == 0);
+
+                    op += 1;
+                }
+
+                const reply_actual_size = context.execute(
+                    op,
                     commit_operation,
                     request.items,
                     reply_actual_buffer[0..TestContext.message_body_size_max],
@@ -2564,7 +2593,7 @@ fn check(test_table: []const u8) !void {
                             mem.bytesAsSlice(Result, reply_actual),
                         );
                     },
-                    .expire_pending_transfers => {},
+                    .expire_pending_transfers => unreachable,
                 }
 
                 request.clearRetainingCapacity();
@@ -2876,8 +2905,8 @@ test "create/lookup 2-phase transfers" {
         \\ commit create_transfers
 
         // Check balances after resolving.
-        \\ lookup_account A1 15 36  0  0
-        \\ lookup_account A2  0  0 15 36
+        \\ lookup_account A1  0 36  0  0
+        \\ lookup_account A2  0  0  0 36
         \\ commit lookup_accounts
     );
 }
