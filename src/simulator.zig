@@ -32,6 +32,8 @@ const Message = @import("message_pool.zig").MessagePool.Message;
 
 const releases = [_]Release{
     .{ .release = 1, .release_client_min = 1 },
+    .{ .release = 2, .release_client_min = 1 },
+    .{ .release = 3, .release_client_min = 1 },
 };
 
 pub const output = std.log.scoped(.cluster);
@@ -173,6 +175,8 @@ pub fn main() !void {
         .replica_crash_stability = random.uintLessThan(u32, 1_000),
         .replica_restart_probability = 0.0002,
         .replica_restart_stability = random.uintLessThan(u32, 1_000),
+        .replica_release_advance_probability = 0.0001,
+        .replica_release_catchup_probability = 0.001,
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = 1 + random.uintLessThan(u8, 99),
         .request_idle_on_probability = random.uintLessThan(u8, 20),
@@ -331,6 +335,14 @@ pub const Simulator = struct {
         replica_restart_probability: f64,
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
+        /// Probability per tick that a healthy replica will be crash-upgraded.
+        /// This probability is set to 0 during liveness mode.
+        replica_release_advance_probability: f64,
+        /// Probability that a crashed with an outdated version will be upgraded as it restarts.
+        /// This helps ensure that when the cluster upgrades, that replicas without the newest
+        /// version don't take too long to receive that new version.
+        /// This probability is set to 0 during liveness mode.
+        replica_release_catchup_probability: f64,
 
         /// The total number of requests to send. Does not count `register` messages.
         requests_max: usize,
@@ -343,6 +355,12 @@ pub const Simulator = struct {
     options: Options,
     cluster: *Cluster,
     workload: StateMachine.Workload,
+
+    // The number of releases in each replica's "binary".
+    replica_releases: []usize,
+    /// The maximum number of releases available in any replica's "binary".
+    /// (i.e. the maximum of any `replica_releases`.)
+    replica_releases_limit: usize = 1,
 
     /// Protect a replica from fast successive crash/restarts.
     replica_stability: []usize,
@@ -376,6 +394,10 @@ pub const Simulator = struct {
         var workload = try StateMachine.Workload.init(allocator, random, options.workload);
         errdefer workload.deinit(allocator);
 
+        var replica_releases = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
+        errdefer allocator.free(replica_releases);
+        @memset(replica_releases, 1);
+
         var replica_stability = try allocator.alloc(usize, options.cluster.replica_count + options.cluster.standby_count);
         errdefer allocator.free(replica_stability);
         @memset(replica_stability, 0);
@@ -388,12 +410,14 @@ pub const Simulator = struct {
             .options = options,
             .cluster = cluster,
             .workload = workload,
+            .replica_releases = replica_releases,
             .replica_stability = replica_stability,
             .reply_sequence = reply_sequence,
         };
     }
 
     pub fn deinit(simulator: *Simulator, allocator: std.mem.Allocator) void {
+        allocator.free(simulator.replica_releases);
         allocator.free(simulator.replica_stability);
         simulator.reply_sequence.deinit(allocator);
         simulator.workload.deinit(allocator);
@@ -406,6 +430,18 @@ pub const Simulator = struct {
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client| {
             assert(client.request_queue.count == 0);
+        }
+
+        // Even though there are no client requests in progress, the cluster may be upgrading.
+        const release_max = simulator.core_release_max();
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                // (If down, the replica is waiting to be upgraded.)
+                maybe(simulator.cluster.replica_health[replica.replica] == .down);
+
+                if (replica.release != release_max) return false;
+                assert(simulator.cluster.replica_health[replica.replica] == .up);
+            }
         }
 
         for (simulator.cluster.replicas) |*replica| {
@@ -477,6 +513,8 @@ pub const Simulator = struct {
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
         simulator.options.replica_crash_probability = 0;
         simulator.options.replica_restart_probability = 0;
+        simulator.options.replica_release_advance_probability = 0;
+        simulator.options.replica_release_catchup_probability = 0;
     }
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,
@@ -663,6 +701,22 @@ pub const Simulator = struct {
         }
     }
 
+    fn core_release_max(simulator: *const Simulator) u16 {
+        assert(simulator.core.count() > 0);
+
+        var release_max: u16 = 0;
+        for (simulator.cluster.replicas) |*replica| {
+            if (simulator.core.isSet(replica.replica)) {
+                release_max = @max(release_max, replica.release);
+                if (replica.upgrade_release) |release| {
+                    release_max = @max(release_max, release);
+                }
+            }
+        }
+        assert(release_max > 0);
+        return release_max;
+    }
+
     fn on_cluster_reply(
         cluster: *Cluster,
         reply_client: usize,
@@ -808,9 +862,20 @@ pub const Simulator = struct {
             switch (simulator.cluster.replica_health[replica.replica]) {
                 .up => {
                     const replica_writes = replica_storage.writes.count();
+
+                    const crash_upgrade =
+                        simulator.replica_releases[replica.replica] < releases.len and
+                        chance_f64(
+                        simulator.random,
+                        simulator.options.replica_release_advance_probability,
+                    );
+                    if (crash_upgrade) simulator.replica_upgrade(replica.replica);
+
                     const crash_probability = simulator.options.replica_crash_probability *
                         @as(f64, if (replica_writes == 0) 1.0 else 10.0);
-                    if (!chance_f64(simulator.random, crash_probability)) continue;
+                    const crash_random = chance_f64(simulator.random, crash_probability);
+
+                    if (!crash_upgrade and !crash_random) continue;
 
                     recoverable_count -= @intFromBool(!replica.standby() and
                         replica.status != .recovering_head and
@@ -823,12 +888,21 @@ pub const Simulator = struct {
                         simulator.options.replica_crash_stability;
                 },
                 .down => {
-                    if (!chance_f64(
+                    // If we are in liveness mode, we need to make sure that all replicas
+                    // (eventually) make it to the same release.
+                    const restart_upgrade =
+                        simulator.replica_releases[replica.replica] <
+                        simulator.replica_releases_limit and
+                        (simulator.core.isSet(replica.replica) or chance_f64(
                         simulator.random,
-                        simulator.options.replica_restart_probability,
-                    )) {
-                        continue;
-                    }
+                        simulator.options.replica_release_catchup_probability,
+                    ));
+                    if (restart_upgrade) simulator.replica_upgrade(replica.replica);
+
+                    const restart_random =
+                        chance_f64(simulator.random, simulator.options.replica_restart_probability);
+
+                    if (!restart_upgrade and !restart_random) continue;
 
                     const fault = recoverable_count >= recoverable_count_min or replica.standby();
                     simulator.restart_replica(replica.replica, fault);
@@ -862,15 +936,22 @@ pub const Simulator = struct {
             }
         }
 
-        log.debug("{}: restart replica (faults={})", .{
+        const replica_releases_count = simulator.replica_releases[replica_index];
+        log.debug("{}: restart replica (faults={} releases={})", .{
             replica_index,
             fault,
+            replica_releases_count,
         });
+
+        var replica_releases = vsr.ReleaseList{};
+        for (0..replica_releases_count) |i| {
+            replica_releases.append_assume_capacity(releases[i].release);
+        }
 
         replica_storage.faulty = fault;
         simulator.cluster.restart_replica(
             replica_index,
-            &[_]u16{ releases[0].release },
+            replica_releases.const_slice(),
         ) catch unreachable;
 
         if (replica.status == .recovering_head) {
@@ -883,6 +964,13 @@ pub const Simulator = struct {
         replica_storage.faulty = true;
         simulator.replica_stability[replica_index] =
             simulator.options.replica_restart_stability;
+    }
+
+    fn replica_upgrade(simulator: *Simulator, replica_index: u8) void {
+        simulator.replica_releases[replica_index] =
+            @min(simulator.replica_releases[replica_index] + 1, releases.len);
+        simulator.replica_releases_limit =
+            @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
     }
 };
 
