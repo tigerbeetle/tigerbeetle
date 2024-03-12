@@ -602,7 +602,7 @@ pub const lsm_manifest_memory_size_min = lsm_manifest_memory_size_multiplier;
 /// The lsm memory size must be a multiple of this value.
 ///
 /// While technically this could be equal to lsm_manifest_node_size, we set it
-/// to 1MB so it is a more obvious increment for users.
+/// to 1MiB so it is a more obvious increment for users.
 pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: {
     const lsm_manifest_memory_multiplier = 64 * lsm_manifest_node_size;
     assert(lsm_manifest_memory_multiplier == 1024 * 1024);
