@@ -30,8 +30,6 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const FreeSet = vsr.FreeSet;
 const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
 
-pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
-
 const FuzzOpAction = union(enum) {
     // TODO Test secondary index lookups and range queries.
     compact: struct {
