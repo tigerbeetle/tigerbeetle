@@ -8450,6 +8450,13 @@ pub fn ReplicaType(
             ));
 
             self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
+            self.upgrade_release = null;
+
+            if (self.release < self.superblock.working.vsr_state.checkpoint.release) {
+                self.release_transition(@src());
+                return;
+            }
+
             assert(self.commit_min == self.op_checkpoint());
             if (self.op < self.op_checkpoint()) {
                 self.transition_to_recovering_head();

@@ -1315,6 +1315,40 @@ test "Cluster: upgrade: R=1" {
     try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
 }
 
+test "Cluster: upgrade: state-sync to new release" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    t.replica(.R_).stop();
+    try t.replica(.R0).open_upgrade(&[_]u16{ 1, 2 });
+    try t.replica(.R1).open_upgrade(&[_]u16{ 1, 2 });
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
+    try t.replica(.R2).open();
+    try expectEqual(t.replica(.R2).health(), .up);
+    try expectEqual(t.replica(.R2).release(), 1);
+    try expectEqual(t.replica(.R2).commit(), 0);
+    t.run();
+
+    // ...But R2 doesn't have v2 available, so it shuts down.
+    try expectEqual(t.replica(.R2).health(), .down);
+    try expectEqual(t.replica(.R2).release(), 1);
+    try expectEqual(t.replica(.R2).commit(), checkpoint_2);
+
+    // Start R2 up with v2 available, and it recovers.
+    try t.replica(.R2).open_upgrade(&[_]u16{ 1, 2 });
+    try expectEqual(t.replica(.R2).health(), .up);
+    try expectEqual(t.replica(.R2).release(), 2);
+    try expectEqual(t.replica(.R2).commit(), checkpoint_2);
+
+    t.run();
+    try expectEqual(t.replica(.R2).commit(), t.replica(.R_).commit());
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
