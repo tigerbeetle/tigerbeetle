@@ -400,7 +400,6 @@ const naughty_list = [_][]const u8{
     "state_machine.zig",
     "state_machine/auditor.zig",
     "state_machine/workload.zig",
-    "testing/aof.zig",
     "testing/cluster/network.zig",
     "testing/cluster/state_checker.zig",
     "testing/hash_log.zig",
