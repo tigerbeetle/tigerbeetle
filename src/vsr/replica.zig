@@ -8587,8 +8587,9 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            // TODO: This fix introduced by the PR #1598 causes a liveness issue
+            // TODO: This block introduced by the PR #1598 causes a liveness issue
             // when a replica cannot start the sync.
+            // SEED 10266230273529621812, 8842160722467235252
             const fix_me = true;
             if (fix_me and candidate.view > self.view_durable()) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
