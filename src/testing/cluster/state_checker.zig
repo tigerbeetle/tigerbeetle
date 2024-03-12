@@ -169,7 +169,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(header_b.?.command == .prepare);
             assert(header_b.?.operation != .reserved);
 
-            if (header_b.?.client != 0) {
+            if (header_b.?.client == 0) {
+                assert(header_b.?.operation == .upgrade);
+            } else {
                 // The replica has transitioned to state `b` that is not yet in the commit history.
                 // Check if this is a valid new state based on the originating client's inflight request.
                 const client = for (state_checker.clients) |*client| {
@@ -195,7 +197,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(state_checker.requests_committed == header_b.?.op);
 
             const release = release: {
-                if (header_b.?.operation == .root) {
+                if (header_b.?.operation == .root or
+                    header_b.?.operation == .upgrade)
+                {
                     break :release null;
                 } else {
                     break :release replica.release;

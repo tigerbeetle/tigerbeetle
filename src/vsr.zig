@@ -220,6 +220,8 @@ pub const Operation = enum(u8) {
     register = 2,
     /// The value 3 is reserved for reconfiguration request.
     reconfigure = 3,
+    /// The value 4 is is reserved for release-upgrade requests.
+    upgrade = 4,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
@@ -542,6 +544,15 @@ test "ReconfigurationRequest" {
         .configuration_applied,
     );
 }
+
+pub const UpgradeRequest = extern struct {
+    release: u16,
+
+    comptime {
+        assert(@sizeOf(UpgradeRequest) == 2);
+        assert(stdx.no_padding(UpgradeRequest));
+    }
+};
 
 pub const Timeout = struct {
     name: []const u8,

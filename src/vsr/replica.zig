@@ -280,6 +280,13 @@ pub fn ReplicaType(
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
 
+        /// The release we are currently upgrading towards.
+        ///
+        /// Invariants:
+        /// - upgrade_release > release
+        /// - upgrade_release > superblock.working.vsr_state.checkpoint.release
+        upgrade_release: ?u16 = null,
+
         /// The latest release list from every other replica. (Constructed from pings.)
         ///
         /// Invariants:
@@ -481,6 +488,10 @@ pub fn ReplicaType(
         /// The number of ticks before sending a sync message (message types depend on syncing).
         /// (syncing≠idle)
         sync_message_timeout: Timeout,
+
+        /// The number of ticks before checking whether we are ready to begin an upgrade.
+        /// (status=normal primary)
+        upgrade_timeout: Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
@@ -1118,6 +1129,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .upgrade_timeout = Timeout{
+                    .name = "upgrade_timeout",
+                    .id = replica_index,
+                    .after = 500,
+                },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
                 .test_context = options.test_context,
@@ -1207,6 +1223,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.tick();
             self.grid_repair_message_timeout.tick();
             self.sync_message_timeout.tick();
+            self.upgrade_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
@@ -1222,6 +1239,7 @@ pub fn ReplicaType(
             if (self.repair_sync_timeout.fired()) self.on_repair_sync_timeout();
             if (self.grid_repair_message_timeout.fired()) self.on_grid_repair_message_timeout();
             if (self.sync_message_timeout.fired()) self.on_sync_message_timeout();
+            if (self.upgrade_timeout.fired()) self.on_upgrade_timeout();
 
             // None of the on_timeout() functions above should send a message to this replica.
             assert(self.loopback_queue == null);
@@ -1490,6 +1508,14 @@ pub fn ReplicaType(
 
             if (message.header.view > self.view) {
                 log.debug("{}: on_prepare: ignoring (newer view)", .{self.replica});
+                return;
+            }
+
+            if (message.header.release > self.release) {
+                // This would be safe to prepare, but rejecting it simplifies assertions.
+                assert(message.header.op > self.op_checkpoint_next_trigger());
+
+                log.debug("{}: on_prepare: ignoring (newer release)", .{self.replica});
                 return;
             }
 
@@ -1781,6 +1807,18 @@ pub fn ReplicaType(
             if (message.header.op > self.op) {
                 assert(message.header.view < self.view);
                 log.debug("{}: on_repair: ignoring (would advance self.op)", .{self.replica});
+                return;
+            }
+
+            if (message.header.release > self.release) {
+                // This case is possible if we advanced self.op to a prepare from the next
+                // checkpoint (which is on a higher version) via a `start_view`.
+                // This would be safe to prepare, but rejecting it simplifies assertions.
+                assert(message.header.op > self.op_checkpoint_next_trigger());
+                assert(self.view_headers.array.get(0).op > self.op_checkpoint_next_trigger());
+                assert(self.view_headers.array.get(0).release > self.release);
+
+                log.debug("{}: on_repair: ignoring (newer release)", .{self.replica});
                 return;
             }
 
@@ -2994,6 +3032,72 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_upgrade_timeout(self: *Self) void {
+            assert(self.primary());
+            assert(self.upgrade_timeout.ticking);
+
+            self.upgrade_timeout.reset();
+
+            if (self.upgrade_release) |_| {
+                // Already upgrading.
+                // Normally we chain send-upgrade-to-self via the commit chain.
+                // But there are a couple special cases where we need to restart the chain:
+                // - The request-to-self might have been dropped if the clock is not synchronized.
+                // - Alternatively, if a primary starts a new view, and an upgrade is already in
+                //   progress, it needs to start preparing more upgrades.
+                self.send_request_upgrade_to_self();
+                return;
+            }
+
+            const release_target: ?u16 = release: {
+                var release_target: ?u16 = null;
+                for (self.releases_bundled.const_slice(), 0..) |release, i| {
+                    if (i > 0) assert(release > self.releases_bundled.get(i - 1));
+                    // Ignore old releases.
+                    if (release <= self.release) continue;
+
+                    var release_replicas: usize = 1; // Count ourself.
+                    for (self.upgrade_targets, 0..) |targets_or_null, replica| {
+                        const targets = targets_or_null orelse continue;
+                        assert(replica != self.replica);
+
+                        for (targets.releases.const_slice()) |target_release| {
+                            assert(target_release > self.release);
+
+                            if (target_release == release) {
+                                release_replicas += 1;
+                                break;
+                            }
+                        }
+                    }
+
+                    // A majority quorum (i.e. `max(quorum_commit, quorum_view_change)`) is required
+                    // to ensure that the upgraded cluster can both commit and view-change.
+                    if (release_replicas >= vsr.quorums(self.replica_count).majority) {
+                        release_target = release;
+                    }
+                }
+                break :release release_target;
+            };
+
+            if (release_target) |release_target_| {
+                log.info("{}: on_upgrade_timeout: upgrading from release={}..{}", .{
+                    self.replica,
+                    self.release,
+                    release_target_,
+                });
+
+                // If there is already an UpgradeRequest in our pipeline,
+                // ignore_request_message_duplicate() will ignore this one.
+                const upgrade = vsr.UpgradeRequest{ .release = release_target_ };
+                self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
+            } else {
+                // One of:
+                // - We are on the latest version.
+                // - There is a newer version available, but not on enough replicas.
+            }
+        }
+
         fn primary_receive_do_view_change(
             self: *Self,
             message: *Message.DoViewChange,
@@ -3585,6 +3689,16 @@ pub fn ReplicaType(
                         self.write_prepare(next.message, .append);
                     }
                 }
+
+                if (self.upgrade_release) |upgrade_release| {
+                    assert(self.release < upgrade_release);
+
+                    if (self.commit_min < self.op_checkpoint_next_trigger() or
+                        self.release_for_next_checkpoint() == self.release)
+                    {
+                        self.send_request_upgrade_to_self();
+                    }
+                }
             }
 
             self.commit_dispatch(.compact_state_machine);
@@ -3753,7 +3867,7 @@ pub fn ReplicaType(
                     .free_set_reference = self.grid.free_set_checkpoint.checkpoint_reference(),
                     .client_sessions_reference = self.client_sessions_checkpoint.checkpoint_reference(),
                     .storage_size = storage_size,
-                    .release = self.release,
+                    .release = self.release_for_next_checkpoint(),
                 },
             );
         }
@@ -3798,6 +3912,14 @@ pub fn ReplicaType(
                 .{ .commit = .{ .op = op } },
             );
 
+            assert(self.release <= self.superblock.working.vsr_state.checkpoint.release);
+            if (self.release < self.superblock.working.vsr_state.checkpoint.release) {
+                // An upgrade has checkpointed, and that checkpoint is now durable.
+                // Deploy the new version!
+                self.release_transition(@src());
+                return;
+            }
+
             self.commit_dispatch(.next);
         }
 
@@ -3808,6 +3930,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.client_replies.writes.available() > 0);
+            assert(self.upgrade_release == null or prepare.header.operation == .upgrade);
             assert(self.superblock.working.vsr_state.checkpoint.release ==
                 self.release);
             assert(prepare.header.command == .prepare);
@@ -3880,6 +4003,7 @@ pub fn ReplicaType(
                     prepare,
                     reply.buffer[@sizeOf(Header)..],
                 ),
+                .upgrade => self.commit_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
                 else => self.state_machine.commit(
                     prepare.header.client,
                     prepare.header.op,
@@ -3942,7 +4066,9 @@ pub fn ReplicaType(
                     assert(entry.header.command == .reply);
                     assert(entry.header.op >= prepare.header.op);
                 } else {
-                    if (prepare.header.client != 0) {
+                    if (prepare.header.client == 0) {
+                        assert(prepare.header.operation == .upgrade);
+                    } else {
                         assert(self.client_sessions.count() == self.client_sessions.capacity());
                     }
                 }
@@ -3953,10 +4079,11 @@ pub fn ReplicaType(
                     self.op_checkpoint(),
                 });
             } else {
-                if (reply.header.operation == .register) {
-                    self.client_table_entry_create(reply);
-                } else {
-                    self.client_table_entry_update(reply);
+                switch (reply.header.operation) {
+                    .root => unreachable,
+                    .register => self.client_table_entry_create(reply),
+                    .upgrade => assert(reply.header.client == 0),
+                    else => self.client_table_entry_update(reply),
                 }
             }
 
@@ -3999,6 +4126,49 @@ pub fn ReplicaType(
 
             result.* = reconfiguration_request.result;
             return @sizeOf(vsr.ReconfigurationResult);
+        }
+
+        fn commit_upgrade(
+            self: *Self,
+            prepare: *const Message.Prepare,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
+        ) usize {
+            maybe(self.upgrade_release == null);
+            assert(self.commit_stage == .setup_client_replies);
+            assert(self.commit_prepare.? == prepare);
+            assert(self.superblock.working.vsr_state.checkpoint.release == self.release);
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation == .upgrade);
+            assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.UpgradeRequest));
+            assert(prepare.header.op == self.commit_min + 1);
+            assert(prepare.header.op <= self.op);
+            assert(prepare.header.client == 0);
+
+            if (self.pipeline == .queue) {
+                assert(self.pipeline.queue.prepare_queue.count == 1);
+                assert(self.pipeline.queue.request_queue.empty());
+            }
+
+            const request = std.mem.bytesAsValue(
+                vsr.UpgradeRequest,
+                prepare.body()[0..@sizeOf(vsr.UpgradeRequest)],
+            );
+            assert(request.release >= self.release);
+
+            if (request.release == self.release) {
+                // We are replaying this upgrade request after restarting into the new version.
+                assert(self.upgrade_release == null);
+            } else {
+                if (self.upgrade_release) |upgrade_release| {
+                    assert(upgrade_release == request.release);
+                } else {
+                    self.upgrade_release = request.release;
+                }
+            }
+
+            // The cluster is sending this request to itself, so there is no reply.
+            _ = output_buffer;
+            return 0;
         }
 
         /// Creates an entry in the client table when registering a new client session.
@@ -4500,8 +4670,63 @@ pub fn ReplicaType(
             }
 
             if (self.ignore_request_message_backup(message)) return true;
+            if (self.ignore_request_message_upgrade(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
+            return false;
+        }
+
+        fn ignore_request_message_upgrade(self: *Self, message: *const Message.Request) bool {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(message.header.command == .request);
+
+            if (message.header.operation == .upgrade) {
+                const upgrade_request = std.mem.bytesAsValue(
+                    vsr.UpgradeRequest,
+                    message.body()[0..@sizeOf(vsr.UpgradeRequest)],
+                );
+
+                if (upgrade_request.release == self.release) {
+                    log.debug("{}: on_request: ignoring (upgrade to current version)", .{
+                        self.replica,
+                    });
+                    return true;
+                }
+
+                if (upgrade_request.release < self.release) {
+                    log.warn("{}: on_request: ignoring (upgrade to old version)", .{
+                        self.replica,
+                    });
+                    return true;
+                }
+
+                if (self.upgrade_release) |upgrade_release| {
+                    if (upgrade_request.release != upgrade_release) {
+                        log.warn("{}: on_request: ignoring (upgrade to different version)", .{
+                            self.replica,
+                        });
+                        return true;
+                    }
+                }
+            } else {
+                if (self.upgrade_release) |_| {
+                    // While we are trying to upgrade, ignore non-upgrade requests.
+                    //
+                    // The objective is to reach a checkpoint such that the last bar of messages
+                    // immediately prior to the checkpoint trigger are noops (operation=upgrade) so
+                    // that they will behave identically before and after the upgrade when they are
+                    // replayed.
+                    log.debug("{}: on_request: ignoring (upgrading)", .{self.replica});
+                    return true;
+                }
+
+                // Even though `operation=upgrade` hasn't committed, it may be in the pipeline.
+                if (self.pipeline.queue.message_by_operation(.upgrade)) |_| {
+                    log.debug("{}: on_request: ignoring (upgrade queued)", .{self.replica});
+                    return true;
+                }
+            }
             return false;
         }
 
@@ -4583,6 +4808,7 @@ pub fn ReplicaType(
                 return true;
             } else {
                 if (message.header.client == 0) {
+                    assert(message.header.operation == .upgrade);
                     assert(message.header.request == 0);
                     return false;
                 } else {
@@ -5299,8 +5525,6 @@ pub fn ReplicaType(
             assert(!self.pipeline.queue.prepare_queue.full());
             self.pipeline.queue.verify();
 
-            assert(!self.ignore_request_message(request.message));
-
             defer self.message_bus.unref(request.message);
 
             log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
@@ -5325,6 +5549,7 @@ pub fn ReplicaType(
                 .reserved, .root => unreachable,
                 .register => {},
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
+                .upgrade => {},
                 else => self.state_machine.prepare(
                     request.message.header.operation.cast(StateMachine),
                     request.message.body(),
@@ -7446,6 +7671,7 @@ pub fn ReplicaType(
             self.request_start_view_message_timeout.stop();
             self.repair_timeout.stop();
             self.repair_sync_timeout.stop();
+            self.upgrade_timeout.stop();
             self.grid_repair_message_timeout.start();
 
             if (self.pipeline == .queue) {
@@ -7495,12 +7721,14 @@ pub fn ReplicaType(
                 assert(!self.do_view_change_message_timeout.ticking);
                 assert(!self.request_start_view_message_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.upgrade_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.upgrade_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
                 self.pipeline = .{ .queue = .{} };
@@ -7522,6 +7750,7 @@ pub fn ReplicaType(
                 assert(!self.do_view_change_message_timeout.ticking);
                 assert(!self.request_start_view_message_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.upgrade_timeout.ticking);
 
                 self.ping_timeout.start();
                 self.normal_heartbeat_timeout.start();
@@ -7573,6 +7802,7 @@ pub fn ReplicaType(
             assert(!self.do_view_change_message_timeout.ticking);
             assert(!self.request_start_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
+            assert(!self.upgrade_timeout.ticking);
 
             self.ping_timeout.start();
             self.normal_heartbeat_timeout.start();
@@ -7604,6 +7834,7 @@ pub fn ReplicaType(
                 assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.upgrade_timeout.ticking);
                 assert(!self.pipeline_repairing);
                 assert(self.pipeline == .queue);
                 assert(self.view == view_new);
@@ -7625,6 +7856,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.upgrade_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
                 if (self.pipeline.queue.prepare_queue.count > 0) {
@@ -7642,6 +7874,7 @@ pub fn ReplicaType(
                 assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.upgrade_timeout.ticking);
                 assert(self.request_start_view_message_timeout.ticking);
                 assert(self.pipeline == .cache);
 
@@ -7748,6 +7981,7 @@ pub fn ReplicaType(
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
             self.grid_repair_message_timeout.start();
+            self.upgrade_timeout.stop();
 
             if (self.primary_index(self.view) == self.replica) {
                 self.request_start_view_message_timeout.stop();
@@ -8369,6 +8603,18 @@ pub fn ReplicaType(
                 assert(self.journal.status == .init);
             }
 
+            if (self.release < release_target) {
+                // Upgrading to new release.
+                // We checkpointed or state-synced an upgrade.
+                //
+                // Even though we are upgrading, our target version is not necessarily available in
+                // our binary. (In this case, release_execute() is responsible for error-ing out.)
+                maybe(self.release == self.releases_bundled.get(0));
+                assert(self.commit_min == self.op_checkpoint() or
+                    self.commit_min == vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()));
+                maybe(self.journal.status == .init);
+            }
+
             log.info("{}: release_transition: release={}..{} (reason={s})", .{
                 self.replica,
                 self.release,
@@ -8381,6 +8627,41 @@ pub fn ReplicaType(
             // - For testing/cluster.zig: `self` is no longer valid – the replica has been
             //   deinitialized and re-opened on the new version.
             // - For tigerbeetle/main.zig: This is unreachable (release_execute() will not return).
+        }
+
+        /// Returns the next checkpoint's `CheckpointState.release`.
+        fn release_for_next_checkpoint(self: *const Self) u16 {
+            assert(self.commit_stage != .idle);
+            assert(self.commit_min == self.op_checkpoint_next_trigger());
+            assert(self.release ==
+                self.superblock.working.vsr_state.checkpoint.release);
+
+            var found_upgrade: usize = 0;
+            for (self.op_checkpoint_next() + 1..self.op_checkpoint_next_trigger() + 1) |op| {
+                const header = self.journal.header_for_op(op).?;
+                assert(header.operation != .reserved);
+
+                if (header.operation == .upgrade) {
+                    found_upgrade += 1;
+                } else {
+                    // Only allow the next checkpoint's release to advance if the entire last bar
+                    // preceding the checkpoint trigger consists of operation=upgrade.
+                    //
+                    // Otherwise we would risk the following:
+                    // 1. Execute op=X in the state machine on version v1.
+                    // 2. Upgrade, checkpoint, restart.
+                    // 3. Replay op=X when recovering from checkpoint on v2.
+                    // If v1 and v2 produce different results when executing op=X, then an assertion
+                    // will trip (as v2's reply doesn't match v1's in the client sessions).
+                    assert(found_upgrade < constants.lsm_batch_multiple);
+                    maybe(found_upgrade > 0);
+                    maybe(self.upgrade_release != null);
+                    return self.release;
+                }
+            }
+            assert(found_upgrade == constants.lsm_batch_multiple);
+            assert(self.upgrade_release != null);
+            return self.upgrade_release.?;
         }
 
         /// Whether it is safe to commit or send prepare_ok messages.
@@ -8830,6 +9111,19 @@ pub fn ReplicaType(
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
             self.send_message_to_replica(parameters.replica, reply);
+        }
+
+        fn send_request_upgrade_to_self(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(self.upgrade_release.? > self.release);
+            maybe(self.pipeline.queue.message_by_operation(.upgrade) != null);
+
+            const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
+            self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
+
+            // If our clock is not synchronized, then the request-to-self might have been dropped.
+            maybe(self.pipeline.queue.message_by_operation(.upgrade) != null);
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
@@ -9531,6 +9825,20 @@ const PipelineQueue = struct {
         var request_iterator = pipeline.request_queue.iterator();
         while (request_iterator.next()) |request| {
             if (request.message.header.client == client_id) message = request.message.base();
+        }
+        return message;
+    }
+
+    fn message_by_operation(pipeline: PipelineQueue, operation: vsr.Operation) ?*const Message {
+        var message: ?*const Message = null;
+        var prepare_iterator = pipeline.prepare_queue.iterator();
+        while (prepare_iterator.next_ptr()) |prepare| {
+            if (prepare.message.header.operation == operation) message = prepare.message.base();
+        }
+
+        var request_iterator = pipeline.request_queue.iterator();
+        while (request_iterator.next()) |request| {
+            if (request.message.header.operation == operation) message = request.message.base();
         }
         return message;
     }
