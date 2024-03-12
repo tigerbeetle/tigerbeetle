@@ -2911,6 +2911,56 @@ test "create/lookup 2-phase transfers" {
     );
 }
 
+test "create/lookup expired transfers" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ ok
+        \\ commit create_accounts
+
+        // First phase.
+        \\ transfer   T1 A1 A2   10   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ ok // Timeout zero will never expire.
+        \\ transfer   T2 A1 A2   11   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _  _ _ ok
+        \\ transfer   T3 A1 A2   12   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _ ok
+        \\ transfer   T4 A1 A2   13   _  _  _  _    3 L1 C1   _ PEN   _   _   _   _  _ _ ok
+        \\ commit create_transfers
+
+        // Check balances before expiration.
+        \\ lookup_account A1 46  0  0  0
+        \\ lookup_account A2  0  0 46  0
+        \\ commit lookup_accounts
+
+        // Check balances after 1s.
+        \\ tick 1000000000
+        \\ lookup_account A1 35  0  0  0
+        \\ lookup_account A2  0  0 35  0
+        \\ commit lookup_accounts
+
+        // Check balances after 1s.
+        \\ tick 1000000000
+        \\ lookup_account A1 23  0  0  0
+        \\ lookup_account A2  0  0 23  0
+        \\ commit lookup_accounts
+
+        // Check balances after 1s.
+        \\ tick 1000000000
+        \\ lookup_account A1 10  0  0  0
+        \\ lookup_account A2  0  0 10  0
+        \\ commit lookup_accounts
+
+        // Second phase.
+        \\ transfer T101 A1 A2   10  T1 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ ok
+        \\ transfer T102 A1 A2   11  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ pending_transfer_expired
+        \\ transfer T103 A1 A2   12  T3 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ pending_transfer_expired
+        \\ transfer T104 A1 A2   13  T4 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ pending_transfer_expired
+        \\ commit create_transfers
+
+        // Check final balances.
+        \\ lookup_account A1  0 10  0  0
+        \\ lookup_account A2  0  0  0 10
+        \\ commit lookup_accounts
+    );
+}
+
 test "create_transfers: empty" {
     try check(
         \\ commit create_transfers
