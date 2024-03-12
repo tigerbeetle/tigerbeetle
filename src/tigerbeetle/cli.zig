@@ -17,7 +17,9 @@ const StateMachine = vsr.state_machine.StateMachineType(
 const CliArgs = union(enum) {
     format: struct {
         cluster: u128,
-        replica: u8,
+        replica: ?u8 = null,
+        // Intentionally undocumented: standbys don't have a concrete practical use-case yet.
+        standby: ?u8 = null,
         replica_count: u8,
 
         positional: struct {
@@ -269,17 +271,46 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 });
             }
 
-            if (format.replica >= constants.standbys_max + format.replica_count) {
-                flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
-                    format.replica,
-                    constants.standbys_max + format.replica_count - 1,
-                });
+            if (format.replica == null and format.standby == null) {
+                flags.fatal("--replica: argument is required", .{});
             }
+
+            if (format.replica != null and format.standby != null) {
+                flags.fatal("--standby: conflicts with '--replica'", .{});
+            }
+
+            if (format.replica) |replica| {
+                if (replica >= format.replica_count) {
+                    flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
+                        replica,
+                        format.replica_count - 1,
+                    });
+                }
+            }
+
+            if (format.standby) |standby| {
+                if (standby < format.replica_count) {
+                    flags.fatal("--standby: value is too small ({}), at least {} is required", .{
+                        standby,
+                        format.replica_count,
+                    });
+                }
+                if (standby >= format.replica_count + constants.standbys_max) {
+                    flags.fatal("--standby: value is too large ({}), at most {} is allowed", .{
+                        standby,
+                        format.replica_count + constants.standbys_max - 1,
+                    });
+                }
+            }
+
+            const replica = (format.replica orelse format.standby).?;
+            assert(replica < constants.members_max);
+            assert(replica < format.replica_count + constants.standbys_max);
 
             return Command{
                 .format = .{
                     .cluster = format.cluster, // just an ID, any value is allowed
-                    .replica = format.replica,
+                    .replica = replica,
                     .replica_count = format.replica_count,
                     .path = format.positional.path,
                 },
