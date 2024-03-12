@@ -2823,37 +2823,7 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.commit_min == self.commit_max);
 
-            if (self.primary_abdicating) {
-                assert(self.primary_abdicate_timeout.ticking);
-                assert(self.pipeline.queue.prepare_queue.count > 0);
-                assert(self.primary_pipeline_pending() != null);
-
-                log.mark.debug("{}: on_commit_message_timeout: primary abdicating (view={})", .{
-                    self.replica,
-                    self.view,
-                });
-                return;
-            }
-
-            const latest_committed_entry = checksum: {
-                if (self.commit_max == self.superblock.working.vsr_state.checkpoint.header.op) {
-                    break :checksum self.superblock.working.vsr_state.checkpoint.header.checksum;
-                } else {
-                    break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
-                }
-            };
-
-            self.send_header_to_other_replicas_and_standbys(@bitCast(Header.Commit{
-                .command = .commit,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .view = self.view,
-                .commit = self.commit_max,
-                .commit_checksum = latest_committed_entry,
-                .timestamp_monotonic = self.clock.monotonic(),
-                .checkpoint_op = self.superblock.working.vsr_state.checkpoint.header.op,
-                .checkpoint_id = self.superblock.working.checkpoint_id(),
-            }));
+            self.send_commit();
         }
 
         fn on_normal_heartbeat_timeout(self: *Self) void {
@@ -3389,6 +3359,13 @@ pub fn ReplicaType(
                     self.client_sessions_checkpoint.size = self.client_sessions.encode(chunks[0]);
                     assert(self.client_sessions_checkpoint.size == ClientSessions.encode_size);
 
+                    if (self.status == .normal and self.primary()) {
+                        // Send a commit message promptly, rather than waiting for our commit timer.
+                        // This is useful when this checkpoint is an upgrade, since we will need to
+                        // restart into the new version. We want all the replicas to restart in
+                        // parallel (as much possible) rather than in sequence.
+                        self.send_commit();
+                    }
                     self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
                     self.client_sessions_checkpoint.checkpoint(commit_op_checkpoint_client_sessions_callback);
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
@@ -9118,6 +9095,44 @@ pub fn ReplicaType(
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
             self.send_message_to_replica(parameters.replica, reply);
+        }
+
+        fn send_commit(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(self.commit_min == self.commit_max);
+
+            if (self.primary_abdicating) {
+                assert(self.primary_abdicate_timeout.ticking);
+                assert(self.pipeline.queue.prepare_queue.count > 0);
+                assert(self.primary_pipeline_pending() != null);
+
+                log.mark.debug("{}: send_commit: primary abdicating (view={})", .{
+                    self.replica,
+                    self.view,
+                });
+                return;
+            }
+
+            const latest_committed_entry = checksum: {
+                if (self.commit_max == self.superblock.working.vsr_state.checkpoint.header.op) {
+                    break :checksum self.superblock.working.vsr_state.checkpoint.header.checksum;
+                } else {
+                    break :checksum self.journal.header_with_op(self.commit_max).?.checksum;
+                }
+            };
+
+            self.send_header_to_other_replicas_and_standbys(@bitCast(Header.Commit{
+                .command = .commit,
+                .cluster = self.cluster,
+                .replica = self.replica,
+                .view = self.view,
+                .commit = self.commit_max,
+                .commit_checksum = latest_committed_entry,
+                .timestamp_monotonic = self.clock.monotonic(),
+                .checkpoint_op = self.superblock.working.vsr_state.checkpoint.header.op,
+                .checkpoint_id = self.superblock.working.checkpoint_id(),
+            }));
         }
 
         fn send_request_upgrade_to_self(self: *Self) void {

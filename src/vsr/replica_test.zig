@@ -373,7 +373,7 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" 
     try c.request(20, 20);
     t.replica(.A0).drop_all(.B1, .incoming);
     t.replica(.A0).drop_all(.B2, .incoming);
-    const mark = marks.check("on_commit_message_timeout: primary abdicating");
+    const mark = marks.check("send_commit: primary abdicating");
     try c.request(30, 30);
     try mark.expect_hit();
 }
