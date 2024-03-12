@@ -35,7 +35,7 @@ pub fn ManifestCheckerType(comptime Forest: type) type {
             assert(forest.grid.superblock.opened);
             assert(forest.manifest_log.opened);
 
-            const checkpoint_op = forest.grid.superblock.working.vsr_state.checkpoint.commit_min;
+            const checkpoint_op = forest.grid.superblock.working.vsr_state.checkpoint.header.op;
             const checksum_stored = checker.checkpoints.getOrPut(checkpoint_op) catch @panic("oom");
             const checksum_current = manifest_levels_checksum(forest);
 

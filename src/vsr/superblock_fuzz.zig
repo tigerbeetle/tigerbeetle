@@ -98,9 +98,9 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .superblock_verify = &superblock_verify,
         .latest_vsr_state = SuperBlockHeader.VSRState{
             .checkpoint = .{
+                .header = std.mem.zeroes(vsr.Header.Prepare),
                 .parent_checkpoint_id = 0,
                 .grandparent_checkpoint_id = 0,
-                .commit_min_checksum = 0,
                 .free_set_checksum = vsr.checksum(&.{}),
                 .free_set_last_block_checksum = 0,
                 .free_set_last_block_address = 0,
@@ -116,7 +116,6 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
                 .snapshots_block_checksum = 0,
                 .snapshots_block_address = 0,
                 .manifest_block_count = 0,
-                .commit_min = 0,
                 .storage_size = data_file_size_min,
                 .release = 1,
             },
@@ -349,7 +348,7 @@ const Environment = struct {
             .command = .prepare,
             .release = 1,
             .operation = @as(vsr.Operation, @enumFromInt(constants.vsr_operations_reserved + 1)),
-            .op = env.superblock.staging.vsr_state.checkpoint.commit_min + 1,
+            .op = env.superblock.staging.vsr_state.checkpoint.header.op + 1,
             .timestamp = 1,
         });
         vsr_head.set_checksum_body(&.{});
@@ -387,10 +386,14 @@ const Environment = struct {
         const vsr_state_old = env.superblock.staging.vsr_state;
         const vsr_state = VSRState{
             .checkpoint = .{
+                .header = header: {
+                    var header = vsr.Header.Prepare.root(cluster);
+                    header.op = vsr_state_old.checkpoint.header.op + 1;
+                    header.set_checksum();
+                    break :header header;
+                },
                 .parent_checkpoint_id = env.superblock.staging.checkpoint_id(),
                 .grandparent_checkpoint_id = vsr_state_old.checkpoint.parent_checkpoint_id,
-                .commit_min_checksum = vsr_state_old.checkpoint.commit_min_checksum + 1,
-                .commit_min = vsr_state_old.checkpoint.commit_min + 1,
                 .free_set_checksum = vsr.checksum(&.{}),
                 .free_set_last_block_checksum = 0,
                 .free_set_last_block_address = 0,
@@ -448,8 +451,7 @@ const Environment = struct {
                 .trailer_size = 0,
                 .checksum = vsr.checksum(&.{}),
             },
-            .commit_min_checksum = vsr_state.checkpoint.commit_min_checksum,
-            .commit_min = vsr_state.checkpoint.commit_min,
+            .header = vsr_state.checkpoint.header,
             .commit_max = vsr_state.commit_max,
             .sync_op_min = 0,
             .sync_op_max = 0,

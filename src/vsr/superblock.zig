@@ -2,9 +2,9 @@
 //!
 //!   * vsr_state
 //!     - vsr_state.replica and vsr_state.replica_count are immutable for now.
-//!     - vsr_state.checkpoint.commit_min is initially 0 (for a newly-formatted replica).
-//!     - vsr_state.checkpoint.commit_min ≤ vsr_state.commit_max
-//!     - vsr_state.checkpoint.commit_min_before ≤ vsr_state.checkpoint.commit_min
+//!     - vsr_state.checkpoint.header.op is initially 0 (for a newly-formatted replica).
+//!     - vsr_state.checkpoint.header.op ≤ vsr_state.commit_max
+//!     - vsr_state.checkpoint.header.op_before ≤ vsr_state.checkpoint.header.op
 //!     - vsr_state.log_view ≤ vsr_state.view
 //!     - vsr_state.sync_op_min ≤ vsr_state.sync_op_max
 //!
@@ -19,13 +19,13 @@
 //!       vsr_state.checkpoint.manifest_oldest_address>0
 //!       vsr_state.checkpoint.manifest_newest_address>0
 //!
-//!     - checkpoint() must advance the superblock's vsr_state.checkpoint.commit_min.
-//!     - view_change() must not advance the superblock's vsr_state.checkpoint.commit_min.
+//!     - checkpoint() must advance the superblock's vsr_state.checkpoint.header.op.
+//!     - view_change() must not advance the superblock's vsr_state.checkpoint.header.op.
 //!     - The following are monotonically increasing:
 //!       - vsr_state.log_view
 //!       - vsr_state.view
 //!       - vsr_state.commit_max
-//!     - vsr_state.checkpoint.commit_min may backtrack due to state sync.
+//!     - vsr_state.checkpoint.header.op may backtrack due to state sync.
 //!
 const std = @import("std");
 const assert = std.debug.assert;
@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3380]u8 = [_]u8{0} ** 3380,
+    reserved: [3172]u8 = [_]u8{0} ** 3172,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -143,7 +143,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
-            assert(@sizeOf(VSRState) == 608);
+            assert(@sizeOf(VSRState) == 816);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -157,10 +157,9 @@ pub const SuperBlockHeader = extern struct {
         }) VSRState {
             return .{
                 .checkpoint = .{
+                    .header = vsr.Header.Prepare.root(options.cluster),
                     .parent_checkpoint_id = 0,
                     .grandparent_checkpoint_id = 0,
-                    .commit_min_checksum = vsr.Header.Prepare.root(options.cluster).checksum,
-                    .commit_min = 0,
                     .free_set_checksum = comptime vsr.checksum(&.{}),
                     .free_set_last_block_checksum = 0,
                     .free_set_last_block_address = 0,
@@ -191,7 +190,7 @@ pub const SuperBlockHeader = extern struct {
         }
 
         pub fn assert_internally_consistent(state: VSRState) void {
-            assert(state.commit_max >= state.checkpoint.commit_min);
+            assert(state.commit_max >= state.checkpoint.header.op);
             assert(state.sync_op_max >= state.sync_op_min);
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
@@ -202,7 +201,6 @@ pub const SuperBlockHeader = extern struct {
             assert(state.checkpoint.snapshots_block_checksum == 0);
             assert(state.checkpoint.snapshots_block_address == 0);
 
-            assert(state.checkpoint.commit_min_checksum_padding == 0);
             assert(state.checkpoint.manifest_oldest_checksum_padding == 0);
             assert(state.checkpoint.manifest_newest_checksum_padding == 0);
             assert(state.checkpoint.snapshots_block_checksum_padding == 0);
@@ -213,7 +211,7 @@ pub const SuperBlockHeader = extern struct {
             if (state.checkpoint.free_set_last_block_address == 0) {
                 assert(state.checkpoint.free_set_last_block_checksum == 0);
                 assert(state.checkpoint.free_set_size == 0);
-                assert(state.checkpoint.free_set_checksum == vsr.checksum(&.{}));
+                assert(state.checkpoint.free_set_checksum == comptime vsr.checksum(&.{}));
             } else {
                 assert(state.checkpoint.free_set_size > 0);
             }
@@ -221,7 +219,7 @@ pub const SuperBlockHeader = extern struct {
             if (state.checkpoint.client_sessions_last_block_address == 0) {
                 assert(state.checkpoint.client_sessions_last_block_checksum == 0);
                 assert(state.checkpoint.client_sessions_size == 0);
-                assert(state.checkpoint.client_sessions_checksum == vsr.checksum(&.{}));
+                assert(state.checkpoint.client_sessions_checksum == comptime vsr.checksum(&.{}));
             } else {
                 assert(state.checkpoint.client_sessions_size == vsr.ClientSessions.encode_size);
             }
@@ -248,8 +246,8 @@ pub const SuperBlockHeader = extern struct {
         pub fn monotonic(old: VSRState, new: VSRState) bool {
             old.assert_internally_consistent();
             new.assert_internally_consistent();
-            if (old.checkpoint.commit_min == new.checkpoint.commit_min) {
-                if (old.checkpoint.commit_min_checksum == 0 and old.checkpoint.commit_min == 0) {
+            if (old.checkpoint.header.op == new.checkpoint.header.op) {
+                if (old.checkpoint.header.checksum == 0 and old.checkpoint.header.op == 0) {
                     // "old" is the root VSRState.
                     assert(old.commit_max == 0);
                     assert(old.sync_op_min == 0);
@@ -260,7 +258,7 @@ pub const SuperBlockHeader = extern struct {
                     assert(stdx.equal_bytes(CheckpointState, &old.checkpoint, &new.checkpoint));
                 }
             } else {
-                assert(old.checkpoint.commit_min_checksum != new.checkpoint.commit_min_checksum);
+                assert(old.checkpoint.header.checksum != new.checkpoint.header.checksum);
                 assert(old.checkpoint.parent_checkpoint_id !=
                     new.checkpoint.parent_checkpoint_id);
             }
@@ -268,7 +266,7 @@ pub const SuperBlockHeader = extern struct {
             assert(old.replica_count == new.replica_count);
             assert(stdx.equal_bytes([constants.members_max]u128, &old.members, &new.members));
 
-            if (old.checkpoint.commit_min > new.checkpoint.commit_min) return false;
+            if (old.checkpoint.header.op > new.checkpoint.header.op) return false;
             if (old.view > new.view) return false;
             if (old.log_view > new.log_view) return false;
             if (old.commit_max > new.commit_max) return false;
@@ -289,8 +287,8 @@ pub const SuperBlockHeader = extern struct {
         /// to ensure deterministic storage.
         pub fn op_compacted(state: VSRState, op: u64) bool {
             // If commit_min is 0, we have never checkpointed, so no compactions are checkpointed.
-            return state.checkpoint.commit_min > 0 and
-                op <= vsr.Checkpoint.trigger_for_checkpoint(state.checkpoint.commit_min).?;
+            return state.checkpoint.header.op > 0 and
+                op <= vsr.Checkpoint.trigger_for_checkpoint(state.checkpoint.header.op).?;
         }
     };
 
@@ -299,9 +297,9 @@ pub const SuperBlockHeader = extern struct {
     /// This struct is sent in a `sync_checkpoint` message from a healthy replica to a syncing
     /// replica.
     pub const CheckpointState = extern struct {
-        /// The vsr.Header.checksum of commit_min's message.
-        commit_min_checksum: u128,
-        commit_min_checksum_padding: u128 = 0,
+        /// The last prepare of the checkpoint committed to the state machine.
+        /// At startup, replay the log hereafter.
+        header: vsr.Header.Prepare,
 
         free_set_last_block_checksum: u128,
         free_set_last_block_checksum_padding: u128 = 0,
@@ -336,9 +334,6 @@ pub const SuperBlockHeader = extern struct {
         manifest_newest_address: u64,
         snapshots_block_address: u64,
 
-        /// The last operation committed to the state machine. At startup, replay the log hereafter.
-        commit_min: u64,
-
         // Logical storage size in bytes.
         //
         // If storage_size is less than the data file size, then the grid blocks beyond storage_size
@@ -363,11 +358,11 @@ pub const SuperBlockHeader = extern struct {
         release: u16,
 
         // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [18]u8 = [_]u8{0} ** 18,
+        reserved: [10]u8 = [_]u8{0} ** 10,
 
         comptime {
-            assert(@sizeOf(CheckpointState) == 352);
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
+            assert(@sizeOf(CheckpointState) == 560);
             assert(stdx.no_padding(CheckpointState));
         }
     };
@@ -723,10 +718,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .parent = 0,
                 .vsr_state = .{
                     .checkpoint = .{
+                        .header = mem.zeroes(vsr.Header.Prepare),
                         .parent_checkpoint_id = 0,
                         .grandparent_checkpoint_id = 0,
-                        .commit_min_checksum = 0,
-                        .commit_min = 0,
                         .manifest_oldest_checksum = 0,
                         .manifest_oldest_address = 0,
                         .manifest_newest_checksum = 0,
@@ -800,8 +794,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
         }
 
         const UpdateCheckpoint = struct {
-            commit_min_checksum: u128,
-            commit_min: u64,
+            header: vsr.Header.Prepare,
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
@@ -819,10 +812,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update: UpdateCheckpoint,
         ) void {
             assert(superblock.opened);
-            assert(update.commit_min <= update.commit_max);
-            assert(update.commit_min > superblock.staging.vsr_state.checkpoint.commit_min);
-            assert(update.commit_min_checksum !=
-                superblock.staging.vsr_state.checkpoint.commit_min_checksum);
+            assert(update.header.op <= update.commit_max);
+            assert(update.header.op > superblock.staging.vsr_state.checkpoint.header.op);
+            assert(update.header.checksum !=
+                superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
 
             assert(update.storage_size <= superblock.storage_size_limit);
@@ -837,10 +830,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = .{
+                .header = update.header,
                 .parent_checkpoint_id = superblock.staging.checkpoint_id(),
                 .grandparent_checkpoint_id = vsr_state_staging.checkpoint.parent_checkpoint_id,
-                .commit_min = update.commit_min,
-                .commit_min_checksum = update.commit_min_checksum,
                 .free_set_checksum = update.free_set_reference.checksum,
                 .free_set_last_block_checksum = update.free_set_reference.last_block_checksum,
                 .free_set_last_block_address = update.free_set_reference.last_block_address,
@@ -901,7 +893,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 (update.headers.command == .do_view_change and update.log_view < update.view));
             // Usually the op-head is ahead of the commit_min. But this may not be the case, due to
             // state sync that ran after the view_durable_update was queued, but before it executed.
-            maybe(superblock.staging.vsr_state.checkpoint.commit_min >
+            maybe(superblock.staging.vsr_state.checkpoint.header.op >
                 update.headers.array.get(0).op);
 
             update.headers.verify();
@@ -938,17 +930,19 @@ pub fn SuperBlockType(comptime Storage: type) type {
             update: UpdateSync,
         ) void {
             assert(superblock.opened);
-            assert(update.checkpoint.commit_min >=
-                superblock.staging.vsr_state.checkpoint.commit_min);
-            assert(update.checkpoint.commit_min <= update.commit_max);
+            assert(update.checkpoint.header.valid_checksum());
+            assert(update.checkpoint.header.command == .prepare);
+            assert(update.checkpoint.header.op >=
+                superblock.staging.vsr_state.checkpoint.header.op);
+            assert(update.checkpoint.header.op <= update.commit_max);
             assert(
-                (update.checkpoint.commit_min ==
-                    superblock.staging.vsr_state.checkpoint.commit_min) ==
-                    (update.checkpoint.commit_min_checksum ==
-                    superblock.staging.vsr_state.checkpoint.commit_min_checksum),
+                (update.checkpoint.header.op ==
+                    superblock.staging.vsr_state.checkpoint.header.op) ==
+                    (update.checkpoint.header.checksum ==
+                    superblock.staging.vsr_state.checkpoint.header.checksum),
             );
             assert(update.sync_op_min <= update.sync_op_max);
-            assert(update.sync_op_max > update.checkpoint.commit_min);
+            assert(update.sync_op_max > update.checkpoint.header.op);
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = update.checkpoint;
@@ -1171,12 +1165,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                 if (context.caller == .format) {
                     assert(working.sequence == 1);
-                    assert(working.vsr_state.checkpoint.commit_min_checksum ==
+                    assert(working.vsr_state.checkpoint.header.checksum ==
                         vsr.Header.Prepare.root(working.cluster).checksum);
                     assert(working.vsr_state.checkpoint.free_set_size == 0);
                     assert(working.vsr_state.checkpoint.client_sessions_size == 0);
                     assert(working.vsr_state.checkpoint.storage_size == data_file_size_min);
-                    assert(working.vsr_state.checkpoint.commit_min == 0);
+                    assert(working.vsr_state.checkpoint.header.op == 0);
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     assert(working.vsr_state.view == 0);
@@ -1222,8 +1216,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .free_set_size = superblock.working.vsr_state.checkpoint.free_set_size,
                         .client_sessions_size = superblock.working.vsr_state.checkpoint.client_sessions_size,
                         .checkpoint_id = superblock.working.checkpoint_id(),
-                        .commit_min_checksum = superblock.working.vsr_state.checkpoint.commit_min_checksum,
-                        .commit_min = superblock.working.vsr_state.checkpoint.commit_min,
+                        .commit_min_checksum = superblock.working.vsr_state.checkpoint.header.checksum,
+                        .commit_min = superblock.working.vsr_state.checkpoint.header.op,
                         .commit_max = superblock.working.vsr_state.commit_max,
                         .log_view = superblock.working.vsr_state.log_view,
                         .view = superblock.working.vsr_state.view,
@@ -1417,14 +1411,14 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .replica = superblock.replica_index,
                 .caller = @tagName(context.caller),
 
-                .commit_min_old = superblock.staging.vsr_state.checkpoint.commit_min,
-                .commit_min_new = context.vsr_state.?.checkpoint.commit_min,
+                .commit_min_old = superblock.staging.vsr_state.checkpoint.header.op,
+                .commit_min_new = context.vsr_state.?.checkpoint.header.op,
 
                 .commit_max_old = superblock.staging.vsr_state.commit_max,
                 .commit_max_new = context.vsr_state.?.commit_max,
 
-                .commit_min_checksum_old = superblock.staging.vsr_state.checkpoint.commit_min_checksum,
-                .commit_min_checksum_new = context.vsr_state.?.checkpoint.commit_min_checksum,
+                .commit_min_checksum_old = superblock.staging.vsr_state.checkpoint.header.checksum,
+                .commit_min_checksum_new = context.vsr_state.?.checkpoint.header.checksum,
 
                 .log_view_old = superblock.staging.vsr_state.log_view,
                 .log_view_new = context.vsr_state.?.log_view,
