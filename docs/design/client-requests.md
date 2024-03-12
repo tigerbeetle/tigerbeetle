@@ -31,7 +31,7 @@ outcome of the next one in the request. These chains of events will all succeed 
 
 The last Transfer or Account in a batch may never have the `flags.linked` set, as it would leave a
 chain open-ended. Attempting to do so will result in the
-[`linked_event_chain_open`](./operations/create_transfers.md#linked_event_chain_open) error.
+[`linked_event_chain_open`](../reference/operations/create_transfers.md#linked_event_chain_open) error.
 
 Multiple chains of events may coexist within a batch to succeed or fail independently. 
 
@@ -39,7 +39,7 @@ Events within a chain are executed in order, or are rolled back on error, so tha
 event in the chain is visible to the next. Each chain is either visible or invisible as a unit to
 subsequent transfers after the chain. The event that was the first to fail within a chain will have
 a unique error result. Other events in the chain will have their error result set to
-[`linked_event_failed`](./operations/create_transfers.md#linked_event_failed).
+[`linked_event_failed`](../reference/operations/create_transfers.md#linked_event_failed).
 
 Consider this set of Transfers as part of a batch:
 
@@ -52,7 +52,7 @@ Consider this set of Transfers as part of a batch:
 | `E`      | `4`                | `false`      |
 
 If any of transfers `B`, `C`, or `D` fail (for example, due to
-[`exceeds_credits`](./operations/create_transfers.md#exceeds_credits), then `B`, `C`, and `D` will
+[`exceeds_credits`](../reference/operations/create_transfers.md#exceeds_credits), then `B`, `C`, and `D` will
 all fail. They are linked.
 
 Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`, and each other.

@@ -38,15 +38,15 @@ applications?
   or [`flags.linked`](../reference/transfers.md#flagslinked)).
 - Multiple client sessions may receive replies [out of order](#reply-order) relative to one another.
   For example, if two clients submit requests around the same time, the client whose request is
-  commmitted first might receive the reply later.
+  committed first might receive the reply later.
 - A client session can consider a request executed when it receives a reply for the request.
 
 #### [Requests](./client-requests.md)
-> Note that a request refers to a batch, rather than a single operation.
+> Note that a request refers to a batch, rather than a single event.
 
 - A request executes within the cluster at most once.
-- Requests do not [time out](#retries) (a timeout typically implies failure, which cannot be
-  conclusively determined in the context of network faults). Note that individual [pending
+- Requests do not [time out](#retries). A timeout typically implies failure, which cannot be
+  conclusively determined in the context of network faults. Note that individual [pending
   transfers](./two-phase-transfers.md) within a request may have
   [timeouts](../reference/transfers.md#timeout).
 - Requests retried by their original client session receive identical replies.
@@ -64,9 +64,9 @@ applications?
 
 - Once committed, an event will always be committed — the cluster's state never backtracks.
 - Within a cluster, object [timestamps are unique and strictly
-  increasing](./time.md#timestamps-are-totally-ordered). For all objects `A` and `B` belonging to
-  the same cluster, `A.timestamp ≠ B.timestamp` and if `A.timestamp < B.timestamp`, then `A` was
-  committed earlier than `B`.
+  increasing](./time.md#timestamps-are-totally-ordered). No two objects within the same cluster will
+  have the same timestamp. Furthermore, the order of the timestamps indicates the order in which the
+  objects were committed.
 - If a client session is terminated and restarts, it is guaranteed to see the effects of updates for
   which the corresponding reply was received prior to termination.
 - If a client session is terminated and restarts, it is _not_ guaranteed to see the effects of
@@ -207,7 +207,8 @@ But suppose the application crashes and restarts immediately after sending its r
   3. _Application_: Crash. Restart.
   4. _Cluster_: Create `A₁`; reply `ok` — but the application session has reset, so this reply never
     reaches the application.
-  5. _Application_: Send "create account" request `A₁` to the cluster with the same ID as in step 1.
+  5. _Application_: Send "create account" request `A₁` to the cluster. The request uses the same ID
+     as in step 1.
   6. _Cluster_: Create `A₁`; reply `exists`.
   7. _Application_: Receive reply `A₁: exists` from the cluster.
   8. _Application_: Set `U₁.account_exists = true`.

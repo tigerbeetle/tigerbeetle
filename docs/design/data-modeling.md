@@ -34,7 +34,7 @@ By convention, debit balances are used to represent:
 - Operator's Assets
 - Operator's Expenses
 
-To limit the balance for this type of account, use
+To enforce a positive (non-negative) debit balance, use
 [`flags.credits_must_not_exceed_debits`](../reference/accounts.md#flagscredits_must_not_exceed_debits).
 
 ### Credit Balances
@@ -46,7 +46,7 @@ By convention, credit balances are used to represent:
 - Equity in the Operator's Business
 - Operator's Income
 
-To limit the balance for this type of account, use
+To enforce a positive (non-negative) credit balance, use
 [`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
 For example, a customer account that is represented as an Operator's Liability would use this flag
 to ensure that the balance cannot go negative.
@@ -150,7 +150,8 @@ multiple `Transfer`s that are related to one another. For example, different cur
 belonging to the same user or multiple `Transfer`s that are part of a [currency
 exchange](../recipes/currency-exchange.md).
 
-[Time-based identifiers](#time-based-identifiers) are recommended for most applications.
+[TigerBeetle Time-Based Identifiers](#tigerbeetle-time-based-identifiers-recommended) are
+recommended for most applications.
 
 When selecting an `id` scheme:
 
@@ -164,34 +165,32 @@ When selecting an `id` scheme:
   SQL). A central oracle may become a performance bottleneck when creating accounts/transfers.
 - Sequences of identifiers with long runs of strictly increasing (or strictly decreasing) values are
   amenable to optimization, leading to higher database throughput.
-- Random identifiers are not recommended – they can't take advantage of all of the LSM's
+- Random identifiers are not recommended – they can't take advantage of all of the LSM
   optimizations. (Random identifiers have ~10% lower throughput than strictly-increasing ULIDs).
 
-### Time-Based Identifiers (Recommended)
+### TigerBeetle Time-Based Identifiers (Recommended)
 
-A time-based identifier (such as ULID or UUIDv7) is recommended for most applications.
+TigerBeetle recommends using a specific ID scheme for most applications. It is time-based and
+lexicographically sortable. The scheme is inspired by ULIDs and UUIDv7s but is better able to take
+advantage of LSM optimizations, which leads to higher database throughput.
 
-TigerBeetle clients include an `id()` function to generate IDs using these recommendations.
+TigerBeetle clients include an `id()` function to generate IDs using the recommended scheme.
 
-A ULID ("Universally Unique Lexicographically Sortable identifier") consists of:
+TigerBeetle IDs consist of:
 
 - 48 bits of (millisecond) timestamp (high-order bits)
 - 80 bits of randomness (low-order bits)
 
-**Important**: If you generate IDs yourself instead of using the `id()` function provided by the
-client libraries, **increment the random bytes** when creating multiple objects during the same
-millisecond (instead of generating new random bytes). Make sure to also store random bytes first,
-timestamp bytes second, and both in little-endian. These details ensure that a sequence of objects
-have strictly increasing ids according to the server. (Such ids are amenable to LSM optimizations,
-leading to higher database throughput).
+When creating multiple objects during the same millisecond, we increment the random bytes rather
+than generating new random bytes. Furthermore, it is important that IDs are stored in little-endian
+with the random bytes as the lower-order bits and the timestamp as the higher-order bits.  These
+details ensure that a sequence of objects have strictly increasing IDs according to the server,
+which improves database optimization.
 
-- ULIDs have an insignificant risk of collision.
-- ULIDs do not require a central oracle.
+Similar to ULIDs and UUIDv7s, these IDs have the following benefits:
 
-To maximize id entropy, prefer a cryptographically-secure PRNG (most languages have one in their
-cryptography library).
-
-See also: [ULID specification](https://github.com/ulid/spec).
+- they have an insignificant risk of collision.
+- they do not require a central oracle to generate.
 
 ### Reuse Foreign Identifier
 

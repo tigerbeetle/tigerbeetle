@@ -49,9 +49,6 @@ Fields used by each mode of transfer:
 
 This is a unique identifier for the transaction.
 
-As an example, you might generate a [ULID](../design/data-modeling.md#time-based-identifiers) to
-identify each transaction.
-
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
@@ -151,8 +148,9 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this transfer to an
 external entity or event.
 
-As an example, you might use a [ULID](../design/data-modeling.md#time-based-identifiers)
-that ties together a group of transfers.
+As an example, you might generate a [TigerBeetle Time-Based
+Identifier](../design/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties
+together a group of transfers.
 
 For more information, see [Data Modeling](../design/data-modeling.md#user_data).
 
