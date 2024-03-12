@@ -114,6 +114,7 @@ pub const AOF = struct {
         entry.from_message(message, .{ .replica = options.replica, .primary = options.primary }, &self.last_checksum);
 
         const disk_size = entry.calculate_disk_size();
+        assert(self.index + disk_size < self.backing_store.len);
         stdx.copy_disjoint(.exact, u8, self.backing_store[self.index .. self.index + disk_size], std.mem.asBytes(&entry)[0..disk_size]);
         self.index += disk_size;
 
