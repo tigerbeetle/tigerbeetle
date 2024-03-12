@@ -449,7 +449,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             demux.* = .{
                 .user_data = user_data,
                 .callback = callback,
-                .event_count = @intCast(@divExact(message.body().len, event_size)),
+                .event_count = if (event_size == 0) 0 else @intCast(
+                    @divExact(message.body().len, event_size),
+                ),
                 .event_offset = 0,
             };
 
