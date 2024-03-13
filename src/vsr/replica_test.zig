@@ -1191,19 +1191,17 @@ test "Cluster: sync: checkpoint from a newer view" {
         b1.drop(.R_, .incoming, .pong);
 
         const b1_view_before = b1.view();
-        var mark = marks.check("jump_sync_target: ignoring, newer view");
         try c.request(checkpoint_2_trigger - 1, checkpoint_2_trigger - 1);
         try expectEqual(b1_view_before, b1.view());
-        try expectEqual(b1.op_checkpoint(), 0); // B1 ignores new checkpoint.
-        try mark.expect_hit();
+        try expectEqual(b1.op_checkpoint(), checkpoint_1);
+        try expectEqual(b1.status(), .recovering_head);
 
-        mark = marks.check("jump_sync_target: ignoring, newer view");
-        b1.stop(); // It should be ignored even after restart.
+        b1.stop();
         try b1.open();
         t.run();
         try expectEqual(b1_view_before, b1.view());
-        try expectEqual(b1.op_checkpoint(), 0);
-        try mark.expect_hit();
+        try expectEqual(b1.op_checkpoint(), checkpoint_1);
+        try expectEqual(b1.status(), .recovering_head);
     }
 
     t.replica(.R_).pass_all(.R_, .bidirectional);
