@@ -8587,8 +8587,7 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            // Ignoring newer view, we need to change view first when receiving a SV.
-            if (candidate.view > self.view_durable() and self.view < candidate.view) {
+            if (candidate.view > self.view_durable()) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
                     " (view={} view_durable={} candidate.view={})", .{
                     self.replica,
@@ -8644,9 +8643,7 @@ pub fn ReplicaType(
                 .checkpoint_op = candidate.checkpoint_op,
             };
 
-            if (self.syncing != .idle and
-                self.grid_repair_tables.executing() == 0)
-            {
+            if (self.syncing != .idle) {
                 self.sync_start_from_sync();
             }
         }
