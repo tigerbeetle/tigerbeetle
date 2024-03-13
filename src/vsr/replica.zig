@@ -4701,7 +4701,7 @@ pub fn ReplicaType(
                 }
 
                 // Even though `operation=upgrade` hasn't committed, it may be in the pipeline.
-                if (self.pipeline.queue.message_by_operation(.upgrade)) |_| {
+                if (self.pipeline.queue.contains_operation(.upgrade)) {
                     log.debug("{}: on_request: ignoring (upgrade queued)", .{self.replica});
                     return true;
                 }
@@ -9139,13 +9139,13 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.upgrade_release.? > self.release);
-            maybe(self.pipeline.queue.message_by_operation(.upgrade) != null);
+            maybe(self.pipeline.queue.contains_operation(.upgrade));
 
             const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
 
             // If our clock is not synchronized, then the request-to-self might have been dropped.
-            maybe(self.pipeline.queue.message_by_operation(.upgrade) != null);
+            maybe(self.pipeline.queue.contains_operation(.upgrade));
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
@@ -9851,18 +9851,17 @@ const PipelineQueue = struct {
         return message;
     }
 
-    fn message_by_operation(pipeline: PipelineQueue, operation: vsr.Operation) ?*const Message {
-        var message: ?*const Message = null;
+    fn contains_operation(pipeline: PipelineQueue, operation: vsr.Operation) bool {
         var prepare_iterator = pipeline.prepare_queue.iterator();
         while (prepare_iterator.next_ptr()) |prepare| {
-            if (prepare.message.header.operation == operation) message = prepare.message.base();
+            if (prepare.message.header.operation == operation) return true;
         }
 
         var request_iterator = pipeline.request_queue.iterator();
         while (request_iterator.next()) |request| {
-            if (request.message.header.operation == operation) message = request.message.base();
+            if (request.message.header.operation == operation) return true;
         }
-        return message;
+        return false;
     }
 
     /// Warning: This temporarily violates the prepare/request queue count invariant.
