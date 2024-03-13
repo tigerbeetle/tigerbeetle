@@ -656,7 +656,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }) catch unreachable;
 
                 if (replica.pipeline == .queue) {
-                    pipeline = std.fmt.bufPrint(&pipeline_buffer, "{:>2}/{}Pp {:>2}/{}Rq", .{
+                    pipeline = std.fmt.bufPrint(&pipeline_buffer, "  {:>2}/{}Pp {:>2}/{}Rq", .{
                         replica.pipeline.queue.prepare_queue.count,
                         constants.pipeline_prepare_queue_max,
                         replica.pipeline.queue.request_queue.count,
@@ -666,7 +666,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
 
             log.info("{[replica]: >2} {[event]c} {[role]c} {[statuses]s}" ++
-                "  {[info]s}  {[pipeline]s}", .{
+                "  {[info]s}{[pipeline]s}", .{
                 .replica = replica.replica,
                 .event = @intFromEnum(event),
                 .role = role,
