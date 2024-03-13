@@ -124,7 +124,7 @@ Constraints:
 #### Examples
 
 - For representing fractional amounts (e.g. `$12.34`), see
-  [Fractional Amounts](../recipes/fractional-amounts.md).
+  [Fractional Amounts](../design/data-modeling.md#fractional-amounts-and-asset-scale).
 - For balancing transfers, see [Close Account](../recipes/close-account.md).
 
 ### `pending_id`
