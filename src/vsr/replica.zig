@@ -8587,11 +8587,8 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            // TODO: This block introduced by the PR #1598 causes a liveness issue
-            // when a replica cannot start the sync.
-            // SEED 10266230273529621812, 8842160722467235252
-            const fix_me = true;
-            if (fix_me and candidate.view > self.view_durable()) {
+            // Ignoring newer view, we need to change view first when receiving a SV.
+            if (candidate.view > self.view_durable() and self.view < candidate.view) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
                     " (view={} view_durable={} candidate.view={})", .{
                     self.replica,
@@ -8647,7 +8644,9 @@ pub fn ReplicaType(
                 .checkpoint_op = candidate.checkpoint_op,
             };
 
-            if (self.syncing != .idle) {
+            if (self.syncing != .idle and
+                self.grid_repair_tables.executing() == 0)
+            {
                 self.sync_start_from_sync();
             }
         }
