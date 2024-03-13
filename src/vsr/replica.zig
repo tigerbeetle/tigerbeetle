@@ -3039,9 +3039,7 @@ pub fn ReplicaType(
                         }
                     }
 
-                    // A majority quorum (i.e. `max(quorum_commit, quorum_view_change)`) is required
-                    // to ensure that the upgraded cluster can both commit and view-change.
-                    if (release_replicas >= vsr.quorums(self.replica_count).majority) {
+                    if (release_replicas >= vsr.quorums(self.replica_count).upgrade) {
                         release_target = release;
                     }
                 }
