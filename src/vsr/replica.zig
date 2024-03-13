@@ -689,22 +689,26 @@ pub fn ReplicaType(
                     self.transition_to_normal_from_recovering_status();
                 }
             } else {
-                // Even if op_head_certain() returns false, a DVC always has a certain head op.
-                if ((self.log_view < self.view and self.op_checkpoint() <= self.op) or
-                    (self.log_view == self.view and self.op_head_certain()))
-                {
-                    if (self.log_view == self.view) {
-                        if (self.primary_index(self.view) == self.replica) {
-                            self.transition_to_view_change_status(self.view + 1);
+                if (self.view < self.superblock.working.vsr_state.checkpoint.header.view) {
+                    self.transition_to_recovering_head();
+                } else {
+                    // Even if op_head_certain() returns false, a DVC always has a certain head op.
+                    if ((self.log_view < self.view and self.op_checkpoint() <= self.op) or
+                        (self.log_view == self.view and self.op_head_certain()))
+                    {
+                        if (self.log_view == self.view) {
+                            if (self.primary_index(self.view) == self.replica) {
+                                self.transition_to_view_change_status(self.view + 1);
+                            } else {
+                                self.transition_to_normal_from_recovering_status();
+                            }
                         } else {
-                            self.transition_to_normal_from_recovering_status();
+                            assert(self.view > self.log_view);
+                            self.transition_to_view_change_status(self.view);
                         }
                     } else {
-                        assert(self.view > self.log_view);
-                        self.transition_to_view_change_status(self.view);
+                        self.transition_to_recovering_head();
                     }
-                } else {
-                    self.transition_to_recovering_head();
                 }
             }
 
@@ -4797,6 +4801,10 @@ pub fn ReplicaType(
                     }
 
                     if (self.status == .recovering_head) {
+                        if (message.header.view < self.superblock.working.vsr_state.checkpoint.header.view) {
+                            return true;
+                        }
+
                         if (message_header.view > self.view or
                             message_header.op >= self.op_prepare_max() or
                             message_header.nonce == self.nonce)
@@ -8543,7 +8551,7 @@ pub fn ReplicaType(
                 @panic("checkpoint diverged");
             }
 
-            if (candidate.view > self.view_durable()) {
+            if (candidate.view > self.view_durable() and self.status != .recovering_head) {
                 log.mark.debug("{}: on_{s}: jump_sync_target: ignoring, newer view" ++
                     " (view={} view_durable={} candidate.view={})", .{
                     self.replica,
