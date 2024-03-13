@@ -547,9 +547,10 @@ test "ReconfigurationRequest" {
 
 pub const UpgradeRequest = extern struct {
     release: u16,
+    reserved: [14]u8 = [_]u8{0} ** 14,
 
     comptime {
-        assert(@sizeOf(UpgradeRequest) == 2);
+        assert(@sizeOf(UpgradeRequest) == 16);
         assert(stdx.no_padding(UpgradeRequest));
     }
 };

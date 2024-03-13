@@ -512,8 +512,8 @@ pub const Header = extern struct {
                     if (self.session != 0) return "upgrade: session != 0";
                     if (self.request != 0) return "upgrade: request != 0";
 
-                    if (self.size != @sizeOf(Header) + @sizeOf(u16)) {
-                        return "upgrade: size != @sizeOf(Header) + @sizeOf(u16)";
+                    if (self.size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)) {
+                        return "upgrade: size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)";
                     }
                 },
                 else => {

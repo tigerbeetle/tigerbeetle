@@ -4127,6 +4127,7 @@ pub fn ReplicaType(
                 prepare.body()[0..@sizeOf(vsr.UpgradeRequest)],
             );
             assert(request.release >= self.release);
+            assert(stdx.zeroed(&request.reserved));
 
             if (request.release == self.release) {
                 // We are replaying this upgrade request after restarting into the new version.
