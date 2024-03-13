@@ -616,6 +616,12 @@ pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: 
     break :lsm_manifest_memory_multiplier lsm_manifest_memory_multiplier;
 };
 
+/// When attempting to coalesce tables (as an optimization to avoid compaction),
+/// search this many tables before giving up. This number is determined experimentally
+/// and attempts to keep the search time under 1ms.
+/// todo - this needs to be selected more carefully.
+pub const lsm_manifest_coalesce_max_tables_to_search = 1024;
+
 /// The number of milliseconds between each replica tick, the basic unit of time in TigerBeetle.
 /// Used to regulate heartbeats, retries and timeouts, all specified as multiples of a tick.
 pub const tick_ms = config.process.tick_ms;

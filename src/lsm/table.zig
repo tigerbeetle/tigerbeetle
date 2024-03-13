@@ -104,6 +104,11 @@ pub fn TableType(
             assert(key_size == 8 or key_size == 16 or key_size == 24 or key_size == 32);
         }
 
+        const block_value_count_max = @divFloor(
+            block_body_size,
+            value_size,
+        );
+
         pub const layout = layout: {
             assert(block_size % constants.sector_size == 0);
             assert(math.isPowerOfTwo(block_size));
@@ -112,11 +117,6 @@ pub fn TableType(
             // the total index size is not 64 byte cache line aligned.
             assert(@sizeOf(Key) >= 4);
             assert(@sizeOf(Key) % 4 == 0);
-
-            const block_value_count_max = @divFloor(
-                block_body_size,
-                value_size,
-            );
 
             // We need enough blocks to hold `value_count_max` values.
             const data_blocks = div_ceil(value_count_max, block_value_count_max);
@@ -127,6 +127,11 @@ pub fn TableType(
                 .data_block_count_max = data_blocks,
             };
         };
+
+        /// The actual maximum number of values in the table,
+        /// according to the layout calculation above.
+        /// Contrast to Table.value_count_max, which may be less than this.
+        pub const value_count_max_actual = block_value_count_max * layout.data_block_count_max;
 
         const index_block_count = 1;
         pub const data_block_count_max = layout.data_block_count_max;

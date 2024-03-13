@@ -14,6 +14,11 @@ const Direction = @import("../direction.zig").Direction;
 const SegmentedArray = @import("segmented_array.zig").SegmentedArray;
 const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
 
+// The maximum number of tables that can be coalesced is determined by
+// the number of tables supported by compaction, which is determined by `lsm_growth_factor`.
+const max_coalesce_window_size = constants.lsm_growth_factor;
+const max_coalesce_tables_to_search = constants.lsm_manifest_coalesce_max_tables_to_search;
+
 pub fn ManifestLevelType(
     comptime NodePool: type,
     comptime Key: type,
@@ -729,6 +734,336 @@ pub fn ManifestLevelType(
 
             return range;
         }
+
+        const TableCoalesceWindow = struct {
+            tables: stdx.BoundedArray(TableInfoReference, max_coalesce_window_size),
+        };
+
+        const TableCoalesceWindowCandidate = struct {
+            tables: stdx.BoundedArray(*const TableInfo, max_coalesce_window_size),
+            total_values: u64,
+        };
+
+        /// Attempt to find a range of visible tables that, when merged, will
+        /// free up an empty table. The compaction code uses this as an
+        /// optimization to avoid running a full compaction on a level.
+        ///
+        /// This will iterate up to `max_coalesce_tables_to_search` tables,
+        /// attempting to find the best window as defined by
+        /// `choose_coalesce_window_candidate`.
+        ///
+        /// For large levels, the index to begin iteration is chosen
+        /// pseudo-randomly but deterministically, seeded by the caller with a
+        /// number that is unique per compaction and deterministic across
+        /// replicas.
+        pub fn find_table_coalesce_window(
+            level: *const Self,
+            prng_seed: u64,
+        ) ?TableCoalesceWindow {
+            const num_tables = level.tables.len();
+
+            // todo need a heuristic to decide level is too full and not worth searching at all
+
+            if (num_tables <= 1) {
+                return null;
+            }
+
+            if (num_tables <= max_coalesce_tables_to_search) {
+                return level.find_table_coalesce_window_from_index(0);
+            } else {
+                var pcg = std.rand.Pcg.init(prng_seed);
+                var rng = pcg.random();
+
+                const max_start_table = num_tables - max_coalesce_tables_to_search;
+                const max_start_table_exclusive = max_start_table + 1;
+                const start_index = rng.uintLessThan(u32, max_start_table_exclusive);
+                return level.find_table_coalesce_window_from_index(start_index);
+            }
+        }
+
+        /// Iterate over tables looking for the best candidate coalesce window.
+        ///
+        /// This function relies on a pair of custom iterators,
+        /// `CoalesceTableIterator` and `CoalesceWindowIterator`, that
+        /// encapsulate some relatively complex bookkeeping, described
+        /// more in the their own doc comments.
+        fn find_table_coalesce_window_from_index(
+            level: *const Self,
+            start_index: u32,
+        ) ?TableCoalesceWindow {
+            var best_candidate: ?TableCoalesceWindowCandidate = null;
+
+            // This is an iterator of iterators, each sub-iterator iterating up to
+            // `max_coalesce_window_size` visible tables.
+            var table_iter = CoalesceTableIterator.from_index(&level.tables, start_index);
+
+            // Look at each window and decide if it is the best candidate.
+            while (table_iter.next()) |window_iter| {
+                const next_candidate = level.next_coalesce_window_candidate(
+                    window_iter,
+                );
+                if (next_candidate) |nc| {
+                    std.log.debug("candidate {} / tables {}", .{
+                        nc.total_values,
+                        nc.tables.count(),
+                    });
+                }
+                best_candidate = level.choose_coalesce_window_candidate(
+                    best_candidate,
+                    next_candidate,
+                );
+            }
+
+            if (best_candidate) |best_candidate_| {
+                std.log.debug("best candidate {} / tables {}", .{
+                    best_candidate_.total_values,
+                    best_candidate_.tables.count(),
+                });
+                var result = TableCoalesceWindow{
+                    .tables = .{},
+                };
+                for (best_candidate_.tables.const_slice()) |table| {
+                    var table_reference = TableInfoReference{
+                        // todo this cast is suspicious, but is done elsewhere in relation
+                        // to table iterators
+                        .table_info = @constCast(table),
+                        .generation = level.generation,
+                    };
+                    result.tables.append_assume_capacity(table_reference);
+                }
+                return result;
+            } else {
+                return null;
+            }
+        }
+
+        /// This function looks at a single iterator over visible tables
+        /// and decides if it is a coalesce candidate. It looks at no more
+        /// than `max_coalesce_tables_to_search` tables.
+        fn next_coalesce_window_candidate(
+            level: *const Self,
+            window_iter: CoalesceWindowIterator,
+        ) ?TableCoalesceWindowCandidate {
+            _ = level;
+            var window_iter_mut = window_iter;
+            var tables: stdx.BoundedArray(*const TableInfo, max_coalesce_window_size) = .{};
+            var value_count_sum: u64 = 0;
+
+            // todo - there's quite a lot of logic in this hot loop (the
+            // iterator `next` method itself is very complex) and it would be
+            // nice to avoid as much as possible. Most best candidates seem to
+            // be 2 tables, rarely (or effectively never) 8 tables. There may be
+            // opportunities to do less here.
+            //
+            // todo - the first iteration could be pulled out of this loop,
+            // along with the special first-iteration check, while also avoiding
+            // the can_free_table check. Need to measure if that's worth it.
+            while (window_iter_mut.next()) |table| {
+                // If the first table has max values then ignore this window
+                if (tables.count() == 0 and table.value_count == TableInfo.value_count_max_actual) {
+                    return null;
+                }
+
+                tables.append_assume_capacity(table);
+                value_count_sum += table.value_count;
+
+                const max_values = tables.count() * TableInfo.value_count_max_actual;
+                assert(value_count_sum <= max_values);
+                const free_value_slots = max_values - value_count_sum;
+                const can_free_table = free_value_slots >= TableInfo.value_count_max_actual;
+
+                if (can_free_table) {
+                    return TableCoalesceWindowCandidate{
+                        .tables = tables,
+                        .total_values = value_count_sum,
+                    };
+                }
+            }
+
+            return null;
+        }
+
+        fn choose_coalesce_window_candidate(
+            level: *const Self,
+            candidate_a: ?TableCoalesceWindowCandidate,
+            candidate_b: ?TableCoalesceWindowCandidate,
+        ) ?TableCoalesceWindowCandidate {
+            _ = level;
+            if (candidate_a) |candidate_a_| {
+                if (candidate_b) |candidate_b_| {
+                    // Choose the window with fewest values.
+                    // todo should we care about the table count?
+                    if (candidate_a_.total_values < candidate_b_.total_values) {
+                        return candidate_a_;
+                    } else {
+                        return candidate_b_;
+                    }
+                } else {
+                    return candidate_a_;
+                }
+            } else {
+                return candidate_b;
+            }
+        }
+
+        /// An iterator over tables used to find coalesce window candidates.
+        ///
+        /// Each iteration returns a sub-iterator, `CoalesceWindowIterator`,
+        /// both of which cooperate to achieve several goals:
+        ///
+        /// - counting both invisible and visible tables to only iterate
+        ///   up to `max_coalesce_tables_to_search` tables.
+        /// - only visiting visible tables
+        /// - iterating invisible tables only once - a naive implementation
+        ///   that creates new iterators for each window could see each
+        ///   invisible table up to a factor of `max_coalesce_tables_to_search` times.
+        ///
+        /// It uses a pair of queues to manage the backtracking:
+        /// during iteration, tables in `buffer` are visited first before pulling
+        /// from an inner iterator; as new tables are visited that will need to be
+        /// visited again in the future they are pushed onto `double_buffer` for
+        /// use by future iterators.
+        const CoalesceTableIterator = struct {
+            inner: Tables.Iterator,
+            /// Previously-visited tables that need to be re-visited in the next window,
+            /// prior to visiting those in double_buffer, enqueued by the prepare_buffer function.
+            buffer: stdx.BoundedArray(*const TableInfo, max_coalesce_window_size),
+            /// Previously-visited tables that need to be re-viseted in the next window,
+            /// after visiting those in buffer, enqueued by CoalesceWindowIterator.
+            double_buffer: stdx.BoundedArray(*const TableInfo, max_coalesce_window_size),
+            /// A counter of total tables (invisible and visible) retrieved from the
+            /// inner iterator. After this hits `max_coalesce_tables_to_search` we will
+            /// no longer defer to the inner iterator.
+            tables_visited: u32,
+            /// This indicates that we've taken as many tables from the inner
+            /// iterator as we can (either because it is empty or we've called
+            /// it `tables_visited` times) and there are no more buffered tables
+            /// to return, so we should not return any new
+            /// `CoalesceWindowIterator`s in the `next` method.
+            end_of_iter: bool,
+
+            pub fn from_index(tables: *const Tables, start_index: u32) CoalesceTableIterator {
+                return CoalesceTableIterator{
+                    .inner = tables.iterator_from_index(start_index, .ascending),
+                    .buffer = .{},
+                    .double_buffer = .{},
+                    .tables_visited = 0,
+                    .end_of_iter = false,
+                };
+            }
+
+            pub fn next(it: *CoalesceTableIterator) ?CoalesceWindowIterator {
+                if (it.end_of_iter) {
+                    assert(it.buffer.empty() and it.double_buffer.empty());
+                    return null;
+                }
+
+                it.prepare_buffer();
+
+                return CoalesceWindowIterator{
+                    .parent = it,
+                    .window_size = 0,
+                };
+            }
+
+            /// Prepare `buffer` from the contents of `buffer` and `double_buffer`.
+            fn prepare_buffer(it: *CoalesceTableIterator) void {
+                assert(it.buffer.count() + it.double_buffer.count() <= max_coalesce_window_size);
+                if (!it.double_buffer.empty()) {
+                    // Anything still in `buffer` needs to be visited after `double_buffer`.
+                    // This can happen if the contents of `buffer` were not fully iterated
+                    // by a previous CoalesceWindowIterator.
+                    while (it.pop_buffer_queue()) |table| {
+                        it.push_double_buffer_queue(table);
+                    }
+                    // Promote double_buffer to buffer.
+                    std.mem.swap(
+                        stdx.BoundedArray(*const TableInfo, max_coalesce_window_size),
+                        &it.buffer,
+                        &it.double_buffer,
+                    );
+                }
+            }
+
+            // todo - this is a hot function and might profit from memcpy optimization
+            fn pop_buffer_queue(it: *CoalesceTableIterator) ?*const TableInfo {
+                if (it.buffer.empty()) {
+                    return null;
+                }
+
+                const retval = it.buffer.get(0);
+
+                var index: usize = 0;
+                while (index < it.buffer.count() - 1) {
+                    it.buffer.slice()[index] = it.buffer.get(index + 1);
+                    index += 1;
+                }
+
+                it.buffer.truncate(it.buffer.count() - 1);
+
+                return retval;
+            }
+
+            fn push_double_buffer_queue(it: *CoalesceTableIterator, t: *const TableInfo) void {
+                assert(it.double_buffer.count() < max_coalesce_window_size);
+                it.double_buffer.append_assume_capacity(t);
+            }
+        };
+
+        const CoalesceWindowIterator = struct {
+            parent: *CoalesceTableIterator,
+            window_size: u32,
+
+            pub fn next(it: *CoalesceWindowIterator) ?*const TableInfo {
+                if (it.window_size == 0) {
+                    assert(it.parent.double_buffer.empty());
+                }
+
+                assert(it.window_size <= max_coalesce_window_size);
+                if (it.window_size == max_coalesce_window_size) {
+                    assert(it.parent.buffer.empty());
+                    return null;
+                }
+
+                // Start by visiting the buffered tables
+                if (it.parent.pop_buffer_queue()) |table| {
+                    // Save every table after the first for the next window iterator
+                    if (it.window_size != 0) {
+                        it.parent.push_double_buffer_queue(table);
+                    }
+                    it.window_size += 1;
+                    return table;
+                } else {
+                    assert(it.parent.tables_visited <= max_coalesce_tables_to_search);
+                    if (it.parent.tables_visited < max_coalesce_tables_to_search) {
+                        // Now go back to the inner iterator
+                        while (it.parent.inner.next()) |table| {
+                            it.parent.tables_visited += 1;
+
+                            if (table.visible(lsm.snapshot_latest)) {
+                                if (it.window_size != 0) {
+                                    it.parent.push_double_buffer_queue(table);
+                                }
+                                it.window_size += 1;
+                                return table;
+                            }
+
+                            if (it.parent.tables_visited == max_coalesce_tables_to_search) {
+                                break;
+                            }
+                        }
+                    }
+
+                    // There are no more tables in the main iterator and no more
+                    // tables in the buffer - do not generate any more window iterators.
+                    if (it.parent.double_buffer.count() == 0) {
+                        it.parent.end_of_iter = true;
+                    }
+
+                    return null;
+                }
+            }
+        };
     };
 }
 
