@@ -1248,6 +1248,9 @@ pub fn ReplicaType(
         /// Called by the MessageBus to deliver a message to the replica.
         fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
             const self = @fieldParentPtr(Self, "message_bus", message_bus);
+            if (message.header.into(.request)) |header| {
+                assert(header.client != 0);
+            }
             self.on_message(message);
         }
 
@@ -1377,7 +1380,9 @@ pub fn ReplicaType(
                     const releases_all = std.mem.bytesAsSlice(u16, message.body());
                     const releases = releases_all[0..message.header.release_count];
                     assert(releases.len == message.header.release_count);
+                    assert(std.mem.indexOfScalar(u16, releases, message.header.release) != null);
                     vsr.verify_release_list(releases);
+
                     for (releases) |release| {
                         if (release > self.release) {
                             upgrade_targets.*.?.releases.append_assume_capacity(release);
@@ -8614,8 +8619,7 @@ pub fn ReplicaType(
         fn release_for_next_checkpoint(self: *const Self) u16 {
             assert(self.commit_stage != .idle);
             assert(self.commit_min == self.op_checkpoint_next_trigger());
-            assert(self.release ==
-                self.superblock.working.vsr_state.checkpoint.release);
+            assert(self.release == self.superblock.working.vsr_state.checkpoint.release);
 
             var found_upgrade: usize = 0;
             for (self.op_checkpoint_next() + 1..self.op_checkpoint_next_trigger() + 1) |op| {
@@ -8634,8 +8638,7 @@ pub fn ReplicaType(
                     // 3. Replay op=X when recovering from checkpoint on v2.
                     // If v1 and v2 produce different results when executing op=X, then an assertion
                     // will trip (as v2's reply doesn't match v1's in the client sessions).
-                    assert(found_upgrade < constants.lsm_batch_multiple);
-                    maybe(found_upgrade > 0);
+                    assert(found_upgrade == 0);
                     maybe(self.upgrade_release != null);
                     return self.release;
                 }
