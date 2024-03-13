@@ -28,7 +28,6 @@ pub const messages_max_replica = messages_max: {
     sum += constants.pipeline_prepare_queue_max; // Replica.Pipeline{Queue|Cache}
     sum += constants.pipeline_request_queue_max; // Replica.Pipeline{Queue|Cache}
     sum += 1; // Replica.commit_prepare
-    sum += 1; // The `StateMachine.pulse()` message
     // Replica.do_view_change_from_all_replicas quorum:
     // All other quorums are bitsets.
     sum += constants.replicas_max;

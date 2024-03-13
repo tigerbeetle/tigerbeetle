@@ -1078,7 +1078,7 @@ pub fn ReplicaType(
                 .pulse_timeout = Timeout{
                     .name = "pulse_timeout",
                     .id = replica_index,
-                    .after = 1 * (std.time.ms_per_s / constants.tick_ms), // 1s
+                    .after = 1 * (std.time.ms_per_s / constants.tick_ms), // 1 ticks/s
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
@@ -3861,7 +3861,7 @@ pub fn ReplicaType(
             if (self.event_callback) |hook| hook(self, .{ .committed = prepare });
 
             if (prepare.header.client == 0) {
-                // This prepare was sent by the primary, tere's no reply to the client.
+                // This prepare was sent by the primary, there's no reply to the client.
                 assert(reply_body_size == 0);
                 assert(prepare.header.request == 0);
                 return;
@@ -5393,6 +5393,8 @@ pub fn ReplicaType(
         fn pulse_inject(self: *Self, operation: StateMachine.Operation) void {
             assert(self.status == .normal);
             assert(self.primary());
+            assert(!self.pipeline.queue.full());
+            assert(!self.pipeline.queue.pulse_in_progress());
 
             const message = self.message_bus.get_message(.prepare);
             defer self.message_bus.unref(message);
@@ -5401,7 +5403,7 @@ pub fn ReplicaType(
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
                 .cluster = self.cluster,
-                .size = @intCast(@sizeOf(Header)),
+                .size = @sizeOf(Header),
                 .view = self.view,
                 .release = self.release,
                 .command = .prepare,
@@ -5419,10 +5421,8 @@ pub fn ReplicaType(
 
             assert(message.body().len == 0);
             const sector_ceil = vsr.sector_ceil(message.header.size);
-            if (message.header.size != sector_ceil) {
-                assert(message.header.size < sector_ceil);
-                @memset(message.buffer[message.header.size..sector_ceil], 0);
-            }
+            assert(message.header.size < sector_ceil);
+            @memset(message.buffer[message.header.size..sector_ceil], 0);
 
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -9380,7 +9380,7 @@ const PipelineQueue = struct {
         while (pipeline.prepare_queue.pop()) |p| message_pool.unref(p.message);
     }
 
-    fn verify(pipeline: *PipelineQueue) void {
+    fn verify(pipeline: *const PipelineQueue) void {
         assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
         assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
 
@@ -9410,7 +9410,7 @@ const PipelineQueue = struct {
         }
     }
 
-    fn full(pipeline: *PipelineQueue) bool {
+    fn full(pipeline: *const PipelineQueue) bool {
         if (pipeline.prepare_queue.full()) {
             return pipeline.request_queue.full();
         } else {
@@ -9421,9 +9421,9 @@ const PipelineQueue = struct {
         }
     }
 
-    fn pulse_in_progress(pipeline: *PipelineQueue) bool {
+    fn pulse_in_progress(pipeline: *const PipelineQueue) bool {
         return inline for (0..constants.pipeline_prepare_queue_max) |index| {
-            if (pipeline.prepare_queue.get_ptr(index)) |prepare| {
+            if (pipeline.prepare_queue.get_const_ptr(index)) |prepare| {
                 if (prepare.message.header.client == 0) break true;
             } else {
                 break false;

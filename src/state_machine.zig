@@ -1004,6 +1004,8 @@ pub fn StateMachineType(
                 assert(t.timeout > 0);
 
                 const expires_at = t.timestamp + t.timeout_ns();
+                assert(self.prefetch_timestamp < expires_at);
+
                 log.debug("expire_pending_transfers_pulse_timestamp: {}", .{expires_at});
 
                 self.expire_pending_transfers_pulse_timestamp = expires_at;
