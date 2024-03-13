@@ -217,7 +217,7 @@ pub const configs = struct {
             .verify = false,
         },
         .cluster = .{
-            .clients_max = 32,
+            .clients_max = 64,
         },
     };
 
