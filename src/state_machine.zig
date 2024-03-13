@@ -2182,7 +2182,10 @@ const TestAction = union(enum) {
         credits_posted: u128,
     },
 
-    tick: u64,
+    tick: struct {
+        value: i64,
+        unit: enum { seconds },
+    },
 
     commit: TestContext.StateMachine.Operation,
     account: TestCreateAccount,
@@ -2421,8 +2424,19 @@ fn check(test_table: []const u8) !void {
             },
 
             .tick => |ticks| {
-                assert(ticks > 0);
-                context.state_machine.prepare_timestamp += ticks;
+                assert(ticks.value != 0);
+                const interval_ns: u64 = std.math.absCast(ticks.value) *
+                    switch (ticks.unit) {
+                    .seconds => std.time.ns_per_s,
+                };
+
+                // The `parse` logic already computes `maxInt - value` when a unsigned int is
+                // represented as a negative number. However, we need to use a signed int and
+                // perform our own calculation to account for the unit.
+                context.state_machine.prepare_timestamp += if (ticks.value > 0)
+                    interval_ns
+                else
+                    std.math.maxInt(u64) - interval_ns;
             },
 
             .account => |a| {
@@ -2777,7 +2791,7 @@ test "create_transfers/lookup_transfers" {
         \\ setup A5    0 -1000   10 -1100
 
         // Bump the state machine time to `maxInt - 3s` for testing timeout overflow.
-        \\ tick -3000000000
+        \\ tick -3 seconds
 
         // Test errors by descending precedence.
         \\ transfer   T0 A0 A0    0  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ P1 1 timestamp_must_be_zero
@@ -2858,7 +2872,7 @@ test "create/lookup 2-phase transfers" {
         \\ commit lookup_accounts
 
         // Bump the state machine time in +1s for testing the timeout expiration.
-        \\ tick 1000000000
+        \\ tick 1 seconds
 
         // Second phase.
         \\ transfer T101 A1 A2   13  T2 U1 U1 U1    _ L1 C1   _   _ POS   _   _   _  _ _ ok
@@ -2930,19 +2944,19 @@ test "create/lookup expired transfers" {
         \\ commit lookup_accounts
 
         // Check balances after 1s.
-        \\ tick 1000000000
+        \\ tick 1 seconds
         \\ lookup_account A1 35  0  0  0
         \\ lookup_account A2  0  0 35  0
         \\ commit lookup_accounts
 
         // Check balances after 1s.
-        \\ tick 1000000000
+        \\ tick 1 seconds
         \\ lookup_account A1 23  0  0  0
         \\ lookup_account A2  0  0 23  0
         \\ commit lookup_accounts
 
         // Check balances after 1s.
-        \\ tick 1000000000
+        \\ tick 1 seconds
         \\ lookup_account A1 10  0  0  0
         \\ lookup_account A2  0  0 10  0
         \\ commit lookup_accounts
