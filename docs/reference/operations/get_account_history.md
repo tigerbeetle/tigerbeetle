@@ -11,6 +11,9 @@ Fetch the historical [`AccountBalance`](../account_balances.md)s of a given [`Ac
 - Only accounts created with the flag [`history`](../accounts.md#flagshistory) set retain the
   history of balances.
 
+- [Pending](../transfers.md#flagspending) balances automatically removed due to
+  [timeout](../transfers.md#timeout) expiration don't change the history of balances.
+
 ## Event
 
 The query filter. See [`AccountFilter`](../account_filter.md) for constraints.
@@ -18,11 +21,11 @@ The query filter. See [`AccountFilter`](../account_filter.md) for constraints.
 ## Result
 
 - If the account has the flag [`history`](../accounts.md#flagshistory) set and any matching
-  balances exist, return an array of [`AccountBalance`](../account_balances.md)s.  
+  balances exist, return an array of [`AccountBalance`](../account_balances.md)s.
 - If the account does not have the flag [`history`](../accounts.md#flagshistory) set,
-  return nothing.  
-- If no matching balance exist, return nothing.  
-- If any constraint is violated, return nothing. 
+  return nothing.
+- If no matching balance exist, return nothing.
+- If any constraint is violated, return nothing.
 
 ## Client libraries
 

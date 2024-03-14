@@ -191,6 +191,15 @@ Zero denotes absence of timeout.
 If the timeout expires and the pending transfer has not already been
 posted or voided, the pending balance is removed automatically.
 
+Transfers expire in chronological order by their expiration time ([`timestamp`](#timestamp)
+_plus_ `timeout` converted in nanoseconds). If multiple transfers expire at the same time, then
+the creation [`timestamp`](#timestamp) is used.
+
+TigerBeetle can atomically expire [one batch](../design/client-requests.md#batching-events) of
+transfers at a time. It means that client requests executed immediately after the expiration _might_
+still see pending balances for expired transfers if there where more transfers to expire than it
+can process in a single batch.
+
 Non-pending transfers cannot have a timeout.
 
 Constraints:
