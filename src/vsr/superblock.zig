@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3172]u8 = [_]u8{0} ** 3172,
+    reserved: [2708]u8 = [_]u8{0} ** 2708,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -143,7 +143,7 @@ pub const SuperBlockHeader = extern struct {
         reserved: [15]u8 = [_]u8{0} ** 15,
 
         comptime {
-            assert(@sizeOf(VSRState) == 816);
+            assert(@sizeOf(VSRState) == 1280);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -357,12 +357,11 @@ pub const SuperBlockHeader = extern struct {
         /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
         release: u16,
 
-        // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [10]u8 = [_]u8{0} ** 10,
+        reserved: [474]u8 = [_]u8{0} ** 474,
 
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
-            assert(@sizeOf(CheckpointState) == 560);
+            assert(@sizeOf(CheckpointState) == 1024);
             assert(stdx.no_padding(CheckpointState));
         }
     };
