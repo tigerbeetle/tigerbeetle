@@ -1382,6 +1382,7 @@ pub fn ReplicaType(
                     assert(releases.len == message.header.release_count);
                     assert(std.mem.indexOfScalar(u16, releases, message.header.release) != null);
                     vsr.verify_release_list(releases);
+                    for (releases_all[message.header.release_count..]) |r| assert(r == 0);
 
                     for (releases) |release| {
                         if (release > self.release) {
@@ -4122,11 +4123,6 @@ pub fn ReplicaType(
             assert(prepare.header.op <= self.op);
             assert(prepare.header.client == 0);
 
-            if (self.pipeline == .queue) {
-                assert(self.pipeline.queue.prepare_queue.count == 1);
-                assert(self.pipeline.queue.request_queue.empty());
-            }
-
             const request = std.mem.bytesAsValue(
                 vsr.UpgradeRequest,
                 prepare.body()[0..@sizeOf(vsr.UpgradeRequest)],
@@ -4135,13 +4131,22 @@ pub fn ReplicaType(
             assert(stdx.zeroed(&request.reserved));
 
             if (request.release == self.release) {
-                // We are replaying this upgrade request after restarting into the new version.
+                // The replica is replaying this upgrade request after restarting into the new
+                // version.
                 assert(self.upgrade_release == null);
             } else {
                 if (self.upgrade_release) |upgrade_release| {
                     assert(upgrade_release == request.release);
                 } else {
                     self.upgrade_release = request.release;
+
+                    if (self.pipeline == .queue) {
+                        self.pipeline.queue.verify();
+                        if (self.status == .normal) {
+                            assert(self.pipeline.queue.prepare_queue.count == 1);
+                            assert(self.pipeline.queue.request_queue.empty());
+                        }
+                    }
                 }
             }
 
@@ -9758,11 +9763,18 @@ const PipelineQueue = struct {
             var op = head.message.header.op;
             var parent = head.message.header.parent;
             var prepare_iterator = pipeline.prepare_queue.iterator();
+            var upgrade: bool = false;
             while (prepare_iterator.next_ptr()) |prepare| {
                 assert(prepare.message.header.command == .prepare);
                 assert(prepare.message.header.operation != .reserved);
                 assert(prepare.message.header.op == op);
                 assert(prepare.message.header.parent == parent);
+
+                if (prepare.message.header.operation == .upgrade) {
+                    upgrade = true;
+                } else {
+                    assert(!upgrade);
+                }
 
                 parent = prepare.message.header.checksum;
                 op += 1;

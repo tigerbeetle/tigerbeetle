@@ -1279,13 +1279,10 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         // running version 1.
         t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
         t.run();
-        t.run();
         try expectEqual(t.replica(.R_).op_checkpoint(), 0);
         try expectEqual(t.replica(.R_).release(), 1);
 
         t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
-        t.run();
-        t.run();
         t.run();
         try expectEqual(t.replica(.R_).release(), 2);
         try expectEqual(t.replica(.R_).op_checkpoint(), data.checkpoint);

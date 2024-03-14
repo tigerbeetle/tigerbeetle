@@ -326,7 +326,7 @@ const Command = struct {
     }
 };
 
-fn replica_release_execute(replica: *Replica, release: u16) void {
+fn replica_release_execute(replica: *Replica, release: u16) noreturn {
     assert(release != replica.release);
 
     if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release) == null) {
