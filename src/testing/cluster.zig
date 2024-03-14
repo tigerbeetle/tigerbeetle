@@ -46,24 +46,6 @@ pub const Failure = enum(u8) {
     correctness = 129,
 };
 
-pub const ClusterReply = union(enum) {
-    /// Replies sent to clients, including `command=register` messages.
-    client: struct {
-        index: usize,
-        request: *Message.Request,
-        reply: *Message.Reply,
-    },
-    /// Committed prepares sent by the `primary' with no reply to clients.
-    no_reply: *Message.Prepare,
-
-    pub fn op(self: ClusterReply) u64 {
-        return switch (self) {
-            .client => |client| client.reply.header.op,
-            .no_reply => |prepare| prepare.header.op,
-        };
-    }
-};
-
 /// Shift the id-generating index because the simulator network expects client ids to never collide
 /// with a replica index.
 const client_id_permutation_shift = constants.members_max;
