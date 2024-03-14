@@ -259,12 +259,14 @@ pub fn StateMachineType(
         );
 
         pub const PostedGrooveValue = extern struct {
-            timestamp: u64,
-            fulfillment: enum(u8) {
+            pub const Fulfillment = enum(u8) {
                 posted = 0,
                 voided = 1,
                 expired = 2,
-            },
+            };
+
+            timestamp: u64,
+            fulfillment: Fulfillment,
             padding: [7]u8 = [_]u8{0} ** 7,
 
             comptime {
@@ -1745,15 +1747,6 @@ pub fn StateMachineType(
                 }
             }
 
-            self.forest.grooves.posted.insert(&PostedGrooveValue{
-                .timestamp = p.timestamp,
-                .fulfillment = fulfillment: {
-                    if (t.flags.post_pending_transfer) break :fulfillment .posted;
-                    if (t.flags.void_pending_transfer) break :fulfillment .voided;
-                    unreachable;
-                },
-            });
-
             self.transfer_update_pending_status(p.timestamp, status: {
                 if (t.flags.post_pending_transfer) break :status .posted;
                 if (t.flags.void_pending_transfer) break :status .voided;
@@ -1906,6 +1899,21 @@ pub fn StateMachineType(
             assert(timestamp != 0);
             assert(status != .none and status != .pending);
 
+            const Fulfillment = PostedGrooveValue.Fulfillment;
+
+            // Insert the Posted groove.
+            self.forest.grooves.posted.insert(&.{
+                .timestamp = timestamp,
+                .fulfillment = switch (status) {
+                    .posted => Fulfillment.posted,
+                    .voided => Fulfillment.voided,
+                    .expired => Fulfillment.expired,
+                    else => unreachable,
+                },
+            });
+
+            // Update the secondary index.
+            // TODO(batiati) Assert (with constants.verify) that `pending_status == .pending`.
             self.forest.grooves.transfers.indexes.pending_status.remove(&.{
                 .timestamp = timestamp,
                 .field = @intFromEnum(TransferPendingStatus.pending),
@@ -1933,6 +1941,7 @@ pub fn StateMachineType(
             for (transfers) |expired| {
                 assert(expired.flags.pending);
                 assert(expired.timeout > 0);
+                assert(expired.amount > 0);
 
                 const expires_at = expired.timestamp + expired.timeout_ns();
                 assert(expires_at <= timestamp);
@@ -1958,12 +1967,6 @@ pub fn StateMachineType(
 
                 grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
                 grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
-
-                // Expire the transfer.
-                grooves.posted.insert(&.{
-                    .timestamp = expired.timestamp,
-                    .fulfillment = .expired,
-                });
 
                 self.transfer_update_pending_status(expired.timestamp, .expired);
 

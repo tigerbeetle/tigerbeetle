@@ -685,6 +685,7 @@ pub const Simulator = struct {
                 assert(commit.reply.header.client == commit_client.id);
                 assert(commit.reply.header.request == commit.request.header.request);
                 assert(commit.reply.header.operation == commit.request.header.operation);
+                assert(commit.reply.header.operation != .pulse);
 
                 assert(commit.request.references == 1);
                 assert(commit.request.header.checksum == prepare_header.request_checksum);

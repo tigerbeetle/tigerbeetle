@@ -1364,10 +1364,15 @@ pub fn ReplicaType(
             assert(message.header.operation != .root);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
-            const realtime = self.clock.realtime_synchronized() orelse {
-                log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
-                return;
-            };
+            // Messages with `client == 0` are sent from itself,
+            // it's not needed to get a different timestamp.
+            const realtime: i64 = if (message.header.client == 0)
+                @intCast(message.header.timestamp)
+            else
+                self.clock.realtime_synchronized() orelse {
+                    log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                    return;
+                };
 
             const request = .{
                 .message = message.ref(),
@@ -2918,16 +2923,15 @@ pub fn ReplicaType(
 
         fn on_pulse_timeout(self: *Self) void {
             if (constants.aof_recovery) unreachable;
-
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.pulse_timeout.ticking);
 
-            if (self.pipeline.queue.prepare_queue.full()) {
-                self.pulse_timeout.backoff(self.prng.random());
-                return;
-            }
+            defer self.pulse_timeout.reset();
+            if (self.pipeline.queue.prepare_queue.full()) return;
 
+            // To decide whether or not to `pulse` a time-dependant
+            // operation, the State Machine needs an updated `prepare_timestamp`.
             const realtime = self.clock.realtime();
             self.state_machine.prepare_timestamp = @max(
                 self.state_machine.prepare_timestamp,
@@ -2939,7 +2943,6 @@ pub fn ReplicaType(
                     self.send_request_pulse_to_self();
                 }
             }
-            self.pulse_timeout.reset();
         }
 
         fn primary_receive_do_view_change(
@@ -5351,10 +5354,6 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            self.push_prepare(message);
-        }
-
-        fn push_prepare(self: *Self, message: *Message.Prepare) void {
             log.debug("{}: primary_pipeline_prepare: prepare {}", .{ self.replica, message.header.checksum });
 
             if (self.primary_pipeline_pending()) |_| {
