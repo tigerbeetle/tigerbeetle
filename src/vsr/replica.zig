@@ -3982,7 +3982,7 @@ pub fn ReplicaType(
 
             const reply_body_size = switch (prepare.header.operation) {
                 .reserved, .root => unreachable,
-                .register => 0,
+                .register => self.commit_register(prepare, reply.buffer[@sizeOf(Header)..]),
                 .reconfigure => self.commit_reconfiguration(
                     prepare,
                     reply.buffer[@sizeOf(Header)..],
@@ -4079,6 +4079,28 @@ pub fn ReplicaType(
                     self.send_reply_message_to_client(reply);
                 }
             }
+        }
+
+        fn commit_register(
+            self: *Self,
+            prepare: *const Message.Prepare,
+            output_buffer: *align(16) [constants.message_body_size_max]u8,
+        ) usize {
+            assert(self.commit_stage == .setup_client_replies);
+            assert(self.commit_prepare.? == prepare);
+            assert(prepare.header.command == .prepare);
+            assert(prepare.header.operation == .register);
+            assert(prepare.header.size == @sizeOf(vsr.Header));
+            assert(prepare.header.op == self.commit_min + 1);
+            assert(prepare.header.op <= self.op);
+
+            const result = std.mem.bytesAsValue(
+                vsr.RegisterResult,
+                output_buffer[0..@sizeOf(vsr.RegisterResult)],
+            );
+
+            result.* = .{};
+            return @sizeOf(vsr.RegisterResult);
         }
 
         // The actual "execution" was handled by the primary when the request was prepared.
@@ -4183,7 +4205,7 @@ pub fn ReplicaType(
             assert(reply.header.operation == .register);
             assert(reply.header.client > 0);
             assert(reply.header.op == reply.header.commit);
-            assert(reply.header.size == @sizeOf(Header));
+            assert(reply.header.size == @sizeOf(Header) + @sizeOf(vsr.RegisterResult));
 
             const session = reply.header.commit; // The commit number becomes the session number.
             const request = reply.header.request;
@@ -4229,11 +4251,7 @@ pub fn ReplicaType(
             const reply_slot = self.client_sessions.put(session, reply.header);
             assert(self.client_sessions.count() <= constants.clients_max);
 
-            if (reply.header.size == @sizeOf(Header)) {
-                self.client_replies.remove_reply(reply_slot);
-            } else {
-                self.client_replies.write_reply(reply_slot, reply, .commit);
-            }
+            self.client_replies.write_reply(reply_slot, reply, .commit);
         }
 
         fn client_table_entry_update(self: *Self, reply: *Message.Reply) void {

@@ -1028,9 +1028,13 @@ test "Client Batching" {
 
             // Figure out how many zeroes to write to reply.
             // StateMachine requests get an equal amount of empty Results per Event.
-            const body_size = if (message.header.operation.vsr_reserved()) blk: {
+            const body_size: usize = if (message.header.operation.vsr_reserved()) blk: {
                 assert(message.body().len == 0);
-                break :blk 0;
+                if (message.header.operation == .register) {
+                    break :blk @sizeOf(vsr.RegisterResult);
+                } else {
+                    break :blk 0;
+                }
             } else switch (message.header.operation.cast(StateMachine)) {
                 inline else => |operation| result_size: {
                     const event_count = @divExact(

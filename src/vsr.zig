@@ -286,6 +286,16 @@ pub const Operation = enum(u8) {
     }
 };
 
+pub const RegisterResult = extern struct {
+    reserved: [64]u8 = [_]u8{0} ** 64,
+
+    comptime {
+        assert(@sizeOf(RegisterResult) == 64);
+        assert(@sizeOf(RegisterResult) <= constants.message_body_size_max);
+        assert(stdx.no_padding(RegisterResult));
+    }
+};
+
 pub const BlockRequest = extern struct {
     block_checksum: u128,
     block_address: u64,
@@ -551,6 +561,7 @@ pub const UpgradeRequest = extern struct {
 
     comptime {
         assert(@sizeOf(UpgradeRequest) == 16);
+        assert(@sizeOf(UpgradeRequest) <= constants.message_body_size_max);
         assert(stdx.no_padding(UpgradeRequest));
     }
 };
