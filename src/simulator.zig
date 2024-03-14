@@ -842,75 +842,68 @@ pub const Simulator = struct {
     }
 
     fn tick_crash(simulator: *Simulator) void {
-        const recoverable_count_min =
-            vsr.quorums(simulator.options.cluster.replica_count).view_change;
-
-        var recoverable_count: usize = 0;
-        for (simulator.cluster.replicas, 0..) |*replica, i| {
-            recoverable_count += @intFromBool(simulator.cluster.replica_health[i] == .up and
-                !replica.standby() and
-                replica.status != .recovering_head and
-                replica.syncing == .idle);
-        }
-
-        for (
-            simulator.cluster.replicas,
-            simulator.cluster.storages,
-        ) |*replica, *replica_storage| {
+        for (simulator.cluster.replicas) |*replica| {
             simulator.replica_stability[replica.replica] -|= 1;
             const stability = simulator.replica_stability[replica.replica];
             if (stability > 0) continue;
 
             switch (simulator.cluster.replica_health[replica.replica]) {
-                .up => {
-                    const replica_writes = replica_storage.writes.count();
-
-                    const crash_upgrade =
-                        simulator.replica_releases[replica.replica] < releases.len and
-                        chance_f64(
-                        simulator.random,
-                        simulator.options.replica_release_advance_probability,
-                    );
-                    if (crash_upgrade) simulator.replica_upgrade(replica.replica);
-
-                    const crash_probability = simulator.options.replica_crash_probability *
-                        @as(f64, if (replica_writes == 0) 1.0 else 10.0);
-                    const crash_random = chance_f64(simulator.random, crash_probability);
-
-                    if (!crash_upgrade and !crash_random) continue;
-
-                    recoverable_count -= @intFromBool(!replica.standby() and
-                        replica.status != .recovering_head and
-                        replica.syncing == .idle);
-
-                    log.debug("{}: crash replica", .{replica.replica});
-                    simulator.cluster.crash_replica(replica.replica);
-
-                    simulator.replica_stability[replica.replica] =
-                        simulator.options.replica_crash_stability;
-                },
-                .down => {
-                    // If we are in liveness mode, we need to make sure that all replicas
-                    // (eventually) make it to the same release.
-                    const restart_upgrade =
-                        simulator.replica_releases[replica.replica] <
-                        simulator.replica_releases_limit and
-                        (simulator.core.isSet(replica.replica) or chance_f64(
-                        simulator.random,
-                        simulator.options.replica_release_catchup_probability,
-                    ));
-                    if (restart_upgrade) simulator.replica_upgrade(replica.replica);
-
-                    const restart_random =
-                        chance_f64(simulator.random, simulator.options.replica_restart_probability);
-
-                    if (!restart_upgrade and !restart_random) continue;
-
-                    const fault = recoverable_count >= recoverable_count_min or replica.standby();
-                    simulator.restart_replica(replica.replica, fault);
-                },
+                .up => simulator.tick_crash_up(replica),
+                .down => simulator.tick_crash_down(replica),
             }
         }
+    }
+
+    fn tick_crash_up(simulator: *Simulator, replica: *Cluster.Replica) void {
+        const replica_storage = &simulator.cluster.storages[replica.replica];
+        const replica_writes = replica_storage.writes.count();
+
+        const crash_upgrade =
+            simulator.replica_releases[replica.replica] < releases.len and
+            chance_f64(simulator.random, simulator.options.replica_release_advance_probability);
+        if (crash_upgrade) simulator.replica_upgrade(replica.replica);
+
+        const crash_probability = simulator.options.replica_crash_probability *
+            @as(f64, if (replica_writes == 0) 1.0 else 10.0);
+        const crash_random = chance_f64(simulator.random, crash_probability);
+
+        if (!crash_upgrade and !crash_random) return;
+
+        log.debug("{}: crash replica", .{replica.replica});
+        simulator.cluster.crash_replica(replica.replica);
+
+        simulator.replica_stability[replica.replica] =
+            simulator.options.replica_crash_stability;
+    }
+
+    fn tick_crash_down(simulator: *Simulator, replica: *Cluster.Replica) void {
+        // If we are in liveness mode, we need to make sure that all replicas
+        // (eventually) make it to the same release.
+        const restart_upgrade =
+            simulator.replica_releases[replica.replica] <
+            simulator.replica_releases_limit and
+            (simulator.core.isSet(replica.replica) or
+            chance_f64(simulator.random, simulator.options.replica_release_catchup_probability));
+        if (restart_upgrade) simulator.replica_upgrade(replica.replica);
+
+        const restart_random =
+            chance_f64(simulator.random, simulator.options.replica_restart_probability);
+
+        if (!restart_upgrade and !restart_random) return;
+
+        const recoverable_count_min =
+            vsr.quorums(simulator.options.cluster.replica_count).view_change;
+
+        var recoverable_count: usize = 0;
+        for (simulator.cluster.replicas, 0..) |*r, i| {
+            recoverable_count += @intFromBool(simulator.cluster.replica_health[i] == .up and
+                !r.standby() and
+                r.status != .recovering_head and
+                r.syncing == .idle);
+        }
+
+        const fault = recoverable_count >= recoverable_count_min or replica.standby();
+        simulator.restart_replica(replica.replica, fault);
     }
 
     fn restart_replica(simulator: *Simulator, replica_index: u8, fault: bool) void {
