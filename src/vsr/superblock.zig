@@ -539,10 +539,18 @@ comptime {
 /// The size of the entire superblock storage zone.
 pub const superblock_zone_size = superblock_copy_size * constants.superblock_copies;
 
-/// The size of an individual superblock including padding.
-/// TODO Add some padding between copies and include that here.
-pub const superblock_copy_size = @sizeOf(SuperBlockHeader);
+/// Leave enough padding after every superblock copy so that it is feasible, in the future, to
+/// modify the `pipeline_prepare_queue_max` of an existing cluster (up to a maximum of clients_max).
+/// (That is, this space is reserved for potential `vsr_headers`).
+const superblock_copy_padding: comptime_int = stdx.div_ceil(
+    (constants.clients_max - constants.pipeline_prepare_queue_max) * @sizeOf(vsr.Header),
+    constants.sector_size,
+) * constants.sector_size;
+
+/// The size of an individual superblock header copy, including padding.
+pub const superblock_copy_size = @sizeOf(SuperBlockHeader) + superblock_copy_padding;
 comptime {
+    assert(superblock_copy_padding % constants.sector_size == 0);
     assert(superblock_copy_size % constants.sector_size == 0);
 }
 
