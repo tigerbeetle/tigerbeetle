@@ -690,6 +690,7 @@ pub fn ReplicaType(
                 }
             } else {
                 if (self.log_view < self.superblock.working.vsr_state.checkpoint.header.view) {
+                    // During state sync, the replica installed CheckpointState from a future view.
                     self.transition_to_recovering_head();
                 } else {
                     // Even if op_head_certain() returns false, a DVC always has a certain head op.
@@ -4800,11 +4801,16 @@ pub fn ReplicaType(
                         return true;
                     }
 
-                    if (self.status == .recovering_head) {
-                        if (message.header.view < self.superblock.working.vsr_state.checkpoint.header.view) {
-                            return true;
-                        }
+                    if (message.header.view < self.superblock.working.vsr_state.checkpoint.header.view) {
+                        assert(self.status == .recovering_head);
+                        log.debug("{}: on_{s}: ignoring (recovering_head, checkpoint from newer view)", .{
+                            self.replica,
+                            command,
+                        });
+                        return true;
+                    }
 
+                    if (self.status == .recovering_head) {
                         if (message_header.view > self.view or
                             message_header.op >= self.op_prepare_max() or
                             message_header.nonce == self.nonce)
@@ -7394,7 +7400,8 @@ pub fn ReplicaType(
 
             if (self.log_view < self.superblock.working.vsr_state.checkpoint.header.view) {
                 // Transitioning to recovering head after state sync --- checkpoint is from a
-                // "future" view, so we might need to truncate our log.
+                // "future" view, so the replica needs to truncate our log.
+                assert(self.commit_min == self.op_checkpoint());
             } else {
                 if (self.status == .recovering) {
                     assert(self.pipeline == .cache);
@@ -7571,7 +7578,6 @@ pub fn ReplicaType(
             assert(!self.primary_abdicating);
             assert(self.view_headers.command == .start_view);
             assert(self.log_view >= self.superblock.working.vsr_state.checkpoint.header.view);
-
 
             self.status = .normal;
 
@@ -8195,6 +8201,9 @@ pub fn ReplicaType(
 
             self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
             assert(self.commit_min == self.op_checkpoint());
+
+            // The head op must be in the Journal and there should not be a break between the
+            // checkpoint header and the Journal.
             if (self.op < self.op_checkpoint() or
                 self.log_view < self.superblock.working.vsr_state.checkpoint.header.view)
             {
