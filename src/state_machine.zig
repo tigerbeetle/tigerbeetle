@@ -11,6 +11,7 @@ const maybe = stdx.maybe;
 
 const global_constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
+const vsr = @import("vsr.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
@@ -118,6 +119,7 @@ pub fn StateMachineType(
         /// Used to determine if an operation can be batched at the VSR layer.
         /// If so, the StateMachine must support demuxing batched operations below.
         pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
+            .pulse = false,
             .create_accounts = true,
             .create_transfers = true,
             // Don't batch lookups/queries for now.
@@ -125,7 +127,6 @@ pub fn StateMachineType(
             .lookup_transfers = false,
             .get_account_transfers = false,
             .get_account_history = false,
-            .expire_pending_transfers = false,
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
@@ -343,14 +344,21 @@ pub fn StateMachineType(
 
         pub const Operation = enum(u8) {
             /// Operations exported by TigerBeetle:
-            create_accounts = config.vsr_operations_reserved + 0,
-            create_transfers = config.vsr_operations_reserved + 1,
-            lookup_accounts = config.vsr_operations_reserved + 2,
-            lookup_transfers = config.vsr_operations_reserved + 3,
-            get_account_transfers = config.vsr_operations_reserved + 4,
-            get_account_history = config.vsr_operations_reserved + 5,
-            expire_pending_transfers = config.vsr_operations_reserved + 6,
+            pulse = config.vsr_operations_reserved + 0,
+            create_accounts = config.vsr_operations_reserved + 1,
+            create_transfers = config.vsr_operations_reserved + 2,
+            lookup_accounts = config.vsr_operations_reserved + 3,
+            lookup_transfers = config.vsr_operations_reserved + 4,
+            get_account_transfers = config.vsr_operations_reserved + 5,
+            get_account_history = config.vsr_operations_reserved + 6,
         };
+
+        pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
+            if (operation == .pulse) return .pulse;
+            if (operation.vsr_reserved()) return null;
+
+            return vsr.Operation.to(StateMachine, operation);
+        }
 
         pub const Options = struct {
             lsm_forest_node_count: u32,
@@ -495,25 +503,25 @@ pub fn StateMachineType(
 
         pub fn Event(comptime operation: Operation) type {
             return switch (operation) {
+                .pulse => void,
                 .create_accounts => Account,
                 .create_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
                 .get_account_history => AccountFilter,
-                .expire_pending_transfers => void,
             };
         }
 
         pub fn Result(comptime operation: Operation) type {
             return switch (operation) {
+                .pulse => void,
                 .create_accounts => CreateAccountsResult,
                 .create_transfers => CreateTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
                 .get_account_history => AccountBalance,
-                .expire_pending_transfers => void,
             };
         }
 
@@ -536,13 +544,13 @@ pub fn StateMachineType(
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
         pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) u8) void {
             self.prepare_timestamp += switch (operation) {
+                .pulse => 0,
                 .create_accounts => mem.bytesAsSlice(Account, input).len,
                 .create_transfers => mem.bytesAsSlice(Transfer, input).len,
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
                 .get_account_history => 0,
-                .expire_pending_transfers => 0,
             };
         }
 
@@ -550,14 +558,11 @@ pub fn StateMachineType(
             self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_min;
         }
 
-        pub fn pulse_operation(self: *StateMachine) ?Operation {
+        pub fn pulse(self: *const StateMachine) bool {
             comptime assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
 
-            return if (self.expire_pending_transfers_pulse_timestamp <= self.prepare_timestamp)
-                .expire_pending_transfers
-            else
-                null;
+            return self.expire_pending_transfers_pulse_timestamp <= self.prepare_timestamp;
         }
 
         pub fn prefetch(
@@ -586,6 +591,10 @@ pub fn StateMachineType(
             self.forest.grooves.posted.prefetch_setup(null);
 
             return switch (operation) {
+                .pulse => {
+                    assert(input.len == 0);
+                    self.prefetch_expire_pending_transfers();
+                },
                 .create_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
@@ -603,9 +612,6 @@ pub fn StateMachineType(
                 },
                 .get_account_history => {
                     self.prefetch_get_account_history(parse_filter_from_input(input));
-                },
-                .expire_pending_transfers => {
-                    self.prefetch_expire_pending_transfers();
                 },
             };
         }
@@ -1170,13 +1176,13 @@ pub fn StateMachineType(
             );
 
             const result = switch (operation) {
+                .pulse => self.execute_expire_pending_transfers(timestamp),
                 .create_accounts => self.execute(.create_accounts, timestamp, input, output),
                 .create_transfers => self.execute(.create_transfers, timestamp, input, output),
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 .get_account_transfers => self.execute_get_account_transfers(input, output),
                 .get_account_history => self.execute_get_account_history(input, output),
-                .expire_pending_transfers => self.execute_expire_pending_transfers(timestamp),
             };
 
             tracer.end(
@@ -2580,10 +2586,10 @@ fn check(test_table: []const u8) !void {
                 context.state_machine.prepare_timestamp += 1;
                 context.state_machine.prepare(commit_operation, request.items);
 
-                if (context.state_machine.pulse_operation()) |pulse_operation| {
+                if (context.state_machine.pulse()) {
                     const pulse_size = context.execute(
                         op,
-                        pulse_operation,
+                        vsr.Operation.pulse.cast(TestContext.StateMachine),
                         &.{},
                         reply_actual_buffer[0..TestContext.message_body_size_max],
                     );
@@ -2609,7 +2615,7 @@ fn check(test_table: []const u8) !void {
                             mem.bytesAsSlice(Result, reply_actual),
                         );
                     },
-                    .expire_pending_transfers => unreachable,
+                    .pulse => unreachable,
                 }
 
                 request.clearRetainingCapacity();

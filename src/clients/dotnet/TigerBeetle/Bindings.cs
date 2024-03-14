@@ -914,19 +914,19 @@ internal enum PacketAcquireStatus : uint
 
 internal enum TBOperation : byte
 {
-    CreateAccounts = 128,
+    Pulse = 128,
 
-    CreateTransfers = 129,
+    CreateAccounts = 129,
 
-    LookupAccounts = 130,
+    CreateTransfers = 130,
 
-    LookupTransfers = 131,
+    LookupAccounts = 131,
 
-    GetAccountTransfers = 132,
+    LookupTransfers = 132,
 
-    GetAccountHistory = 133,
+    GetAccountTransfers = 133,
 
-    ExpirePendingTransfers = 134,
+    GetAccountHistory = 134,
 
 }
 

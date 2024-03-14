@@ -715,12 +715,12 @@ export type AccountBalance = {
 }
 
 export enum Operation {
-  create_accounts = 128,
-  create_transfers = 129,
-  lookup_accounts = 130,
-  lookup_transfers = 131,
-  get_account_transfers = 132,
-  get_account_history = 133,
-  expire_pending_transfers = 134,
+  pulse = 128,
+  create_accounts = 129,
+  create_transfers = 130,
+  lookup_accounts = 131,
+  lookup_transfers = 132,
+  get_account_transfers = 133,
+  get_account_history = 134,
 }
 

@@ -22,6 +22,12 @@ pub fn StateMachineType(
             echo = config.vsr_operations_reserved + 0,
         };
 
+        pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
+            if (operation.vsr_reserved()) return null;
+
+            return vsr.Operation.to(StateMachine, operation);
+        }
+
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
         };
@@ -157,9 +163,9 @@ pub fn StateMachineType(
             _ = state_machine;
         }
 
-        pub fn pulse_operation(state_machine: *StateMachine) ?Operation {
+        pub fn pulse(state_machine: *const StateMachine) bool {
             _ = state_machine;
-            return null;
+            return false;
         }
 
         pub fn prepare(

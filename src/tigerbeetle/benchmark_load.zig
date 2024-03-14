@@ -481,7 +481,7 @@ const Benchmark = struct {
 
         const event_count = switch (operation) {
             inline else => |op| @divExact(payload.len, @sizeOf(StateMachine.Event(op))),
-            .expire_pending_transfers => unreachable,
+            .pulse => unreachable,
         };
 
         const batch = b.client.batch_get(operation, event_count) catch unreachable;

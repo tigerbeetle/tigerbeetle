@@ -903,6 +903,12 @@ const TestStateMachine = struct {
         serial = config.vsr_operations_reserved + 1,
     };
 
+    pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
+        if (operation.vsr_reserved()) return null;
+
+        return vsr.Operation.to(TestStateMachine, operation);
+    }
+
     pub fn Event(comptime operation: Operation) type {
         return switch (operation) {
             .batched => [128]u8,

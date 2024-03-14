@@ -350,7 +350,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 //TODO: implement query.
                 .get_account_transfers, .get_account_history => unreachable,
                 //Not handled by the client.
-                .expire_pending_transfers => unreachable,
+                .pulse => unreachable,
             }
         }
 
@@ -361,11 +361,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             timestamp: u64,
         ) void {
             assert(timestamp != 0);
+            assert(operation == .pulse);
 
-            switch (operation) {
-                .expire_pending_transfers => self.auditor.expire_pending_transfers(timestamp),
-                else => unreachable,
-            }
+            self.auditor.expire_pending_transfers(timestamp);
         }
 
         fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {

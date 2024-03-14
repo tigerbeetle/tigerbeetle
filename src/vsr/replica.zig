@@ -2934,9 +2934,9 @@ pub fn ReplicaType(
                 @as(u64, @intCast(realtime)),
             );
 
-            if (self.state_machine.pulse_operation()) |pulse_operation| {
+            if (self.state_machine.pulse()) {
                 if (!self.pipeline.queue.pulse_in_progress()) {
-                    self.pulse_inject(pulse_operation);
+                    self.pulse_inject();
                 }
             }
             self.pulse_timeout.reset();
@@ -3474,18 +3474,20 @@ pub fn ReplicaType(
                 @src(),
             );
 
-            if (prepare.header.operation.vsr_reserved()) {
-                // NOTE: this inline callback is fine because the next stage of committing,
-                // `.setup_client_replies`, is always async.
-                commit_op_prefetch_callback(&self.state_machine);
-            } else {
+            if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_op_prefetch_callback,
                     prepare.header.op,
-                    prepare.header.operation.cast(StateMachine),
+                    prepare_operation,
                     prepare.body(),
                 );
+            } else {
+                assert(prepare.header.operation.vsr_reserved());
+
+                // NOTE: this inline callback is fine because the next stage of committing,
+                // `.setup_client_replies`, is always async.
+                commit_op_prefetch_callback(&self.state_machine);
             }
         }
 
@@ -5279,9 +5281,9 @@ pub fn ReplicaType(
                         // Note that `prepare` must be called before so the StateMachine can
                         // correctly assure that time-dependant tasks (e.g. expiring transfers)
                         // will never intersect with a request batch.
-                        if (self.state_machine.pulse_operation()) |pulse_operation| {
+                        if (self.state_machine.pulse()) {
                             if (!self.pipeline.queue.pulse_in_progress()) {
-                                self.pulse_inject(pulse_operation);
+                                self.pulse_inject();
                                 self.pipeline.queue.delay_request(request);
                                 return;
                             }
@@ -5390,7 +5392,7 @@ pub fn ReplicaType(
             assert(reconfiguration_request.result != .reserved);
         }
 
-        fn pulse_inject(self: *Self, operation: StateMachine.Operation) void {
+        fn pulse_inject(self: *Self) void {
             assert(self.status == .normal);
             assert(self.primary());
             assert(!self.pipeline.queue.full());
@@ -5414,7 +5416,7 @@ pub fn ReplicaType(
                 .op = self.op + 1,
                 .commit = self.commit_max,
                 .timestamp = prepare_timestamp,
-                .operation = vsr.Operation.from(StateMachine, operation),
+                .operation = vsr.Operation.pulse,
                 .client = 0,
                 .request = 0,
             };
