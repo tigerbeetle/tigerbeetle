@@ -458,7 +458,7 @@ pub fn ReplicaType(
         sync_message_timeout: Timeout,
 
         /// The number of ticks on an idle cluester before injecting a `pulse` operation.
-        /// (status=normal and primary)
+        /// (status=normal and primary and !constants.aof_recovery)
         pulse_timeout: Timeout,
 
         /// Used to calculate exponential backoff with random jitter.

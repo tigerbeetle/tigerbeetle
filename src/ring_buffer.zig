@@ -111,17 +111,6 @@ pub fn RingBuffer(
             }
         }
 
-        pub inline fn get_const_ptr(self: *const Self, index: usize) ?*const T {
-            if (self.buffer.len == 0) unreachable;
-
-            if (index < self.count) {
-                return &self.buffer[(self.index + index) % self.buffer.len];
-            } else {
-                assert(index < self.buffer.len);
-                return null;
-            }
-        }
-
         pub inline fn next_tail(self: Self) ?T {
             if (self.buffer.len == 0 or self.full()) return null;
             return self.buffer[(self.index + self.count) % self.buffer.len];
