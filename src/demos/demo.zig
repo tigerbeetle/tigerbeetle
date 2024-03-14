@@ -67,16 +67,14 @@ pub fn request(
     );
     defer client.deinit(allocator);
 
-    const client_batch = client.batch_get(operation, batch.len) catch unreachable;
-    stdx.copy_disjoint(.exact, u8, client_batch.slice(), std.mem.asBytes(&batch));
-
-    client.batch_submit(
-        0,
+    client.request(
         on_reply,
-        client_batch,
+        0,
+        operation,
+        std.mem.asBytes(&batch),
     );
 
-    while (client.request_queue.count > 0) {
+    while (client.request_inflight != null) {
         client.tick();
         try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }

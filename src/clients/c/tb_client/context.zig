@@ -12,6 +12,7 @@ const vsr = @import("../../../vsr.zig");
 const Header = vsr.Header;
 
 const IO = @import("../../../io.zig").IO;
+const FIFO = @import("../../../fifo.zig").FIFO;
 const message_pool = @import("../../../message_pool.zig");
 
 const MessagePool = message_pool.MessagePool;
@@ -54,8 +55,8 @@ pub fn ContextType(
 ) type {
     return struct {
         const Context = @This();
-        const Thread = ThreadType(Context);
 
+        const StateMachine = Client.StateMachine;
         const UserData = extern struct {
             self: *Context,
             packet: *Packet,
@@ -100,8 +101,12 @@ pub fn ContextType(
 
         completion_fn: tb_completion_t,
         implementation: ContextImplementation,
-        thread: Thread,
-        shutdown: Atomic(bool) = Atomic(bool).init(false),
+
+        signal: Signal,
+        submitted: Packet.SubmissionStack,
+        pending: FIFO(Packet),
+        shutdown: Atomic(bool),
+        thread: std.Thread,
 
         pub fn init(
             allocator: std.mem.Allocator,
@@ -191,9 +196,29 @@ pub fn ContextType(
                 .deinit_fn = Context.on_deinit,
             };
 
-            log.debug("{}: init: initializing thread", .{context.client_id});
-            try context.thread.init(context);
-            errdefer context.thread.deinit(context.allocator);
+            context.submitted = .{};
+            context.shutdown = Atomic(bool).init(false);
+            context.pending = .{ .name = null };
+
+            log.debug("{}: init: initializing signal", .{context.client_id});
+            try context.signal.init(&context.io, Context.on_signal);
+            errdefer context.signal.deinit();
+
+            log.debug("{}: init: spawning thread", .{context.client_id});
+            context.thread = std.Thread.spawn(.{}, Context.run, .{context}) catch |err| {
+                log.err("{}: failed to spawn thread: {s}", .{
+                    context.client_id,
+                    @errorName(err),
+                });
+                return switch (err) {
+                    error.Unexpected => error.Unexpected,
+                    error.OutOfMemory => error.OutOfMemory,
+                    error.SystemResources,
+                    error.ThreadQuotaExceeded,
+                    error.LockedMemoryLimitExceeded,
+                    => error.SystemResources,
+                };
+            };
 
             return context;
         }
@@ -201,7 +226,8 @@ pub fn ContextType(
         pub fn deinit(self: *Context) void {
             const is_shutdown = self.shutdown.swap(true, .Monotonic);
             if (!is_shutdown) {
-                self.thread.deinit();
+                self.thread.join();
+                self.signal.deinit();
 
                 self.client.deinit(self.allocator);
                 self.message_pool.deinit(self.allocator);
@@ -243,52 +269,155 @@ pub fn ContextType(
             }
         }
 
-        pub fn request(self: *Context, packet: *Packet) Client.BatchError!void {
+        fn on_signal(signal: *Signal) void {
+            const self = @fieldParentPtr(Context, "signal", signal);
+            while (self.submitted.pop()) |packet| {
+                self.request(packet);
+            }
+        }
+
+        fn request(self: *Context, packet: *Packet) void {
             // Get the size of each request structure in the packet.data:
             const event_size: usize = operation_event_size(packet.operation) orelse {
                 return self.on_complete(packet, error.InvalidOperation);
             };
 
             // Make sure the packet.data size is correct:
-            const readable = @as([*]const u8, @ptrCast(packet.data))[0..packet.data_size];
-            if (readable.len == 0 or readable.len % event_size != 0) {
+            const events = @as([*]const u8, @ptrCast(packet.data))[0..packet.data_size];
+            if (events.len == 0 or events.len % event_size != 0) {
                 return self.on_complete(packet, error.InvalidDataSize);
             }
 
             // Make sure the packet.data wouldn't overflow a message:
-            if (readable.len > constants.message_body_size_max) {
+            if (events.len > constants.message_body_size_max) {
                 return self.on_complete(packet, error.TooMuchData);
             }
 
-            const batch = try self.client.batch_get(
-                @enumFromInt(packet.operation),
-                @divExact(readable.len, event_size),
-            );
+            packet.batch_link = null;
+            packet.batch_data = @ptrFromInt(packet.data_size);
 
-            stdx.copy_disjoint(.exact, u8, batch.slice(), readable);
+            // Nothing inflight means the packet should be submitted right now.
+            if (self.client.request_inflight == null) {
+                return self.submit(packet);
+            }
 
-            // Submit the message for processing:
-            self.client.batch_submit(
+            // Otherwise, try to batch the packet with another already in self.pending.
+            if (StateMachine.batch_logical_allowed.get(@enumFromInt(packet.operation))) {
+                var it = self.pending.peek();
+                while (it) |root| {
+                    it = root.next;
+
+                    // Check for pending packets of the same operation which can be batched.
+                    if (root.operation != packet.operation) continue;
+                    if (@intFromPtr(root.batch_data) + packet.data_size > constants.message_body_size_max) continue;
+
+                    // Queue packet to the root for batching.
+                    // The root's .batch_data is always the total message body size of the chain.
+                    // The packet following root.batch_link will have its .batch_data be the tail
+                    // which must point to the last packet in the linked batch for O(1) append.
+                    if (root.batch_link) |next| {
+                        next.batch_data.?.batch_link = packet;
+                        next.batch_data = packet;
+                    } else {
+                        root.batch_link = packet;
+                        packet.batch_data = packet;
+                    }
+
+                    // Accumulate the root's batch_size with the packets to track message body size.
+                    root.batch_data = @ptrFromInt(@intFromPtr(root.batch_data) + packet.data_size);
+                    return;
+                }
+            }
+
+            // Couldn't batch with existing packet so push to pending directly.
+            packet.next = null;
+            self.pending.push(packet);
+        }
+
+        fn submit(self: *Context, packet: *Packet) void {
+            assert(self.client.request_inflight == null);
+            const message = self.client.get_message().build(.request);
+            errdefer self.client.release_message(message.base());
+
+            // The root packet's internal .data contains the total .batch_size for the message.
+            const batch_size = @intFromPtr(packet.batch_data);
+            assert(batch_size <= constants.message_body_size_max);
+
+            const operation: StateMachine.Operation = @enumFromInt(packet.operation);
+            message.header.* = .{
+                .release = self.client.release,
+                .client = self.client.id,
+                .request = undefined, // Set by client.raw_request.
+                .cluster = self.client.cluster,
+                .command = .request,
+                .operation = vsr.Operation.from(StateMachine, operation),
+                .size = @intCast(@sizeOf(vsr.Header) + batch_size),
+            };
+
+            // Copy all batched packet event data into the message.
+            var offset: u32 = 0;
+            var it: ?*Packet = packet;
+            while (it) |batched| {
+                it = batched.batch_link;
+
+                const event_data = @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size];
+                stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
+                offset += @intCast(event_data.len);
+            }
+
+            assert(offset == batch_size);
+            self.client.raw_request(
+                Context.on_result,
                 @bitCast(UserData{
                     .self = self,
                     .packet = packet,
                 }),
-                Context.on_result,
-                batch,
+                message,
             );
         }
 
         fn on_result(
             raw_user_data: u128,
-            op: Client.StateMachine.Operation,
-            results: []const u8,
+            op: StateMachine.Operation,
+            reply: []const u8,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
             const self = user_data.self;
             const packet = user_data.packet;
 
-            assert(packet.operation == @intFromEnum(op));
-            self.on_complete(packet, results);
+            // Submit the next pending packet after having VSR completed this one.
+            if (self.pending.pop()) |packet_next| {
+                self.submit(packet_next);
+            }
+
+            switch (op) {
+                inline else => |operation| {
+                    // Demuxer takes a mutable []Result slice but VSR callback gives us []const u8.
+                    // The reply comes directly from message.body() which is safe to @alignCast()
+                    // and the reply's body is writable and unused after so safe to @constCast().
+                    var demuxer = StateMachine.DemuxerType(operation).init(
+                        @constCast(@alignCast(std.mem.bytesAsSlice(StateMachine.Result(operation), reply))),
+                    );
+
+                    var it: ?*Packet = packet;
+                    var event_offset: u32 = 0;
+                    while (it) |batched| {
+                        it = batched.batch_link;
+
+                        const event_count = @divExact(batched.data_size, @sizeOf(StateMachine.Event(operation)));
+                        const decoded = demuxer.decode(event_offset, event_count);
+                        event_offset += event_count;
+
+                        const result = std.mem.sliceAsBytes(decoded);
+                        if (!StateMachine.batch_logical_allowed.get(operation)) {
+                            assert(result.len == reply.len);
+                        }
+
+                        assert(batched.operation == @intFromEnum(operation));
+                        self.on_complete(batched, result);
+                    }
+                },
+            }
         }
 
         fn on_complete(
@@ -298,9 +427,6 @@ pub fn ContextType(
         ) void {
             const completion_ctx = self.implementation.completion_ctx;
             assert(self.client.messages_available <= constants.client_request_queue_max);
-
-            // Signal to resume sending requests that was waiting for available messages.
-            self.thread.signal.notify();
 
             const tb_client = api.context_to_client(&self.implementation);
             const bytes = result catch |err| {
@@ -322,13 +448,13 @@ pub fn ContextType(
         }
 
         fn on_acquire_packet(implementation: *ContextImplementation, out_packet: *?*Packet) PacketAcquireStatus {
-            const context = get_context(implementation);
+            const self = get_context(implementation);
 
             // During shutdown, no packet can be acquired by the application.
-            const is_shutdown = context.shutdown.load(.Acquire);
+            const is_shutdown = self.shutdown.load(.Acquire);
             if (is_shutdown) {
                 return .shutdown;
-            } else if (context.packets_free.pop()) |packet| {
+            } else if (self.packets_free.pop()) |packet| {
                 out_packet.* = packet;
                 return .ok;
             } else {
@@ -337,18 +463,19 @@ pub fn ContextType(
         }
 
         fn on_release_packet(implementation: *ContextImplementation, packet: *Packet) void {
-            const context = get_context(implementation);
-            return context.packets_free.push(packet);
+            const self = get_context(implementation);
+            return self.packets_free.push(packet);
         }
 
         fn on_submit(implementation: *ContextImplementation, packet: *Packet) void {
-            const context = get_context(implementation);
-            context.thread.submit(packet);
+            const self = get_context(implementation);
+            self.submitted.push(packet);
+            self.signal.notify();
         }
 
         fn on_deinit(implementation: *ContextImplementation) void {
-            const context = get_context(implementation);
-            context.deinit();
+            const self = get_context(implementation);
+            self.deinit();
         }
     };
 }

@@ -614,8 +614,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             };
 
             client.raw_request(
-                undefined,
                 request_callback,
+                undefined,
                 message,
             );
         }

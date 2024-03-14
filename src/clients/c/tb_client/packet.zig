@@ -9,6 +9,14 @@ pub const Packet = extern struct {
     status: Status,
     data_size: u32,
     data: ?*anyopaque,
+    batch_link: ?*Packet,
+    batch_data: ?*Packet,
+    reserved: [2]?*anyopaque,
+
+    comptime {
+        assert(@sizeOf(Packet) == 64);
+        assert(@alignOf(Packet) == 8);
+    }
 
     pub const Status = enum(u8) {
         ok,

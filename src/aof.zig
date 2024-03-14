@@ -370,10 +370,10 @@ pub const AOFReplayClient = struct {
                 .release = header.release,
             };
 
-            self.client.raw_request(@intFromPtr(self), AOFReplayClient.replay_callback, message);
+            self.client.raw_request(AOFReplayClient.replay_callback, @intFromPtr(self), message);
 
             // Process messages one by one for now
-            while (self.client.request_queue.count > 0) {
+            while (self.client.request_inflight != null) {
                 self.client.tick();
                 try self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             }

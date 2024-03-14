@@ -1945,7 +1945,7 @@ const TestClients = struct {
 
             for (t.clients.const_slice()) |c| {
                 const client = &t.cluster.clients[c];
-                if (client.request_queue.empty() and
+                if (client.request_inflight == null and
                     t.context.client_requests[c] > client.request_number)
                 {
                     assert(client.messages_available == constants.client_request_queue_max);

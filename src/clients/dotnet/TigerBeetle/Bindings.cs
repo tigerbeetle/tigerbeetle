@@ -933,7 +933,34 @@ internal enum TBOperation : byte
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 internal unsafe struct TBPacket
 {
-    public const int SIZE = 32;
+    public const int SIZE = 64;
+
+    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 16;
+
+        private fixed byte raw[SIZE];
+
+        public byte[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+            }
+        }
+
+        public void SetData(byte[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != SIZE) throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<byte>(ptr, SIZE));
+            }
+        }
+    }
 
     public TBPacket* next;
 
@@ -946,6 +973,12 @@ internal unsafe struct TBPacket
     public uint dataSize;
 
     public IntPtr data;
+
+    public TBPacket* batchLink;
+
+    public TBPacket* batchData;
+
+    private ReservedData reserved;
 
 }
 
