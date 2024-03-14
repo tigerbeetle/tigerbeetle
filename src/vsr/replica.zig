@@ -4139,12 +4139,20 @@ pub fn ReplicaType(
                 // The replica is replaying this upgrade request after restarting into the new
                 // version.
                 assert(self.upgrade_release == null);
+
+                log.debug("{}: commit_upgrade: release={} (ignoring, already upgraded)", .{
+                    self.replica,
+                    request.release,
+                });
             } else {
                 if (self.upgrade_release) |upgrade_release| {
                     assert(upgrade_release == request.release);
-                } else {
-                    self.upgrade_release = request.release;
 
+                    log.debug("{}: commit_upgrade: release={} (ignoring, already upgrading)", .{
+                        self.replica,
+                        request.release,
+                    });
+                } else {
                     if (self.pipeline == .queue) {
                         self.pipeline.queue.verify();
                         if (self.status == .normal) {
@@ -4152,6 +4160,13 @@ pub fn ReplicaType(
                             assert(self.pipeline.queue.request_queue.empty());
                         }
                     }
+
+                    log.debug("{}: commit_upgrade: release={}", .{
+                        self.replica,
+                        request.release,
+                    });
+
+                    self.upgrade_release = request.release;
                 }
             }
 
