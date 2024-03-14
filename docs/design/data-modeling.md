@@ -71,7 +71,7 @@ present fractional amounts to their users in a way that they are familiar with s
 When the multiplier is a power of 10 (e.g. `10 ^ n`), then the exponent `n` is referred to as an
 _asset scale_. For example, representing USD in cents uses an asset scale of `2`.
 
-## Examples
+### Examples
 
 - In USD, `$1` = `100` cents. So for example,
   - The fractional amount `$0.45` is represented as the integer `45`.
