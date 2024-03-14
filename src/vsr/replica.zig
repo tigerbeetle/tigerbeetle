@@ -2936,7 +2936,7 @@ pub fn ReplicaType(
 
             if (self.state_machine.pulse()) {
                 if (!self.pipeline.queue.contains_operation(.pulse)) {
-                    self.pulse_inject();
+                    self.send_request_pulse_to_self();
                 }
             }
             self.pulse_timeout.reset();
@@ -4466,7 +4466,6 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
 
             assert(message.header.command == .request);
-            assert(message.header.client > 0);
             assert(message.header.view <= self.view); // See ignore_request_message_backup().
             assert(message.header.session == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
@@ -4474,6 +4473,7 @@ pub fn ReplicaType(
             if (self.client_sessions.get(message.header.client)) |entry| {
                 assert(entry.header.command == .reply);
                 assert(entry.header.client == message.header.client);
+                assert(entry.header.client != 0);
 
                 if (message.header.operation == .register) {
                     // Fall through below to check if we should resend the .register session reply.
@@ -4529,16 +4529,25 @@ pub fn ReplicaType(
                 // reloaded into the pipeline to be driven to completion by the new primary, which
                 // now receives a request from the client that appears to have no session.
                 // However, the session is about to be registered, so we must wait for it to commit.
-                log.debug("{}: on_request: waiting for session to commit", .{self.replica});
+                log.debug(
+                    "{}: on_request: waiting for session to commit (client={})",
+                    .{ self.replica, message.header.client },
+                );
                 return true;
             } else {
-                // We must have all commits to know whether a session has been evicted. For example,
-                // there is the risk of sending an eviction message (even as the primary) if we are
-                // partitioned and don't yet know about a session. We solve this by having clients
-                // include the view number and rejecting messages from clients with newer views.
-                log.err("{}: on_request: no session", .{self.replica});
-                self.send_eviction_message_to_client(message.header.client, .no_session);
-                return true;
+                if (message.header.client == 0) {
+                    assert(message.header.operation == .pulse);
+                    assert(message.header.request == 0);
+                    return false;
+                } else {
+                    // We must have all commits to know whether a session has been evicted. For example,
+                    // there is the risk of sending an eviction message (even as the primary) if we are
+                    // partitioned and don't yet know about a session. We solve this by having clients
+                    // include the view number and rejecting messages from clients with newer views.
+                    log.err("{}: on_request: no session", .{self.replica});
+                    self.send_eviction_message_to_client(message.header.client, .no_session);
+                    return true;
+                }
             }
         }
 
@@ -4671,12 +4680,12 @@ pub fn ReplicaType(
             assert(self.primary());
 
             assert(message.header.command == .request);
-            assert(message.header.client > 0);
             assert(message.header.view <= self.view); // See ignore_request_message_backup().
 
             if (self.pipeline.queue.message_by_client(message.header.client)) |pipeline_message| {
                 assert(pipeline_message.header.command == .request or
                     pipeline_message.header.command == .prepare);
+                assert(message.header.client != 0);
 
                 switch (pipeline_message.header.into_any()) {
                     .request => |pipeline_message_header| {
@@ -5277,16 +5286,18 @@ pub fn ReplicaType(
                     );
 
                     if (!constants.aof_recovery) {
-                        // Check if the StateMachine needs to execute something before
-                        // the request.
-                        // Note that `prepare` must be called before so the StateMachine can
-                        // correctly assure that time-dependant tasks (e.g. expiring transfers)
-                        // will never intersect with a request batch.
-                        if (self.state_machine.pulse()) {
-                            if (!self.pipeline.queue.contains_operation(.pulse)) {
-                                self.pulse_inject();
-                                self.pipeline.queue.delay_request(request);
-                                return;
+                        if (request.message.header.operation != .pulse) {
+                            // Check if the StateMachine needs to execute something before
+                            // the request.
+                            // Note that `prepare` must be called before so the StateMachine can
+                            // correctly assure that time-dependant tasks (e.g. expiring transfers)
+                            // will never intersect with a request batch.
+                            if (self.state_machine.pulse()) {
+                                if (!self.pipeline.queue.contains_operation(.pulse)) {
+                                    self.send_request_pulse_to_self();
+                                    self.pipeline.queue.delay_request(request);
+                                    return;
+                                }
                             }
                         }
                     }
@@ -5296,6 +5307,14 @@ pub fn ReplicaType(
 
             // Reuse the Request message as a Prepare message by replacing the header.
             const message = request.message.base().build(.prepare);
+
+            const checkpoint_id = checkpoint_id: {
+                if (self.op + 1 <= self.op_checkpoint_next()) {
+                    break :checkpoint_id self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
+                } else {
+                    break :checkpoint_id self.superblock.working.checkpoint_id();
+                }
+            };
 
             // Copy the header to the stack before overwriting it to avoid UB.
             const request_header: Header.Request = request.message.header.*;
@@ -5310,7 +5329,7 @@ pub fn ReplicaType(
                 .parent = latest_entry.checksum,
                 .client = request_header.client,
                 .request_checksum = request_header.checksum,
-                .checkpoint_id = self.checkpoint_id_now(),
+                .checkpoint_id = checkpoint_id,
                 .op = self.op + 1,
                 .commit = self.commit_max,
                 .timestamp = timestamp: {
@@ -5364,14 +5383,6 @@ pub fn ReplicaType(
             assert(self.op == message.header.op);
         }
 
-        fn checkpoint_id_now(self: *Self) u128 {
-            if (self.op + 1 <= self.op_checkpoint_next()) {
-                return self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
-            } else {
-                return self.superblock.working.checkpoint_id();
-            }
-        }
-
         fn primary_prepare_reconfiguration(
             self: *const Self,
             request: *Message.Request,
@@ -5391,46 +5402,6 @@ pub fn ReplicaType(
                 .standby_count = self.standby_count,
             });
             assert(reconfiguration_request.result != .reserved);
-        }
-
-        fn pulse_inject(self: *Self) void {
-            assert(self.status == .normal);
-            assert(self.primary());
-            assert(!self.pipeline.queue.full());
-            assert(!self.pipeline.queue.contains_operation(.pulse));
-
-            const message = self.message_bus.get_message(.prepare);
-            defer self.message_bus.unref(message);
-
-            const prepare_timestamp = self.state_machine.prepare_timestamp;
-            const latest_entry = self.journal.header_with_op(self.op).?;
-            message.header.* = Header.Prepare{
-                .cluster = self.cluster,
-                .size = @sizeOf(Header),
-                .view = self.view,
-                .release = self.release,
-                .command = .prepare,
-                .replica = self.replica,
-                .parent = latest_entry.checksum,
-                .request_checksum = 0,
-                .checkpoint_id = self.checkpoint_id_now(),
-                .op = self.op + 1,
-                .commit = self.commit_max,
-                .timestamp = prepare_timestamp,
-                .operation = vsr.Operation.pulse,
-                .client = 0,
-                .request = 0,
-            };
-
-            assert(message.body().len == 0);
-            const sector_ceil = vsr.sector_ceil(message.header.size);
-            assert(message.header.size < sector_ceil);
-            @memset(message.buffer[message.header.size..sector_ceil], 0);
-
-            message.header.set_checksum_body(message.body());
-            message.header.set_checksum();
-
-            self.push_prepare(message);
         }
 
         /// Returns the next prepare in the pipeline waiting for a quorum.
@@ -8811,6 +8782,46 @@ pub fn ReplicaType(
             // Note that our checkpoint may not be canonical — that is the syncing replica's
             // responsibility to check.
             self.send_message_to_replica(parameters.replica, reply);
+        }
+
+        fn send_request_pulse_to_self(self: *Self) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(!self.pipeline.queue.full());
+            assert(!self.pipeline.queue.contains_operation(.pulse));
+
+            self.send_request_to_self(.pulse, &.{});
+        }
+
+        fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            const request = self.message_bus.get_message(.request);
+            defer self.message_bus.unref(request);
+
+            request.header.* = .{
+                .cluster = self.cluster,
+                .command = .request,
+                .replica = self.replica,
+                .release = self.release,
+                .size = @intCast(@sizeOf(Header) + body.len),
+                .view = self.view,
+                .operation = operation,
+                .request = 0,
+                .parent = 0,
+                .client = 0,
+                .session = 0,
+            };
+
+            stdx.copy_disjoint(.exact, u8, request.body(), body);
+            @memset(request.buffer[request.header.size..vsr.sector_ceil(request.header.size)], 0);
+
+            request.header.set_checksum_body(request.body());
+            request.header.set_checksum();
+
+            self.send_message_to_replica(self.replica, request);
+            defer self.flush_loopback_queue();
         }
     };
 }
