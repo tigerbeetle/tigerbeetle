@@ -6,6 +6,7 @@ simulator
 /tigerbeetle
 /tigerbeetle.exe
 *_*.tigerbeetle.*
+*_*.tigerbeetle
 zig/
 zig-cache/
 zig-out/

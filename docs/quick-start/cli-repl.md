@@ -18,7 +18,7 @@ TigerBeetle Client
   Hit enter after a semicolon to run a command.
 
 Examples:
-  create_accounts id=1 code=10 ledger=700,
+  create_accounts id=1 code=10 ledger=700 flags=linked | history,
                   id=2 code=10 ledger=700;
   create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
   lookup_accounts id=1;
@@ -82,3 +82,6 @@ fields on the accounts.
 
 Now that you've created some accounts and transfers, you may want to dig into the [data
 model](../design/data-modeling.md) to learn more about how to build with TigerBeetle.
+
+You can also take a look at the [Operations](../reference/operations/index.md) to see what else you
+can do with the REPL.
