@@ -797,7 +797,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .release = replica.release,
-                    .release_max = replica.releases_bundled.get(0),
+                    .release_max = replica.releases_bundled.get(
+                        replica.releases_bundled.count() - 1,
+                    ),
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else
