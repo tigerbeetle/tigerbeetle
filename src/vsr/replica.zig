@@ -4139,12 +4139,20 @@ pub fn ReplicaType(
                 // The replica is replaying this upgrade request after restarting into the new
                 // version.
                 assert(self.upgrade_release == null);
+
+                log.debug("{}: commit_upgrade: release={} (ignoring, already upgraded)", .{
+                    self.replica,
+                    request.release,
+                });
             } else {
                 if (self.upgrade_release) |upgrade_release| {
                     assert(upgrade_release == request.release);
-                } else {
-                    self.upgrade_release = request.release;
 
+                    log.debug("{}: commit_upgrade: release={} (ignoring, already upgrading)", .{
+                        self.replica,
+                        request.release,
+                    });
+                } else {
                     if (self.pipeline == .queue) {
                         self.pipeline.queue.verify();
                         if (self.status == .normal) {
@@ -4152,6 +4160,13 @@ pub fn ReplicaType(
                             assert(self.pipeline.queue.request_queue.empty());
                         }
                     }
+
+                    log.debug("{}: commit_upgrade: release={}", .{
+                        self.replica,
+                        request.release,
+                    });
+
+                    self.upgrade_release = request.release;
                 }
             }
 
@@ -8456,6 +8471,7 @@ pub fn ReplicaType(
                 &stage.checkpoint_state,
             ));
 
+            const commit_min_previous = self.commit_min;
             self.commit_min = self.superblock.working.vsr_state.checkpoint.header.op;
 
             if (self.release < self.superblock.working.vsr_state.checkpoint.release) {
@@ -8464,7 +8480,26 @@ pub fn ReplicaType(
                 return;
             }
 
-            assert(self.upgrade_release == null);
+            if (self.upgrade_release) |_| {
+                // If `upgrade_release` is non-null, then:
+                // - The replica just synced a single checkpoint. (We do not assert this via
+                //   sync_op_min/sync_op_max, since we may have synced a single checkpoint multiple
+                //   times.)
+                // - An `operation=upgrade` was committed during the last bar of the checkpoint we
+                //   just synced.
+                // - But at least one op (+1) of the last bar was *not* an `operation=upgrade`.
+                //   (If all of the last bar was `operation=upgrade`, then the new superblock's
+                //   release would have increased.
+                // - We were very close to reaching the checkpoint via WAL replay – close enough to
+                //   have executed at least one (but not all) of the upgrades in that last bar.
+                // As we replay the bar immediately after this checkpoint, we will set
+                // `upgrade_release` "again", so we reset it now to keep the assertions simple.
+                assert(commit_min_previous > self.op_checkpoint() + 1);
+                assert(self.superblock.working.vsr_state.checkpoint.header.operation != .upgrade);
+
+                self.upgrade_release = null;
+            }
+
             assert(self.commit_min == self.op_checkpoint());
 
             // The head op must be in the Journal and there should not be a break between the
