@@ -456,6 +456,7 @@ const Environment = struct {
             .sync_op_min = 0,
             .sync_op_max = 0,
             .storage_size = data_file_size_min,
+            .release = 1,
         });
     }
 

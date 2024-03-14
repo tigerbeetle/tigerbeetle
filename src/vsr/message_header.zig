@@ -488,13 +488,14 @@ pub const Header = extern struct {
             assert(self.command == .request);
             if (self.release == 0) return "release == 0";
             if (self.parent_padding != 0) return "parent_padding != 0";
-            if (self.client == 0) return "client == 0";
             if (self.timestamp != 0 and !constants.aof_recovery) return "timestamp != 0";
             switch (self.operation) {
                 .reserved => return "operation == .reserved",
                 .root => return "operation == .root",
                 .register => {
                     // The first request a client makes must be to register with the cluster:
+                    if (self.replica != 0) return "register: replica != 0";
+                    if (self.client == 0) return "register: client == 0";
                     if (self.parent != 0) return "register: parent != 0";
                     if (self.session != 0) return "register: session != 0";
                     if (self.request != 0) return "register: request != 0";
@@ -502,7 +503,18 @@ pub const Header = extern struct {
                     if (self.checksum_body != checksum_body_empty) {
                         return "register: checksum_body != expected";
                     }
-                    if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
+                    if (self.size != @sizeOf(Header)) return "register: size != @sizeOf(Header)";
+                },
+                .upgrade => {
+                    // These requests don't originate from a real client or session.
+                    if (self.client != 0) return "upgrade: client != 0";
+                    if (self.parent != 0) return "upgrade: parent != 0";
+                    if (self.session != 0) return "upgrade: session != 0";
+                    if (self.request != 0) return "upgrade: request != 0";
+
+                    if (self.size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)) {
+                        return "upgrade: size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)";
+                    }
                 },
                 else => {
                     if (self.operation == .reconfigure) {
@@ -512,6 +524,8 @@ pub const Header = extern struct {
                     } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                         return "operation is reserved";
                     }
+                    if (self.replica != 0) return "replica != 0";
+                    if (self.client == 0) return "client == 0";
                     // Thereafter, the client must provide the session number:
                     // These requests should set `parent` to the `checksum` of the previous reply.
                     if (self.session == 0) return "session == 0";
@@ -621,11 +635,17 @@ pub const Header = extern struct {
                 },
                 else => {
                     if (self.release == 0) return "release == 0";
-                    if (self.client == 0) return "client == 0";
+                    if (self.operation == .upgrade) {
+                        if (self.client != 0) return "client != 0";
+                    } else {
+                        if (self.client == 0) return "client == 0";
+                    }
                     if (self.op == 0) return "op == 0";
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
-                    if (self.operation == .register) {
+                    if (self.operation == .register or
+                        self.operation == .upgrade)
+                    {
                         if (self.request != 0) return "request != 0";
                     } else {
                         if (self.request == 0) return "request == 0";
@@ -740,11 +760,17 @@ pub const Header = extern struct {
                     if (self.timestamp != 0) return "root: timestamp != 0";
                 },
                 else => {
-                    if (self.client == 0) return "client == 0";
+                    if (self.operation == .upgrade) {
+                        if (self.client != 0) return "client != 0";
+                    } else {
+                        if (self.client == 0) return "client == 0";
+                    }
                     if (self.op == 0) return "op == 0";
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
-                    if (self.operation == .register) {
+                    if (self.operation == .register or
+                        self.operation == .upgrade)
+                    {
                         if (self.request != 0) return "request != 0";
                     } else {
                         if (self.request == 0) return "request == 0";

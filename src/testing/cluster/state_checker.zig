@@ -12,6 +12,8 @@ const Message = MessagePool.Message;
 const ReplicaSet = std.StaticBitSet(constants.members_max);
 const Commits = std.ArrayList(struct {
     header: vsr.Header.Prepare,
+    // null for operation=root and operation=upgrade
+    release: ?u16,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
 });
 
@@ -55,6 +57,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             for (options.replicas, 0..) |_, i| commit_replicas.set(i);
             try commits.append(.{
                 .header = root_prepare,
+                .release = null,
                 .replicas = commit_replicas,
             });
 
@@ -140,7 +143,16 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             // If some other replica has already reached this state, then it will be in the commit history:
             if (replica.commit_min < state_checker.commits.items.len) {
-                state_checker.commits.items[replica.commit_min].replicas.set(replica_index);
+                const commit = &state_checker.commits.items[commit_b];
+                if (replica.op_checkpoint() < replica.commit_min) {
+                    if (commit.release) |release| assert(release == replica.release);
+                } else {
+                    // When op_checkpoint==commit_min, we recovered from checkpoint, so it is ok if
+                    // the release doesn't match. (commit_min is not actually being executed.)
+                    assert(replica.op_checkpoint() == replica.commit_min);
+                }
+
+                commit.replicas.set(replica_index);
 
                 assert(replica.commit_min < state_checker.commits.items.len);
                 // A replica may transition more than once to the same state, for example, when
@@ -157,31 +169,48 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             assert(header_b.?.command == .prepare);
             assert(header_b.?.operation != .reserved);
 
-            // The replica has transitioned to state `b` that is not yet in the commit history.
-            // Check if this is a valid new state based on the originating client's inflight request.
-            const client = for (state_checker.clients) |*client| {
-                if (client.id == header_b.?.client) break client;
-            } else unreachable;
+            if (header_b.?.client == 0) {
+                assert(header_b.?.operation == .upgrade);
+            } else {
+                // The replica has transitioned to state `b` that is not yet in the commit history.
+                // Check if this is a valid new state based on the originating client's inflight request.
+                const client = for (state_checker.clients) |*client| {
+                    if (client.id == header_b.?.client) break client;
+                } else unreachable;
 
-            if (client.request_queue.empty()) {
-                return error.ReplicaTransitionedToInvalidState;
+                if (client.request_queue.empty()) {
+                    return error.ReplicaTransitionedToInvalidState;
+                }
+
+                const request = client.request_queue.head_ptr_const().?;
+                assert(request.message.header.client == header_b.?.client);
+                assert(request.message.header.checksum == header_b.?.request_checksum);
+                assert(request.message.header.request == header_b.?.request);
+                assert(request.message.header.command == .request);
+                assert(request.message.header.operation == header_b.?.operation);
+                assert(request.message.header.size == header_b.?.size);
+                // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
+                // prepare body's accounts/transfers.
             }
-
-            const request = client.request_queue.head_ptr_const().?;
-            assert(request.message.header.client == header_b.?.client);
-            assert(request.message.header.checksum == header_b.?.request_checksum);
-            assert(request.message.header.request == header_b.?.request);
-            assert(request.message.header.command == .request);
-            assert(request.message.header.operation == header_b.?.operation);
-            assert(request.message.header.size == header_b.?.size);
-            // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
-            // prepare body's accounts/transfers.
 
             state_checker.requests_committed += 1;
             assert(state_checker.requests_committed == header_b.?.op);
 
+            const release = release: {
+                if (header_b.?.operation == .root or
+                    header_b.?.operation == .upgrade)
+                {
+                    break :release null;
+                } else {
+                    break :release replica.release;
+                }
+            };
+
             assert(state_checker.commits.items.len == header_b.?.op);
-            state_checker.commits.append(.{ .header = header_b.?.* }) catch unreachable;
+            state_checker.commits.append(.{
+                .header = header_b.?.*,
+                .release = release,
+            }) catch unreachable;
             state_checker.commits.items[header_b.?.op].replicas.set(replica_index);
         }
 

@@ -220,6 +220,8 @@ pub const Operation = enum(u8) {
     register = 2,
     /// The value 3 is reserved for reconfiguration request.
     reconfigure = 3,
+    /// The value 4 is is reserved for release-upgrade requests.
+    upgrade = 4,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
@@ -542,6 +544,16 @@ test "ReconfigurationRequest" {
         .configuration_applied,
     );
 }
+
+pub const UpgradeRequest = extern struct {
+    release: u16,
+    reserved: [14]u8 = [_]u8{0} ** 14,
+
+    comptime {
+        assert(@sizeOf(UpgradeRequest) == 16);
+        assert(stdx.no_padding(UpgradeRequest));
+    }
+};
 
 pub const Timeout = struct {
     name: []const u8,
@@ -915,6 +927,7 @@ pub fn quorums(replica_count: u8) struct {
     view_change: u8,
     nack_prepare: u8,
     majority: u8,
+    upgrade: u8,
 } {
     assert(replica_count > 0);
 
@@ -950,11 +963,22 @@ pub fn quorums(replica_count: u8) struct {
         stdx.div_ceil(replica_count, 2) + @intFromBool(@mod(replica_count, 2) == 0);
     assert(quorum_majority > @divFloor(replica_count, 2));
 
+    // A majority quorum (i.e. `max(quorum_commit, quorum_view_change)`) is required
+    // to ensure that the upgraded cluster can both commit and view-change.
+    //
+    // However, we farther require that all-but-one replicas can upgrade. In most cases, not
+    // upgrading all replicas together would be a mistake (leading to replicas lagging and needing
+    // to state sync). The -1 allows for a single broken/recovering replica before the upgrade.
+    const quorum_upgrade = @max(replica_count - 1, quorum_majority);
+    assert(quorum_upgrade >= quorum_replication);
+    assert(quorum_upgrade >= quorum_view_change);
+
     return .{
         .replication = quorum_replication,
         .view_change = quorum_view_change,
         .nack_prepare = quorum_nack_prepare,
         .majority = quorum_majority,
+        .upgrade = quorum_upgrade,
     };
 }
 

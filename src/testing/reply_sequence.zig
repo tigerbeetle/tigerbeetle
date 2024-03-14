@@ -41,10 +41,6 @@ pub const ReplySequence = struct {
 
     message_pool: MessagePool,
 
-    /// The next op to be verified.
-    /// Starts at 1, because op=0 is the root.
-    stalled_op: u64 = 1,
-
     /// The list of messages waiting to be verified (the reply for a lower op has not yet arrived).
     /// Includes `register` messages.
     stalled_queue: PendingReplyQueue,
@@ -88,11 +84,12 @@ pub const ReplySequence = struct {
         reply_message: *Message.Reply,
     ) void {
         assert(request_message.header.invalid() == null);
+        assert(request_message.header.client != 0);
         assert(request_message.header.command == .request);
 
         assert(reply_message.header.invalid() == null);
+        assert(reply_message.header.client != 0);
         assert(reply_message.header.request == request_message.header.request);
-        assert(reply_message.header.op >= sequence.stalled_op);
         assert(reply_message.header.command == .reply);
         assert(reply_message.header.operation == request_message.header.operation);
 
@@ -103,23 +100,21 @@ pub const ReplySequence = struct {
         }) catch unreachable;
     }
 
-    pub fn peek(sequence: *ReplySequence) ?PendingReply {
+    // TODO(Zig): This type signature could be *const once std.PriorityQueue.peek() is updated.
+    pub fn peek(sequence: *ReplySequence, op: u64) ?PendingReply {
         assert(sequence.stalled_queue.len <= stalled_queue_capacity);
 
         const commit = sequence.stalled_queue.peek() orelse return null;
-        if (commit.reply.header.op == sequence.stalled_op) {
+        if (commit.reply.header.op == op) {
             return commit;
         } else {
-            assert(commit.reply.header.op > sequence.stalled_op);
+            assert(commit.reply.header.op > op);
             return null;
         }
     }
 
     pub fn next(sequence: *ReplySequence) void {
         const commit = sequence.stalled_queue.remove();
-        assert(commit.reply.header.op == sequence.stalled_op);
-
-        sequence.stalled_op += 1;
         sequence.message_pool.unref(commit.reply);
         sequence.message_pool.unref(commit.request);
     }

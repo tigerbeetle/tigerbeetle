@@ -15,6 +15,7 @@ const parse_table = @import("../testing/table.zig").parse;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
+const ReplicaHealth = @import("../testing/cluster.zig").ReplicaHealth;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -30,6 +31,12 @@ const checkpoint_1_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_2).?;
 const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
 const log_level = std.log.Level.err;
+
+const releases = .{
+    .{ .release = 1, .release_client_min = 1 },
+    .{ .release = 2, .release_client_min = 1 },
+    .{ .release = 3, .release_client_min = 1 },
+};
 
 // TODO Test client eviction once it no longer triggers a client panic.
 // TODO Detect when cluster has stabilized and stop run() early, rather than just running for a
@@ -366,7 +373,7 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" 
     try c.request(20, 20);
     t.replica(.A0).drop_all(.B1, .incoming);
     t.replica(.A0).drop_all(.B2, .incoming);
-    const mark = marks.check("on_commit_message_timeout: primary abdicating");
+    const mark = marks.check("send_commit: primary abdicating");
     try c.request(30, 30);
     try mark.expect_hit();
 }
@@ -1240,6 +1247,105 @@ test "Cluster: prepare beyond checkpoint trigger" {
     try expectEqual(t.replica(.R_).op_head(), checkpoint_1_prepare_max - 1);
 }
 
+test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
+    const trigger_for_checkpoint = vsr.Checkpoint.trigger_for_checkpoint;
+    for ([_]struct {
+        request: u64,
+        checkpoint: u64,
+    }{
+        .{
+            // The entire last bar before the operation is free for operation=upgrade's, so when we
+            // hit the checkpoint trigger we can immediately upgrade the cluster.
+            .request = checkpoint_1_trigger - constants.lsm_batch_multiple,
+            .checkpoint = checkpoint_1,
+        },
+        .{
+            // Since there is a non-upgrade request in the last bar, the replica cannot upgrade
+            // during checkpoint_1 and must pad ahead to the next checkpoint.
+            .request = checkpoint_1_trigger - constants.lsm_batch_multiple + 1,
+            .checkpoint = checkpoint_2,
+        },
+    }) |data| {
+        const t = try TestContext.init(.{ .replica_count = 3 });
+        defer t.deinit();
+
+        var c = t.clients(0, t.cluster.clients.len);
+        try c.request(data.request, data.request);
+
+        t.replica(.R_).stop();
+        try t.replica(.R_).open_upgrade(&[_]u16{ 1, 2 });
+
+        // Prevent the upgrade from committing so that we can verify that the replica is still
+        // running version 1.
+        t.replica(.R_).drop(.__, .bidirectional, .prepare_ok);
+        t.run();
+        try expectEqual(t.replica(.R_).op_checkpoint(), 0);
+        try expectEqual(t.replica(.R_).release(), 1);
+
+        t.replica(.R_).pass(.__, .bidirectional, .prepare_ok);
+        t.run();
+        try expectEqual(t.replica(.R_).release(), 2);
+        try expectEqual(t.replica(.R_).op_checkpoint(), data.checkpoint);
+        try expectEqual(t.replica(.R_).commit(), trigger_for_checkpoint(data.checkpoint).?);
+        try expectEqual(t.replica(.R_).op_head(), trigger_for_checkpoint(data.checkpoint).?);
+
+        // Verify that the upgraded cluster is healthy; i.e. that it can commit.
+        try c.request(data.request + 1, data.request + 1);
+    }
+}
+
+test "Cluster: upgrade: R=1" {
+    // R=1 clusters upgrade even though they don't build a quorum of upgrade targets.
+    const t = try TestContext.init(.{ .replica_count = 1 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    t.replica(.R_).stop();
+    try t.replica(.R0).open_upgrade(&[_]u16{ 1, 2 });
+    t.run();
+
+    try expectEqual(t.replica(.R0).health(), .up);
+    try expectEqual(t.replica(.R0).release(), 2);
+    try expectEqual(t.replica(.R0).op_checkpoint(), checkpoint_1);
+    try expectEqual(t.replica(.R0).commit(), checkpoint_1_trigger);
+}
+
+test "Cluster: upgrade: state-sync to new release" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+    try c.request(20, 20);
+
+    t.replica(.R_).stop();
+    try t.replica(.R0).open_upgrade(&[_]u16{ 1, 2 });
+    try t.replica(.R1).open_upgrade(&[_]u16{ 1, 2 });
+    try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
+
+    // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
+    try t.replica(.R2).open();
+    try expectEqual(t.replica(.R2).health(), .up);
+    try expectEqual(t.replica(.R2).release(), 1);
+    try expectEqual(t.replica(.R2).commit(), 0);
+    t.run();
+
+    // ...But R2 doesn't have v2 available, so it shuts down.
+    try expectEqual(t.replica(.R2).health(), .down);
+    try expectEqual(t.replica(.R2).release(), 1);
+    try expectEqual(t.replica(.R2).commit(), checkpoint_2);
+
+    // Start R2 up with v2 available, and it recovers.
+    try t.replica(.R2).open_upgrade(&[_]u16{ 1, 2 });
+    try expectEqual(t.replica(.R2).health(), .up);
+    try expectEqual(t.replica(.R2).release(), 2);
+    try expectEqual(t.replica(.R2).commit(), checkpoint_2);
+
+    t.run();
+    try expectEqual(t.replica(.R2).commit(), t.replica(.R_).commit());
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1289,6 +1395,7 @@ const TestContext = struct {
             .client_count = options.client_count,
             .storage_size_limit = vsr.sector_floor(constants.storage_size_limit_max),
             .seed = random.int(u64),
+            .releases = &releases,
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
@@ -1452,7 +1559,24 @@ const TestReplicas = struct {
     pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r) catch |err| {
+            t.cluster.restart_replica(
+                r,
+                t.cluster.replicas[r].releases_bundled.const_slice(),
+            ) catch |err| {
+                assert(t.replicas.count() == 1);
+                return switch (err) {
+                    error.WALCorrupt => return error.WALCorrupt,
+                    error.WALInvalid => return error.WALInvalid,
+                    else => @panic("unexpected error"),
+                };
+            };
+        }
+    }
+
+    pub fn open_upgrade(t: *const TestReplicas, releases_bundled: []const u16) !void {
+        for (t.replicas.const_slice()) |r| {
+            log.info("{}: restart replica", .{r});
+            t.cluster.restart_replica(r, releases_bundled) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -1466,6 +1590,19 @@ const TestReplicas = struct {
     pub fn index(t: *const TestReplicas) u8 {
         assert(t.replicas.count() == 1);
         return t.replicas.get(0);
+    }
+
+    pub fn health(t: *const TestReplicas) ReplicaHealth {
+        var value_all: ?ReplicaHealth = null;
+        for (t.replicas.const_slice()) |r| {
+            const value = t.cluster.replica_health[r];
+            if (value_all) |all| {
+                assert(all == value);
+            } else {
+                value_all = value;
+            }
+        }
+        return value_all.?;
     }
 
     fn get(
@@ -1492,6 +1629,10 @@ const TestReplicas = struct {
             }
         }
         return value_all.?;
+    }
+
+    pub fn release(t: *const TestReplicas) u16 {
+        return t.get(.release);
     }
 
     pub fn status(t: *const TestReplicas) vsr.Status {

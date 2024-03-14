@@ -184,6 +184,7 @@ const Command = struct {
             .release = 1,
             .release_client_min = 1,
             .releases_bundled = &[_]u16{1},
+            .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
@@ -324,6 +325,21 @@ const Command = struct {
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
 };
+
+fn replica_release_execute(replica: *Replica, release: u16) noreturn {
+    assert(release != replica.release);
+
+    if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release) == null) {
+        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
+            replica.replica,
+            release,
+        });
+        @panic("release_execute: binary missing required version");
+    }
+
+    // TODO(Multiversioning) Exec into the new release.
+    unreachable;
+}
 
 fn print_value(
     writer: anytype,
