@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [2708]u8 = [_]u8{0} ** 2708,
+    reserved: [1940]u8 = [_]u8{0} ** 1940,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -140,10 +140,10 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [15]u8 = [_]u8{0} ** 15,
+        reserved: [783]u8 = [_]u8{0} ** 783,
 
         comptime {
-            assert(@sizeOf(VSRState) == 1280);
+            assert(@sizeOf(VSRState) == 2048);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
