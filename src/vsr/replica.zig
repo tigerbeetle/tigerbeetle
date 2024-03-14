@@ -3035,6 +3035,11 @@ pub fn ReplicaType(
 
             defer self.pulse_timeout.reset();
             if (self.pipeline.queue.prepare_queue.full()) return;
+            // Solo replicas only change views immediately when they start up.
+            if (self.solo() and self.view_durable_updating()) return;
+            // Requests are ignored during upgrades.
+            if (self.upgrade_release != null or
+                self.pipeline.queue.contains_operation(.upgrade)) return;
 
             // To decide whether or not to `pulse` a time-dependant
             // operation, the State Machine needs an updated `prepare_timestamp`.
@@ -9285,6 +9290,7 @@ pub fn ReplicaType(
             assert(!self.pipeline.queue.contains_operation(.pulse));
 
             self.send_request_to_self(.pulse, &.{});
+            assert(self.pipeline.queue.contains_operation(.pulse));
         }
 
         fn send_request_upgrade_to_self(self: *Self) void {
@@ -9295,9 +9301,7 @@ pub fn ReplicaType(
 
             const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
-
-            // If our clock is not synchronized, then the request-to-self might have been dropped.
-            maybe(self.pipeline.queue.contains_operation(.upgrade));
+            assert(self.pipeline.queue.contains_operation(.upgrade));
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
