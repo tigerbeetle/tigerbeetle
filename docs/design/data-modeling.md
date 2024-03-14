@@ -61,7 +61,7 @@ currency to 1**. Consider all amounts in TigerBeetle as a multiple of that unit.
 
 Applications may rescale the integer amounts as necessary when rendering or interfacing with other
 systems. But when working with fractional amounts, calculations should be performed on the integers
-to avoid loss of precision due to e.g. floating-point approximations.
+to avoid loss of precision due to floating-point approximations.
 
 TigerBeetle stores information precisely and efficiently, while applications can still
 present fractional amounts to their users in a way that they are familiar with seeing them.
