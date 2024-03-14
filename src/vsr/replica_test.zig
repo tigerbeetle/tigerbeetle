@@ -1377,15 +1377,14 @@ const TestContext = struct {
 
     fn on_client_reply(
         cluster: *Cluster,
-        reply: ClusterReply,
+        client: usize,
+        request: *Message.Request,
+        reply: *Message.Reply,
     ) void {
-        switch (reply) {
-            .client => |client| {
-                const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));
-                t.client_replies[client.index] += 1;
-            },
-            .no_reply => {},
-        }
+        _ = request;
+        _ = reply;
+        const t: *TestContext = @ptrCast(@alignCast(cluster.context.?));
+        t.client_replies[client] += 1;
     }
 
     const ProcessList = stdx.BoundedArray(Process, constants.members_max + constants.clients_max);

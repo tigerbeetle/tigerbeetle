@@ -79,7 +79,7 @@ pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
     state_machine_opened,
     /// Called immediately after a prepare is committed by the state machine.
-    committed: *const Message.Prepare,
+    committed,
     /// Called immediately after a compaction.
     compaction_completed,
     /// Called immediately before a checkpoint.
@@ -2935,7 +2935,7 @@ pub fn ReplicaType(
             );
 
             if (self.state_machine.pulse()) {
-                if (!self.pipeline.queue.pulse_in_progress()) {
+                if (!self.pipeline.queue.contains_operation(.pulse)) {
                     self.pulse_inject();
                 }
             }
@@ -3860,11 +3860,12 @@ pub fn ReplicaType(
             assert(self.commit_min == prepare.header.op);
             self.advance_commit_max(self.commit_min, @src());
 
-            if (self.event_callback) |hook| hook(self, .{ .committed = prepare });
+            if (self.event_callback) |hook| hook(self, .committed);
 
-            if (prepare.header.client == 0) {
+            if (prepare.header.operation == .pulse) {
                 // This prepare was sent by the primary, there's no reply to the client.
                 assert(reply_body_size == 0);
+                assert(prepare.header.client == 0);
                 assert(prepare.header.request == 0);
                 return;
             }
@@ -5282,7 +5283,7 @@ pub fn ReplicaType(
                         // correctly assure that time-dependant tasks (e.g. expiring transfers)
                         // will never intersect with a request batch.
                         if (self.state_machine.pulse()) {
-                            if (!self.pipeline.queue.pulse_in_progress()) {
+                            if (!self.pipeline.queue.contains_operation(.pulse)) {
                                 self.pulse_inject();
                                 self.pipeline.queue.delay_request(request);
                                 return;
@@ -5396,7 +5397,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary());
             assert(!self.pipeline.queue.full());
-            assert(!self.pipeline.queue.pulse_in_progress());
+            assert(!self.pipeline.queue.contains_operation(.pulse));
 
             const message = self.message_bus.get_message(.prepare);
             defer self.message_bus.unref(message);
@@ -9386,7 +9387,7 @@ const PipelineQueue = struct {
         assert(pipeline.request_queue.empty() or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1 or
-            pipeline.pulse_in_progress());
+            pipeline.contains_operation(.pulse));
 
         if (pipeline.prepare_queue.head_ptr_const()) |head| {
             var op = head.message.header.op;
@@ -9415,19 +9416,9 @@ const PipelineQueue = struct {
         } else {
             assert(pipeline.request_queue.empty() or
                 pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
-                pipeline.pulse_in_progress());
+                pipeline.contains_operation(.pulse));
             return false;
         }
-    }
-
-    fn pulse_in_progress(pipeline: *const PipelineQueue) bool {
-        return inline for (0..constants.pipeline_prepare_queue_max) |index| {
-            if (pipeline.prepare_queue.get_const_ptr(index)) |prepare| {
-                if (prepare.message.header.client == 0) break true;
-            } else {
-                break false;
-            }
-        } else false;
     }
 
     /// Searches the pipeline for a prepare for a given op and checksum.
@@ -9497,14 +9488,27 @@ const PipelineQueue = struct {
         return message;
     }
 
+    fn contains_operation(pipeline: PipelineQueue, operation: vsr.Operation) bool {
+        var prepare_iterator = pipeline.prepare_queue.iterator();
+        while (prepare_iterator.next_ptr()) |prepare| {
+            if (prepare.message.header.operation == operation) return true;
+        }
+
+        var request_iterator = pipeline.request_queue.iterator();
+        while (request_iterator.next()) |request| {
+            if (request.message.header.operation == operation) return true;
+        }
+        return false;
+    }
+
     /// Warning: This temporarily violates the prepare/request queue count invariant.
     /// After invocation, call pop_request→push_prepare to begin preparing the next request.
     fn pop_prepare(pipeline: *PipelineQueue) ?Prepare {
         if (pipeline.prepare_queue.pop()) |prepare| {
             assert(pipeline.request_queue.empty() or
                 pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
-                prepare.message.header.client == 0 or
-                pipeline.pulse_in_progress());
+                prepare.message.header.operation == .pulse or
+                pipeline.contains_operation(.pulse));
             return prepare;
         } else {
             assert(pipeline.request_queue.empty());

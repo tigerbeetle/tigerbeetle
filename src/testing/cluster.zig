@@ -97,7 +97,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         options: Options,
         on_cluster_reply: *const fn (
             cluster: *Self,
-            reply: ClusterReply,
+            client: usize,
+            request: *Message.Request,
+            reply: *Message.Reply,
         ) void,
 
         network: *Network,
@@ -128,9 +130,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         pub fn init(
             allocator: mem.Allocator,
+            /// Includes command=register messages.
             on_cluster_reply: *const fn (
                 cluster: *Self,
-                reply: ClusterReply,
+                client: usize,
+                request: *Message.Request,
+                reply: *Message.Reply,
             ) void,
             options: Options,
         ) !*Self {
@@ -515,13 +520,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 if (client == c) break i;
             } else unreachable;
 
-            cluster.on_cluster_reply(cluster, .{
-                .client = .{
-                    .index = client_index,
-                    .request = request_message,
-                    .reply = reply_message,
-                },
-            });
+            cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
@@ -535,19 +534,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_machine_opened => {
                     cluster.manifest_checker.forest_open(&replica.state_machine.forest);
                 },
-                .committed => |prepare| {
+                .committed => {
                     cluster.log_replica(.commit, replica.replica);
                     cluster.state_checker.check_state(replica.replica) catch |err| {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
-
-                    if (prepare.header.client == 0) {
-                        assert(prepare.header.request == 0);
-                        if (!replica.standby()) {
-                            var prepare_ptr: *Message.Prepare = @constCast(prepare);
-                            cluster.on_cluster_reply(cluster, .{ .no_reply = prepare_ptr });
-                        }
-                    }
                 },
                 .compaction_completed => {},
                 .checkpoint_commenced => {

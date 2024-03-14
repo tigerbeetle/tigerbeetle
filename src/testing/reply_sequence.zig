@@ -11,21 +11,23 @@ const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const Client = @import("cluster.zig").Client;
 const StateMachine = @import("cluster.zig").StateMachine;
-const ClusterReply = @import("cluster.zig").ClusterReply;
 
 const PriorityQueue = std.PriorityQueue;
 
-const PendingReplyQueue = PriorityQueue(
-    ClusterReply,
-    void,
-    struct {
-        /// `PendingReply`s are ordered by ascending reply op.
-        fn compare(context: void, a: ClusterReply, b: ClusterReply) std.math.Order {
-            _ = context;
-            return std.math.order(a.op(), b.op());
-        }
-    }.compare,
-);
+/// Both messages belong to the ReplySequence's `MessagePool`.
+const PendingReply = struct {
+    client_index: usize,
+    request: *Message.Request,
+    reply: *Message.Reply,
+
+    /// `PendingReply`s are ordered by ascending reply op.
+    fn compare(context: void, a: PendingReply, b: PendingReply) std.math.Order {
+        _ = context;
+        return std.math.order(a.reply.header.op, b.reply.header.op);
+    }
+};
+
+const PendingReplyQueue = PriorityQueue(PendingReply, void, PendingReply.compare);
 
 pub const ReplySequence = struct {
     /// Reply messages (from cluster to client) may be reordered during transit.
@@ -39,17 +41,9 @@ pub const ReplySequence = struct {
 
     message_pool: MessagePool,
 
-    /// The next op to be verified.
-    /// Starts at 1, because op=0 is the root.
-    stalled_op: u64 = 1,
-
     /// The list of messages waiting to be verified (the reply for a lower op has not yet arrived).
     /// Includes `register` messages.
     stalled_queue: PendingReplyQueue,
-
-    /// The last `no_reply` op received.
-    /// Since each replica reports commits, this field is used for deduplicating by op number.
-    no_reply_op_last: u64 = 0,
 
     pub fn init(allocator: std.mem.Allocator) !ReplySequence {
         // *2 for PendingReply.request and PendingReply.reply.
@@ -67,8 +61,9 @@ pub const ReplySequence = struct {
     }
 
     pub fn deinit(sequence: *ReplySequence, allocator: std.mem.Allocator) void {
-        while (sequence.stalled_queue.removeOrNull()) |commit| {
-            sequence.unref(commit);
+        while (sequence.stalled_queue.removeOrNull()) |pending| {
+            sequence.message_pool.unref(pending.request);
+            sequence.message_pool.unref(pending.reply);
         }
         sequence.stalled_queue.deinit();
         sequence.message_pool.deinit(allocator);
@@ -84,85 +79,44 @@ pub const ReplySequence = struct {
 
     pub fn insert(
         sequence: *ReplySequence,
-        reply: ClusterReply,
-    ) bool {
-        switch (reply) {
-            .client => |client| {
-                assert(client.request.header.invalid() == null);
-                assert(client.request.header.command == .request);
+        client_index: usize,
+        request_message: *Message.Request,
+        reply_message: *Message.Reply,
+    ) void {
+        assert(request_message.header.invalid() == null);
+        assert(request_message.header.client != 0);
+        assert(request_message.header.command == .request);
 
-                assert(client.reply.header.invalid() == null);
-                assert(client.reply.header.request == client.request.header.request);
-                assert(client.reply.header.op >= sequence.stalled_op);
-                assert(client.reply.header.command == .reply);
-                assert(client.reply.header.operation == client.request.header.operation);
-            },
-            .no_reply => |prepare| {
-                assert(prepare.header.invalid() == null);
-                assert(prepare.header.command == .prepare);
-                assert(prepare.header.client == 0);
-                assert(prepare.header.request == 0);
+        assert(reply_message.header.invalid() == null);
+        assert(reply_message.header.client != 0);
+        assert(reply_message.header.request == request_message.header.request);
+        assert(reply_message.header.command == .reply);
+        assert(reply_message.header.operation == request_message.header.operation);
 
-                // Deduplicating `header.op` before inserting into the queue.
-                if (prepare.header.op <= sequence.no_reply_op_last) return false;
-                sequence.no_reply_op_last = prepare.header.op;
-            },
-        }
-
-        sequence.stalled_queue.add(sequence.clone(reply)) catch unreachable;
-        return true;
+        sequence.stalled_queue.add(.{
+            .client_index = client_index,
+            .request = sequence.clone_message(request_message.base_const()).into(.request).?,
+            .reply = sequence.clone_message(reply_message.base_const()).into(.reply).?,
+        }) catch unreachable;
     }
 
-    fn clone(
-        sequence: *ReplySequence,
-        reply: ClusterReply,
-    ) ClusterReply {
-        return switch (reply) {
-            .client => |client| .{
-                .client = .{
-                    .index = client.index,
-                    .request = sequence.clone_message(client.request.base_const())
-                        .into(.request).?,
-                    .reply = sequence.clone_message(client.reply.base_const())
-                        .into(.reply).?,
-                },
-            },
-            .no_reply => |prepare| .{
-                .no_reply = sequence.clone_message(prepare.base_const()).into(.prepare).?,
-            },
-        };
-    }
-
-    fn unref(sequence: *ReplySequence, reply: ClusterReply) void {
-        switch (reply) {
-            .client => |client| {
-                sequence.message_pool.unref(client.reply);
-                sequence.message_pool.unref(client.request);
-            },
-            .no_reply => |prepare| {
-                sequence.message_pool.unref(prepare);
-            },
-        }
-    }
-
-    pub fn peek(sequence: *ReplySequence) ?ClusterReply {
+    // TODO(Zig): This type signature could be *const once std.PriorityQueue.peek() is updated.
+    pub fn peek(sequence: *ReplySequence, op: u64) ?PendingReply {
         assert(sequence.stalled_queue.len <= stalled_queue_capacity);
 
         const commit = sequence.stalled_queue.peek() orelse return null;
-        if (commit.op() == sequence.stalled_op) {
+        if (commit.reply.header.op == op) {
             return commit;
         } else {
-            assert(commit.op() > sequence.stalled_op);
+            assert(commit.reply.header.op > op);
             return null;
         }
     }
 
     pub fn next(sequence: *ReplySequence) void {
         const commit = sequence.stalled_queue.remove();
-        assert(commit.op() == sequence.stalled_op);
-
-        sequence.stalled_op += 1;
-        sequence.unref(commit);
+        sequence.message_pool.unref(commit.reply);
+        sequence.message_pool.unref(commit.request);
     }
 
     /// Copy the message from a Client's MessagePool to the ReplySequence's MessagePool.
