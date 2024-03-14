@@ -307,6 +307,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
             const checkpoint_op = op - constants.lsm_batch_multiple;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
+                .header = header: {
+                    var header = vsr.Header.Prepare.root(cluster);
+                    header.op = checkpoint_op;
+                    header.set_checksum();
+                    break :header header;
+                },
                 .manifest_references = std.mem.zeroes(vsr.SuperBlockManifestReferences),
                 .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
                 .client_sessions_reference = .{
@@ -315,13 +321,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     .trailer_size = 0,
                     .checksum = vsr.checksum(&.{}),
                 },
-                .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
-                .commit_min = checkpoint_op,
                 .commit_max = checkpoint_op + 1,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
+                .release = 1,
             });
 
             env.change_state(.fuzzing, .superblock_checkpoint);

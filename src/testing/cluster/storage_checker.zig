@@ -156,7 +156,7 @@ pub const StorageChecker = struct {
             break :checkpoint checkpoint;
         };
 
-        const replica_checkpoint_op = superblock.working.vsr_state.checkpoint.commit_min;
+        const replica_checkpoint_op = superblock.working.vsr_state.checkpoint.header.op;
         for (std.enums.values(CheckpointArea)) |area| {
             log.debug("{}: {s}: checkpoint={} area={s} value={?x:0>32}", .{
                 superblock.replica_index.?,

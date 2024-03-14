@@ -20,7 +20,7 @@ Here's how to do that:
    Example:
    ```
    [Service]
-   Environment=TIGERBEETLE_CACHE_GRID_SIZE=4GB
+   Environment=TIGERBEETLE_CACHE_GRID_SIZE=4GiB
    Environment=TIGERBEETLE_ADDRESSES=0.0.0.0:3001
    ```
 

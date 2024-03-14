@@ -6,7 +6,7 @@ const log = std.log.scoped(.io_benchmark);
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
 
-// 1 MB: larger than socket buffer so forces io_pending on darwin
+// 1 MiB: larger than socket buffer so forces io_pending on darwin
 // Configure this value to smaller amounts to test IO scheduling overhead
 const buffer_size = 1 * 1024 * 1024;
 
@@ -38,7 +38,7 @@ pub fn main() !void {
         const elapsed_ns = timer.monotonic() - started;
         const transferred_mb = @as(f64, @floatFromInt(self.transferred)) / 1024 / 1024;
 
-        log.info("took {}ms @ {d:.2} MB/s\n", .{
+        log.info("took {}ms @ {d:.2} MiB/s\n", .{
             elapsed_ns / std.time.ns_per_ms,
             transferred_mb / (@as(f64, @floatFromInt(elapsed_ns)) / std.time.ns_per_s),
         });

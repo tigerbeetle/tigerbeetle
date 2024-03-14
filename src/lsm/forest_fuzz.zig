@@ -30,8 +30,6 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const FreeSet = vsr.FreeSet;
 const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
 
-pub const tigerbeetle_config = @import("../config.zig").configs.fuzz_min;
-
 const FuzzOpAction = union(enum) {
     // TODO Test secondary index lookups and range queries.
     compact: struct {
@@ -279,6 +277,12 @@ const Environment = struct {
         try env.tick_until_state_change(.grid_checkpoint, .superblock_checkpoint);
 
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
+            .header = header: {
+                var header = vsr.Header.Prepare.root(cluster);
+                header.op = env.checkpoint_op.?;
+                header.set_checksum();
+                break :header header;
+            },
             .manifest_references = env.forest.manifest_log.checkpoint_references(),
             .free_set_reference = env.grid.free_set_checkpoint.checkpoint_reference(),
             .client_sessions_reference = .{
@@ -287,13 +291,12 @@ const Environment = struct {
                 .trailer_size = 0,
                 .checksum = vsr.checksum(&.{}),
             },
-            .commit_min_checksum = env.superblock.working.vsr_state.checkpoint.commit_min_checksum + 1,
-            .commit_min = env.checkpoint_op.?,
             .commit_max = env.checkpoint_op.? + 1,
             .sync_op_min = 0,
             .sync_op_max = 0,
             .storage_size = vsr.superblock.data_file_size_min +
                 (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
+            .release = 1,
         });
         try env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
 

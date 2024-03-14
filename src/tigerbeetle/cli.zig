@@ -1,3 +1,16 @@
+//! Parse and validate command-line arguments for the tigerbeetle binary.
+//!
+//! Everything that can be validated without reading the data file must be validated here.
+//! Caller must additionally assert validity of arguments as a defense in depth.
+//!
+//! Some flags are experimental: intentionally undocumented and are not a part of the official
+//! surface area. Even experimental features must adhere to the same strict standard of safety,
+//! but they come without any performance or usability guarantees.
+//!
+//! Experimental features are not gated by comptime option for safety: it is much easier to review
+//! code for correctness when it is initially added to the main branch, rather when a comptime flag
+//! is lifted.
+
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
@@ -17,7 +30,9 @@ const StateMachine = vsr.state_machine.StateMachineType(
 const CliArgs = union(enum) {
     format: struct {
         cluster: u128,
-        replica: u8,
+        replica: ?u8 = null,
+        // Experimental: standbys don't have a concrete practical use-case yet.
+        standby: ?u8 = null,
         replica_count: u8,
 
         positional: struct {
@@ -54,6 +69,7 @@ const CliArgs = union(enum) {
         command: []const u8 = "",
     },
 
+    // Experimental: the interface is subject to change.
     benchmark: struct {
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
@@ -80,13 +96,11 @@ const CliArgs = union(enum) {
         \\
         \\  tigerbeetle format --cluster=<integer> --replica=<index> --replica-count=<integer> <path>
         \\
-        \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KB|MB|GB>] <path>
+        \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KiB|MiB|GiB>] <path>
         \\
         \\  tigerbeetle version [--verbose]
         \\
         \\  tigerbeetle repl --cluster=<integer> --addresses=<addresses>
-        \\
-        \\  tigerbeetle benchmark [<args>]
         \\
         \\Commands:
         \\
@@ -99,9 +113,6 @@ const CliArgs = union(enum) {
         \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
         \\  repl       Enter the TigerBeetle client REPL.
-        \\
-        \\  benchmark  Measure performance of TigerBeetle on the current hardware.
-        \\             Benchmark options and output format are subject to change.
         \\
         \\Options:
         \\
@@ -127,18 +138,18 @@ const CliArgs = union(enum) {
         \\        will be used.
         \\        "addresses[i]" corresponds to replica "i".
         \\
-        \\  --cache-grid=<size><KB|MB|GB>
+        \\  --cache-grid=<size><KiB|MiB|GiB>
         \\        Set the grid cache size. The grid cache acts like a page cache for TigerBeetle,
         \\        and should be set as large as possible.
         \\        On a machine running only TigerBeetle, this is somewhere around
-        \\        (Total RAM) - 3GB (TigerBeetle) - 1GB (System), eg 12GB for a 16GB machine.
-        \\        Defaults to {[default_cache_grid_gb]d}GB.
+        \\        (Total RAM) - 3GiB (TigerBeetle) - 1GiB (System), eg 12GiB for a 16GiB machine.
+        \\        Defaults to {[default_cache_grid_gb]d}GiB.
         \\
-        \\  --memory-lsm-manifest=<size><KB|MB|GB>
+        \\  --memory-lsm-manifest=<size><KiB|MiB|GiB>
         \\        Sets the amount of memory allocated for LSM-tree manifests. When the
         \\        number or size of LSM-trees would become too large for their manifests to fit
         \\        into memory the server will terminate.
-        \\        Defaults to {[default_memory_lsm_manifest_mb]d}MB.
+        \\        Defaults to {[default_memory_lsm_manifest_mb]d}MiB.
         \\
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
@@ -271,17 +282,46 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 });
             }
 
-            if (format.replica >= constants.standbys_max + format.replica_count) {
-                flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
-                    format.replica,
-                    constants.standbys_max + format.replica_count - 1,
-                });
+            if (format.replica == null and format.standby == null) {
+                flags.fatal("--replica: argument is required", .{});
             }
+
+            if (format.replica != null and format.standby != null) {
+                flags.fatal("--standby: conflicts with '--replica'", .{});
+            }
+
+            if (format.replica) |replica| {
+                if (replica >= format.replica_count) {
+                    flags.fatal("--replica: value is too large ({}), at most {} is allowed", .{
+                        replica,
+                        format.replica_count - 1,
+                    });
+                }
+            }
+
+            if (format.standby) |standby| {
+                if (standby < format.replica_count) {
+                    flags.fatal("--standby: value is too small ({}), at least {} is required", .{
+                        standby,
+                        format.replica_count,
+                    });
+                }
+                if (standby >= format.replica_count + constants.standbys_max) {
+                    flags.fatal("--standby: value is too large ({}), at most {} is allowed", .{
+                        standby,
+                        format.replica_count + constants.standbys_max - 1,
+                    });
+                }
+            }
+
+            const replica = (format.replica orelse format.standby).?;
+            assert(replica < constants.members_max);
+            assert(replica < format.replica_count + constants.standbys_max);
 
             return Command{
                 .format = .{
                     .cluster = format.cluster, // just an ID, any value is allowed
-                    .replica = format.replica,
+                    .replica = replica,
                     .replica_count = format.replica_count,
                     .path = format.positional.path,
                 },

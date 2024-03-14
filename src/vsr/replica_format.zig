@@ -255,7 +255,7 @@ test "format" {
             superblock_header.vsr_state.checkpoint.storage_size,
             storage.size,
         );
-        try std.testing.expectEqual(superblock_header.vsr_state.checkpoint.commit_min, 0);
+        try std.testing.expectEqual(superblock_header.vsr_state.checkpoint.header.op, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.commit_max, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.view, 0);
         try std.testing.expectEqual(superblock_header.vsr_state.log_view, 0);

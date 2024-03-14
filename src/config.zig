@@ -142,6 +142,7 @@ const ConfigCluster = struct {
     lsm_batch_multiple: comptime_int = 32,
     lsm_snapshots_max: usize = 32,
     lsm_manifest_compact_extra_blocks: comptime_int = 1,
+    vsr_releases_max: usize = 64,
 
     // Minimal value.
     // TODO(batiati): Maybe this constant should be derived from `grid_iops_read_max`,
@@ -216,7 +217,7 @@ pub const configs = struct {
             .verify = false,
         },
         .cluster = .{
-            .clients_max = 32,
+            .clients_max = 64,
         },
     };
 

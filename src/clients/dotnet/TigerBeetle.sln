@@ -7,8 +7,6 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TigerBeetle", "TigerBeetle\
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TigerBeetle.Tests", "TigerBeetle.Tests\TigerBeetle.Tests.csproj", "{F39EACD7-EE9B-490F-BB06-800E6663C9D9}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TigerBeetle.Benchmarks", "TigerBeetle.Benchmarks\TigerBeetle.Benchmarks.csproj", "{B0089954-8024-4D5E-81BA-59A5CCB9BA68}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

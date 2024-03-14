@@ -161,7 +161,7 @@ const Command = struct {
         // `constants.block_size` and `SetAssociativeCache.value_count_max_multiple`,
         // and it may have been converted to zero if a smaller value is passed in.
         if (grid_cache_size == 0) {
-            fatal("Grid cache must be greater than {}MB. See --cache-grid", .{
+            fatal("Grid cache must be greater than {}MiB. See --cache-grid", .{
                 @divExact(grid_cache_size_min, 1024 * 1024),
             });
         }
@@ -169,7 +169,7 @@ const Command = struct {
 
         const grid_cache_size_warn = 1024 * 1024 * 1024;
         if (grid_cache_size < grid_cache_size_warn) {
-            log_main.warn("Grid cache size of {}MB is small. See --cache-grid", .{
+            log_main.warn("Grid cache size of {}MiB is small. See --cache-grid", .{
                 @divExact(grid_cache_size, 1024 * 1024),
             });
         }
@@ -183,6 +183,8 @@ const Command = struct {
             // TODO Use real release numbers.
             .release = 1,
             .release_client_min = 1,
+            .releases_bundled = &[_]u16{1},
+            .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
@@ -218,12 +220,12 @@ const Command = struct {
                 node_maybe = node.next;
             }
         }
-        log_main.info("{}: Allocated {}MB in {} regions during replica init", .{
+        log_main.info("{}: Allocated {}MiB in {} regions during replica init", .{
             replica.replica,
             @divFloor(allocation_size, 1024 * 1024),
             allocation_count,
         });
-        log_main.info("{}: Grid cache: {}MB, LSM-tree manifests: {}MB", .{
+        log_main.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,
             @divFloor(grid_cache_size, 1024 * 1024),
             @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, 1024 * 1024),
@@ -238,6 +240,11 @@ const Command = struct {
         if (constants.aof_recovery) {
             log_main.warn("{}: started in AOF recovery mode. This is potentially dangerous - " ++
                 "if it's unexpected, please recompile TigerBeetle with -Dconfig-aof-recovery=false.", .{replica.replica});
+        }
+
+        if (constants.verify) {
+            log_main.warn("{}: started with constants.verify - expect reduced performance. " ++
+                "Recompile with -Dconfig=production if unexpected.", .{replica.replica});
         }
 
         // It is possible to start tigerbeetle passing `0` as an address:
@@ -318,6 +325,21 @@ const Command = struct {
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
 };
+
+fn replica_release_execute(replica: *Replica, release: u16) noreturn {
+    assert(release != replica.release);
+
+    if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release) == null) {
+        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
+            replica.replica,
+            release,
+        });
+        @panic("release_execute: binary missing required version");
+    }
+
+    // TODO(Multiversioning) Exec into the new release.
+    unreachable;
+}
 
 fn print_value(
     writer: anytype,

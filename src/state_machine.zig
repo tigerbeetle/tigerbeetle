@@ -2120,7 +2120,7 @@ const TestContext = struct {
 
         // Pretend that the superblock is open so that the Forest can initialize.
         ctx.superblock.opened = true;
-        ctx.superblock.working.vsr_state.checkpoint.commit_min = 0;
+        ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
 
         ctx.grid = try Grid.init(allocator, .{
             .superblock = &ctx.superblock,

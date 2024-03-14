@@ -50,6 +50,41 @@ ledger might look something like this:
   perspective this is a liability.
 - Alice and Bob cannot "overdraw" their account — that is, their balance will never be negative.
 
+## Fractional Amounts and Asset Scale
+
+To maximize precision and efficiency, [`Account`](../reference/accounts.md) debits/credits
+and [`Transfer`](../reference/transfers.md) amounts are unsigned 128-bit integers.
+However, currencies are often denominated in fractional amounts.
+
+To represent a fractional amount in TigerBeetle, **map the smallest useful unit of the fractional
+currency to 1**. Consider all amounts in TigerBeetle as a multiple of that unit.
+
+Applications may rescale the integer amounts as necessary when rendering or interfacing with other
+systems. But when working with fractional amounts, calculations should be performed on the integers
+to avoid loss of precision due to floating-point approximations.
+
+TigerBeetle stores information precisely and efficiently, while applications can still
+present fractional amounts to their users in a way that they are familiar with seeing them.
+
+### Asset Scale
+
+When the multiplier is a power of 10 (e.g. `10 ^ n`), then the exponent `n` is referred to as an
+_asset scale_. For example, representing USD in cents uses an asset scale of `2`.
+
+### Examples
+
+- In USD, `$1` = `100` cents. So for example,
+  - The fractional amount `$0.45` is represented as the integer `45`.
+  - The fractional amount `$123.00` is represented as the integer `12300`.
+  - The fractional amount `$123.45` is represented as the integer `12345`.
+
+### Oversized Amounts
+
+The other direction works as well. If the smallest useful unit of a currency is `10,000,000 ¤`,
+then it can be scaled down to the integer `1`.
+
+The 128-bit representation defines the precision, but not the scale.
+
 ## `user_data`
 
 `user_data_128`, `user_data_64` and `user_data_32` are the most flexible fields in the schema (for both
@@ -195,3 +230,19 @@ You can also use different ledgers to further partition accounts, beyond asset t
 you have a multi-tenant setup where you are tracking balances for your customers' end-users, you
 might have a ledger for each of your customers. If customers have end-user accounts in multiple
 currencies, each of your customers would have multiple ledgers.
+
+## `code`
+
+[`Account`s](../reference/accounts.md#code) and [`Transfer`s](../reference/transfers.md#code) both
+have a `code` field. While they have slightly different meanings, both can be used to represent
+different types of `Account`s and `Transfer`s within your system.
+
+The `code` on an `Account` can be used to indicate the type, such as assets, liabilities, equity,
+income, or expenses, and subcategories within those classifications.
+
+The `code` on a `Transfer` can be used to indicate the reason why a given transfer is happening,
+such as a purchase, refund, currency exchange, etc.
+
+When you start building out your application on top of TigerBeetle, you may find it helpful to list
+out all of the known types of accounts and movements of funds and mapping each of these to `code`
+numbers or ranges.

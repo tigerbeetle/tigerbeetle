@@ -291,7 +291,7 @@ pub const Header = extern struct {
         checksum_body_padding: u128 = 0,
         nonce_reserved: u128 = 0,
         cluster: u128,
-        size: u32 = @sizeOf(Header),
+        size: u32,
         epoch: u32 = 0,
         // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
         // view, to avoid disrupting clock synchronization while the view is being updated.
@@ -308,16 +308,22 @@ pub const Header = extern struct {
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
+        release_count: u16,
 
-        reserved: [96]u8 = [_]u8{0} ** 96,
+        reserved: [94]u8 = [_]u8{0} ** 94,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
-            if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
-            if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.size != @sizeOf(Header) + @sizeOf(u16) * constants.vsr_releases_max) {
+                return "size != @sizeOf(Header) + @sizeOf(u16) * constants.vsr_releases_max";
+            }
             if (self.release == 0) return "release == 0";
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
             if (self.ping_timestamp_monotonic == 0) return "ping_timestamp_monotonic != expected";
+            if (self.release_count == 0) return "release_count == 0";
+            if (self.release_count > constants.vsr_releases_max) {
+                return "release_count > vsr_releases_max";
+            }
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -507,6 +513,17 @@ pub const Header = extern struct {
                     if (self.request != 0) return "pulse: request != 0";
                     if (self.size != @sizeOf(Header)) return "pulse: size != @sizeOf(Header)";
                 },
+                .upgrade => {
+                    // These requests don't originate from a real client or session.
+                    if (self.client != 0) return "upgrade: client != 0";
+                    if (self.parent != 0) return "upgrade: parent != 0";
+                    if (self.session != 0) return "upgrade: session != 0";
+                    if (self.request != 0) return "upgrade: request != 0";
+
+                    if (self.size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)) {
+                        return "upgrade: size != @sizeOf(Header) + @sizeOf(vsr.UpgradeRequest)";
+                    }
+                },
                 else => {
                     if (self.operation == .reconfigure) {
                         if (self.size != @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)) {
@@ -626,7 +643,9 @@ pub const Header = extern struct {
                 },
                 else => {
                     if (self.release == 0) return "release == 0";
-                    if (self.operation == .pulse) {
+                    if (self.operation == .pulse or
+                        self.operation == .upgrade)
+                    {
                         if (self.client != 0) return "client != 0";
                     } else {
                         if (self.client == 0) return "client == 0";
@@ -635,7 +654,8 @@ pub const Header = extern struct {
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
                     if (self.operation == .register or
-                        self.operation == .pulse)
+                        self.operation == .pulse or
+                        self.operation == .upgrade)
                     {
                         if (self.request != 0) return "request != 0";
                     } else {
@@ -751,13 +771,19 @@ pub const Header = extern struct {
                     if (self.timestamp != 0) return "root: timestamp != 0";
                 },
                 else => {
-                    // Client zero means the primary.
-                    maybe(self.client == 0);
-
+                    if (self.operation == .upgrade or
+                        self.operation == .pulse)
+                    {
+                        if (self.client != 0) return "client != 0";
+                    } else {
+                        if (self.client == 0) return "client == 0";
+                    }
                     if (self.op == 0) return "op == 0";
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
-                    if (self.operation == .register) {
+                    if (self.operation == .register or
+                        self.operation == .upgrade)
+                    {
                         if (self.request != 0) return "request != 0";
                     } else if (self.client == 0) {
                         if (self.request != 0) return "request != 0";

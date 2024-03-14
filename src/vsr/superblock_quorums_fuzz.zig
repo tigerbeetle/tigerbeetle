@@ -132,8 +132,14 @@ fn test_quorums_working(
                 .replica_id = members[1],
                 .members = members,
                 .replica_count = 6,
+                .commit_max = 123,
                 .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
-                    .commit_min_checksum = 123,
+                    .header = header: {
+                        var checkpoint_header = vsr.Header.Prepare.root(0);
+                        checkpoint_header.op = 123;
+                        checkpoint_header.set_checksum();
+                        break :header checkpoint_header;
+                    },
                     .free_set_checksum = vsr.checksum(&.{}),
                     .client_sessions_checksum = vsr.checksum(&.{}),
                     .storage_size = superblock.data_file_size_min,
@@ -280,7 +286,12 @@ pub fn fuzz_quorum_repairs(
                     .members = members,
                     .replica_count = 6,
                     .checkpoint = std.mem.zeroInit(SuperBlockHeader.CheckpointState, .{
-                        .commit_min_checksum = 123,
+                        .header = header: {
+                            var checkpoint_header = vsr.Header.Prepare.root(0);
+                            checkpoint_header.op = 123;
+                            checkpoint_header.set_checksum();
+                            break :header checkpoint_header;
+                        },
                     }),
                 }),
             });

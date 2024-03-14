@@ -38,7 +38,6 @@ Here are some common use-cases for TigerBeetle:
 
 - [Closing accounts](./recipes/close-account.md)
 - [Currency exchange](./recipes/currency-exchange.md)
-- [Fractional amounts](./recipes/fractional-amounts.md)
 - [Multi-debit/credit transfers](./recipes/multi-debit-credit-transfers.md)
 
 ## Client libraries
