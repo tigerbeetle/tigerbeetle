@@ -48,6 +48,7 @@ pub const Packet = extern struct {
             if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
             const packet = self.popped orelse return null;
             self.popped = packet.next;
+            packet.next = null;
             return packet;
         }
     };

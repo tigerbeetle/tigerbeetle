@@ -235,14 +235,12 @@ fn request(
         .pulse => unreachable,
     };
 
-    packet.* = .{
-        .next = null,
-        .user_data = callback_ref,
-        .operation = @intFromEnum(operation),
-        .status = .ok,
-        .data_size = @intCast(packet_data.len),
-        .data = packet_data.ptr,
-    };
+    packet.operation = @intFromEnum(operation);
+    packet.user_data = callback_ref;
+    packet.data = packet_data.ptr;
+    packet.data_size = @intCast(packet_data.len);
+    packet.next = null;
+    packet.status = .ok;
 
     tb.submit(client, packet);
 }
