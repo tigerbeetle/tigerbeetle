@@ -17,10 +17,8 @@ const message_pool = @import("../../../message_pool.zig");
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
-
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
-const ThreadType = @import("thread.zig").ThreadType;
 
 const api = @import("../tb_client.zig");
 const tb_status_t = api.tb_status_t;

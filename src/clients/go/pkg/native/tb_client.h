@@ -212,7 +212,9 @@ typedef struct tb_packet_t {
     uint8_t status;
     uint32_t data_size;
     void* data;
-    void* internal[4];
+    struct tb_packet_t* batch_link;
+    struct tb_packet_t* batch_data;
+    void* reserved[2];
 } tb_packet_t;
 
 typedef void* tb_client_t; 
