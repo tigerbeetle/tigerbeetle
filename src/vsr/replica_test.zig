@@ -878,6 +878,8 @@ test "Cluster: view-change: nack older view" {
     try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger);
     try expectEqual(a0.op_head(), checkpoint_1_trigger + 3);
 
+    t.replica(.R_).pass(.R_, .bidirectional, .ping);
+    t.replica(.R_).pass(.R_, .bidirectional, .pong);
     b1.pass(.R_, .bidirectional, .start_view_change);
     b1.pass(.R_, .incoming, .do_view_change);
     b1.pass(.R_, .outgoing, .start_view);
