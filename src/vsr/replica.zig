@@ -1249,7 +1249,7 @@ pub fn ReplicaType(
         fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
             const self = @fieldParentPtr(Self, "message_bus", message_bus);
             if (message.header.into(.request)) |header| {
-                assert(header.client != 0);
+                assert(header.client != 0 or constants.aof_recovery);
             }
             self.on_message(message);
         }
