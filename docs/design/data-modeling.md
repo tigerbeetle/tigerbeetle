@@ -195,3 +195,19 @@ You can also use different ledgers to further partition accounts, beyond asset t
 you have a multi-tenant setup where you are tracking balances for your customers' end-users, you
 might have a ledger for each of your customers. If customers have end-user accounts in multiple
 currencies, each of your customers would have multiple ledgers.
+
+## `code`
+
+[`Account`s](../reference/accounts.md#code) and [`Transfer`s](../reference/transfers.md#code) both
+have a `code` field. While they have slightly different meanings, both can be used to represent
+different types of `Account`s and `Transfer`s within your system.
+
+The `code` on an `Account` can be used to indicate the type, such as assets, liabilities, equity,
+income, or expenses, and subcategories within those classifications.
+
+The `code` on a `Transfer` can be used to indicate the reason why a given transfer is happening,
+such as a purchase, refund, currency exchange, etc.
+
+When you start building out your application on top of TigerBeetle, you may find it helpful to list
+out all of the known types of accounts and movements of funds and mapping each of these to `code`
+numbers or ranges.
