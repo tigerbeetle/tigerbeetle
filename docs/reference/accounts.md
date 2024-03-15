@@ -13,6 +13,14 @@ Account fields *cannot be changed by the user* after
 creation. However, debits and credits fields are updated by
 TigerBeetle as transfers move money to and from an account.
 
+### Deletion
+
+Accounts **cannot be deleted** after creation. This provides a strong guarantee for an audit trail
+-- and the account record is only 128 bytes.
+
+If an account is no longer in use, you may want to [zero out its
+balance](../recipes/close-account.md).
+
 ## Fields
 
 ### `id`
