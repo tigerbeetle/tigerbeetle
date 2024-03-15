@@ -836,6 +836,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
             assert(update.release >= superblock.staging.vsr_state.checkpoint.release);
+            assert(update.sync_view == 0 or
+                update.sync_view == superblock.staging.vsr_state.sync_view);
 
             assert(update.storage_size <= superblock.storage_size_limit);
             assert(update.storage_size >= data_file_size_min);
@@ -875,7 +877,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.sync_op_max = update.sync_op_max;
             vsr_state.sync_view = update.sync_view;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
-            assert(vsr_state.sync_view == 0 or vsr_state.sync_view == vsr_state_staging.sync_view);
 
             context.* = .{
                 .superblock = superblock,
