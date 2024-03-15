@@ -89,7 +89,7 @@ pub const vsr_releases_max = config.cluster.vsr_releases_max;
 
 comptime {
     assert(vsr_releases_max >= 2);
-    assert(vsr_releases_max * @sizeOf(u16) <= message_body_size_max);
+    assert(vsr_releases_max * @sizeOf(vsr.Release) <= message_body_size_max);
     // The number of releases is encoded into ping headers as a u16.
     assert(vsr_releases_max <= std.math.maxInt(u16));
 }

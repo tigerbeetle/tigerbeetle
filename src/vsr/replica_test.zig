@@ -33,9 +33,18 @@ const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 const log_level = std.log.Level.err;
 
 const releases = .{
-    .{ .release = 1, .release_client_min = 1 },
-    .{ .release = 2, .release_client_min = 1 },
-    .{ .release = 3, .release_client_min = 1 },
+    .{
+        .release = vsr.Release.from(.{ .major = 1 }),
+        .release_client_min = vsr.Release.from(.{ .major = 1 }),
+    },
+    .{
+        .release = vsr.Release.from(.{ .major = 2 }),
+        .release_client_min = vsr.Release.from(.{ .major = 1 }),
+    },
+    .{
+        .release = vsr.Release.from(.{ .major = 3 }),
+        .release_client_min = vsr.Release.from(.{ .major = 1 }),
+    },
 };
 
 // TODO Test client eviction once it no longer triggers a client panic.
@@ -1573,10 +1582,15 @@ const TestReplicas = struct {
         }
     }
 
-    pub fn open_upgrade(t: *const TestReplicas, releases_bundled: []const u16) !void {
+    pub fn open_upgrade(t: *const TestReplicas, releases_bundled_major: []const u16) !void {
+        var releases_bundled = vsr.ReleaseList{};
+        for (releases_bundled_major) |major| {
+            releases_bundled.append_assume_capacity(vsr.Release.from(.{ .major = major }));
+        }
+
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r, releases_bundled) catch |err| {
+            t.cluster.restart_replica(r, releases_bundled.const_slice()) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -1632,7 +1646,16 @@ const TestReplicas = struct {
     }
 
     pub fn release(t: *const TestReplicas) u16 {
-        return t.get(.release);
+        var value_all: ?u16 = null;
+        for (t.replicas.const_slice()) |r| {
+            const value = t.cluster.replicas[r].release.triple().major;
+            if (value_all) |all| {
+                assert(all == value);
+            } else {
+                value_all = value;
+            }
+        }
+        return value_all.?;
     }
 
     pub fn status(t: *const TestReplicas) vsr.Status {

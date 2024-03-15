@@ -298,7 +298,7 @@ pub fn TableType(
 
             const DataFinishOptions = struct {
                 cluster: u128,
-                release: u16,
+                release: vsr.Release,
                 address: u64,
                 snapshot_min: u64,
                 tree_id: u16,
@@ -397,7 +397,7 @@ pub fn TableType(
 
             const IndexFinishOptions = struct {
                 cluster: u128,
-                release: u16,
+                release: vsr.Release,
                 address: u64,
                 snapshot_min: u64,
                 tree_id: u16,

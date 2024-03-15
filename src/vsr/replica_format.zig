@@ -238,7 +238,7 @@ test "format" {
 
     try format(Storage, allocator, .{
         .cluster = cluster,
-        .release = 1,
+        .release = vsr.Release.minimum,
         .replica = replica,
         .replica_count = replica_count,
     }, &storage, &superblock);

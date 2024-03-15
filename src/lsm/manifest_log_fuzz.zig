@@ -370,7 +370,7 @@ const Environment = struct {
         env.pending += 1;
         env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
             .cluster = 0,
-            .release = 1,
+            .release = vsr.Release.minimum,
             .replica = 0,
             .replica_count = 6,
         });
@@ -489,7 +489,7 @@ const Environment = struct {
                 .sync_view = 0,
                 .storage_size = vsr.superblock.data_file_size_min +
                     (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
-                .release = 1,
+                .release = vsr.Release.minimum,
             },
         );
         env.wait(&env.manifest_log);

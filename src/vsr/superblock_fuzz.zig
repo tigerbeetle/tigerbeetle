@@ -117,7 +117,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
                 .snapshots_block_address = 0,
                 .manifest_block_count = 0,
                 .storage_size = data_file_size_min,
-                .release = 1,
+                .release = vsr.Release.minimum,
             },
             .commit_max = 0,
             .sync_op_min = 0,
@@ -281,7 +281,7 @@ const Environment = struct {
         env.pending.insert(.format);
         env.superblock.format(format_callback, &env.context_format, .{
             .cluster = cluster,
-            .release = 1,
+            .release = vsr.Release.minimum,
             .replica = replica,
             .replica_count = replica_count,
         });
@@ -294,7 +294,7 @@ const Environment = struct {
         try env.sequence_states.append(.{
             .vsr_state = VSRState.root(.{
                 .cluster = cluster,
-                .release = 1,
+                .release = vsr.Release.minimum,
                 .replica_id = env.members[replica],
                 .members = env.members,
                 .replica_count = replica_count,
@@ -348,7 +348,7 @@ const Environment = struct {
             .client = 1,
             .request = 1,
             .command = .prepare,
-            .release = 1,
+            .release = vsr.Release.minimum,
             .operation = @as(vsr.Operation, @enumFromInt(constants.vsr_operations_reserved + 1)),
             .op = env.superblock.staging.vsr_state.checkpoint.header.op + 1,
             .timestamp = 1,
@@ -412,7 +412,7 @@ const Environment = struct {
                 .storage_size = data_file_size_min,
                 .snapshots_block_checksum = 0,
                 .snapshots_block_address = 0,
-                .release = 1,
+                .release = vsr.Release.minimum,
             },
             .commit_max = vsr_state_old.commit_max + 1,
             .sync_op_min = 0,
@@ -460,7 +460,7 @@ const Environment = struct {
             .sync_op_max = 0,
             .sync_view = 0,
             .storage_size = data_file_size_min,
-            .release = 1,
+            .release = vsr.Release.minimum,
         });
     }
 

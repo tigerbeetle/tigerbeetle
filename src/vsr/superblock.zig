@@ -159,7 +159,7 @@ pub const SuperBlockHeader = extern struct {
             replica_id: u128,
             members: vsr.Members,
             replica_count: u8,
-            release: u16,
+            release: vsr.Release,
         }) VSRState {
             return .{
                 .checkpoint = .{
@@ -363,7 +363,7 @@ pub const SuperBlockHeader = extern struct {
         /// `trigger_for_checkpoint(checkpoint_after(commit_min))` must be executed by this release.
         /// (Prepares with `operation=upgrade` are the exception – upgrades in the last
         /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
-        release: u16,
+        release: vsr.Release,
 
         reserved: [474]u8 = [_]u8{0} ** 474,
 
@@ -699,7 +699,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const FormatOptions = struct {
             cluster: u128,
-            release: u16,
+            release: vsr.Release,
             replica: u8,
             replica_count: u8,
         };
@@ -713,7 +713,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
             assert(superblock.replica_index == null);
 
-            assert(options.release > 0);
+            assert(options.release.value > 0);
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
@@ -752,7 +752,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .storage_size = 0,
                         .snapshots_block_checksum = 0,
                         .snapshots_block_address = 0,
-                        .release = 0,
+                        .release = vsr.Release.zero,
                     },
                     .replica_id = replica_id,
                     .members = members,
@@ -819,7 +819,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             free_set_reference: TrailerReference,
             client_sessions_reference: TrailerReference,
             storage_size: u64,
-            release: u16,
+            release: vsr.Release,
         };
 
         /// Must update the commit_min and commit_min_checksum.
@@ -835,7 +835,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.header.checksum !=
                 superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
-            assert(update.release >= superblock.staging.vsr_state.checkpoint.release);
+            assert(update.release.value >= superblock.staging.vsr_state.checkpoint.release.value);
             assert(update.sync_view == 0 or
                 update.sync_view == superblock.staging.vsr_state.sync_view);
 

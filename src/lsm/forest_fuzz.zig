@@ -164,7 +164,7 @@ const Environment = struct {
         env.change_state(.init, .superblock_format);
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
             .cluster = cluster,
-            .release = 1,
+            .release = vsr.Release.minimum,
             .replica = replica,
             .replica_count = replica_count,
         });
@@ -297,7 +297,7 @@ const Environment = struct {
             .sync_view = 0,
             .storage_size = vsr.superblock.data_file_size_min +
                 (env.grid.free_set.highest_address_acquired() orelse 0) * constants.block_size,
-            .release = 1,
+            .release = vsr.Release.minimum,
         });
         try env.tick_until_state_change(.superblock_checkpoint, .fuzzing);
 
