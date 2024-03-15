@@ -68,20 +68,9 @@ pub const ReleaseList = stdx.BoundedArray(Release, constants.vsr_releases_max);
 pub const Release = extern struct {
     value: u32,
 
-    pub const ReleaseTriple = extern struct {
-        patch: u8,
-        minor: u8,
-        major: u16,
-
-        comptime {
-            assert(@sizeOf(ReleaseTriple) == 4);
-            assert(@sizeOf(ReleaseTriple) == @sizeOf(Release));
-            assert(stdx.no_padding(ReleaseTriple));
-        }
-    };
-
     comptime {
         assert(@sizeOf(Release) == 4);
+        assert(@sizeOf(Release) == @sizeOf(ReleaseTriple));
         assert(stdx.no_padding(Release));
     }
 
@@ -120,6 +109,59 @@ pub const Release = extern struct {
         }
     }
 };
+
+pub const ReleaseTriple = extern struct {
+    patch: u8,
+    minor: u8,
+    major: u16,
+
+    comptime {
+        assert(@sizeOf(ReleaseTriple) == 4);
+        assert(stdx.no_padding(ReleaseTriple));
+    }
+
+    pub fn parse(string: []const u8) error{ InvalidRelease }!ReleaseTriple {
+        var parts = std.mem.splitScalar(u8, string, '.');
+        const major = parts.first();
+        const minor = parts.next() orelse return error.InvalidRelease;
+        const patch = parts.next() orelse return error.InvalidRelease;
+        if (parts.next() != null) return error.InvalidRelease;
+        return .{
+            .major = std.fmt.parseUnsigned(u16, major, 10) catch return error.InvalidRelease,
+            .minor = std.fmt.parseUnsigned(u8, minor, 10) catch return error.InvalidRelease,
+            .patch = std.fmt.parseUnsigned(u8, patch, 10) catch return error.InvalidRelease,
+        };
+    }
+};
+
+test "ReleaseTriple.parse" {
+    const tests = [_]struct {
+        string: []const u8,
+        result: error{ InvalidRelease }!ReleaseTriple,
+    }{
+        // Valid:
+        .{ .string = "0.0.1", .result = .{ .major = 0, .minor = 0, .patch = 1 } },
+        .{ .string = "0.1.0", .result = .{ .major = 0, .minor = 1, .patch = 0 } },
+        .{ .string = "1.0.0", .result = .{ .major = 1, .minor = 0, .patch = 0 } },
+
+        // Invalid characters:
+        .{ .string = "v0.0.1", .result = error.InvalidRelease },
+        .{ .string = "0.0.1v", .result = error.InvalidRelease },
+        // Invalid separators:
+        .{ .string = "0.0.0.1", .result = error.InvalidRelease },
+        .{ .string = "0..0.1", .result = error.InvalidRelease },
+        // Overflow (and near-overflow):
+        .{ .string = "0.0.255", .result = .{ .major = 0, .minor = 0, .patch = 255 } },
+        .{ .string = "0.0.256", .result = error.InvalidRelease },
+        .{ .string = "0.255.0", .result = .{ .major = 0, .minor = 255, .patch = 0 } },
+        .{ .string = "0.256.0", .result = error.InvalidRelease },
+        .{ .string = "65535.0.0", .result = .{ .major = 65535, .minor = 0, .patch = 0 } },
+        .{ .string = "65536.0.0", .result = error.InvalidRelease },
+    };
+    for (tests) |t| {
+        try std.testing.expectEqualDeep(ReleaseTriple.parse(t.string), t.result);
+    }
+}
 
 pub const ProcessType = enum { replica, client };
 
