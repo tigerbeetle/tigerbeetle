@@ -67,4 +67,7 @@ pub const Target = struct {
     checkpoint_id: u128,
     /// The op_checkpoint() that corresponds to the checkpoint id.
     checkpoint_op: u64,
+    /// The view where the target's checkpoint is committed.
+    /// It might be greater than `checkpoint.header.view`.
+    view: u32,
 };

@@ -131,6 +131,12 @@ pub const SuperBlockHeader = extern struct {
         /// past them via state sync.)
         sync_op_max: u64,
 
+        /// The view where it is known that checkpoint.header is committed.
+        /// It may be greater than view --- during state sync, the replica first accepts a new
+        /// checkpoint, and then jumps view. Appending checkpoint first is required for appending
+        /// SV headers to the journal.
+        sync_view: u32,
+
         /// The last view in which the replica's status was normal.
         log_view: u32,
 
@@ -140,7 +146,7 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [783]u8 = [_]u8{0} ** 783,
+        reserved: [779]u8 = [_]u8{0} ** 779,
 
         comptime {
             assert(@sizeOf(VSRState) == 2048);
@@ -184,6 +190,7 @@ pub const SuperBlockHeader = extern struct {
                 .commit_max = 0,
                 .sync_op_min = 0,
                 .sync_op_max = 0,
+                .sync_view = 0,
                 .log_view = 0,
                 .view = 0,
             };
@@ -751,6 +758,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .commit_max = 0,
                     .sync_op_min = 0,
                     .sync_op_max = 0,
+                    .sync_view = 0,
                     .log_view = 0,
                     .view = 0,
                     .replica_count = options.replica_count,
@@ -864,6 +872,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
+            assert(vsr_state.sync_view == 0 or vsr_state.sync_view == vsr_state_staging.sync_view);
 
             context.* = .{
                 .superblock = superblock,
@@ -930,6 +939,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
+            sync_view: u32,
         };
 
         pub fn sync(
@@ -958,6 +968,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
+            vsr_state.sync_view = update.sync_view;
 
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
 

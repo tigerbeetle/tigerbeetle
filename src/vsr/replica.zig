@@ -716,7 +716,7 @@ pub fn ReplicaType(
                     self.transition_to_normal_from_recovering_status();
                 }
             } else {
-                if (self.log_view < self.superblock.working.vsr_state.checkpoint.header.view) {
+                if (self.log_view < self.superblock.working.vsr_state.sync_view) {
                     // During state sync, the replica installed CheckpointState from a future view.
                     self.transition_to_recovering_head();
                 } else {
@@ -2702,7 +2702,8 @@ pub fn ReplicaType(
                 .size = @sizeOf(Header) + @sizeOf(u16) * constants.vsr_releases_max,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view_durable(), // Don't drop pings while the view is being updated.
+                // Don't drop pings while the view is being updated.
+                .view = @max(self.view_durable(), self.superblock.working.vsr_state.sync_view),
                 .release = self.release,
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
@@ -2716,7 +2717,13 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
 
-            assert(message.header.view <= self.view);
+            // Pings advertise checkpoints, and current checkpoint's view might be greater than
+            // the replica view.
+            if (message.header.view > self.view) {
+                assert(self.status == .recovering_head);
+                assert(self.superblock.working.vsr_state.sync_view >
+                    self.superblock.working.vsr_state.view);
+            }
 
             self.send_message_to_other_replicas_and_standbys(message.base());
         }
@@ -5079,7 +5086,7 @@ pub fn ReplicaType(
                         return true;
                     }
 
-                    if (message.header.view < self.superblock.working.vsr_state.checkpoint.header.view) {
+                    if (message.header.view < self.superblock.working.vsr_state.sync_view) {
                         assert(self.status == .recovering_head);
                         log.debug("{}: on_{s}: ignoring (recovering_head, checkpoint from newer view)", .{
                             self.replica,
@@ -7163,7 +7170,9 @@ pub fn ReplicaType(
                 // Critical: Do not advertise a view/log_view before it is durable.
                 // See view_durable()/log_view_durable().
                 if (message.header.view > self.view_durable() and
-                    message.header.command != .request_start_view)
+                    message.header.command != .request_start_view and
+                    !(message.header.command == .ping and
+                    message.header.view == self.superblock.working.vsr_state.sync_view))
                 {
                     // Pings are used for syncing time, so they must not be
                     // blocked on persisting view.
@@ -7680,9 +7689,9 @@ pub fn ReplicaType(
             assert(self.commit_stage == .idle);
             assert(self.journal.header_with_op(self.op) != null);
 
-            if (self.log_view < self.superblock.working.vsr_state.checkpoint.header.view) {
+            if (self.log_view < self.superblock.working.vsr_state.sync_view) {
                 // Transitioning to recovering head after state sync --- checkpoint is from a
-                // "future" view, so the replica needs to truncate our log.
+                // "future" view, so the replica needs to truncate its log.
                 assert(self.commit_min == self.op_checkpoint());
             } else {
                 if (self.status == .recovering) {
@@ -8384,6 +8393,7 @@ pub fn ReplicaType(
             const stage: *const SyncStage.RequestingCheckpoint =
                 &self.syncing.requesting_checkpoint;
             assert(stage.target.checkpoint_id == vsr.checksum(std.mem.asBytes(checkpoint_state)));
+            assert(stage.target.view >= checkpoint_state.header.view);
 
             log.debug("{[replica]}: sync_requesting_checkpoint_callback: " ++
                 "checkpoint_op={[checkpoint_op]} checkpoint_id={[checkpoint_id]x:0>32} " ++
@@ -8459,6 +8469,7 @@ pub fn ReplicaType(
                 else
                     sync_min_new;
             };
+            const sync_view = stage.target.view;
 
             self.sync_message_timeout.stop();
             self.superblock.sync(
@@ -8469,6 +8480,7 @@ pub fn ReplicaType(
                     .commit_max = self.commit_max,
                     .sync_op_max = sync_op_max,
                     .sync_op_min = sync_op_min,
+                    .sync_view = sync_view,
                 },
             );
         }
@@ -8527,9 +8539,7 @@ pub fn ReplicaType(
 
             // The head op must be in the Journal and there should not be a break between the
             // checkpoint header and the Journal.
-            if (self.op < self.op_checkpoint() or
-                self.log_view < self.superblock.working.vsr_state.checkpoint.header.view)
-            {
+            if (self.op < self.op_checkpoint() or self.log_view < stage.target.view) {
                 self.transition_to_recovering_head();
             }
 
@@ -8947,7 +8957,7 @@ pub fn ReplicaType(
             if (header.replica >= self.replica_count) return; // Ignore messages from standbys.
             if (header.replica == self.replica) return; // Ignore messages from self (misdirected).
 
-            const candidate = switch (header.into_any()) {
+            const candidate: SyncTarget = switch (header.into_any()) {
                 inline .commit, .ping => |h| .{
                     .checkpoint_id = h.checkpoint_id,
                     .checkpoint_op = h.checkpoint_op,
@@ -9011,10 +9021,7 @@ pub fn ReplicaType(
                 @tagName(self.syncing),
             });
 
-            self.sync_target_max = .{
-                .checkpoint_id = candidate.checkpoint_id,
-                .checkpoint_op = candidate.checkpoint_op,
-            };
+            self.sync_target_max = candidate;
 
             if (self.syncing != .idle) {
                 self.sync_start_from_sync();
