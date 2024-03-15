@@ -1141,7 +1141,7 @@ pub fn ReplicaType(
                 .pulse_timeout = Timeout{
                     .name = "pulse_timeout",
                     .id = replica_index,
-                    .after = 1 * (std.time.ms_per_s / constants.tick_ms), // 1 ticks/s
+                    .after = 10,
                 },
                 .upgrade_timeout = Timeout{
                     .name = "upgrade_timeout",
@@ -3028,19 +3028,13 @@ pub fn ReplicaType(
         }
 
         fn on_pulse_timeout(self: *Self) void {
-            if (constants.aof_recovery) unreachable;
+            assert(!constants.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
             assert(self.pulse_timeout.ticking);
 
             defer self.pulse_timeout.reset();
-            if (self.pipeline.queue.prepare_queue.full()) return;
-            // Solo replicas only change views immediately when they start up,
-            // and during that time they do not accept requests.
-            // See Replica.open() for more detail.
-            if (self.solo() and self.view_durable_updating()) return;
-            // Requests are ignored during upgrades.
-            if (self.upgrading()) return;
+            if (!self.pulse_needed()) return;
 
             // To decide whether or not to `pulse` a time-dependant
             // operation, the State Machine needs an updated `prepare_timestamp`.
@@ -3049,12 +3043,7 @@ pub fn ReplicaType(
                 self.state_machine.prepare_timestamp,
                 @as(u64, @intCast(realtime)),
             );
-
-            if (self.state_machine.pulse()) {
-                if (!self.pipeline.queue.contains_operation(.pulse)) {
-                    self.send_request_pulse_to_self();
-                }
-            }
+            self.send_request_pulse_to_self();
         }
 
         fn on_upgrade_timeout(self: *Self) void {
@@ -3700,7 +3689,9 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
 
             if (self.status == .normal and self.primary()) {
-                if (self.pipeline.queue.pop_request()) |request| {
+                if (self.pulse_needed()) {
+                    self.send_request_pulse_to_self();
+                } else if (self.pipeline.queue.pop_request()) |request| {
                     // Start preparing the next request in the queue (if any).
                     self.primary_pipeline_prepare(request);
                 }
@@ -5619,41 +5610,6 @@ pub fn ReplicaType(
                         request.message.header.operation.cast(StateMachine),
                         request.message.body(),
                     );
-
-                    if (!constants.aof_recovery and
-                        request.message.header.client != 0)
-                    {
-                        // Check if the StateMachine needs to execute a `pulse` before
-                        // the request.
-                        // Note that `prepare` must be called before so the StateMachine can
-                        // correctly assure that time-dependant tasks (e.g. expiring transfers)
-                        // will never intersect with a request batch.
-                        if (self.state_machine.pulse()) {
-                            if (!self.pipeline.queue.contains_operation(.pulse) and
-                                !self.upgrading())
-                            {
-                                self.send_request_pulse_to_self();
-                                assert(self.pipeline.queue.contains_operation(.pulse));
-
-                                // Bump the prepare timestamp after the pulse is injected, so that
-                                // the next operation does not happen in the same nanosecond.
-                                self.state_machine.prepare_timestamp += 1;
-
-                                // If the prepare queue is full, the replica delays the
-                                // current request and returns, otherwise it runs prepare
-                                // again and proceeds after having injected the pulse.
-                                if (self.pipeline.queue.prepare_queue.full()) {
-                                    self.pipeline.queue.delay_request(request);
-                                    return;
-                                } else {
-                                    self.state_machine.prepare(
-                                        request.message.header.operation.cast(StateMachine),
-                                        request.message.body(),
-                                    );
-                                }
-                            }
-                        }
-                    }
                 },
             }
             const prepare_timestamp = self.state_machine.prepare_timestamp;
@@ -9296,7 +9252,27 @@ pub fn ReplicaType(
             }));
         }
 
+        fn pulse_needed(self: *Self) bool {
+            assert(!constants.aof_recovery);
+            assert(self.status == .normal);
+            assert(self.primary());
+
+            // The state machine does not need a pulse.
+            if (!self.state_machine.pulse()) return false;
+            // There's a pulse already in progress.
+            if (self.pipeline.queue.contains_operation(.pulse)) return false;
+            // Solo replicas only change views immediately when they start up,
+            // and during that time they do not accept requests.
+            // See Replica.open() for more detail.
+            if (self.solo() and self.view_durable_updating()) return false;
+            // Requests are ignored during upgrades.
+            if (self.upgrading()) return false;
+
+            return true;
+        }
+
         fn send_request_pulse_to_self(self: *Self) void {
+            assert(!constants.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
             assert(!self.pipeline.queue.full());
@@ -10072,19 +10048,6 @@ const PipelineQueue = struct {
         pipeline.assert_request_queue(request);
 
         pipeline.request_queue.push_assume_capacity(request);
-        if (constants.verify) pipeline.verify();
-    }
-
-    fn delay_request(pipeline: *PipelineQueue, request: Request) void {
-        assert(request.message.header.command == .request);
-        assert(pipeline.prepare_queue.full());
-
-        pipeline.assert_request_queue(request);
-
-        pipeline.request_queue.push_head_assume_capacity(.{
-            .realtime = request.realtime,
-            .message = request.message.ref(),
-        });
         if (constants.verify) pipeline.verify();
     }
 
