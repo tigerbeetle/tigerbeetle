@@ -3697,6 +3697,7 @@ pub fn ReplicaType(
                 }
 
                 if (self.pulse_needed()) {
+                    assert(self.upgrade_release == null);
                     self.send_request_pulse_to_self();
                 }
 
