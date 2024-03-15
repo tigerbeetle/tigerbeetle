@@ -833,6 +833,9 @@ pub const Header = extern struct {
             if (self.op != self.commit) return "op != commit";
             if (self.timestamp == 0) return "timestamp == 0";
             if (self.operation == .register) {
+                if (self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterResult)) {
+                    return "register: size != @sizeOf(Header) + @sizeOf(vsr.RegisterResult)";
+                }
                 // In this context, the commit number is the newly registered session number.
                 // The `0` commit number is reserved for cluster initialization.
                 if (self.commit == 0) return "commit == 0";

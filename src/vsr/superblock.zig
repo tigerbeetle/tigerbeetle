@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [3172]u8 = [_]u8{0} ** 3172,
+    reserved: [1940]u8 = [_]u8{0} ** 1940,
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -140,10 +140,10 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [15]u8 = [_]u8{0} ** 15,
+        reserved: [783]u8 = [_]u8{0} ** 783,
 
         comptime {
-            assert(@sizeOf(VSRState) == 816);
+            assert(@sizeOf(VSRState) == 2048);
             // Assert that there is no implicit padding in the struct.
             assert(stdx.no_padding(VSRState));
         }
@@ -357,12 +357,11 @@ pub const SuperBlockHeader = extern struct {
         /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
         release: u16,
 
-        // TODO Reserve some more extra space before locking in storage layout.
-        reserved: [10]u8 = [_]u8{0} ** 10,
+        reserved: [474]u8 = [_]u8{0} ** 474,
 
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
-            assert(@sizeOf(CheckpointState) == 560);
+            assert(@sizeOf(CheckpointState) == 1024);
             assert(stdx.no_padding(CheckpointState));
         }
     };
@@ -540,10 +539,18 @@ comptime {
 /// The size of the entire superblock storage zone.
 pub const superblock_zone_size = superblock_copy_size * constants.superblock_copies;
 
-/// The size of an individual superblock including padding.
-/// TODO Add some padding between copies and include that here.
-pub const superblock_copy_size = @sizeOf(SuperBlockHeader);
+/// Leave enough padding after every superblock copy so that it is feasible, in the future, to
+/// modify the `pipeline_prepare_queue_max` of an existing cluster (up to a maximum of clients_max).
+/// (That is, this space is reserved for potential `vsr_headers`).
+const superblock_copy_padding: comptime_int = stdx.div_ceil(
+    (constants.clients_max - constants.pipeline_prepare_queue_max) * @sizeOf(vsr.Header),
+    constants.sector_size,
+) * constants.sector_size;
+
+/// The size of an individual superblock header copy, including padding.
+pub const superblock_copy_size = @sizeOf(SuperBlockHeader) + superblock_copy_padding;
 comptime {
+    assert(superblock_copy_padding % constants.sector_size == 0);
     assert(superblock_copy_size % constants.sector_size == 0);
 }
 
