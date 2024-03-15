@@ -561,7 +561,7 @@ pub fn StateMachineType(
         }
 
         pub fn pulse(self: *const StateMachine) bool {
-            comptime assert(!global_constants.aof_recovery);
+            assert(!global_constants.aof_recovery);
             assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
 
             return self.expire_pending_transfers_pulse_timestamp <= self.prepare_timestamp;

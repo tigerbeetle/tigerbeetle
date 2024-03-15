@@ -9253,10 +9253,11 @@ pub fn ReplicaType(
         }
 
         fn pulse_needed(self: *Self) bool {
-            assert(!constants.aof_recovery);
             assert(self.status == .normal);
             assert(self.primary());
 
+            // Pulses are replayed during `aof recovery`.
+            if (constants.aof_recovery) return false;
             // The state machine does not need a pulse.
             if (!self.state_machine.pulse()) return false;
             // There's a pulse already in progress.
