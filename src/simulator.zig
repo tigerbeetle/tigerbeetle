@@ -962,7 +962,9 @@ pub const Simulator = struct {
             // Even with faults disabled, a replica that was syncing before it crashed
             // (or just recently finished syncing before it crashed) may wind up in
             // status=recovering_head.
-            assert(fault or replica.op < replica.op_checkpoint());
+            assert(fault or
+                replica.op < replica.op_checkpoint() or
+                replica.log_view < replica.superblock.working.vsr_state.sync_view);
         }
 
         replica_storage.faulty = true;
