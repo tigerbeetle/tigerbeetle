@@ -199,6 +199,7 @@ pub const SuperBlockHeader = extern struct {
         pub fn assert_internally_consistent(state: VSRState) void {
             assert(state.commit_max >= state.checkpoint.header.op);
             assert(state.sync_op_max >= state.sync_op_min);
+            if (state.sync_op_max == 0) assert(state.sync_view == 0);
             assert(state.view >= state.log_view);
             assert(state.replica_count > 0);
             assert(state.replica_count <= constants.replicas_max);
@@ -813,6 +814,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             sync_op_min: u64,
             sync_op_max: u64,
+            sync_view: u32,
             manifest_references: ManifestReferences,
             free_set_reference: TrailerReference,
             client_sessions_reference: TrailerReference,
@@ -871,6 +873,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.commit_max = update.commit_max;
             vsr_state.sync_op_min = update.sync_op_min;
             vsr_state.sync_op_max = update.sync_op_max;
+            vsr_state.sync_view = update.sync_view;
             assert(superblock.staging.vsr_state.would_be_updated_by(vsr_state));
             assert(vsr_state.sync_view == 0 or vsr_state.sync_view == vsr_state_staging.sync_view);
 
@@ -962,6 +965,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             );
             assert(update.sync_op_min <= update.sync_op_max);
             assert(update.sync_op_max > update.checkpoint.header.op);
+            assert(update.sync_view >= update.checkpoint.header.view);
 
             var vsr_state = superblock.staging.vsr_state;
             vsr_state.checkpoint = update.checkpoint;

@@ -3819,16 +3819,17 @@ pub fn ReplicaType(
             // Thus, the SuperBlock's `commit_min` is set to 7-2=5.
             const vsr_state_commit_min = self.op_checkpoint_next();
 
-            const vsr_state_sync_op: struct { min: u64, max: u64 } = sync: {
+            const vsr_state_sync: struct { op_min: u64, op_max: u64, view: u32 } = sync: {
                 if (self.sync_content_done()) {
                     assert(self.sync_tables == null);
                     assert(self.grid_repair_tables.executing() == 0);
 
-                    break :sync .{ .min = 0, .max = 0 };
+                    break :sync .{ .op_min = 0, .op_max = 0, .view = 0 };
                 } else {
                     break :sync .{
-                        .min = self.superblock.staging.vsr_state.sync_op_min,
-                        .max = self.superblock.staging.vsr_state.sync_op_max,
+                        .op_min = self.superblock.staging.vsr_state.sync_op_min,
+                        .op_max = self.superblock.staging.vsr_state.sync_op_max,
+                        .view = self.superblock.staging.vsr_state.view,
                     };
                 }
             };
@@ -3852,8 +3853,9 @@ pub fn ReplicaType(
                 .{
                     .header = self.journal.header_with_op(vsr_state_commit_min).?.*,
                     .commit_max = self.commit_max,
-                    .sync_op_min = vsr_state_sync_op.min,
-                    .sync_op_max = vsr_state_sync_op.max,
+                    .sync_op_min = vsr_state_sync.op_min,
+                    .sync_op_max = vsr_state_sync.op_max,
+                    .sync_view = vsr_state_sync.view,
                     .manifest_references = self.state_machine.forest.manifest_log.checkpoint_references(),
                     .free_set_reference = self.grid.free_set_checkpoint.checkpoint_reference(),
                     .client_sessions_reference = self.client_sessions_checkpoint.checkpoint_reference(),
