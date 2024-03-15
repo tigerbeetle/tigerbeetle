@@ -449,7 +449,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             demux.* = .{
                 .user_data = user_data,
                 .callback = callback,
-                .event_count = @intCast(@divExact(message.body().len, event_size)),
+                .event_count = if (event_size == 0) 0 else @intCast(
+                    @divExact(message.body().len, event_size),
+                ),
                 .event_offset = 0,
             };
 
@@ -674,8 +676,21 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(!inflight_vsr_operation.vsr_reserved());
             switch (inflight_vsr_operation.cast(StateMachine)) {
                 inline else => |operation| {
+                    const Result = StateMachine.Result(operation);
+                    // Pulse operations are not supposed to go through the client,
+                    // although when recovering from `aof` they are replayed.
+                    if (@sizeOf(Result) == 0) {
+                        const demux = inflight.demux_queue.pop().?;
+                        const user_data = demux.user_data;
+                        const callback = demux.callback.?;
+                        self.demux_pool.release(demux);
+
+                        callback(user_data, operation, &.{});
+                        return;
+                    }
+
                     var demuxer = StateMachine.DemuxerType(operation).init(
-                        std.mem.bytesAsSlice(StateMachine.Result(operation), reply.body()),
+                        std.mem.bytesAsSlice(Result, reply.body()),
                     );
 
                     while (inflight.demux_queue.pop()) |demux| {
@@ -887,6 +902,12 @@ const TestStateMachine = struct {
         batched = config.vsr_operations_reserved + 0,
         serial = config.vsr_operations_reserved + 1,
     };
+
+    pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
+        if (operation.vsr_reserved()) return null;
+
+        return vsr.Operation.to(TestStateMachine, operation);
+    }
 
     pub fn Event(comptime operation: Operation) type {
         return switch (operation) {

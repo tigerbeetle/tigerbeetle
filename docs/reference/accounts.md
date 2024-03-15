@@ -52,7 +52,11 @@ Constraints:
 
 ### `credits_pending`
 
-Amount of pending credits.
+`credits_pending` counts credits reserved by pending transfers. When a pending transfer posts, voids,
+or times out, the amount is removed from `credits_pending`.
+
+Money in `credits_pending` is reserved — that is, it cannot be spent until the corresponding pending
+transfer resolves.
 
 Constraints:
 

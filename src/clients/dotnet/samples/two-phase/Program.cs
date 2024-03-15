@@ -104,11 +104,11 @@ using (var client = new Client(
     {
         if (transfer.Id == 1)
         {
-            Debug.Assert(transfer.Flags == TransferFlags.Pending);
+            Debug.Assert(transfer.Flags.HasFlag(TransferFlags.Pending));
         }
         else if (transfer.Id == 2)
         {
-            Debug.Assert(transfer.Flags == TransferFlags.PostPendingTransfer);
+            Debug.Assert(transfer.Flags.HasFlag(TransferFlags.PostPendingTransfer));
         }
         else
         {

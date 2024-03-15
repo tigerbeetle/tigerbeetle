@@ -166,27 +166,12 @@ const transfer_templates = table: {
 pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     const Operation = AccountingStateMachine.Operation;
 
-    // Create the enum using @Type reification. Previously, we were using enumToInt for the variant
-    // value (see below), but it was crashing the stage2 compiler (0.10.1) so we use @Type instead.
-    // ```
-    // const Action = enum(u8) {
-    //     create_accounts = @enumToInt(Operation.create_accounts), // An enum with one is fine.
-    //     create_transfers = @enumToInt(Operation.create_transfers), // But 2+ crashes stage2.
-    // };
-    // ```
-    const Action = @Type(.{
-        .Enum = .{
-            .tag_type = u8,
-            .fields = &[_]std.builtin.Type.EnumField{
-                .{ .name = "create_accounts", .value = @intFromEnum(Operation.create_accounts) },
-                .{ .name = "create_transfers", .value = @intFromEnum(Operation.create_transfers) },
-                .{ .name = "lookup_accounts", .value = @intFromEnum(Operation.lookup_accounts) },
-                .{ .name = "lookup_transfers", .value = @intFromEnum(Operation.lookup_transfers) },
-            },
-            .decls = &.{},
-            .is_exhaustive = true,
-        },
-    });
+    const Action = enum(u8) {
+        create_accounts = @intFromEnum(Operation.create_accounts),
+        create_transfers = @intFromEnum(Operation.create_transfers),
+        lookup_accounts = @intFromEnum(Operation.lookup_accounts),
+        lookup_transfers = @intFromEnum(Operation.lookup_transfers),
+    };
 
     return struct {
         const Self = @This();
@@ -364,7 +349,21 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 ),
                 //TODO: implement query.
                 .get_account_transfers, .get_account_history => unreachable,
+                //Not handled by the client.
+                .pulse => unreachable,
             }
+        }
+
+        /// `on_pulse` is called for pulse operations in commit order.
+        pub fn on_pulse(
+            self: *Self,
+            operation: AccountingStateMachine.Operation,
+            timestamp: u64,
+        ) void {
+            assert(timestamp != 0);
+            assert(operation == .pulse);
+
+            self.auditor.expire_pending_transfers(timestamp);
         }
 
         fn build_create_accounts(self: *Self, client_index: usize, accounts: []tb.Account) usize {
@@ -852,10 +851,8 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 .linked_valid_probability = random.uintLessThan(u8, 101),
                 // 100% chance because this only applies to consecutive invalid transfers, which are rare.
                 .linked_invalid_probability = 100,
-                // TODO(Timeouts): When timeouts are implemented in the StateMachine, change this to the
-                // (commented out) value so that timeouts can actually trigger.
-                .pending_timeout_mean = std.math.maxInt(u32) / 2,
-                // .pending_timeout_mean = 1 + random.uintLessThan(usize, 1_000_000_000 / 4),
+                // One second.
+                .pending_timeout_mean = 1,
                 .accounts_batch_size_min = 0,
                 .accounts_batch_size_span = 1 + random.uintLessThan(
                     usize,

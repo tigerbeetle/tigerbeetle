@@ -208,9 +208,11 @@ pub const AccountingAuditor = struct {
     }
 
     /// Expire pending transfers that have not been posted or voided.
-    fn tick_to_timestamp(self: *Self, timestamp: u64) void {
+    pub fn expire_pending_transfers(self: *Self, timestamp: u64) void {
         assert(self.timestamp < timestamp);
+        defer self.timestamp = timestamp;
 
+        var expired_count: u32 = 0;
         while (self.pending_expiries.peek()) |expiration| {
             if (timestamp < expiration.timestamp) break;
             defer _ = self.pending_expiries.remove();
@@ -226,16 +228,15 @@ pub const AccountingAuditor = struct {
             dr.debits_pending -= pending_transfer.amount;
             cr.credits_pending -= pending_transfer.amount;
 
+            // Each expiration round can expire at most one batch of transfers.
+            expired_count += 1;
+            if (expired_count == StateMachine.constants.batch_max.create_transfers) break;
+
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));
             assert(!cr.debits_exceed_credits(0));
             assert(!cr.credits_exceed_debits(0));
-
-            // TODO(Timeouts): When timeouts are implemented in the StateMachine, remove this unimplemented.
-            stdx.unimplemented("timeouts");
         }
-
-        self.timestamp = timestamp;
     }
 
     pub fn on_create_accounts(
@@ -247,7 +248,7 @@ pub const AccountingAuditor = struct {
     ) void {
         assert(accounts.len >= results.len);
         assert(self.timestamp < timestamp);
-        defer assert(self.timestamp == timestamp);
+        defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
         var results_iterator = IteratorForCreate(tb.CreateAccountsResult).init(results);
@@ -255,9 +256,6 @@ pub const AccountingAuditor = struct {
 
         for (accounts, 0..) |*account, i| {
             const account_timestamp = timestamp - accounts.len + i + 1;
-            // TODO Should this be at the end of the loop? (If a timeout & post land on the same
-            // timestamp, which wins?)
-            self.tick_to_timestamp(account_timestamp);
 
             const result_actual = results_iterator.take(i) orelse .ok;
             if (!results_expect[i].contains(result_actual)) {
@@ -281,10 +279,6 @@ pub const AccountingAuditor = struct {
                 assert(result_actual != .ok);
             }
         }
-
-        if (accounts.len == 0) {
-            self.tick_to_timestamp(timestamp);
-        }
     }
 
     pub fn on_create_transfers(
@@ -296,7 +290,7 @@ pub const AccountingAuditor = struct {
     ) void {
         assert(transfers.len >= results.len);
         assert(self.timestamp < timestamp);
-        defer assert(self.timestamp == timestamp);
+        defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
         var results_iterator = IteratorForCreate(tb.CreateTransfersResult).init(results);
@@ -304,9 +298,6 @@ pub const AccountingAuditor = struct {
 
         for (transfers, 0..) |*transfer, i| {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
-            // TODO Should this be deferrred to the end of the loop? (If a timeout & post land on
-            // the same timestamp, which wins?)
-            self.tick_to_timestamp(transfer_timestamp);
 
             const result_actual = results_iterator.take(i) orelse .ok;
             if (!results_expect[i].contains(result_actual)) {
@@ -355,20 +346,20 @@ pub const AccountingAuditor = struct {
                 assert(self.accounts_created[cr_index]);
 
                 if (transfer.flags.pending) {
-                    self.pending_transfers.putAssumeCapacity(transfer.id, .{
-                        .amount = transfer.amount,
-                        .debit_account_index = dr_index,
-                        .credit_account_index = cr_index,
-                    });
-                    self.pending_expiries.add(.{
-                        .transfer = transfer.id,
-                        .timestamp = transfer_timestamp +
-                            @as(u64, transfer.timeout) * std.time.ns_per_s,
-                    }) catch unreachable;
-                    // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
-                    // created more pending transfers than permitted.
-                    assert(self.pending_expiries.len <= self.options.transfers_pending_max);
-
+                    if (transfer.timeout > 0) {
+                        self.pending_transfers.putAssumeCapacity(transfer.id, .{
+                            .amount = transfer.amount,
+                            .debit_account_index = dr_index,
+                            .credit_account_index = cr_index,
+                        });
+                        self.pending_expiries.add(.{
+                            .transfer = transfer.id,
+                            .timestamp = transfer_timestamp + transfer.timeout_ns(),
+                        }) catch unreachable;
+                        // PriorityQueue lacks an "unmanaged" API, so verify that the workload hasn't
+                        // created more pending transfers than permitted.
+                        assert(self.pending_expiries.len <= self.options.transfers_pending_max);
+                    }
                     dr.debits_pending += transfer.amount;
                     cr.credits_pending += transfer.amount;
                 } else {
@@ -382,10 +373,6 @@ pub const AccountingAuditor = struct {
                 assert(!cr.credits_exceed_debits(0));
             }
         }
-
-        if (transfers.len == 0) {
-            self.tick_to_timestamp(timestamp);
-        }
     }
 
     pub fn on_lookup_accounts(
@@ -398,7 +385,7 @@ pub const AccountingAuditor = struct {
         _ = client_index;
         assert(ids.len >= results.len);
         assert(self.timestamp < timestamp);
-        defer assert(self.timestamp == timestamp);
+        defer self.timestamp = timestamp;
 
         var results_iterator = IteratorForLookup(tb.Account).init(results);
         defer assert(results_iterator.results.len == 0);
@@ -433,7 +420,6 @@ pub const AccountingAuditor = struct {
                 assert(account_lookup == null);
             }
         }
-        self.tick_to_timestamp(timestamp);
     }
 
     /// Most `lookup_transfers` validation is handled by Workload.
@@ -448,7 +434,7 @@ pub const AccountingAuditor = struct {
         _ = client_index;
         assert(ids.len >= results.len);
         assert(self.timestamp < timestamp);
-        defer assert(self.timestamp == timestamp);
+        defer self.timestamp = timestamp;
 
         var results_iterator = IteratorForLookup(tb.Transfer).init(results);
         defer assert(results_iterator.results.len == 0);
@@ -457,7 +443,6 @@ pub const AccountingAuditor = struct {
             const result = results_iterator.take(id);
             assert(result == null or result.?.id == id);
         }
-        self.tick_to_timestamp(timestamp);
     }
 
     /// Returns a random account matching the given criteria.

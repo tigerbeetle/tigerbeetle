@@ -12,6 +12,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.junit.AfterClass;
@@ -630,7 +631,7 @@ public class IntegrationTest {
         assertTrue(createTransfersErrors.getLength() == 0);
 
         // Looking up the accounts.
-        final var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
+        var lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
         assertTrue(lookupAccounts.getLength() == 2);
 
         accounts.beforeFirst();
@@ -669,13 +670,13 @@ public class IntegrationTest {
         // We need to wait 1s for the server to expire the transfer,
         // however `Thread.sleep` does not have nanoseconds resolution and may finish earlier than
         // the server timeout, so adding an extra delay to avoid flaky tests.
-        final var TIMEOUT_MS = 1000;
+        final var timeout_ms = TimeUnit.SECONDS.toMillis(lookupTransfers.getTimeout());
         final var currentMilis = System.currentTimeMillis();
-        Thread.sleep(TIMEOUT_MS + 1);
-        assertTrue(System.currentTimeMillis() - currentMilis > TIMEOUT_MS);
+        Thread.sleep(timeout_ms + 1);
+        assertTrue(System.currentTimeMillis() - currentMilis > timeout_ms);
 
         // Creating a void_pending transfer.
-        final var voidTransfers = new TransferBatch(2);
+        final var voidTransfers = new TransferBatch(1);
         voidTransfers.add();
         voidTransfers.setId(transfer2Id);
         voidTransfers.setCreditAccountId(account1Id);
@@ -692,9 +693,31 @@ public class IntegrationTest {
         assertEquals(CreateTransferResult.PendingTransferExpired,
                 createVoidTransfersErrors.getResult());
 
-        // TODO(batiati)
-        // Check the accounts again for the updated balance when we implement transfers
-        // expiration.
+        // Looking up the accounts again for the updated balance.
+        lookupAccounts = client.lookupAccounts(new IdBatch(account1Id, account2Id));
+        assertTrue(lookupAccounts.getLength() == 2);
+
+        accounts.beforeFirst();
+
+        // Asserting the pending credit was voided.
+        assertTrue(accounts.next());
+        assertTrue(lookupAccounts.next());
+        assertAccounts(accounts, lookupAccounts);
+
+        assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+        assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+        assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+        assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
+
+        // Asserting the pending debit was voided.
+        assertTrue(accounts.next());
+        assertTrue(lookupAccounts.next());
+        assertAccounts(accounts, lookupAccounts);
+
+        assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPending());
+        assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPending());
+        assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
+        assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
     }
 
     @Test
@@ -1640,7 +1663,7 @@ public class IntegrationTest {
             this.process = new ProcessBuilder()
                     .command(new String[] {exe, "start", "--addresses=0", "--cache-grid=512MiB",
                             TB_FILE})
-                    .redirectOutput(Redirect.PIPE).redirectError(Redirect.DISCARD).start();
+                    .redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();
 
             final var stdout = process.getInputStream();
             try (final var reader = new BufferedReader(new InputStreamReader(stdout))) {

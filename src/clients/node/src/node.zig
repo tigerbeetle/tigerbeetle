@@ -232,6 +232,7 @@ fn request(
             try decode_array(StateMachine.Event(op), env, array, events);
             break :blk std.mem.sliceAsBytes(events);
         },
+        .pulse => unreachable,
     };
 
     packet.* = .{
@@ -289,6 +290,7 @@ fn on_completion(
                 .result_count = @intCast(results.len),
             });
         },
+        .pulse => unreachable,
     }
 
     // Stuff client pointer into packet.next to store it until the packet arrives on the JS thread.
@@ -328,6 +330,7 @@ fn on_completion_js(
             const results = buffer.results()[0..buffer_size.result_count];
             break :blk encode_array(StateMachine.Result(op), env, results);
         },
+        .pulse => unreachable,
     };
 
     // Extract the remaining packet information and release it back to the client.
@@ -464,6 +467,8 @@ fn add_trailing_null(comptime input: []const u8) [:0]const u8 {
 /// Each packet allocates enough room to hold both its Events and its Results.
 /// Buffer is an abstraction over the memory management for this.
 fn BufferType(comptime op: Operation) type {
+    assert(op != .pulse);
+
     return struct {
         const Buffer = @This();
         const Event = StateMachine.Event(op);

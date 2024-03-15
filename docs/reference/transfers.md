@@ -185,12 +185,30 @@ Constraints:
 
 This is the interval in seconds after a
 [`pending`](#flagspending) transfer's [arrival at the cluster](#timestamp)
-that it may be posted or voided. Zero denotes absence of timeout.
-
-If the timeout expires and the pending transfer has not already been
-posted or voided, the pending transfer is voided automatically.
+that it may be [posted](#flagspost_pending_transfer) or [voided](#flagsvoid_pending_transfer).
+Zero denotes absence of timeout.
 
 Non-pending transfers cannot have a timeout.
+
+TigerBeetle makes a best-effort approach to remove pending balances of expired transfers automatically:
+
+- Transfers expire _exactly_ at their expiry time ([`timestamp`](#timestamp)
+  _plus_ `timeout` converted in nanoseconds).
+
+- Pending balances will never be removed before its expiry.
+
+- Expired transfers cannot be manually posted or voided.
+
+- It is not guaranteed that the pending balance will be removed exactly at its expiry.
+
+  In particular, client requests may observe still-pending balances for expired transfers.
+
+- Pending balances are removed in chronological order by expiry. If multiple transfers expire at
+  the same time, then ordered by the transfer's creation [`timestamp`](#timestamp).
+
+  If a transfer `A` has expiry `E₁` and transfer `B` has expiry `E₂`, and `E₁<E₂`,
+  if transfer `B` had the pending balance removed, then transfer `A` had the pending
+  balance removed as well.
 
 Constraints:
 

@@ -99,7 +99,10 @@ pub const AOF = struct {
             if (last_entry.?.header().checksum != checksum) {
                 return error.ChecksumMismatch;
             }
-            log.debug("validated all aof entries. last entry checksum {} matches supplied {}", .{ last_entry.?.header().checksum, checksum });
+            log.debug("validated all aof entries. last entry checksum {} matches supplied {}", .{
+                last_entry.?.header().checksum,
+                checksum,
+            });
         } else {
             log.debug("validated present aof entries.", .{});
         }
@@ -111,10 +114,20 @@ pub const AOF = struct {
         options: struct { replica: u8, primary: u8 },
     ) !void {
         var entry: AOFEntry align(constants.sector_size) = undefined;
-        entry.from_message(message, .{ .replica = options.replica, .primary = options.primary }, &self.last_checksum);
+        entry.from_message(
+            message,
+            .{ .replica = options.replica, .primary = options.primary },
+            &self.last_checksum,
+        );
 
         const disk_size = entry.calculate_disk_size();
-        stdx.copy_disjoint(.exact, u8, self.backing_store[self.index .. self.index + disk_size], std.mem.asBytes(&entry)[0..disk_size]);
+        assert(self.index + disk_size <= self.backing_store.len);
+        stdx.copy_disjoint(
+            .exact,
+            u8,
+            self.backing_store[self.index..][0..disk_size],
+            std.mem.asBytes(&entry)[0..disk_size],
+        );
         self.index += disk_size;
 
         log.debug("wrote {} bytes, {} used / {}", .{ disk_size, self.index, backing_size });
