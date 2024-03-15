@@ -265,9 +265,18 @@ pub fn main() !void {
         if (simulator.requests_replied > requests_replied_old) {
             tick = 0;
         }
-        if (simulator.requests_replied == simulator.options.requests_max) {
-            break;
-        }
+        const requests_done = simulator.requests_replied == simulator.options.requests_max;
+        const upgrades_done =
+            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
+        {
+            if (health == .down) continue;
+            const release_latest = releases[simulator.replica_releases_limit - 1].release;
+            if (replica.release == release_latest) {
+                break true;
+            }
+        } else false;
+
+        if (requests_done and upgrades_done) break;
     } else {
         output.info(
             "no liveness, final cluster state (requests_max={} requests_replied={}):",
