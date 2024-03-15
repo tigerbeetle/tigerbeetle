@@ -4223,6 +4223,8 @@ pub fn ReplicaType(
                 // The replica is replaying this upgrade request after restarting into the new
                 // version.
                 assert(self.upgrade_release == null);
+                assert(prepare.header.op <=
+                    vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?);
 
                 log.debug("{}: commit_upgrade: release={} (ignoring, already upgraded)", .{
                     self.replica,
@@ -5643,7 +5645,18 @@ pub fn ReplicaType(
                 .reserved, .root => unreachable,
                 .register => {},
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
-                .upgrade => {},
+                .upgrade => {
+                    const upgrade_request = std.mem.bytesAsValue(
+                        vsr.UpgradeRequest,
+                        request.message.body()[0..@sizeOf(vsr.UpgradeRequest)],
+                    );
+
+                    if (self.release == upgrade_request.release) {
+                        const op_checkpoint_trigger =
+                            vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint());
+                        assert(op_checkpoint_trigger.? > self.op + 1);
+                    }
+                },
                 else => {
                     self.state_machine.prepare(
                         request.message.header.operation.cast(StateMachine),
