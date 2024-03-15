@@ -60,7 +60,7 @@ pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").Checkpoi
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
-pub const Version: u16 = 0;
+pub const Version: u16 = 1;
 
 /// A ReleaseList is ordered from lowest-to-highest version.
 pub const ReleaseList = stdx.BoundedArray(u16, constants.vsr_releases_max);
