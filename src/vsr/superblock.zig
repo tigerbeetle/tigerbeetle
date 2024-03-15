@@ -45,7 +45,7 @@ pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
 });
 
-pub const SuperBlockVersion: u16 = 0;
+pub const SuperBlockVersion: u16 = 1;
 
 const vsr_headers_reserved_size = constants.sector_size -
     ((constants.view_change_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
@@ -1485,6 +1485,7 @@ test "SuperBlockHeader" {
     const expect = std.testing.expect;
 
     var a = std.mem.zeroes(SuperBlockHeader);
+    a.version = SuperBlockVersion;
     a.set_checksum();
 
     assert(a.copy == 0);
