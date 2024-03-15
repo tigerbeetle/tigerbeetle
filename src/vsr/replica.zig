@@ -1466,7 +1466,10 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
             // Messages with `client == 0` are sent from itself,
-            // it's not needed to get a different timestamp.
+            // setting it to zero so the StateMachine `{prepare,commit}_timestamp`
+            // will be used instead.
+            // Invariant: header.timestamp ≠ 0 only for AOF recovery, then
+            // we need to be deterministic with the timestamp being replayed.
             const realtime: i64 = if (message.header.client == 0)
                 @intCast(message.header.timestamp)
             else
@@ -3033,7 +3036,7 @@ pub fn ReplicaType(
             assert(self.primary());
             assert(self.pulse_timeout.ticking);
 
-            defer self.pulse_timeout.reset();
+            self.pulse_timeout.reset();
             if (!self.pulse_needed()) return;
 
             // To decide whether or not to `pulse` a time-dependant
@@ -3689,11 +3692,13 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
 
             if (self.status == .normal and self.primary()) {
-                if (self.pulse_needed()) {
-                    self.send_request_pulse_to_self();
-                } else if (self.pipeline.queue.pop_request()) |request| {
+                if (self.pipeline.queue.pop_request()) |request| {
                     // Start preparing the next request in the queue (if any).
                     self.primary_pipeline_prepare(request);
+                }
+
+                if (self.pulse_needed()) {
+                    self.send_request_pulse_to_self();
                 }
 
                 assert(self.commit_min == self.commit_max);
@@ -3716,6 +3721,7 @@ pub fn ReplicaType(
 
                 if (self.upgrade_release) |upgrade_release| {
                     assert(self.release < upgrade_release);
+                    assert(!self.pulse_needed());
 
                     if (self.commit_min < self.op_checkpoint_next_trigger() or
                         self.release_for_next_checkpoint() == self.release)
