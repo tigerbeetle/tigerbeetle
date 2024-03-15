@@ -1,6 +1,7 @@
 const std = @import("std");
 const stdx = @import("../../../stdx.zig");
 const assert = std.debug.assert;
+const testing = std.testing;
 const mem = std.mem;
 
 const constants = @import("../../../constants.zig");
@@ -172,4 +173,40 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
             self.message_pool.unref(message);
         }
     };
+}
+
+test "Echo Demuxer" {
+    const StateMachine = @import("../../../state_machine.zig").StateMachineType(
+        @import("../../../testing/storage.zig").Storage,
+        constants.state_machine_config,
+    );
+    const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
+    const Client = EchoClient(StateMachine, MessageBus);
+
+    var prng = std.rand.DefaultPrng.init(42);
+    inline for ([_]StateMachine.Operation{
+        .create_accounts,
+        .create_transfers,
+    }) |operation| {
+        const Event = StateMachine.Event(operation);
+        var events: [@divExact(constants.message_body_size_max, @sizeOf(Event))]Event = undefined;
+        prng.fill(std.mem.asBytes(&events));
+
+        for (0..events.len) |i| {
+            const events_total = i + 1;
+            var demuxer = Client.DemuxerType(operation).init(std.mem.sliceAsBytes(events[0..events_total]));
+
+            var events_offset: usize = 0;
+            while (events_offset < events_total) {
+                const events_limit = events_total - events_offset;
+                const events_count = @max(1, prng.random().uintAtMost(usize, events_limit));
+                defer events_offset += events_count;
+
+                const reply_bytes = demuxer.decode(@intCast(events_offset), @intCast(events_count));
+                const reply: []Event = @alignCast(std.mem.bytesAsSlice(Event, reply_bytes));
+                try testing.expectEqual(&reply[0], &events[events_offset]);
+                try testing.expectEqual(reply.len, events[events_offset..][0..events_count].len);
+            }
+        }
+    }
 }
