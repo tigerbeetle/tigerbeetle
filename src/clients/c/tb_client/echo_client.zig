@@ -21,6 +21,34 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         pub const StateMachine = VSRClient.StateMachine;
         pub const Request = VSRClient.Request;
 
+        /// Custom Demuxer which treats Event(operation)'s and results and echoes them back.
+        pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
+            return struct {
+                const Demuxer = @This();
+
+                results: []u8,
+                events_decoded: u32 = 0,
+
+                pub fn init(reply: []u8) Demuxer {
+                    return Demuxer{ .results = reply };
+                }
+
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
+                    // Double check the event offset/count are contiguously decoded from results.
+                    assert(self.events_decoded == event_offset);
+                    self.events_decoded += event_count;
+
+                    // Double check the results has enough event bytes to echo back.
+                    const byte_count = @sizeOf(StateMachine.Event(operation)) * event_count;
+                    assert(self.results.len >= byte_count);
+
+                    // Echo back the result bytes and consume the events.
+                    defer self.results = self.results[byte_count..];
+                    return self.results[0..byte_count];
+                }
+            };
+        }
+
         id: u128,
         cluster: u128,
         request_number: u32 = 1,

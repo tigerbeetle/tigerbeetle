@@ -34,6 +34,26 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             callback: Callback,
         };
 
+        /// Custom Demuxer which passes through to StateMachine.Demuxer.
+        pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
+            return struct {
+                const Demuxer = @This();
+                const DemuxerBase = StateMachine.DemuxerType(operation);
+
+                base: DemuxerBase,
+
+                pub fn init(reply: []u8) Demuxer {
+                    const results = std.mem.bytesAsSlice(StateMachine.Result(operation), reply);
+                    return Demuxer{ .base = DemuxerBase.init(@alignCast(results)) };
+                }
+
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
+                    const results = self.base.decode(event_offset, event_count);
+                    return std.mem.sliceAsBytes(results);
+                }
+            };
+        }
+
         allocator: mem.Allocator,
 
         message_bus: MessageBus,

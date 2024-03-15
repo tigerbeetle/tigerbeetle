@@ -390,12 +390,10 @@ pub fn ContextType(
 
             switch (op) {
                 inline else => |operation| {
-                    // Demuxer takes a mutable []Result slice but VSR callback gives us []const u8.
-                    // The reply comes directly from message.body() which is safe to @alignCast()
-                    // and the reply's body is writable and unused after so safe to @constCast().
-                    var demuxer = StateMachine.DemuxerType(operation).init(
-                        @constCast(@alignCast(std.mem.bytesAsSlice(StateMachine.Result(operation), reply))),
-                    );
+                    // Demuxer expects []u8 but VSR callback provides []const u8.
+                    // The bytes are known to come from a Message body that will be soon discarded
+                    // therefor it's safe to @constCast and potentially modify the data in-place.
+                    var demuxer = Client.DemuxerType(operation).init(@constCast(reply));
 
                     var it: ?*Packet = packet;
                     var event_offset: u32 = 0;
@@ -403,16 +401,15 @@ pub fn ContextType(
                         it = batched.batch_link;
 
                         const event_count = @divExact(batched.data_size, @sizeOf(StateMachine.Event(operation)));
-                        const decoded = demuxer.decode(event_offset, event_count);
+                        const results = demuxer.decode(event_offset, event_count);
                         event_offset += event_count;
 
-                        const result = std.mem.sliceAsBytes(decoded);
                         if (!StateMachine.batch_logical_allowed.get(operation)) {
-                            assert(result.len == reply.len);
+                            assert(results.len == reply.len);
                         }
 
                         assert(batched.operation == @intFromEnum(operation));
-                        self.on_complete(batched, result);
+                        self.on_complete(batched, results);
                     }
                 },
             }
