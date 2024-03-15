@@ -23,10 +23,14 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
-* Must not conflict with another account
+* Must not conflict with another account in the cluster
 
 See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
+
+Note that account IDs are unique for the cluster -- not per ledger. If you want to store a
+relationship between accounts, such as indicating that multiple accounts on different ledgers belong
+to the same user, you should store a user ID in one of the [`user_data`](#user_data_128) fields.
 
 ### `debits_pending`
 

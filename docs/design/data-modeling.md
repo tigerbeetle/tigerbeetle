@@ -103,10 +103,16 @@ Example uses:
 
 ## `id`
 
-The primary purpose of an `id` (for both [accounts](../reference/accounts.md#id) and
-[transfers](../reference/transfers.md#id)) is to serve as an "idempotency key" — to avoid
+The `id` field uniquely identifies each [`Account`](../reference/accounts.md#id) and
+[`Transfer`](../reference/transfers.md#id) within the cluster.
+
+The primary purpose of an `id` is to serve as an "idempotency key" — to avoid
 executing an event twice. For example, if a client creates a transfer but the server's reply is
 lost, the client (or application) will retry — the database must not transfer the money twice.
+
+Note that `id`s are unique per cluster -- not per ledger. To store a relationship between `Account`s
+or `Transfer`s on different ledgers, you should store another identifier in one of the
+[`user_data`](#user_data) fields.
 
 [Time-based identifiers](#time-based-identifiers) are recommended for most applications.
 

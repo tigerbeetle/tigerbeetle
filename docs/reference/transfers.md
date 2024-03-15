@@ -56,10 +56,15 @@ Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
 * Must not be zero or `2^128 - 1`
-* Must not conflict with another transfer
+* Must not conflict with another transfer in the cluster
 
 See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
+
+Note that transfer IDs are unique for the cluster -- not the ledger. If you want to store a
+relationship between multiple transfers, such as indicating that multiple transfers on different
+ledgers were part of a single transaction, you should store a transaction ID in one of the
+[`user_data`](#user_data_128) fields.
 
 ### `debit_account_id`
 
