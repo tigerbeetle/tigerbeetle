@@ -8186,7 +8186,6 @@ pub fn ReplicaType(
             assert(self.status != .recovering);
             assert(self.syncing != .idle);
             assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.executing() == 0);
 
             log.debug("{}: sync_start_from_sync " ++
                 "(checkpoint_op={} checkpoint_id={x:0>32})", .{
@@ -8206,6 +8205,7 @@ pub fn ReplicaType(
 
                 .requesting_target => {
                     assert(self.commit_stage == .idle);
+                    assert(self.grid_repair_tables.executing() == 0);
                     assert(self.sync_target_max != null);
                     self.sync_dispatch(.requesting_target);
                 },
@@ -8214,6 +8214,7 @@ pub fn ReplicaType(
                 // Re-sync to the new target.
                 .requesting_checkpoint => |*stage| {
                     assert(self.commit_stage == .idle);
+                    assert(self.grid_repair_tables.executing() == 0);
                     assert(self.sync_target_max.?.checkpoint_op >= stage.target.checkpoint_op);
                     if (self.sync_target_max.?.checkpoint_op == stage.target.checkpoint_op) return;
 
