@@ -6473,6 +6473,10 @@ pub fn ReplicaType(
                 assert(self.journal.has(header));
             }
 
+            if (header.op == self.op_checkpoint() + 1) {
+                assert(header.parent == self.superblock.working.vsr_state.checkpoint.header.checksum);
+            }
+
             if (header.op < self.op_repair_min()) return;
 
             // We must not set an op as dirty if we already have it exactly because:
@@ -8527,6 +8531,12 @@ pub fn ReplicaType(
                 self.log_view < self.superblock.working.vsr_state.checkpoint.header.view)
             {
                 self.transition_to_recovering_head();
+            }
+
+            if (self.status == .normal) {
+                if (self.journal.header_with_op(self.op_checkpoint() + 1)) |header| {
+                    assert(header.parent == self.superblock.working.vsr_state.checkpoint.header.checksum);
+                }
             }
 
             self.grid.open(grid_open_callback);
