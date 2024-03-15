@@ -1061,7 +1061,7 @@ pub const IO = struct {
             },
             .file => {
                 var direct_io_supported = false;
-                var dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
+                const dir_on_tmpfs = try fs_is_tmpfs(dir_fd);
 
                 if (dir_on_tmpfs) {
                     log.warn(
