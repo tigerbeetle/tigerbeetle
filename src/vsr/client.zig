@@ -678,7 +678,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 inline else => |operation| {
                     const Result = StateMachine.Result(operation);
                     // Pulse operations are not supposed to go through the client,
-                    // although when using `aof` they are replayed.
+                    // although when recovering from `aof` they are replayed.
                     if (@sizeOf(Result) == 0) {
                         const demux = inflight.demux_queue.pop().?;
                         const user_data = demux.user_data;

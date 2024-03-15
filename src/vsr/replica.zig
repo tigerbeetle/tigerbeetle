@@ -4068,14 +4068,6 @@ pub fn ReplicaType(
 
             if (self.event_callback) |hook| hook(self, .committed);
 
-            if (prepare.header.operation == .pulse) {
-                // This prepare was sent by the primary, there's no reply to the client.
-                assert(reply_body_size == 0);
-                assert(prepare.header.client == 0);
-                assert(prepare.header.request == 0);
-                return;
-            }
-
             reply.header.* = .{
                 .command = .reply,
                 .operation = prepare.header.operation,
@@ -4108,7 +4100,8 @@ pub fn ReplicaType(
                     assert(entry.header.op >= prepare.header.op);
                 } else {
                     if (prepare.header.client == 0) {
-                        assert(prepare.header.operation == .upgrade);
+                        assert(prepare.header.operation == .pulse or
+                            prepare.header.operation == .upgrade);
                     } else {
                         assert(self.client_sessions.count() == self.client_sessions.capacity());
                     }
@@ -4123,7 +4116,7 @@ pub fn ReplicaType(
                 switch (reply.header.operation) {
                     .root => unreachable,
                     .register => self.client_table_entry_create(reply),
-                    .upgrade => assert(reply.header.client == 0),
+                    .pulse, .upgrade => assert(reply.header.client == 0),
                     else => self.client_table_entry_update(reply),
                 }
             }
@@ -5668,6 +5661,9 @@ pub fn ReplicaType(
             // Reuse the Request message as a Prepare message by replacing the header.
             const message = request.message.base().build(.prepare);
 
+            // Copy the header to the stack before overwriting it to avoid UB.
+            const request_header: Header.Request = request.message.header.*;
+
             const checkpoint_id = checkpoint_id: {
                 if (self.op + 1 <= self.op_checkpoint_next()) {
                     break :checkpoint_id self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id;
@@ -5676,8 +5672,6 @@ pub fn ReplicaType(
                 }
             };
 
-            // Copy the header to the stack before overwriting it to avoid UB.
-            const request_header: Header.Request = request.message.header.*;
             const latest_entry = self.journal.header_with_op(self.op).?;
             message.header.* = Header.Prepare{
                 .cluster = self.cluster,
@@ -9926,7 +9920,7 @@ const PipelineQueue = struct {
         while (pipeline.prepare_queue.pop()) |p| message_pool.unref(p.message);
     }
 
-    fn verify(pipeline: *const PipelineQueue) void {
+    fn verify(pipeline: PipelineQueue) void {
         assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
         assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
 
@@ -9963,7 +9957,7 @@ const PipelineQueue = struct {
         }
     }
 
-    fn full(pipeline: *const PipelineQueue) bool {
+    fn full(pipeline: PipelineQueue) bool {
         if (pipeline.prepare_queue.full()) {
             return pipeline.request_queue.full();
         } else {
