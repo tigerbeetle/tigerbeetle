@@ -141,8 +141,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         replica_count: u8,
 
         /// Only tests should ever override the release.
-        // TODO Use real release number.
-        release: vsr.Release = vsr.Release.minimum,
+        release: vsr.Release = constants.config.process.release,
 
         /// The total number of ticks elapsed since the client was initialized.
         ticks: u64 = 0,
@@ -1080,7 +1079,7 @@ test "Client Batching" {
                 .view = message.header.view,
                 .command = .reply,
                 .replica = message.header.replica,
-                .release = vsr.Release.minimum, // TODO Use the real release number.
+                .release = vsr.Release.minimum,
                 .request_checksum = message.header.checksum,
                 .client = message.header.client,
                 .context = undefined, // computed below.

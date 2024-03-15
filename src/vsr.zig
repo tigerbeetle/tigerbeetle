@@ -120,7 +120,7 @@ pub const ReleaseTriple = extern struct {
         assert(stdx.no_padding(ReleaseTriple));
     }
 
-    pub fn parse(string: []const u8) error{ InvalidRelease }!ReleaseTriple {
+    pub fn parse(string: []const u8) error{InvalidRelease}!ReleaseTriple {
         var parts = std.mem.splitScalar(u8, string, '.');
         const major = parts.first();
         const minor = parts.next() orelse return error.InvalidRelease;
@@ -137,7 +137,7 @@ pub const ReleaseTriple = extern struct {
 test "ReleaseTriple.parse" {
     const tests = [_]struct {
         string: []const u8,
-        result: error{ InvalidRelease }!ReleaseTriple,
+        result: error{InvalidRelease}!ReleaseTriple,
     }{
         // Valid:
         .{ .string = "0.0.1", .result = .{ .major = 0, .minor = 0, .patch = 1 } },

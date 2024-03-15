@@ -58,7 +58,7 @@ pub fn main() !void {
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
-            .release = vsr.Release.minimum, // TODO Use real release number.
+            .release = config.process.release,
         }, args.path),
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
@@ -180,10 +180,10 @@ const Command = struct {
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
-            // TODO Use real release numbers.
-            .release = vsr.Release.minimum,
-            .release_client_min = vsr.Release.minimum,
-            .releases_bundled = &[_]vsr.Release{ vsr.Release.minimum },
+            .release = config.process.release,
+            // TODO Where should this be set?
+            .release_client_min = config.process.release,
+            .releases_bundled = &[_]vsr.Release{config.process.release},
             .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
