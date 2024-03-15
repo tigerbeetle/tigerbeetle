@@ -194,7 +194,8 @@ test "Echo Demuxer" {
 
         for (0..events.len) |i| {
             const events_total = i + 1;
-            var demuxer = Client.DemuxerType(operation).init(std.mem.sliceAsBytes(events[0..events_total]));
+            const events_data = std.mem.sliceAsBytes(events[0..events_total]);
+            var demuxer = Client.DemuxerType(operation).init(events_data);
 
             var events_offset: usize = 0;
             while (events_offset < events_total) {
