@@ -3044,6 +3044,7 @@ pub fn ReplicaType(
 
             self.pulse_timeout.reset();
             if (!self.pulse_needed()) return;
+            if (self.pipeline.queue.full()) return;
 
             // To decide whether or not to `pulse` a time-dependant
             // operation, the State Machine needs an updated `prepare_timestamp`.
