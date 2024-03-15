@@ -66,25 +66,27 @@ pub const Version: u16 = 0;
 pub const ReleaseList = stdx.BoundedArray(Release, constants.vsr_releases_max);
 
 pub const Release = extern struct {
-    value: u16,
+    value: u32,
 
     pub const ReleaseTriple = extern struct {
+        patch: u8,
+        minor: u8,
         major: u16,
 
         comptime {
-            assert(@sizeOf(ReleaseTriple) == 2);
+            assert(@sizeOf(ReleaseTriple) == 4);
             assert(@sizeOf(ReleaseTriple) == @sizeOf(Release));
             assert(stdx.no_padding(ReleaseTriple));
         }
     };
 
     comptime {
-        assert(@sizeOf(Release) == 2);
+        assert(@sizeOf(Release) == 4);
         assert(stdx.no_padding(Release));
     }
 
-    pub const zero = Release.from(.{ .major = 0 });
-    pub const minimum = Release.from(.{ .major = 1 });
+    pub const zero = Release.from(.{ .major = 0, .minor = 0, .patch = 0 });
+    pub const minimum = Release.from(.{ .major = 0, .minor = 0, .patch = 1 });
 
     pub fn from(release_triple: ReleaseTriple) Release {
         return std.mem.bytesAsValue(Release, std.mem.asBytes(&release_triple)).*;
@@ -103,7 +105,11 @@ pub const Release = extern struct {
         _ = fmt;
         _ = options;
         const release_triple = release.triple();
-        return writer.print("{}", .{release_triple.major});
+        return writer.print("{}.{}.{}", .{
+            release_triple.major,
+            release_triple.minor,
+            release_triple.patch,
+        });
     }
 
     pub fn max(a: Release, b: Release) Release {
@@ -622,7 +628,7 @@ test "ReconfigurationRequest" {
 
 pub const UpgradeRequest = extern struct {
     release: Release,
-    reserved: [14]u8 = [_]u8{0} ** 14,
+    reserved: [12]u8 = [_]u8{0} ** 12,
 
     comptime {
         assert(@sizeOf(UpgradeRequest) == 16);

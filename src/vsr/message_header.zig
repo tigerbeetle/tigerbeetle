@@ -62,7 +62,7 @@ pub const Header = extern struct {
     replica: u8,
 
     /// Reserved for future use by the header frame (i.e. to be shared by all message types).
-    reserved_frame: [14]u8,
+    reserved_frame: [12]u8,
 
     /// This data's schema is different depending on the `Header.command`.
     /// (No default value – `Header`s should not be constructed directly.)
@@ -272,7 +272,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [14]u8,
+        reserved_frame: [12]u8,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -300,7 +300,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// Current checkpoint id.
         checkpoint_id: u128,
@@ -315,7 +315,8 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
             if (self.size != @sizeOf(Header) + @sizeOf(vsr.Release) * constants.vsr_releases_max) {
-                return "size != @sizeOf(Header) + @sizeOf(vsr.Release) * constants.vsr_releases_max";
+                return "size != @sizeOf(Header) + " ++
+                    "@sizeOf(vsr.Release) * constants.vsr_releases_max";
             }
             if (self.release.value == 0) return "release == 0";
             if (!vsr.Checkpoint.valid(self.checkpoint_op)) return "checkpoint_op invalid";
@@ -347,7 +348,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         ping_timestamp_monotonic: u64,
         pong_timestamp_wall: u64,
@@ -382,7 +383,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         client: u128,
         reserved: [112]u8 = [_]u8{0} ** 112,
@@ -416,7 +417,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -447,7 +448,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
@@ -564,7 +565,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// A backpointer to the previous prepare checksum for hash chain verification.
         /// This provides a cryptographic guarantee for linearizability across our distributed log
@@ -731,7 +732,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// The previous prepare's checksum.
         /// (Same as the corresponding Prepare's `parent`.)
@@ -818,7 +819,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// The checksum of the corresponding Request.
         request_checksum: u128,
@@ -880,7 +881,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// The latest committed prepare's checksum.
         commit_checksum: u128,
@@ -927,7 +928,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -957,7 +958,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
         /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
@@ -1003,7 +1004,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
         nonce: u128,
@@ -1040,7 +1041,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         nonce: u128,
         reserved: [112]u8 = [_]u8{0} ** 112,
@@ -1072,7 +1073,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// The minimum op requested (inclusive).
         op_min: u64,
@@ -1108,7 +1109,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         prepare_checksum: u128,
         prepare_checksum_padding: u128 = 0,
@@ -1143,7 +1144,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         reply_checksum: u128,
         reply_checksum_padding: u128 = 0,
@@ -1180,7 +1181,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -1209,7 +1210,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         client: u128,
         reserved: [111]u8 = [_]u8{0} ** 111,
@@ -1261,7 +1262,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         reserved: [128]u8 = [_]u8{0} ** 128,
 
@@ -1296,7 +1297,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         // Schema is determined by `block_type`.
         metadata_bytes: [metadata_size]u8,
@@ -1338,7 +1339,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         checkpoint_id: u128,
         checkpoint_op: u64,
@@ -1371,7 +1372,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [14]u8 = [_]u8{0} ** 14,
+        reserved_frame: [12]u8 = [_]u8{0} ** 12,
 
         /// Strictly speaking, this is identical to `checksum_body`.
         /// It is included separately to mirror the RequestSyncCheckpoint header.

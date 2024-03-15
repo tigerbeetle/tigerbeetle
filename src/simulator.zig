@@ -32,16 +32,16 @@ const Message = @import("message_pool.zig").MessagePool.Message;
 
 const releases = [_]Release{
     .{
-        .release = vsr.Release.from(.{ .major = 1 }),
-        .release_client_min = vsr.Release.from(.{ .major = 1 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
     },
     .{
-        .release = vsr.Release.from(.{ .major = 2 }),
-        .release_client_min = vsr.Release.from(.{ .major = 1 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 2 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
     },
     .{
-        .release = vsr.Release.from(.{ .major = 3 }),
-        .release_client_min = vsr.Release.from(.{ .major = 1 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 3 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
     },
 };
 

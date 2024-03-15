@@ -365,7 +365,7 @@ pub const SuperBlockHeader = extern struct {
         /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
         release: vsr.Release,
 
-        reserved: [474]u8 = [_]u8{0} ** 474,
+        reserved: [472]u8 = [_]u8{0} ** 472,
 
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);

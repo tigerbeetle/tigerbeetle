@@ -802,10 +802,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .wal_op_max = wal_op_max,
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
-                    .release = replica.release.triple().major,
+                    .release = replica.release.triple().patch,
                     .release_max = replica.releases_bundled.get(
                         replica.releases_bundled.count() - 1,
-                    ).triple().major,
+                    ).triple().patch,
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else
