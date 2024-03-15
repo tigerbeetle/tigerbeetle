@@ -1465,11 +1465,10 @@ pub fn ReplicaType(
             assert(message.header.operation != .root);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
-            // Messages with `client == 0` are sent from itself,
-            // setting it to zero so the StateMachine `{prepare,commit}_timestamp`
-            // will be used instead.
-            // Invariant: header.timestamp ≠ 0 only for AOF recovery, then
-            // we need to be deterministic with the timestamp being replayed.
+            // Messages with `client == 0` are sent from itself, setting `realtime` to zero
+            // so the StateMachine `{prepare,commit}_timestamp` will be used instead.
+            // Invariant: header.timestamp ≠ 0 only for AOF recovery, then we need to be
+            // deterministic with the timestamp being replayed.
             const realtime: i64 = if (message.header.client == 0)
                 @intCast(message.header.timestamp)
             else
