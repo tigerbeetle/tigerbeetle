@@ -3061,14 +3061,21 @@ pub fn ReplicaType(
 
             self.upgrade_timeout.reset();
 
-            if (self.upgrade_release) |_| {
+            if (self.upgrade_release) |upgrade_release| {
                 // Already upgrading.
                 // Normally we chain send-upgrade-to-self via the commit chain.
                 // But there are a couple special cases where we need to restart the chain:
                 // - The request-to-self might have been dropped if the clock is not synchronized.
                 // - Alternatively, if a primary starts a new view, and an upgrade is already in
                 //   progress, it needs to start preparing more upgrades.
-                self.send_request_upgrade_to_self();
+                const release_next = self.release_for_next_checkpoint();
+                if (release_next == null or release_next.? != upgrade_release) {
+                    self.send_request_upgrade_to_self();
+                } else {
+                    // (Don't send an upgrade to ourself if we are already ready to upgrade and just
+                    // waiting on the last commit + checkpoint before we restart.)
+                    assert(self.commit_stage != .idle);
+                }
                 return;
             }
 
@@ -3730,9 +3737,8 @@ pub fn ReplicaType(
                     assert(self.release < upgrade_release);
                     assert(!self.pulse_needed());
 
-                    if (self.commit_min < self.op_checkpoint_next_trigger() or
-                        self.release_for_next_checkpoint() == self.release)
-                    {
+                    const release_next = self.release_for_next_checkpoint();
+                    if (release_next == null or release_next.? == self.release) {
                         self.send_request_upgrade_to_self();
                     }
                 }
@@ -3906,7 +3912,7 @@ pub fn ReplicaType(
                     .free_set_reference = self.grid.free_set_checkpoint.checkpoint_reference(),
                     .client_sessions_reference = self.client_sessions_checkpoint.checkpoint_reference(),
                     .storage_size = storage_size,
-                    .release = self.release_for_next_checkpoint(),
+                    .release = self.release_for_next_checkpoint().?,
                 },
             );
         }
@@ -8792,10 +8798,12 @@ pub fn ReplicaType(
         }
 
         /// Returns the next checkpoint's `CheckpointState.release`.
-        fn release_for_next_checkpoint(self: *const Self) u16 {
-            assert(self.commit_stage != .idle);
-            assert(self.commit_min == self.op_checkpoint_next_trigger());
+        fn release_for_next_checkpoint(self: *const Self) ?u16 {
             assert(self.release == self.superblock.working.vsr_state.checkpoint.release);
+
+            if (self.commit_min < self.op_checkpoint_next_trigger()) {
+                return null;
+            }
 
             var found_upgrade: usize = 0;
             for (self.op_checkpoint_next() + 1..self.op_checkpoint_next_trigger() + 1) |op| {
