@@ -222,7 +222,7 @@ pub const Operation = enum(u8) {
     reconfigure = 3,
     /// The value 4 is reserved for pulse request.
     pulse = 4,
-    /// The value 4 is is reserved for release-upgrade requests.
+    /// The value 5 is is reserved for release-upgrade requests.
     upgrade = 5,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
@@ -284,9 +284,17 @@ pub const Operation = enum(u8) {
             assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
                 @typeInfo(Operation).Enum.tag_type);
             for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
-                const op = @field(StateMachine.Operation, field.name);
-                if (@intFromEnum(op) < constants.vsr_operations_reserved) {
+                const operation = @field(StateMachine.Operation, field.name);
+                if (@intFromEnum(operation) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
+                }
+            }
+            for (@typeInfo(Operation).Enum.fields) |field| {
+                const vsr_operation = @field(Operation, field.name);
+                switch (vsr_operation) {
+                    // The StateMachine can convert a `vsr.Operation.pulse` into a valid operation.
+                    .pulse => maybe(StateMachine.operation_from_vsr(vsr_operation) == null),
+                    else => assert(StateMachine.operation_from_vsr(vsr_operation) == null),
                 }
             }
         }

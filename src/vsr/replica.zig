@@ -3035,7 +3035,9 @@ pub fn ReplicaType(
 
             defer self.pulse_timeout.reset();
             if (self.pipeline.queue.prepare_queue.full()) return;
-            // Solo replicas only change views immediately when they start up.
+            // Solo replicas only change views immediately when they start up,
+            // and during that time they do not accept requests.
+            // See Replica.open() for more detail.
             if (self.solo() and self.view_durable_updating()) return;
             // Requests are ignored during upgrades.
             if (self.upgrade_release != null or
@@ -5626,18 +5628,34 @@ pub fn ReplicaType(
                         request.message.body(),
                     );
 
-                    if (!constants.aof_recovery) {
-                        if (request.message.header.operation != .pulse) {
-                            // Check if the StateMachine needs to execute something before
-                            // the request.
-                            // Note that `prepare` must be called before so the StateMachine can
-                            // correctly assure that time-dependant tasks (e.g. expiring transfers)
-                            // will never intersect with a request batch.
-                            if (self.state_machine.pulse()) {
-                                if (!self.pipeline.queue.contains_operation(.pulse)) {
-                                    self.send_request_pulse_to_self();
+                    if (!constants.aof_recovery and
+                        request.message.header.client != 0)
+                    {
+                        // Check if the StateMachine needs to execute a `pulse` before
+                        // the request.
+                        // Note that `prepare` must be called before so the StateMachine can
+                        // correctly assure that time-dependant tasks (e.g. expiring transfers)
+                        // will never intersect with a request batch.
+                        if (self.state_machine.pulse()) {
+                            if (!self.pipeline.queue.contains_operation(.pulse)) {
+                                self.send_request_pulse_to_self();
+                                assert(self.pipeline.queue.contains_operation(.pulse));
+
+                                // Bump the prepare timestamp after the pulse is injected, so that
+                                // the next operation does not happen in the same nanosecond.
+                                self.state_machine.prepare_timestamp += 1;
+
+                                // If the prepare queue is full, the replica delays the
+                                // current request and returns, otherwise it runs prepare
+                                // again and proceeds after having injected the pulse.
+                                if (self.pipeline.queue.prepare_queue.full()) {
                                     self.pipeline.queue.delay_request(request);
                                     return;
+                                } else {
+                                    self.state_machine.prepare(
+                                        request.message.header.operation.cast(StateMachine),
+                                        request.message.body(),
+                                    );
                                 }
                             }
                         }
@@ -10059,6 +10077,8 @@ const PipelineQueue = struct {
 
     fn delay_request(pipeline: *PipelineQueue, request: Request) void {
         assert(request.message.header.command == .request);
+        assert(pipeline.prepare_queue.full());
+
         pipeline.assert_request_queue(request);
 
         pipeline.request_queue.push_head_assume_capacity(.{
