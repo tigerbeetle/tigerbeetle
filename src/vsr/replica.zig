@@ -3043,8 +3043,8 @@ pub fn ReplicaType(
             assert(self.pulse_timeout.ticking);
 
             self.pulse_timeout.reset();
-            if (!self.pulse_needed()) return;
             if (self.pipeline.queue.full()) return;
+            if (!self.pulse_needed()) return;
 
             // To decide whether or not to `pulse` a time-dependant
             // operation, the State Machine needs an updated `prepare_timestamp`.
@@ -9300,6 +9300,7 @@ pub fn ReplicaType(
         fn pulse_needed(self: *Self) bool {
             assert(self.status == .normal);
             assert(self.primary());
+            assert(!self.pipeline.queue.full());
 
             // Pulses are replayed during `aof recovery`.
             if (constants.aof_recovery) return false;
