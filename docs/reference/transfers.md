@@ -188,19 +188,27 @@ This is the interval in seconds after a
 that it may be [posted](#flagspost_pending_transfer) or [voided](#flagsvoid_pending_transfer).
 Zero denotes absence of timeout.
 
-If the timeout expires and the pending transfer has not already been
-posted or voided, the pending balance is removed automatically.
-
-Transfers expire in chronological order by their expiration time ([`timestamp`](#timestamp)
-_plus_ `timeout` converted in nanoseconds). If multiple transfers expire at the same time, then
-the creation [`timestamp`](#timestamp) is used.
-
-TigerBeetle can atomically expire [one batch](../design/client-requests.md#batching-events) of
-transfers at a time. This means that client requests executed immediately after the expiration _might_
-still see pending balances for expired transfers if there were more transfers to expire than it
-can process in a single batch.
-
 Non-pending transfers cannot have a timeout.
+
+TigerBeetle makes a best-effort approach to remove pending balances of expired transfers automatically:
+
+- Transfers expire _exactly_ at their expiry time ([`timestamp`](#timestamp)
+  _plus_ `timeout` converted in nanoseconds).
+
+- Pending balances will never be removed before its expiry.
+
+- Expired transfers cannot be manually posted or voided.
+
+- It is not guaranteed that the pending balance will be removed exactly at its expiry.
+
+  In particular, client requests may observe still-pending balances for expired transfers.
+
+- Pending balances are removed in chronological order by expiry. If multiple transfers expire at
+  the same time, then ordered by the transfer's creation [`timestamp`](#timestamp).
+
+  If a transfer `A` has expiry `E₁` and transfer `B` has expiry `E₂`, and `E₁<E₂`,
+  if transfer `B` had the pending balance removed, then transfer `A` had the pending
+  balance removed as well.
 
 Constraints:
 

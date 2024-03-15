@@ -24,7 +24,7 @@ The query filter. See [`AccountFilter`](../account_filter.md) for constraints.
   balances exist, return an array of [`AccountBalance`](../account_balances.md)s.
 - If the account does not have the flag [`history`](../accounts.md#flagshistory) set,
   return nothing.
-- If no matching balance exist, return nothing.
+- If no matching balances exist, return nothing.
 - If any constraint is violated, return nothing.
 
 ## Client libraries
