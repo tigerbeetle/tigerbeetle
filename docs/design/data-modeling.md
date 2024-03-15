@@ -110,9 +110,11 @@ The primary purpose of an `id` is to serve as an "idempotency key" — to avoid
 executing an event twice. For example, if a client creates a transfer but the server's reply is
 lost, the client (or application) will retry — the database must not transfer the money twice.
 
-Note that `id`s are unique per cluster -- not per ledger. To store a relationship between `Account`s
-or `Transfer`s on different ledgers, you should store another identifier in one of the
-[`user_data`](#user_data) fields.
+Note that `id`s are unique per cluster -- not per ledger. You should attach a separate identifier in
+the [`user_data`](#user_data) field if you want to store a connection between multiple `Account`s or
+multiple `Transfer`s that are related to one another. For example, different currency `Account`s
+belonging to the same user or multiple `Transfer`s that are part of a [currency
+exchange](../recipes/currency-exchange.md).
 
 [Time-based identifiers](#time-based-identifiers) are recommended for most applications.
 
