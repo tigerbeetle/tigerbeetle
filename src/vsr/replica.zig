@@ -3040,8 +3040,7 @@ pub fn ReplicaType(
             // See Replica.open() for more detail.
             if (self.solo() and self.view_durable_updating()) return;
             // Requests are ignored during upgrades.
-            if (self.upgrade_release != null or
-                self.pipeline.queue.contains_operation(.upgrade)) return;
+            if (self.upgrading()) return;
 
             // To decide whether or not to `pulse` a time-dependant
             // operation, the State Machine needs an updated `prepare_timestamp`.
@@ -5637,7 +5636,9 @@ pub fn ReplicaType(
                         // correctly assure that time-dependant tasks (e.g. expiring transfers)
                         // will never intersect with a request batch.
                         if (self.state_machine.pulse()) {
-                            if (!self.pipeline.queue.contains_operation(.pulse)) {
+                            if (!self.pipeline.queue.contains_operation(.pulse) and
+                                !self.upgrading())
+                            {
                                 self.send_request_pulse_to_self();
                                 assert(self.pipeline.queue.contains_operation(.pulse));
 
@@ -9351,6 +9352,11 @@ pub fn ReplicaType(
 
             self.send_message_to_replica(self.replica, request);
             defer self.flush_loopback_queue();
+        }
+
+        fn upgrading(self: *const Self) bool {
+            return self.upgrade_release != null or
+                self.pipeline.queue.contains_operation(.upgrade);
         }
     };
 }
