@@ -222,7 +222,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
-            var replica_times = try allocator.alloc(Time, node_count);
+            const replica_times = try allocator.alloc(Time, node_count);
             errdefer allocator.free(replica_times);
             @memset(replica_times, .{
                 .resolution = constants.tick_ms * std.time.ns_per_ms,
@@ -565,7 +565,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release)) |_| {
                 // Disable faults while restarting to ensure that the cluster doesn't get stuck due
                 // to too many replicas in status=recovering_head.
-                var faulty = cluster.storages[replica_index].faulty;
+                const faulty = cluster.storages[replica_index].faulty;
                 cluster.storages[replica_index].faulty = false;
                 defer cluster.storages[replica_index].faulty = faulty;
 

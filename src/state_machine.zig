@@ -464,7 +464,7 @@ pub fn StateMachineType(
             );
             errdefer forest.deinit(allocator);
 
-            var scan_buffer = try allocator.alignedAlloc(u8, 16, @max(
+            const scan_buffer = try allocator.alignedAlloc(u8, 16, @max(
                 constants.batch_max.get_account_transfers * @sizeOf(Transfer),
                 constants.batch_max.get_account_history * @sizeOf(AccountHistoryGrooveValue),
             ));
