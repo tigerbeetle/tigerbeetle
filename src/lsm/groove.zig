@@ -332,7 +332,7 @@ pub fn GrooveType(
             }
 
             const derived_fn = @TypeOf(@field(groove_options.derived, field_name));
-            return std.meta.Child(@typeInfo(derived_fn).Fn.return_type.?);
+            return @typeInfo(derived_fn).Fn.return_type.?;
         }
 
         fn HelperType(comptime field_name: []const u8) type {
@@ -340,7 +340,7 @@ pub fn GrooveType(
                 const Index = IndexType(field_name);
                 const IndexInteger = switch (@typeInfo(Index)) {
                     .Int => Index,
-                    .Enum => |info| info.int_type,
+                    .Enum => |info| info.tag_type,
                     else => @compileError("Unsupported index type for " ++ field_name),
                 };
 

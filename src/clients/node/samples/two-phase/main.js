@@ -121,9 +121,9 @@ async function main() {
   assert.equal(transfers.length, 2);
   for (let transfer of transfers) {
     if (transfer.id === 1n) {
-      assert.equal(transfer.flags, TransferFlags.pending);
+      assert.equal(transfer.flags & TransferFlags.pending, TransferFlags.pending);
     } else if (transfer.id === 2n) {
-      assert.equal(transfer.flags, TransferFlags.post_pending_transfer);
+      assert.equal(transfer.flags & TransferFlags.post_pending_transfer, TransferFlags.post_pending_transfer);
     } else {
       assert.fail("Unexpected transfer: " + transfer.id);
     }
@@ -147,7 +147,7 @@ async function main() {
       assert.fail("Unexpected account: " + account.id);
     }
   }
-  
+
   console.log('ok');
 }
 

@@ -97,10 +97,30 @@ pub const Transfer = extern struct {
     flags: TransferFlags,
     timestamp: u64 = 0,
 
+    // Converts the timeout from seconds to ns.
+    pub fn timeout_ns(self: *const Transfer) u64 {
+        // Casting to u64 to avoid integer overflow:
+        return @as(u64, self.timeout) * std.time.ns_per_s;
+    }
+
     comptime {
         assert(stdx.no_padding(Transfer));
         assert(@sizeOf(Transfer) == 128);
         assert(@alignOf(Transfer) == 16);
+    }
+};
+
+pub const TransferPendingStatus = enum(u8) {
+    none = 0,
+    pending = 1,
+    posted = 2,
+    voided = 3,
+    expired = 4,
+
+    comptime {
+        for (std.enums.values(TransferPendingStatus), 0..) |result, index| {
+            assert(@intFromEnum(result) == index);
+        }
     }
 };
 

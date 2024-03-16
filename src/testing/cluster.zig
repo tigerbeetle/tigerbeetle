@@ -90,7 +90,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         allocator: mem.Allocator,
         options: Options,
-        on_client_reply: *const fn (
+        on_cluster_reply: *const fn (
             cluster: *Self,
             client: usize,
             request: *Message.Request,
@@ -127,7 +127,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn init(
             allocator: mem.Allocator,
             /// Includes command=register messages.
-            on_client_reply: *const fn (
+            on_cluster_reply: *const fn (
                 cluster: *Self,
                 client: usize,
                 request: *Message.Request,
@@ -314,7 +314,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.* = Self{
                 .allocator = allocator,
                 .options = options,
-                .on_client_reply = on_client_reply,
+                .on_cluster_reply = on_cluster_reply,
                 .network = network,
                 .storages = storages,
                 .aofs = aofs,
@@ -647,7 +647,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 if (client == c) break i;
             } else unreachable;
 
-            cluster.on_client_reply(cluster, client_index, request_message, reply_message);
+            cluster.on_cluster_reply(cluster, client_index, request_message, reply_message);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {

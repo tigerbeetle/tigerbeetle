@@ -23,6 +23,14 @@ pub fn ScanLookupType(
 
         pub const Callback = *const fn (*ScanLookup) void;
 
+        pub const Status = enum {
+            idle,
+            scan,
+            lookup,
+            buffer_finished,
+            scan_finished,
+        };
+
         const LookupWorker = struct {
             scan_lookup: *ScanLookup,
             lookup_context: Groove.ObjectTree.LookupContext = undefined,
@@ -52,7 +60,7 @@ pub fn ScanLookupType(
 
         buffer: ?[]Object,
         buffer_produced_len: usize,
-        state: enum { idle, scan, lookup, finished },
+        state: Status,
         callback: ?Callback,
 
         workers: [lookup_workers_max]LookupWorker = undefined,
@@ -93,7 +101,7 @@ pub fn ScanLookupType(
         }
 
         pub fn slice(self: *const ScanLookup) []const Object {
-            assert(self.state == .finished);
+            assert(self.state == .buffer_finished or self.state == .scan_finished);
             assert(self.workers_pending == 0);
             return self.buffer.?[0..self.buffer_produced_len];
         }
@@ -138,7 +146,7 @@ pub fn ScanLookupType(
             while (self.state == .lookup) {
                 if (self.buffer_produced_len == self.buffer.?.len) {
                     // The provided buffer was exhausted.
-                    self.state = .finished;
+                    self.state = .buffer_finished;
                     break;
                 }
 
@@ -150,7 +158,7 @@ pub fn ScanLookupType(
                     },
                 } orelse {
                     // Reached the end of the scan.
-                    self.state = .finished;
+                    self.state = .scan_finished;
                     break;
                 };
 
@@ -203,7 +211,7 @@ pub fn ScanLookupType(
             // The worker finished synchronously by reading from cache.
             switch (self.state) {
                 .idle, .lookup => unreachable,
-                .scan, .finished => self.lookup_worker_finished(),
+                .scan, .buffer_finished, .scan_finished => self.lookup_worker_finished(),
             }
         }
 
@@ -226,7 +234,7 @@ pub fn ScanLookupType(
             switch (self.state) {
                 .idle => unreachable,
                 .lookup => self.lookup_worker_next(worker),
-                .scan, .finished => self.lookup_worker_finished(),
+                .scan, .scan_finished, .buffer_finished => self.lookup_worker_finished(),
             }
         }
 
@@ -242,7 +250,8 @@ pub fn ScanLookupType(
                     .idle, .lookup => unreachable,
                     // The scan's buffer was consumed and it needs to read again:
                     .scan => self.scan.read(&self.scan_context),
-                    .finished => {
+                    // Either the lookup buffer was filled, or the scan reached the end:
+                    .buffer_finished, .scan_finished => {
                         const callback = self.callback.?;
                         self.callback = null;
 

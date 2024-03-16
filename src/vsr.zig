@@ -220,23 +220,30 @@ pub const Operation = enum(u8) {
     register = 2,
     /// The value 3 is reserved for reconfiguration request.
     reconfigure = 3,
-    /// The value 4 is is reserved for release-upgrade requests.
-    upgrade = 4,
+    /// The value 4 is reserved for pulse request.
+    pulse = 4,
+    /// The value 5 is is reserved for release-upgrade requests.
+    upgrade = 5,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
     _,
 
-    pub fn from(comptime StateMachine: type, op: StateMachine.Operation) Operation {
+    pub fn from(comptime StateMachine: type, operation: StateMachine.Operation) Operation {
         check_state_machine_operations(StateMachine);
-        return @as(Operation, @enumFromInt(@intFromEnum(op)));
+        return @as(Operation, @enumFromInt(@intFromEnum(operation)));
+    }
+
+    pub fn to(comptime StateMachine: type, operation: Operation) StateMachine.Operation {
+        check_state_machine_operations(StateMachine);
+        assert(operation.valid(StateMachine));
+        assert(!operation.vsr_reserved());
+        return @as(StateMachine.Operation, @enumFromInt(@intFromEnum(operation)));
     }
 
     pub fn cast(self: Operation, comptime StateMachine: type) StateMachine.Operation {
         check_state_machine_operations(StateMachine);
-        assert(self.valid(StateMachine));
-        assert(!self.vsr_reserved());
-        return @as(StateMachine.Operation, @enumFromInt(@intFromEnum(self)));
+        return StateMachine.operation_from_vsr(self).?;
     }
 
     pub fn valid(self: Operation, comptime StateMachine: type) bool {
@@ -277,9 +284,17 @@ pub const Operation = enum(u8) {
             assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
                 @typeInfo(Operation).Enum.tag_type);
             for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
-                const op = @field(StateMachine.Operation, field.name);
-                if (@intFromEnum(op) < constants.vsr_operations_reserved) {
+                const operation = @field(StateMachine.Operation, field.name);
+                if (@intFromEnum(operation) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
+                }
+            }
+            for (@typeInfo(Operation).Enum.fields) |field| {
+                const vsr_operation = @field(Operation, field.name);
+                switch (vsr_operation) {
+                    // The StateMachine can convert a `vsr.Operation.pulse` into a valid operation.
+                    .pulse => maybe(StateMachine.operation_from_vsr(vsr_operation) == null),
+                    else => assert(StateMachine.operation_from_vsr(vsr_operation) == null),
                 }
             }
         }

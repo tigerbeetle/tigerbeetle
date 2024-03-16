@@ -489,6 +489,10 @@ pub fn ReplicaType(
         /// (syncing≠idle)
         sync_message_timeout: Timeout,
 
+        /// The number of ticks on an idle cluester before injecting a `pulse` operation.
+        /// (status=normal and primary and !constants.aof_recovery)
+        pulse_timeout: Timeout,
+
         /// The number of ticks before checking whether we are ready to begin an upgrade.
         /// (status=normal primary)
         upgrade_timeout: Timeout,
@@ -1134,6 +1138,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .pulse_timeout = Timeout{
+                    .name = "pulse_timeout",
+                    .id = replica_index,
+                    .after = 10,
+                },
                 .upgrade_timeout = Timeout{
                     .name = "upgrade_timeout",
                     .id = replica_index,
@@ -1228,6 +1237,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.tick();
             self.grid_repair_message_timeout.tick();
             self.sync_message_timeout.tick();
+            self.pulse_timeout.tick();
             self.upgrade_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
@@ -1244,6 +1254,7 @@ pub fn ReplicaType(
             if (self.repair_sync_timeout.fired()) self.on_repair_sync_timeout();
             if (self.grid_repair_message_timeout.fired()) self.on_grid_repair_message_timeout();
             if (self.sync_message_timeout.fired()) self.on_sync_message_timeout();
+            if (self.pulse_timeout.fired()) self.on_pulse_timeout();
             if (self.upgrade_timeout.fired()) self.on_upgrade_timeout();
 
             // None of the on_timeout() functions above should send a message to this replica.
@@ -1454,10 +1465,17 @@ pub fn ReplicaType(
             assert(message.header.operation != .root);
             assert(message.header.view <= self.view); // The client's view may be behind ours.
 
-            const realtime = self.clock.realtime_synchronized() orelse {
-                log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
-                return;
-            };
+            // Messages with `client == 0` are sent from itself, setting `realtime` to zero
+            // so the StateMachine `{prepare,commit}_timestamp` will be used instead.
+            // Invariant: header.timestamp ≠ 0 only for AOF recovery, then we need to be
+            // deterministic with the timestamp being replayed.
+            const realtime: i64 = if (message.header.client == 0)
+                @intCast(message.header.timestamp)
+            else
+                self.clock.realtime_synchronized() orelse {
+                    log.err("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                    return;
+                };
 
             const request = .{
                 .message = message.ref(),
@@ -3018,6 +3036,26 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_pulse_timeout(self: *Self) void {
+            assert(!constants.aof_recovery);
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(self.pulse_timeout.ticking);
+
+            self.pulse_timeout.reset();
+            if (self.pipeline.queue.full()) return;
+            if (!self.pulse_needed()) return;
+
+            // To decide whether or not to `pulse` a time-dependant
+            // operation, the State Machine needs an updated `prepare_timestamp`.
+            const realtime = self.clock.realtime();
+            self.state_machine.prepare_timestamp = @max(
+                self.state_machine.prepare_timestamp,
+                @as(u64, @intCast(realtime)),
+            );
+            self.send_request_pulse_to_self();
+        }
+
         fn on_upgrade_timeout(self: *Self) void {
             assert(self.primary());
             assert(self.upgrade_timeout.ticking);
@@ -3621,17 +3659,20 @@ pub fn ReplicaType(
                 @src(),
             );
 
-            if (prepare.header.operation.vsr_reserved()) {
-                // NOTE: this inline callback is fine because the next stage of committing,
-                // `.setup_client_replies`, is always async.
-                commit_op_prefetch_callback(&self.state_machine);
-            } else {
+            if (StateMachine.operation_from_vsr(prepare.header.operation)) |prepare_operation| {
+                self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_op_prefetch_callback,
                     prepare.header.op,
-                    prepare.header.operation.cast(StateMachine),
+                    prepare_operation,
                     prepare.body(),
                 );
+            } else {
+                assert(prepare.header.operation.vsr_reserved());
+
+                // NOTE: this inline callback is fine because the next stage of committing,
+                // `.setup_client_replies`, is always async.
+                commit_op_prefetch_callback(&self.state_machine);
             }
         }
 
@@ -3663,6 +3704,11 @@ pub fn ReplicaType(
                     self.primary_pipeline_prepare(request);
                 }
 
+                if (self.pulse_needed()) {
+                    assert(self.upgrade_release == null);
+                    self.send_request_pulse_to_self();
+                }
+
                 assert(self.commit_min == self.commit_max);
 
                 if (self.pipeline.queue.prepare_queue.head_ptr()) |next| {
@@ -3683,6 +3729,7 @@ pub fn ReplicaType(
 
                 if (self.upgrade_release) |upgrade_release| {
                     assert(self.release < upgrade_release);
+                    assert(!self.pulse_needed());
 
                     if (self.commit_min < self.op_checkpoint_next_trigger() or
                         self.release_for_next_checkpoint() == self.release)
@@ -4060,7 +4107,8 @@ pub fn ReplicaType(
                     assert(entry.header.op >= prepare.header.op);
                 } else {
                     if (prepare.header.client == 0) {
-                        assert(prepare.header.operation == .upgrade);
+                        assert(prepare.header.operation == .pulse or
+                            prepare.header.operation == .upgrade);
                     } else {
                         assert(self.client_sessions.count() == self.client_sessions.capacity());
                     }
@@ -4075,7 +4123,7 @@ pub fn ReplicaType(
                 switch (reply.header.operation) {
                     .root => unreachable,
                     .register => self.client_table_entry_create(reply),
-                    .upgrade => assert(reply.header.client == 0),
+                    .pulse, .upgrade => assert(reply.header.client == 0),
                     else => self.client_table_entry_update(reply),
                 }
             }
@@ -4839,7 +4887,8 @@ pub fn ReplicaType(
                 return true;
             } else {
                 if (message.header.client == 0) {
-                    assert(message.header.operation == .upgrade);
+                    assert(message.header.operation == .pulse or
+                        message.header.operation == .upgrade);
                     assert(message.header.request == 0);
                     return false;
                 } else {
@@ -5590,10 +5639,12 @@ pub fn ReplicaType(
                 .register => {},
                 .reconfigure => self.primary_prepare_reconfiguration(request.message),
                 .upgrade => {},
-                else => self.state_machine.prepare(
-                    request.message.header.operation.cast(StateMachine),
-                    request.message.body(),
-                ),
+                else => {
+                    self.state_machine.prepare(
+                        request.message.header.operation.cast(StateMachine),
+                        request.message.body(),
+                    );
+                },
             }
             const prepare_timestamp = self.state_machine.prepare_timestamp;
 
@@ -5658,6 +5709,12 @@ pub fn ReplicaType(
                 self.prepare_timeout.start();
                 self.primary_abdicate_timeout.start();
             }
+
+            if (!constants.aof_recovery) {
+                assert(self.pulse_timeout.ticking);
+                self.pulse_timeout.reset();
+            }
+
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
@@ -7682,6 +7739,8 @@ pub fn ReplicaType(
             assert(self.view_durable_updating());
             assert(self.log_view > self.log_view_durable());
 
+            self.state_machine.pulse_reset();
+
             // Send prepare_ok messages to ourself to contribute to the pipeline.
             self.send_prepare_oks_after_view_change();
         }
@@ -7725,6 +7784,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.stop();
             self.upgrade_timeout.stop();
             self.grid_repair_message_timeout.start();
+            self.pulse_timeout.stop();
 
             if (self.pipeline == .queue) {
                 // Convert the pipeline queue into a cache.
@@ -7774,6 +7834,7 @@ pub fn ReplicaType(
                 assert(!self.do_view_change_message_timeout.ticking);
                 assert(!self.request_start_view_message_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.pulse_timeout.ticking);
                 assert(!self.upgrade_timeout.ticking);
 
                 self.ping_timeout.start();
@@ -7781,6 +7842,7 @@ pub fn ReplicaType(
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 self.pipeline.cache.deinit(self.message_bus.pool);
@@ -7803,6 +7865,7 @@ pub fn ReplicaType(
                 assert(!self.do_view_change_message_timeout.ticking);
                 assert(!self.request_start_view_message_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.pulse_timeout.ticking);
                 assert(!self.upgrade_timeout.ticking);
 
                 self.ping_timeout.start();
@@ -7856,6 +7919,7 @@ pub fn ReplicaType(
             assert(!self.do_view_change_message_timeout.ticking);
             assert(!self.request_start_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
+            assert(!self.pulse_timeout.ticking);
             assert(!self.upgrade_timeout.ticking);
 
             self.ping_timeout.start();
@@ -7889,6 +7953,7 @@ pub fn ReplicaType(
                 assert(!self.normal_heartbeat_timeout.ticking);
                 assert(!self.primary_abdicate_timeout.ticking);
                 assert(!self.repair_sync_timeout.ticking);
+                assert(!self.pulse_timeout.ticking);
                 assert(!self.upgrade_timeout.ticking);
                 assert(!self.pipeline_repairing);
                 assert(self.pipeline == .queue);
@@ -7911,6 +7976,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
                 // Do not reset the pipeline as there may be uncommitted ops to drive to completion.
@@ -8035,6 +8101,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
+            self.pulse_timeout.stop();
             self.grid_repair_message_timeout.start();
             self.upgrade_timeout.stop();
 
@@ -9230,6 +9297,38 @@ pub fn ReplicaType(
             }));
         }
 
+        fn pulse_needed(self: *Self) bool {
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(!self.pipeline.queue.full());
+
+            // Pulses are replayed during `aof recovery`.
+            if (constants.aof_recovery) return false;
+            // The state machine does not need a pulse.
+            if (!self.state_machine.pulse()) return false;
+            // There's a pulse already in progress.
+            if (self.pipeline.queue.contains_operation(.pulse)) return false;
+            // Solo replicas only change views immediately when they start up,
+            // and during that time they do not accept requests.
+            // See Replica.open() for more detail.
+            if (self.solo() and self.view_durable_updating()) return false;
+            // Requests are ignored during upgrades.
+            if (self.upgrading()) return false;
+
+            return true;
+        }
+
+        fn send_request_pulse_to_self(self: *Self) void {
+            assert(!constants.aof_recovery);
+            assert(self.status == .normal);
+            assert(self.primary());
+            assert(!self.pipeline.queue.full());
+            assert(!self.pipeline.queue.contains_operation(.pulse));
+
+            self.send_request_to_self(.pulse, &.{});
+            assert(self.pipeline.queue.contains_operation(.pulse));
+        }
+
         fn send_request_upgrade_to_self(self: *Self) void {
             assert(self.status == .normal);
             assert(self.primary());
@@ -9238,9 +9337,7 @@ pub fn ReplicaType(
 
             const upgrade = vsr.UpgradeRequest{ .release = self.upgrade_release.? };
             self.send_request_to_self(.upgrade, std.mem.asBytes(&upgrade));
-
-            // If our clock is not synchronized, then the request-to-self might have been dropped.
-            maybe(self.pipeline.queue.contains_operation(.upgrade));
+            assert(self.pipeline.queue.contains_operation(.upgrade));
         }
 
         fn send_request_to_self(self: *Self, operation: vsr.Operation, body: []const u8) void {
@@ -9272,6 +9369,11 @@ pub fn ReplicaType(
 
             self.send_message_to_replica(self.replica, request);
             defer self.flush_loopback_queue();
+        }
+
+        fn upgrading(self: *const Self) bool {
+            return self.upgrade_release != null or
+                self.pipeline.queue.contains_operation(.upgrade);
         }
     };
 }
@@ -9844,9 +9946,11 @@ const PipelineQueue = struct {
     fn verify(pipeline: PipelineQueue) void {
         assert(pipeline.request_queue.count <= constants.pipeline_request_queue_max);
         assert(pipeline.prepare_queue.count <= constants.pipeline_prepare_queue_max);
+
         assert(pipeline.request_queue.empty() or
             constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count or
-            constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1);
+            constants.pipeline_prepare_queue_max == pipeline.prepare_queue.count + 1 or
+            pipeline.contains_operation(.pulse));
 
         if (pipeline.prepare_queue.head_ptr_const()) |head| {
             var op = head.message.header.op;
@@ -9881,7 +9985,8 @@ const PipelineQueue = struct {
             return pipeline.request_queue.full();
         } else {
             assert(pipeline.request_queue.empty() or
-                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max);
+                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
+                pipeline.contains_operation(.pulse));
             return false;
         }
     }
@@ -9971,7 +10076,9 @@ const PipelineQueue = struct {
     fn pop_prepare(pipeline: *PipelineQueue) ?Prepare {
         if (pipeline.prepare_queue.pop()) |prepare| {
             assert(pipeline.request_queue.empty() or
-                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max);
+                pipeline.prepare_queue.count + 1 == constants.pipeline_prepare_queue_max or
+                prepare.message.header.operation == .pulse or
+                pipeline.contains_operation(.pulse));
             return prepare;
         } else {
             assert(pipeline.request_queue.empty());
@@ -9985,13 +10092,17 @@ const PipelineQueue = struct {
 
     fn push_request(pipeline: *PipelineQueue, request: Request) void {
         assert(request.message.header.command == .request);
+        pipeline.assert_request_queue(request);
+
+        pipeline.request_queue.push_assume_capacity(request);
+        if (constants.verify) pipeline.verify();
+    }
+
+    fn assert_request_queue(pipeline: *const PipelineQueue, request: Request) void {
         var queue_iterator = pipeline.request_queue.iterator();
         while (queue_iterator.next()) |queue_request| {
             assert(queue_request.message.header.client != request.message.header.client);
         }
-
-        pipeline.request_queue.push_assume_capacity(request);
-        if (constants.verify) pipeline.verify();
     }
 
     fn push_prepare(pipeline: *PipelineQueue, message: *Message.Prepare) void {

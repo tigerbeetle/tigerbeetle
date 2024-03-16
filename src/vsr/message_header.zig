@@ -505,6 +505,14 @@ pub const Header = extern struct {
                     }
                     if (self.size != @sizeOf(Header)) return "register: size != @sizeOf(Header)";
                 },
+                .pulse => {
+                    // These requests don't originate from a real client or session.
+                    if (self.client != 0) return "pulse: client != 0";
+                    if (self.parent != 0) return "pulse: parent != 0";
+                    if (self.session != 0) return "pulse: session != 0";
+                    if (self.request != 0) return "pulse: request != 0";
+                    if (self.size != @sizeOf(Header)) return "pulse: size != @sizeOf(Header)";
+                },
                 .upgrade => {
                     // These requests don't originate from a real client or session.
                     if (self.client != 0) return "upgrade: client != 0";
@@ -635,7 +643,9 @@ pub const Header = extern struct {
                 },
                 else => {
                     if (self.release == 0) return "release == 0";
-                    if (self.operation == .upgrade) {
+                    if (self.operation == .pulse or
+                        self.operation == .upgrade)
+                    {
                         if (self.client != 0) return "client != 0";
                     } else {
                         if (self.client == 0) return "client == 0";
@@ -644,6 +654,7 @@ pub const Header = extern struct {
                     if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
                     if (self.operation == .register or
+                        self.operation == .pulse or
                         self.operation == .upgrade)
                     {
                         if (self.request != 0) return "request != 0";
@@ -760,7 +771,9 @@ pub const Header = extern struct {
                     if (self.timestamp != 0) return "root: timestamp != 0";
                 },
                 else => {
-                    if (self.operation == .upgrade) {
+                    if (self.operation == .upgrade or
+                        self.operation == .pulse)
+                    {
                         if (self.client != 0) return "client != 0";
                     } else {
                         if (self.client == 0) return "client == 0";
@@ -771,6 +784,8 @@ pub const Header = extern struct {
                     if (self.operation == .register or
                         self.operation == .upgrade)
                     {
+                        if (self.request != 0) return "request != 0";
+                    } else if (self.client == 0) {
                         if (self.request != 0) return "request != 0";
                     } else {
                         if (self.request == 0) return "request == 0";

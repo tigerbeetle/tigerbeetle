@@ -754,7 +754,7 @@ pub const Simulator = struct {
                 assert(commit.reply.header.client == commit_client.id);
                 assert(commit.reply.header.request == commit.request.header.request);
                 assert(commit.reply.header.operation == commit.request.header.operation);
-
+                assert(commit.reply.header.operation != .pulse);
                 assert(commit.request.references == 1);
                 assert(commit.request.header.checksum == prepare_header.request_checksum);
                 assert(commit.request.header.command == .request);
@@ -779,10 +779,18 @@ pub const Simulator = struct {
                 }
             } else {
                 if (prepare_header.client == 0) {
+                    if (prepare_header.operation == .pulse) {
+                        simulator.workload.on_pulse(
+                            prepare_header.operation.cast(StateMachine),
+                            prepare_header.timestamp,
+                        );
+                    }
+
                     assert(prepare_header.operation.vsr_reserved());
                     // We don't receive replies for requests that originated at the replicas.
                     simulator.reply_op_next += 1;
                 } else {
+                    assert(prepare_header.operation != .pulse);
                     break;
                 }
             }

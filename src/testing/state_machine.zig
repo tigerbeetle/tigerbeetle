@@ -22,6 +22,12 @@ pub fn StateMachineType(
             echo = config.vsr_operations_reserved + 0,
         };
 
+        pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
+            if (operation.vsr_reserved()) return null;
+
+            return vsr.Operation.to(StateMachine, operation);
+        }
+
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
         };
@@ -94,6 +100,7 @@ pub fn StateMachineType(
         options: Options,
         forest: Forest,
 
+        prefetch_timestamp: u64 = 0,
         prepare_timestamp: u64 = 0,
         commit_timestamp: u64 = 0,
 
@@ -150,6 +157,15 @@ pub fn StateMachineType(
             state_machine.callback = null;
 
             callback(state_machine);
+        }
+
+        pub fn pulse_reset(state_machine: *StateMachine) void {
+            _ = state_machine;
+        }
+
+        pub fn pulse(state_machine: *const StateMachine) bool {
+            _ = state_machine;
+            return false;
         }
 
         pub fn prepare(
@@ -327,6 +343,19 @@ fn WorkloadType(comptime StateMachine: type) type {
 
             assert(operation == .echo);
             assert(std.mem.eql(u8, request_body, reply_body));
+        }
+
+        pub fn on_pulse(
+            workload: *Workload,
+            operation: StateMachine.Operation,
+            timestamp: u64,
+        ) void {
+            _ = workload;
+            _ = operation;
+            _ = timestamp;
+
+            // This state machine does not implement a pulse operation.
+            unreachable;
         }
 
         pub const Options = struct {
