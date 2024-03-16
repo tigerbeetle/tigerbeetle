@@ -3882,7 +3882,7 @@ pub fn ReplicaType(
                     break :sync .{
                         .op_min = self.superblock.staging.vsr_state.sync_op_min,
                         .op_max = self.superblock.staging.vsr_state.sync_op_max,
-                        .view = self.superblock.staging.vsr_state.view,
+                        .view = self.superblock.staging.vsr_state.sync_view,
                     };
                 }
             };
