@@ -10,7 +10,8 @@ const AOFEntry = @import("../aof.zig").AOFEntry;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const log = std.log.scoped(.aof);
 
-const backing_size = 10 * 1024 * 1024;
+// Arbitrary value.
+const backing_size = 32 * 1024 * 1024;
 
 const InMemoryAOF = struct {
     const Self = @This();
