@@ -126,7 +126,7 @@ fn start(allocator: std.mem.Allocator, options: struct {
     const forward_args = &.{
         .{ options.args.cache_accounts, "cache-accounts" },
         .{ options.args.cache_transfers, "cache-transfers" },
-        .{ options.args.cache_transfers_posted, "cache-transfers-posted" },
+        .{ options.args.cache_transfers_pending, "cache-transfers-pending" },
         .{ options.args.cache_account_history, "cache-account-history" },
         .{ options.args.cache_grid, "cache-grid" },
     };
