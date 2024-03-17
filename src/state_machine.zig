@@ -243,8 +243,11 @@ pub fn StateMachineType(
             .{
                 .ids = constants.tree_ids.transfers_pending,
                 .value_count_max = .{
-                    .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .status = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // Objects are mutated when the pending transfer is posted/voided/expired.
+                    .timestamp = 2 *
+                        config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .status = 2 *
+                        config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{"padding"},
                 .derived = .{},
