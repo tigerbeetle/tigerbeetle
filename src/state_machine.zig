@@ -103,11 +103,11 @@ pub fn StateMachineType(
                     .code = 17,
                     .timestamp = 18,
                     .expires_at = 19,
-                    .pending_status = 20,
                 };
 
-                pub const posted = .{
-                    .timestamp = 21,
+                pub const transfers_pending = .{
+                    .timestamp = 20,
+                    .status = 21,
                 };
 
                 pub const account_history = .{
@@ -222,9 +222,6 @@ pub fn StateMachineType(
                     .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    // Updated when the transfer is posted/voided/expired.
-                    .pending_status = 2 * config.lsm_batch_multiple *
-                        constants.batch_max.create_transfers,
                 },
                 .ignored = &[_][]const u8{ "timeout", "flags" },
                 .derived = .{
@@ -236,43 +233,33 @@ pub fn StateMachineType(
                             return 0;
                         }
                     }.expires_at,
-                    .pending_status = struct {
-                        fn pending_status(object: *const Transfer) TransferPendingStatus {
-                            return if (object.flags.pending) .pending else .none;
-                        }
-                    }.pending_status,
                 },
             },
         );
 
-        const PostedGroove = GrooveType(
+        const TransfersPendingGroove = GrooveType(
             Storage,
-            PostedGrooveValue,
+            TransferPending,
             .{
-                .ids = constants.tree_ids.posted,
+                .ids = constants.tree_ids.transfers_pending,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    .status = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
-                .ignored = &[_][]const u8{ "fulfillment", "padding" },
+                .ignored = &[_][]const u8{"padding"},
                 .derived = .{},
             },
         );
 
-        pub const PostedGrooveValue = extern struct {
-            pub const Fulfillment = enum(u8) {
-                posted = 0,
-                voided = 1,
-                expired = 2,
-            };
-
+        pub const TransferPending = extern struct {
             timestamp: u64,
-            fulfillment: Fulfillment,
+            status: TransferPendingStatus,
             padding: [7]u8 = [_]u8{0} ** 7,
 
             comptime {
                 // Assert that there is no implicit padding.
-                assert(@sizeOf(PostedGrooveValue) == 16);
-                assert(stdx.no_padding(PostedGrooveValue));
+                assert(@sizeOf(TransferPending) == 16);
+                assert(stdx.no_padding(TransferPending));
             }
         };
 
@@ -327,7 +314,7 @@ pub fn StateMachineType(
         pub const Forest = ForestType(Storage, .{
             .accounts = AccountsGroove,
             .transfers = TransfersGroove,
-            .posted = PostedGroove,
+            .transfers_pending = TransfersPendingGroove,
             .account_history = AccountHistoryGroove,
         });
 
@@ -376,7 +363,7 @@ pub fn StateMachineType(
             null,
             accounts: AccountsGroove.PrefetchContext,
             transfers: TransfersGroove.PrefetchContext,
-            posted: PostedGroove.PrefetchContext,
+            transfers_pending: TransfersPendingGroove.PrefetchContext,
 
             pub const Field = std.meta.FieldEnum(PrefetchContext);
             pub fn FieldType(comptime field: Field) type {
@@ -590,7 +577,7 @@ pub fn StateMachineType(
             // TODO(Snapshots) Pass in the target snapshot.
             self.forest.grooves.accounts.prefetch_setup(null);
             self.forest.grooves.transfers.prefetch_setup(null);
-            self.forest.grooves.posted.prefetch_setup(null);
+            self.forest.grooves.transfers_pending.prefetch_setup(null);
 
             return switch (operation) {
                 .pulse => {
@@ -680,7 +667,7 @@ pub fn StateMachineType(
                     if (self.forest.grooves.transfers.get(t.pending_id)) |p| {
                         // This prefetch isn't run yet, but enqueue it here as well to save an extra
                         // iteration over transfers.
-                        self.forest.grooves.posted.prefetch_enqueue(p.timestamp);
+                        self.forest.grooves.transfers_pending.prefetch_enqueue(p.timestamp);
 
                         self.forest.grooves.accounts.prefetch_enqueue(p.debit_account_id);
                         self.forest.grooves.accounts.prefetch_enqueue(p.credit_account_id);
@@ -697,18 +684,22 @@ pub fn StateMachineType(
             );
         }
 
-        fn prefetch_create_transfers_callback_accounts(completion: *AccountsGroove.PrefetchContext) void {
+        fn prefetch_create_transfers_callback_accounts(
+            completion: *AccountsGroove.PrefetchContext,
+        ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
-            self.forest.grooves.posted.prefetch(
-                prefetch_create_transfers_callback_posted,
-                self.prefetch_context.get(.posted),
+            self.forest.grooves.transfers_pending.prefetch(
+                prefetch_create_transfers_callback_transfers_pending,
+                self.prefetch_context.get(.transfers_pending),
             );
         }
 
-        fn prefetch_create_transfers_callback_posted(completion: *PostedGroove.PrefetchContext) void {
-            const self: *StateMachine = PrefetchContext.parent(.posted, completion);
+        fn prefetch_create_transfers_callback_transfers_pending(
+            completion: *TransfersPendingGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.transfers_pending, completion);
             self.prefetch_context = .null;
 
             self.prefetch_finish();
@@ -1121,38 +1112,31 @@ pub fn StateMachineType(
 
                 grooves.accounts.prefetch_enqueue(expired.debit_account_id);
                 grooves.accounts.prefetch_enqueue(expired.credit_account_id);
-
-                if (global_constants.verify) {
-                    // We prefetch `Posted` only to check that it's null.
-                    grooves.posted.prefetch_enqueue(expired.timestamp);
-                }
+                grooves.transfers_pending.prefetch_enqueue(expired.timestamp);
             }
 
             self.forest.grooves.accounts.prefetch(
-                prefetch_expire_pending_transfers_accounts_callback,
+                prefetch_expire_pending_transfers_callback_accounts,
                 self.prefetch_context.get(.accounts),
             );
         }
 
-        fn prefetch_expire_pending_transfers_accounts_callback(completion: *AccountsGroove.PrefetchContext) void {
+        fn prefetch_expire_pending_transfers_callback_accounts(
+            completion: *AccountsGroove.PrefetchContext,
+        ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
-            if (global_constants.verify) {
-                // We prefetch `Posted` only to check that it's null.
-                self.forest.grooves.posted.prefetch(
-                    prefetch_expire_pending_transfers_posted_callback,
-                    self.prefetch_context.get(.posted),
-                );
-            } else {
-                self.prefetch_finish();
-            }
+            self.forest.grooves.transfers_pending.prefetch(
+                prefetch_expire_pending_transfers_callback_transfers_pending,
+                self.prefetch_context.get(.transfers_pending),
+            );
         }
 
-        fn prefetch_expire_pending_transfers_posted_callback(completion: *PostedGroove.PrefetchContext) void {
-            comptime assert(global_constants.verify);
-
-            const self: *StateMachine = PrefetchContext.parent(.posted, completion);
+        fn prefetch_expire_pending_transfers_callback_transfers_pending(
+            completion: *TransfersPendingGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.transfers_pending, completion);
             self.prefetch_context = .null;
 
             self.prefetch_finish();
@@ -1245,7 +1229,7 @@ pub fn StateMachineType(
                 .create_transfers => {
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
-                    self.forest.grooves.posted.scope_open();
+                    self.forest.grooves.transfers_pending.scope_open();
                     self.forest.grooves.account_history.scope_open();
                 },
                 else => unreachable,
@@ -1260,7 +1244,7 @@ pub fn StateMachineType(
                 .create_transfers => {
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
-                    self.forest.grooves.posted.scope_close(mode);
+                    self.forest.grooves.transfers_pending.scope_close(mode);
                     self.forest.grooves.account_history.scope_close(mode);
                 },
                 else => unreachable,
@@ -1600,6 +1584,11 @@ pub fn StateMachineType(
             if (t.flags.pending) {
                 dr_account_new.debits_pending += amount;
                 cr_account_new.credits_pending += amount;
+
+                self.forest.grooves.transfers_pending.insert(&.{
+                    .timestamp = t2.timestamp,
+                    .status = .pending,
+                });
             } else {
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
@@ -1665,6 +1654,7 @@ pub fn StateMachineType(
 
             const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
             assert(p.id == t.pending_id);
+            assert(p.timestamp < t.timestamp);
             if (!p.flags.pending) return .pending_transfer_not_pending;
 
             const dr_account = self.forest.grooves.accounts.get(p.debit_account_id).?;
@@ -1694,19 +1684,19 @@ pub fn StateMachineType(
 
             if (self.get_transfer(t.id)) |e| return post_or_void_pending_transfer_exists(t, e, p);
 
-            if (self.get_posted(p.timestamp)) |posted| {
-                switch (posted.fulfillment) {
-                    .posted => return .pending_transfer_already_posted,
-                    .voided => return .pending_transfer_already_voided,
-                    .expired => {
-                        assert(p.timeout > 0);
-                        assert(t.timestamp >= p.timestamp + p.timeout_ns());
-                        return .pending_transfer_expired;
-                    },
-                }
+            const transfer_pending = self.get_transfer_pending(p.timestamp).?;
+            assert(p.timestamp == transfer_pending.timestamp);
+            switch (transfer_pending.status) {
+                .none => unreachable,
+                .pending => {},
+                .posted => return .pending_transfer_already_posted,
+                .voided => return .pending_transfer_already_voided,
+                .expired => {
+                    assert(p.timeout > 0);
+                    assert(t.timestamp >= p.timestamp + p.timeout_ns());
+                    return .pending_transfer_expired;
+                },
             }
-
-            assert(p.timestamp < t.timestamp);
 
             const t2 = Transfer{
                 .id = t.id,
@@ -1747,7 +1737,7 @@ pub fn StateMachineType(
                 }
             }
 
-            self.transfer_update_pending_status(p.timestamp, status: {
+            self.transfer_update_pending_status(transfer_pending, status: {
                 if (t.flags.post_pending_transfer) break :status .posted;
                 if (t.flags.void_pending_transfer) break :status .voided;
                 unreachable;
@@ -1883,44 +1873,30 @@ pub fn StateMachineType(
             return self.forest.grooves.transfers.get(id);
         }
 
-        /// Returns whether a pending transfer, if it exists, has already been posted or voided.
-        fn get_posted(
+        /// Returns whether a pending transfer, if it exists, has already been
+        /// posted,voided, or expired.
+        fn get_transfer_pending(
             self: *const StateMachine,
             pending_timestamp: u64,
-        ) ?*const PostedGrooveValue {
-            return self.forest.grooves.posted.get(pending_timestamp);
+        ) ?*const TransferPending {
+            return self.forest.grooves.transfers_pending.get(pending_timestamp);
         }
 
         fn transfer_update_pending_status(
             self: *StateMachine,
-            timestamp: u64,
+            transfer_pending: *const TransferPending,
             status: TransferPendingStatus,
         ) void {
-            assert(timestamp != 0);
+            assert(transfer_pending.timestamp != 0);
+            assert(transfer_pending.status == .pending);
             assert(status != .none and status != .pending);
 
-            const Fulfillment = PostedGrooveValue.Fulfillment;
-
-            // Insert the Posted groove.
-            self.forest.grooves.posted.insert(&.{
-                .timestamp = timestamp,
-                .fulfillment = switch (status) {
-                    .posted => Fulfillment.posted,
-                    .voided => Fulfillment.voided,
-                    .expired => Fulfillment.expired,
-                    else => unreachable,
+            self.forest.grooves.transfers_pending.update(.{
+                .old = transfer_pending,
+                .new = &.{
+                    .timestamp = transfer_pending.timestamp,
+                    .status = status,
                 },
-            });
-
-            // Update the secondary index.
-            // TODO(batiati) Assert (with constants.verify) that `pending_status == .pending`.
-            self.forest.grooves.transfers.indexes.pending_status.remove(&.{
-                .timestamp = timestamp,
-                .field = @intFromEnum(TransferPendingStatus.pending),
-            });
-            self.forest.grooves.transfers.indexes.pending_status.put(&.{
-                .timestamp = timestamp,
-                .field = @intFromEnum(status),
             });
         }
 
@@ -1946,10 +1922,6 @@ pub fn StateMachineType(
                 const expires_at = expired.timestamp + expired.timeout_ns();
                 assert(expires_at <= timestamp);
 
-                if (global_constants.verify) {
-                    assert(grooves.posted.get(expired.timestamp) == null);
-                }
-
                 const dr_account = grooves.accounts.get(
                     expired.debit_account_id,
                 ).?;
@@ -1968,7 +1940,10 @@ pub fn StateMachineType(
                 grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
                 grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
-                self.transfer_update_pending_status(expired.timestamp, .expired);
+                const transfer_pending = self.get_transfer_pending(expired.timestamp).?;
+                assert(expired.timestamp == transfer_pending.timestamp);
+                assert(transfer_pending.status == .pending);
+                self.transfer_update_pending_status(transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
                 grooves.transfers.indexes.expires_at.remove(&.{
@@ -2026,17 +2001,18 @@ pub fn StateMachineType(
                         .code = .{},
                         .amount = .{},
                         .expires_at = .{},
-                        .pending_status = .{},
                     },
                 },
-                .posted = .{
+                .transfers_pending = .{
                     .prefetch_entries_for_read_max = batch_transfers_max,
                     // create_transfer() posts/voids at most one transfer.
                     .prefetch_entries_for_update_max = batch_transfers_max,
                     .cache_entries_max = options.cache_entries_posted,
                     .tree_options_object = .{},
                     .tree_options_id = {},
-                    .tree_options_index = .{},
+                    .tree_options_index = .{
+                        .status = .{},
+                    },
                 },
                 .account_history = .{
                     .prefetch_entries_for_read_max = 0,

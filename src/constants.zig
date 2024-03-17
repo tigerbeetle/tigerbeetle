@@ -146,7 +146,7 @@ pub const cache_transfers_size_default = config.process.cache_transfers_size_def
 
 /// The default size of the two-phase transfers in-memory cache:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_transfers_posted_size_default = config.process.cache_transfers_posted_size_default;
+pub const cache_transfers_pending_size_default = config.process.cache_transfers_pending_size_default;
 
 /// The default size of historical balances in-memory cache:
 /// This impacts the amount of memory allocated at initialization by the server.
