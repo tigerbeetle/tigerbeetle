@@ -746,8 +746,11 @@ pub fn StateMachineType(
 
         fn prefetch_get_account_transfers(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_result_count == 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             if (self.get_scan_from_filter(filter)) |scan| {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+
                 var scan_buffer = std.mem.bytesAsSlice(
                     Transfer,
                     self.scan_buffer[0 .. @sizeOf(Transfer) *
@@ -766,14 +769,16 @@ pub fn StateMachineType(
                     scan_buffer[0..@min(filter.limit, scan_buffer.len)],
                     &prefetch_get_account_transfers_callback,
                 );
-            } else {
-                // TODO(batiati): Improve the way we do validations on the state machine.
-                log.info("invalid filter for get_account_transfers: {any}", .{filter});
-                self.forest.grid.on_next_tick(
-                    &prefetch_scan_next_tick_callback,
-                    &self.scan_next_tick,
-                );
+
+                return;
             }
+
+            // TODO(batiati): Improve the way we do validations on the state machine.
+            log.info("invalid filter for get_account_transfers: {any}", .{filter});
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_next_tick_callback,
+                &self.scan_next_tick,
+            );
         }
 
         fn prefetch_get_account_transfers_callback(scan_lookup: *TransfersScanLookup) void {
@@ -809,10 +814,13 @@ pub fn StateMachineType(
 
         fn prefetch_get_account_balances_scan(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_result_count == 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
-            if (self.get_scan_from_filter(filter)) |scan| {
-                if (self.forest.grooves.accounts.get(filter.account_id)) |account| {
-                    if (account.flags.history) {
+            if (self.forest.grooves.accounts.get(filter.account_id)) |account| {
+                if (account.flags.history) {
+                    if (self.get_scan_from_filter(filter)) |scan| {
+                        assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+
                         var scan_buffer = std.mem.bytesAsSlice(
                             AccountBalancesGrooveValue,
                             self.scan_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
@@ -835,13 +843,13 @@ pub fn StateMachineType(
                         return;
                     }
                 }
-            } else {
-                // TODO(batiati): Improve the way we do validations on the state machine.
-                log.info(
-                    "invalid filter for get_account_balances: {any}",
-                    .{filter},
-                );
             }
+
+            // TODO(batiati): Improve the way we do validations on the state machine.
+            log.info(
+                "invalid filter for get_account_balances: {any}",
+                .{filter},
+            );
 
             // Returning an empty array on the next tick.
             self.forest.grid.on_next_tick(
@@ -874,6 +882,8 @@ pub fn StateMachineType(
         }
 
         fn get_scan_from_filter(self: *StateMachine, filter: AccountFilter) ?*TransfersGroove.ScanBuilder.Scan {
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+
             const filter_valid =
                 filter.account_id != 0 and filter.account_id != std.math.maxInt(u128) and
                 filter.timestamp_min != std.math.maxInt(u64) and
@@ -940,13 +950,15 @@ pub fn StateMachineType(
 
         fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
             const self: *StateMachine = @fieldParentPtr(StateMachine, "scan_next_tick", completion);
-            self.scan_lookup = .null;
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+            assert(self.scan_lookup == .null);
 
             self.prefetch_finish();
         }
 
         fn prefetch_expire_pending_transfers(self: *StateMachine) void {
             assert(self.scan_result_count == 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
             assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
 
@@ -1023,6 +1035,7 @@ pub fn StateMachineType(
 
         fn prefetch_expire_pending_transfers_scan(self: *StateMachine) void {
             assert(self.scan_result_count == 0);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             // When it's set to `timestamp_max` it means no transfers will expire
             // in the next pulse.
@@ -3283,6 +3296,35 @@ test "get_account_transfers: two-phase" {
     );
 }
 
+test "get_account_transfers: invalid filter" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2    2   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ ok
+        \\ transfer T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ get_account_transfers A3 _  _  10 DR CR _   // Invalid account.
+        \\ commit get_account_transfers                // Empty result.
+        \\
+        \\ get_account_transfers A1 _  _  10 _  _  _   // Invalid filter flags.
+        \\ commit get_account_transfers                // Empty result.
+        \\
+        \\ get_account_transfers A1 T2 T1 10 DR CR _   // Invalid timestamp_min > timestamp_max.
+        \\ commit get_account_transfers                // Empty result.
+        \\
+        \\ get_account_transfers A1 _   _  0 DR CR _   // Invalid limit.
+        \\ commit get_account_transfers                // Empty result.
+        \\
+        \\ get_account_transfers A1 _   _ 10 DR CR _   // Success.
+        \\ get_account_transfers_result T1 A1 A2    2   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _
+        \\ get_account_transfers_result T2 A1 A2    1  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _
+        \\ commit get_account_transfers
+    );
+}
+
 test "get_account_balances: single-phase" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
@@ -3354,6 +3396,38 @@ test "get_account_balances: two-phase" {
         \\ get_account_balances A1 _ _ 10 DR CR  _
         \\ get_account_balances_result T1 1 0 0 0
         \\ get_account_balances_result T2 0 1 0 0
+        \\ commit get_account_balances
+    );
+}
+
+test "get_account_balances: invalid filter" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _    _ _ _ ok
+        \\ commit create_accounts
+        \\
+        \\ transfer T1 A1 A2    2   _  _  _  _    0 L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ transfer T2 A1 A2    1   _  _  _  _    0 L1 C1   _   _   _   _   _   _  _ _ ok
+        \\ commit create_transfers
+        \\
+        \\ get_account_balances A3 _  _  10 DR CR _   // Invalid account.
+        \\ commit get_account_balances                // Empty result.
+        \\
+        \\ get_account_balances A2 _  _  10 DR CR _   // Account without flags.history.
+        \\ commit get_account_balances                // Empty result.
+        \\
+        \\ get_account_balances A1 _  _  10 _  _  _   // Invalid filter flags.
+        \\ commit get_account_balances                // Empty result.
+        \\
+        \\ get_account_balances A1 T2 T1 10 DR CR _   // Invalid timestamp_min > timestamp_max.
+        \\ commit get_account_balances                // Empty result.
+        \\
+        \\ get_account_balances A1 _   _  0 DR CR _   // Invalid limit.
+        \\ commit get_account_balances                // Empty result.
+        \\
+        \\ get_account_balances A1  _  _ 10 DR CR  _  // Success.
+        \\ get_account_balances_result T1 0 2 0 0
+        \\ get_account_balances_result T2 0 3 0 0
         \\ commit get_account_balances
     );
 }
