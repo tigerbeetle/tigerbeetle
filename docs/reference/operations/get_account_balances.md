@@ -1,4 +1,4 @@
-# `get_account_history`
+# `get_account_balances`
 
 Fetch the historical [`AccountBalance`](../account_balances.md)s of a given [`Account`](../accounts.md).
 
@@ -8,11 +8,11 @@ Fetch the historical [`AccountBalance`](../account_balances.md)s of a given [`Ac
 
 - The amounts refer to the account balance recorded _after_ the transfer execution.
 
-- Only accounts created with the flag [`history`](../accounts.md#flagshistory) set retain the
-  history of balances.
+- Only accounts created with the flag [`history`](../accounts.md#flagshistory) set retain
+  historical balances.
 
 - [Pending](../transfers.md#flagspending) balances automatically removed due to
-  [timeout](../transfers.md#timeout) expiration don't change the history of balances.
+  [timeout](../transfers.md#timeout) expiration don't change historical balances.
 
 ## Event
 
@@ -31,7 +31,7 @@ The query filter. See [`AccountFilter`](../account_filter.md) for constraints.
 
 For language-specific docs see:
 
-* [.NET library](/src/clients/dotnet/README.md#get-account-history)
-* [Java library](/src/clients/java/README.md#get-account-history)
-* [Go library](/src/clients/go/README.md#get-account-history)
-* [Node.js library](/src/clients/node/README.md#get-account-history)
+* [.NET library](/src/clients/dotnet/README.md#get-account-balances)
+* [Java library](/src/clients/java/README.md#get-account-balances)
+* [Go library](/src/clients/go/README.md#get-account-balances)
+* [Node.js library](/src/clients/node/README.md#get-account-balances)

@@ -352,20 +352,20 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err := client.GetAccountHistory(filter)
+		account_balances, err := client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created))
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		timestamp := uint64(0)
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, timestamp < transfer.Timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query only the debit transfers for accountC, descending:
@@ -384,20 +384,20 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		timestamp = ^uint64(0)
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, transfer.Timestamp < timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query only the credit transfers for accountC, descending:
@@ -416,20 +416,20 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		timestamp = ^uint64(0)
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, transfer.Timestamp < timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query the first 5 transfers for accountC:
@@ -448,20 +448,20 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		timestamp = 0
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, timestamp < transfer.Timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query the next 5 transfers for accountC, with pagination:
@@ -480,19 +480,19 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, timestamp < transfer.Timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query again, no more transfers should be found:
@@ -511,13 +511,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Query the first 5 transfers for accountC order by DESC:
 		filter = types.AccountFilter{
@@ -535,20 +535,20 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		timestamp = ^uint64(0)
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, timestamp > transfer.Timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query the next 5 transfers for accountC, with pagination:
@@ -567,19 +567,19 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, len(transfers_created)/2)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		for i, transfer := range transfers_retrieved {
 			assert.True(t, timestamp > transfer.Timestamp)
 			timestamp = transfer.Timestamp
 
-			assert.True(t, transfer.Timestamp == account_history[i].Timestamp)
+			assert.True(t, transfer.Timestamp == account_balances[i].Timestamp)
 		}
 
 		// Query again, no more transfers should be found:
@@ -598,13 +598,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid account:
 		filter = types.AccountFilter{
@@ -622,13 +622,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid timestamp min:
 		filter = types.AccountFilter{
@@ -646,13 +646,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid timestamp max:
 		filter = types.AccountFilter{
@@ -670,13 +670,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid timestamps:
 		filter = types.AccountFilter{
@@ -694,13 +694,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Zero limit:
 		filter = types.AccountFilter{
@@ -718,13 +718,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Empty flags:
 		filter = types.AccountFilter{
@@ -738,13 +738,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 
 		// Invalid flags:
 		filter = types.AccountFilter{
@@ -758,13 +758,13 @@ func doTestClient(s *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		account_history, err = client.GetAccountHistory(filter)
+		account_balances, err = client.GetAccountBalances(filter)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		assert.Len(t, transfers_retrieved, 0)
-		assert.Len(t, account_history, len(transfers_retrieved))
+		assert.Len(t, account_balances, len(transfers_retrieved))
 	})
 
 }

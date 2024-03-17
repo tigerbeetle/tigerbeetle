@@ -60,7 +60,7 @@ pub fn StateMachineType(
                 pub const lookup_accounts = operation_batch_max(.lookup_accounts);
                 pub const lookup_transfers = operation_batch_max(.lookup_transfers);
                 pub const get_account_transfers = operation_batch_max(.get_account_transfers);
-                pub const get_account_history = operation_batch_max(.get_account_history);
+                pub const get_account_balances = operation_batch_max(.get_account_balances);
 
                 comptime {
                     assert(create_accounts > 0);
@@ -68,7 +68,7 @@ pub fn StateMachineType(
                     assert(lookup_accounts > 0);
                     assert(lookup_transfers > 0);
                     assert(get_account_transfers > 0);
-                    assert(get_account_history > 0);
+                    assert(get_account_balances > 0);
                 }
 
                 fn operation_batch_max(comptime operation: Operation) usize {
@@ -110,7 +110,7 @@ pub fn StateMachineType(
                     .status = 21,
                 };
 
-                pub const account_history = .{
+                pub const account_balances = .{
                     .timestamp = 22,
                 };
             };
@@ -126,7 +126,7 @@ pub fn StateMachineType(
             .lookup_accounts = false,
             .lookup_transfers = false,
             .get_account_transfers = false,
-            .get_account_history = false,
+            .get_account_balances = false,
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
@@ -266,11 +266,11 @@ pub fn StateMachineType(
             }
         };
 
-        const AccountHistoryGroove = GrooveType(
+        const AccountBalancesGroove = GrooveType(
             Storage,
-            AccountHistoryGrooveValue,
+            AccountBalancesGrooveValue,
             .{
-                .ids = constants.tree_ids.account_history,
+                .ids = constants.tree_ids.account_balances,
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
@@ -291,7 +291,7 @@ pub fn StateMachineType(
             },
         );
 
-        pub const AccountHistoryGrooveValue = extern struct {
+        pub const AccountBalancesGrooveValue = extern struct {
             dr_account_id: u128,
             dr_debits_pending: u128,
             dr_debits_posted: u128,
@@ -306,9 +306,9 @@ pub fn StateMachineType(
             reserved: [88]u8 = [_]u8{0} ** 88,
 
             comptime {
-                assert(stdx.no_padding(AccountHistoryGrooveValue));
-                assert(@sizeOf(AccountHistoryGrooveValue) == 256);
-                assert(@alignOf(AccountHistoryGrooveValue) == 16);
+                assert(stdx.no_padding(AccountBalancesGrooveValue));
+                assert(@sizeOf(AccountBalancesGrooveValue) == 256);
+                assert(@alignOf(AccountBalancesGrooveValue) == 16);
             }
         };
 
@@ -318,7 +318,7 @@ pub fn StateMachineType(
             .accounts = AccountsGroove,
             .transfers = TransfersGroove,
             .transfers_pending = TransfersPendingGroove,
-            .account_history = AccountHistoryGroove,
+            .account_balances = AccountBalancesGroove,
         });
 
         const TransfersScanLookup = ScanLookupType(
@@ -327,8 +327,8 @@ pub fn StateMachineType(
             Storage,
         );
 
-        const AccountHistoryScanLookup = ScanLookupType(
-            AccountHistoryGroove,
+        const AccountBalancesScanLookup = ScanLookupType(
+            AccountBalancesGroove,
             // Both Objects use the same timestamp, so we can use the TransfersGroove's indexes.
             TransfersGroove.ScanBuilder.Scan,
             Storage,
@@ -342,7 +342,7 @@ pub fn StateMachineType(
             lookup_accounts = config.vsr_operations_reserved + 3,
             lookup_transfers = config.vsr_operations_reserved + 4,
             get_account_transfers = config.vsr_operations_reserved + 5,
-            get_account_history = config.vsr_operations_reserved + 6,
+            get_account_balances = config.vsr_operations_reserved + 6,
         };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
@@ -357,7 +357,7 @@ pub fn StateMachineType(
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
             cache_entries_posted: u32,
-            cache_entries_account_history: u32,
+            cache_entries_account_balances: u32,
         };
 
         /// Since prefetch contexts are used one at a time, it's safe to access
@@ -397,7 +397,7 @@ pub fn StateMachineType(
         const ScanLookup = union(enum) {
             null,
             transfer: TransfersScanLookup,
-            account_history: AccountHistoryScanLookup,
+            account_balances: AccountBalancesScanLookup,
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -456,7 +456,7 @@ pub fn StateMachineType(
 
             const scan_buffer = try allocator.alignedAlloc(u8, 16, @max(
                 constants.batch_max.get_account_transfers * @sizeOf(Transfer),
-                constants.batch_max.get_account_history * @sizeOf(AccountHistoryGrooveValue),
+                constants.batch_max.get_account_balances * @sizeOf(AccountBalancesGrooveValue),
             ));
             errdefer allocator.free(scan_buffer);
 
@@ -501,7 +501,7 @@ pub fn StateMachineType(
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
-                .get_account_history => AccountFilter,
+                .get_account_balances => AccountFilter,
             };
         }
 
@@ -513,7 +513,7 @@ pub fn StateMachineType(
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
-                .get_account_history => AccountBalance,
+                .get_account_balances => AccountBalance,
             };
         }
 
@@ -542,7 +542,7 @@ pub fn StateMachineType(
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
-                .get_account_history => 0,
+                .get_account_balances => 0,
             };
         }
 
@@ -602,8 +602,8 @@ pub fn StateMachineType(
                 .get_account_transfers => {
                     self.prefetch_get_account_transfers(parse_filter_from_input(input));
                 },
-                .get_account_history => {
-                    self.prefetch_get_account_history(parse_filter_from_input(input));
+                .get_account_balances => {
+                    self.prefetch_get_account_balances(parse_filter_from_input(input));
                 },
             };
         }
@@ -787,49 +787,49 @@ pub fn StateMachineType(
             self.prefetch_finish();
         }
 
-        fn prefetch_get_account_history(self: *StateMachine, filter: AccountFilter) void {
+        fn prefetch_get_account_balances(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_result_count == 0);
 
             self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
             self.forest.grooves.accounts.prefetch(
-                prefetch_get_account_history_lookup_account_callback,
+                prefetch_get_account_balances_lookup_account_callback,
                 self.prefetch_context.get(.accounts),
             );
         }
 
-        fn prefetch_get_account_history_lookup_account_callback(
+        fn prefetch_get_account_balances_lookup_account_callback(
             completion: *AccountsGroove.PrefetchContext,
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
             const filter = parse_filter_from_input(self.prefetch_input.?);
-            self.prefetch_get_account_history_scan(filter);
+            self.prefetch_get_account_balances_scan(filter);
         }
 
-        fn prefetch_get_account_history_scan(self: *StateMachine, filter: AccountFilter) void {
+        fn prefetch_get_account_balances_scan(self: *StateMachine, filter: AccountFilter) void {
             assert(self.scan_result_count == 0);
 
             if (self.get_scan_from_filter(filter)) |scan| {
                 if (self.forest.grooves.accounts.get(filter.account_id)) |account| {
                     if (account.flags.history) {
                         var scan_buffer = std.mem.bytesAsSlice(
-                            AccountHistoryGrooveValue,
-                            self.scan_buffer[0 .. @sizeOf(AccountHistoryGrooveValue) *
-                                constants.batch_max.get_account_history],
+                            AccountBalancesGrooveValue,
+                            self.scan_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
+                                constants.batch_max.get_account_balances],
                         );
-                        assert(scan_buffer.len == constants.batch_max.get_account_history);
+                        assert(scan_buffer.len == constants.batch_max.get_account_balances);
 
-                        var scan_lookup = self.scan_lookup.get(.account_history);
-                        scan_lookup.* = AccountHistoryScanLookup.init(
-                            &self.forest.grooves.account_history,
+                        var scan_lookup = self.scan_lookup.get(.account_balances);
+                        scan_lookup.* = AccountBalancesScanLookup.init(
+                            &self.forest.grooves.account_balances,
                             scan,
                         );
 
                         scan_lookup.read(
                             // Limiting the buffer size according to the query limit.
                             scan_buffer[0..@min(filter.limit, scan_buffer.len)],
-                            &prefetch_get_account_history_scan_callback,
+                            &prefetch_get_account_balances_scan_callback,
                         );
 
                         return;
@@ -838,7 +838,7 @@ pub fn StateMachineType(
             } else {
                 // TODO(batiati): Improve the way we do validations on the state machine.
                 log.info(
-                    "invalid filter for get_account_history: {any}",
+                    "invalid filter for get_account_balances: {any}",
                     .{filter},
                 );
             }
@@ -850,8 +850,8 @@ pub fn StateMachineType(
             );
         }
 
-        fn prefetch_get_account_history_scan_callback(scan_lookup: *AccountHistoryScanLookup) void {
-            const self: *StateMachine = ScanLookup.parent(.account_history, scan_lookup);
+        fn prefetch_get_account_balances_scan_callback(scan_lookup: *AccountBalancesScanLookup) void {
+            const self: *StateMachine = ScanLookup.parent(.account_balances, scan_lookup);
             self.scan_result_count = @intCast(scan_lookup.slice().len);
 
             self.forest.scan_buffer_pool.reset();
@@ -1171,7 +1171,7 @@ pub fn StateMachineType(
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 .get_account_transfers => self.execute_get_account_transfers(input, output),
-                .get_account_history => self.execute_get_account_history(input, output),
+                .get_account_balances => self.execute_get_account_balances(input, output),
             };
 
             tracer.end(
@@ -1233,7 +1233,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.transfers_pending.scope_open();
-                    self.forest.grooves.account_history.scope_open();
+                    self.forest.grooves.account_balances.scope_open();
                 },
                 else => unreachable,
             }
@@ -1248,7 +1248,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
                     self.forest.grooves.transfers_pending.scope_close(mode);
-                    self.forest.grooves.account_history.scope_close(mode);
+                    self.forest.grooves.account_balances.scope_close(mode);
                 },
                 else => unreachable,
             }
@@ -1401,12 +1401,12 @@ pub fn StateMachineType(
             return result_size;
         }
 
-        fn execute_get_account_history(
+        fn execute_get_account_balances(
             self: *StateMachine,
             input: []const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            assert(self.scan_result_count <= constants.batch_max.get_account_history);
+            assert(self.scan_result_count <= constants.batch_max.get_account_balances);
             if (self.scan_result_count == 0) return 0;
             defer self.scan_result_count = 0;
 
@@ -1415,9 +1415,9 @@ pub fn StateMachineType(
                 input[0..@sizeOf(AccountFilter)],
             );
 
-            const scan_results: []const AccountHistoryGrooveValue = mem.bytesAsSlice(
-                AccountHistoryGrooveValue,
-                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(AccountHistoryGrooveValue)],
+            const scan_results: []const AccountBalancesGrooveValue = mem.bytesAsSlice(
+                AccountBalancesGrooveValue,
+                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(AccountBalancesGrooveValue)],
             );
 
             const output_slice: []AccountBalance = mem.bytesAsSlice(AccountBalance, output);
@@ -1599,7 +1599,7 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
-            self.account_history(.{
+            self.historical_balance(.{
                 .transfer = &t2,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
@@ -1761,7 +1761,7 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
             self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
 
-            self.account_history(.{
+            self.historical_balance(.{
                 .transfer = &t2,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
@@ -1835,7 +1835,7 @@ pub fn StateMachineType(
             return .exists;
         }
 
-        fn account_history(
+        fn historical_balance(
             self: *StateMachine,
             args: struct {
                 transfer: *const Transfer,
@@ -1848,27 +1848,27 @@ pub fn StateMachineType(
             assert(args.transfer.credit_account_id == args.cr_account.id);
 
             if (args.dr_account.flags.history or args.cr_account.flags.history) {
-                var history = std.mem.zeroInit(AccountHistoryGrooveValue, .{
+                var balance = std.mem.zeroInit(AccountBalancesGrooveValue, .{
                     .timestamp = args.transfer.timestamp,
                 });
 
                 if (args.dr_account.flags.history) {
-                    history.dr_account_id = args.dr_account.id;
-                    history.dr_debits_pending = args.dr_account.debits_pending;
-                    history.dr_debits_posted = args.dr_account.debits_posted;
-                    history.dr_credits_pending = args.dr_account.credits_pending;
-                    history.dr_credits_posted = args.dr_account.credits_posted;
+                    balance.dr_account_id = args.dr_account.id;
+                    balance.dr_debits_pending = args.dr_account.debits_pending;
+                    balance.dr_debits_posted = args.dr_account.debits_posted;
+                    balance.dr_credits_pending = args.dr_account.credits_pending;
+                    balance.dr_credits_posted = args.dr_account.credits_posted;
                 }
 
                 if (args.cr_account.flags.history) {
-                    history.cr_account_id = args.cr_account.id;
-                    history.cr_debits_pending = args.cr_account.debits_pending;
-                    history.cr_debits_posted = args.cr_account.debits_posted;
-                    history.cr_credits_pending = args.cr_account.credits_pending;
-                    history.cr_credits_posted = args.cr_account.credits_posted;
+                    balance.cr_account_id = args.cr_account.id;
+                    balance.cr_debits_pending = args.cr_account.debits_pending;
+                    balance.cr_debits_posted = args.cr_account.debits_posted;
+                    balance.cr_credits_pending = args.cr_account.credits_pending;
+                    balance.cr_credits_posted = args.cr_account.credits_posted;
                 }
 
-                self.forest.grooves.account_history.insert(&history);
+                self.forest.grooves.account_balances.insert(&balance);
             }
         }
 
@@ -2017,10 +2017,10 @@ pub fn StateMachineType(
                         .status = .{},
                     },
                 },
-                .account_history = .{
+                .account_balances = .{
                     .prefetch_entries_for_read_max = 0,
                     .prefetch_entries_for_update_max = batch_transfers_max,
-                    .cache_entries_max = options.cache_entries_account_history,
+                    .cache_entries_max = options.cache_entries_account_balances,
                     .tree_options_object = .{},
                     .tree_options_id = {},
                     .tree_options_index = .{},
@@ -2113,7 +2113,7 @@ const TestContext = struct {
             .cache_entries_accounts = 0,
             .cache_entries_transfers = 0,
             .cache_entries_posted = 0,
-            .cache_entries_account_history = 0,
+            .cache_entries_account_balances = 0,
         });
         errdefer ctx.state_machine.deinit(allocator);
     }
@@ -2198,8 +2198,8 @@ const TestAction = union(enum) {
         },
     },
 
-    get_account_history: TestGetAccountHistory,
-    get_account_history_result: struct {
+    get_account_balances: TestGetAccountBalances,
+    get_account_balances_result: struct {
         transfer_id: u128,
         debits_pending: u128,
         debits_posted: u128,
@@ -2318,7 +2318,7 @@ const TestAccountFilter = struct {
 };
 
 // Both operations share the same input.
-const TestGetAccountHistory = TestAccountFilter;
+const TestGetAccountBalances = TestAccountFilter;
 const TestGetAccountTransfers = TestAccountFilter;
 
 const TestGetAccountTransfersResult = struct {
@@ -2498,9 +2498,9 @@ fn check(test_table: []const u8) !void {
                     },
                 }
             },
-            .get_account_history => |f| {
-                assert(operation == null or operation.? == .get_account_history);
-                operation = .get_account_history;
+            .get_account_balances => |f| {
+                assert(operation == null or operation.? == .get_account_balances);
+                operation = .get_account_balances;
 
                 const timestamp_min = if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
                 const timestamp_max = if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
@@ -2518,8 +2518,8 @@ fn check(test_table: []const u8) !void {
                 };
                 try request.appendSlice(std.mem.asBytes(&event));
             },
-            .get_account_history_result => |r| {
-                assert(operation.? == .get_account_history);
+            .get_account_balances_result => |r| {
+                assert(operation.? == .get_account_balances);
 
                 const balance = AccountBalance{
                     .debits_pending = r.debits_pending,
@@ -3283,7 +3283,7 @@ test "get_account_transfers: two-phase" {
     );
 }
 
-test "get_account_history: single-phase" {
+test "get_account_balances: single-phase" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
@@ -3295,53 +3295,53 @@ test "get_account_history: single-phase" {
         \\ transfer T4 A2 A1   13   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_history A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
-        \\ get_account_history_result T1 0 10 0  0
-        \\ get_account_history_result T2 0 10 0 11
-        \\ get_account_history_result T3 0 22 0 11
-        \\ get_account_history_result T4 0 22 0 24
-        \\ commit get_account_history
+        \\ get_account_balances A1 _ _ 10 DR CR  _ // Debits + credits, chronological.
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
-        \\ get_account_history_result T1 0 10 0  0
-        \\ get_account_history_result T2 0 10 0 11
-        \\ commit get_account_history
+        \\ get_account_balances A1  _  _  2 DR CR  _ // Debits + credits, limit=2.
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
-        \\ get_account_history_result T3 0 22 0 11
-        \\ get_account_history_result T4 0 22 0 24
-        \\ commit get_account_history
+        \\ get_account_balances A1 T3  _ 10 DR CR  _ // Debits + credits, timestamp_min>0.
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
-        \\ get_account_history_result T1 0 10 0  0
-        \\ get_account_history_result T2 0 10 0 11
-        \\ commit get_account_history
+        \\ get_account_balances A1  _ T2 10 DR CR  _ // Debits + credits, timestamp_max>0.
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
-        \\ get_account_history_result T2 0 10 0 11
-        \\ get_account_history_result T3 0 22 0 11
-        \\ commit get_account_history
+        \\ get_account_balances A1 T2 T3 10 DR CR  _ // Debits + credits, 0 < timestamp_min ≤ timestamp_max.
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
-        \\ get_account_history_result T4 0 22 0 24
-        \\ get_account_history_result T3 0 22 0 11
-        \\ get_account_history_result T2 0 10 0 11
-        \\ get_account_history_result T1 0 10 0  0
-        \\ commit get_account_history
+        \\ get_account_balances A1  _  _ 10 DR CR REV // Debits + credits, reverse-chronological.
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1  _  _ 10 DR  _  _ // Debits only.
-        \\ get_account_history_result T1 0 10 0  0
-        \\ get_account_history_result T3 0 22 0 11
-        \\ commit get_account_history
+        \\ get_account_balances A1  _  _ 10 DR  _  _ // Debits only.
+        \\ get_account_balances_result T1 0 10 0  0
+        \\ get_account_balances_result T3 0 22 0 11
+        \\ commit get_account_balances
         \\
-        \\ get_account_history A1  _  _ 10  _ CR  _ // Credits only.
-        \\ get_account_history_result T2 0 10 0 11
-        \\ get_account_history_result T4 0 22 0 24
-        \\ commit get_account_history
+        \\ get_account_balances A1  _  _ 10  _ CR  _ // Credits only.
+        \\ get_account_balances_result T2 0 10 0 11
+        \\ get_account_balances_result T4 0 22 0 24
+        \\ commit get_account_balances
     );
 }
 
-test "get_account_history: two-phase" {
+test "get_account_balances: two-phase" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ ok
@@ -3351,10 +3351,10 @@ test "get_account_history: two-phase" {
         \\ transfer T2 A1 A2    _  T1  _  _  _    0 L1 C1   _   _ POS   _   _   _  _ _ ok
         \\ commit create_transfers
         \\
-        \\ get_account_history A1 _ _ 10 DR CR  _
-        \\ get_account_history_result T1 1 0 0 0
-        \\ get_account_history_result T2 0 1 0 0
-        \\ commit get_account_history
+        \\ get_account_balances A1 _ _ 10 DR CR  _
+        \\ get_account_balances_result T1 1 0 0 0
+        \\ get_account_balances_result T2 0 1 0 0
+        \\ commit get_account_balances
     );
 }
 

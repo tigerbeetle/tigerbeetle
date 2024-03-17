@@ -285,7 +285,7 @@ public final class Client implements AutoCloseable {
     /**
      * Fetch the balance history from a given account.
      *
-     * @see Client#getAccountHistory(AccountFilter)
+     * @see Client#getAccountBalances(AccountFilter)
      * @param filter a {@link com.tigerbeetle.AccountFilter} containing all query parameters.
      * @return a read-only {@link com.tigerbeetle.AccountBalanceBatch batch} containing all balances
      *         that match the query parameters.
@@ -294,9 +294,9 @@ public final class Client implements AutoCloseable {
      *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
-    public AccountBalanceBatch getAccountHistory(final AccountFilter filter)
+    public AccountBalanceBatch getAccountBalances(final AccountFilter filter)
             throws ConcurrencyExceededException {
-        final var request = BlockingRequest.getAccountHistory(this.nativeClient, filter);
+        final var request = BlockingRequest.getAccountBalances(this.nativeClient, filter);
         request.beginRequest();
         return request.waitForResult();
     }
@@ -304,7 +304,7 @@ public final class Client implements AutoCloseable {
     /**
      * Fetch the balance history from a given account asynchronously.
      *
-     * @see Client#getAccountHistory(AccountFilter)
+     * @see Client#getAccountBalances(AccountFilter)
      * @param filter a {@link com.tigerbeetle.AccountFilter} containing all query parameters.
      * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
      * @throws NullPointerException if {@code filter} is null.
@@ -312,9 +312,9 @@ public final class Client implements AutoCloseable {
      *         {@link #Client(byte[], String[], int) concurrencyMax} parameter.
      * @throws IllegalStateException if this client is closed.
      */
-    public CompletableFuture<AccountBalanceBatch> getAccountHistoryAsync(final AccountFilter filter)
-            throws ConcurrencyExceededException {
-        final var request = AsyncRequest.getAccountHistory(this.nativeClient, filter);
+    public CompletableFuture<AccountBalanceBatch> getAccountBalancesAsync(
+            final AccountFilter filter) throws ConcurrencyExceededException {
+        final var request = AsyncRequest.getAccountBalances(this.nativeClient, filter);
         request.beginRequest();
         return request.getFuture();
     }

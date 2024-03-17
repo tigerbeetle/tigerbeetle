@@ -986,10 +986,10 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits
             };
             var account_transfers = client.GetAccountTransfers(filter);
-            var account_history = client.GetAccountHistory(filter);
+            var account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 10);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             ulong timestamp = 0;
             for (int i = 0; i < account_transfers.Length; i++)
@@ -998,7 +998,7 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp > timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
         }
@@ -1016,10 +1016,10 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits | AccountFilterFlags.Reversed
             };
             var account_transfers = client.GetAccountTransfers(filter);
-            var account_history = client.GetAccountHistory(filter);
+            var account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 10);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             ulong timestamp = ulong.MaxValue;
             for (int i = 0; i < account_transfers.Length; i++)
@@ -1028,7 +1028,7 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp < timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
         }
@@ -1046,10 +1046,10 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Debits
             };
             var account_transfers = client.GetAccountTransfers(filter);
-            var account_history = client.GetAccountHistory(filter);
+            var account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 5);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             ulong timestamp = 0;
             for (int i = 0; i < account_transfers.Length; i++)
@@ -1058,7 +1058,7 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp > timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
         }
@@ -1076,10 +1076,10 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Reversed
             };
             var account_transfers = client.GetAccountTransfers(filter);
-            var account_history = client.GetAccountHistory(filter);
+            var account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 5);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             ulong timestamp = ulong.MaxValue;
             for (int i = 0; i < account_transfers.Length; i++)
@@ -1088,7 +1088,7 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp < timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
         }
@@ -1108,10 +1108,10 @@ public class IntegrationTests
 
             // First 5 items:
             var account_transfers = client.GetAccountTransfers(filter);
-            var account_history = client.GetAccountHistory(filter);
+            var account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 5);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             ulong timestamp = 0;
             for (int i = 0; i < account_transfers.Length; i++)
@@ -1120,17 +1120,17 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp > timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
 
             // Next 5 items from this timestamp:
             filter.TimestampMin = timestamp + 1;
             account_transfers = client.GetAccountTransfers(filter);
-            account_history = client.GetAccountHistory(filter);
+            account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 5);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             for (int i = 0; i < account_transfers.Length; i++)
             {
@@ -1138,17 +1138,17 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp > timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
 
             // No more pages after that:
             filter.TimestampMin = timestamp + 1;
             account_transfers = client.GetAccountTransfers(filter);
-            account_history = client.GetAccountHistory(filter);
+            account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 0);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
         }
 
         {
@@ -1166,10 +1166,10 @@ public class IntegrationTests
 
             // First 5 items:
             var account_transfers = client.GetAccountTransfers(filter);
-            var account_history = client.GetAccountHistory(filter);
+            var account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 5);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             ulong timestamp = ulong.MaxValue;
             for (int i = 0; i < account_transfers.Length; i++)
@@ -1178,17 +1178,17 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp < timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
 
             // Next 5 items from this timestamp:
             filter.TimestampMax = timestamp - 1;
             account_transfers = client.GetAccountTransfers(filter);
-            account_history = client.GetAccountHistory(filter);
+            account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 5);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
 
             for (int i = 0; i < account_transfers.Length; i++)
             {
@@ -1196,23 +1196,23 @@ public class IntegrationTests
                 Assert.IsTrue(transfer.Timestamp < timestamp);
                 timestamp = transfer.Timestamp;
 
-                var balance = account_history[i];
+                var balance = account_balances[i];
                 Assert.IsTrue(balance.Timestamp == transfer.Timestamp);
             }
 
             // No more pages after that:
             filter.TimestampMax = timestamp - 1;
             account_transfers = client.GetAccountTransfers(filter);
-            account_history = client.GetAccountHistory(filter);
+            account_balances = client.GetAccountBalances(filter);
 
             Assert.IsTrue(account_transfers.Length == 0);
-            Assert.IsTrue(account_history.Length == account_transfers.Length);
+            Assert.IsTrue(account_balances.Length == account_transfers.Length);
         }
 
         {
             // Empty filter:
             Assert.IsTrue(client.GetAccountTransfers(new AccountFilter { }).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(new AccountFilter { }).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(new AccountFilter { }).Length == 0);
 
             // Invalid account
             var filter = new AccountFilter
@@ -1224,7 +1224,7 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
 
             // Invalid timestamp min
             filter = new AccountFilter
@@ -1236,7 +1236,7 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
 
             // Invalid timestamp max
             filter = new AccountFilter
@@ -1248,7 +1248,7 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
 
             // Invalid timestamp range
             filter = new AccountFilter
@@ -1260,7 +1260,7 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
 
             // Zero limit
             filter = new AccountFilter
@@ -1272,7 +1272,7 @@ public class IntegrationTests
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
 
             // Empty flags
             filter = new AccountFilter
@@ -1284,7 +1284,7 @@ public class IntegrationTests
                 Flags = (AccountFilterFlags)0,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
 
             // Invalid flags
             filter = new AccountFilter
@@ -1296,7 +1296,7 @@ public class IntegrationTests
                 Flags = (AccountFilterFlags)0xFFFF,
             };
             Assert.IsTrue(client.GetAccountTransfers(filter).Length == 0);
-            Assert.IsTrue(client.GetAccountHistory(filter).Length == 0);
+            Assert.IsTrue(client.GetAccountBalances(filter).Length == 0);
         }
     }
 

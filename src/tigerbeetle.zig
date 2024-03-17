@@ -284,7 +284,7 @@ pub const CreateTransfersResult = extern struct {
     }
 };
 
-/// Filter used in both `get_account_transfer` and `get_account_history`.
+/// Filter used in both `get_account_transfer` and `get_account_balances`.
 pub const AccountFilter = extern struct {
     /// The account id.
     account_id: u128,

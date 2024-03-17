@@ -398,7 +398,7 @@ var filter = new AccountFilter
 transfers = client.GetAccountTransfers(filter);
 ```
 
-## Get Account History
+## Get Account Balances
 
 NOTE: This is a preview API that is subject to breaking changes once we have
 a stable querying API.
@@ -408,7 +408,7 @@ pagination capabilities.
 
 Only accounts created with the flag
 [`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-the history of balances.
+[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
 
 The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
@@ -424,7 +424,7 @@ filter = new AccountFilter
         AccountFilterFlags.Credits | // Include transfer from the credit side.
         AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
-var account_balances = client.GetAccountHistory(filter);
+var account_balances = client.GetAccountBalances(filter);
 ```
 
 ## Linked Events

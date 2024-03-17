@@ -355,7 +355,7 @@ async function main() {
   const account_transfers = await client.getAccountTransfers(filter);
   // endsection:get-account-transfers
 
-  // section:get-account-history
+  // section:get-account-balances
   filter = {
     account_id: 2n,
     timestamp_min: 0n, // No filter by Timestamp.
@@ -365,8 +365,8 @@ async function main() {
       AccountFilterFlags.credits | // Include transfer from the credit side.
       AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
   };
-  const account_balances = await client.getAccountHistory(filter);
-  // endsection:get-account-history
+  const account_balances = await client.getAccountBalances(filter);
+  // endsection:get-account-balances
 
     try {
         // section:linked-events

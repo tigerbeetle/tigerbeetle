@@ -137,14 +137,14 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequestAsync<Transfer, AccountFilter>(TBOperation.GetAccountTransfers, new[] { filter });
     }
 
-    public AccountBalance[] GetAccountHistory(AccountFilter filter)
+    public AccountBalance[] GetAccountBalances(AccountFilter filter)
     {
-        return nativeClient.CallRequest<AccountBalance, AccountFilter>(TBOperation.GetAccountHistory, new[] { filter });
+        return nativeClient.CallRequest<AccountBalance, AccountFilter>(TBOperation.GetAccountBalances, new[] { filter });
     }
 
-    public Task<AccountBalance[]> GetAccountHistoryAsync(AccountFilter filter)
+    public Task<AccountBalance[]> GetAccountBalancesAsync(AccountFilter filter)
     {
-        return nativeClient.CallRequestAsync<AccountBalance, AccountFilter>(TBOperation.GetAccountHistory, new[] { filter });
+        return nativeClient.CallRequestAsync<AccountBalance, AccountFilter>(TBOperation.GetAccountBalances, new[] { filter });
     }
 
     public void Dispose()

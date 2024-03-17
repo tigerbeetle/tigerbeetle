@@ -926,7 +926,7 @@ internal enum TBOperation : byte
 
     GetAccountTransfers = 133,
 
-    GetAccountHistory = 134,
+    GetAccountBalances = 134,
 
 }
 

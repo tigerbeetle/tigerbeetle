@@ -202,7 +202,7 @@ func main() {
 	log.Println(transfers)
 	// endsection:get-account-transfers
 
-	// section:get-account-history
+	// section:get-account-balances
 	filter = AccountFilter{
 		AccountID:    ToUint128(2),
 		TimestampMin: 0,  // No filter by Timestamp.
@@ -214,13 +214,13 @@ func main() {
 			Reversed: true, // Sort by timestamp in reverse-chronological order.
 		}.ToUint32(),
 	}
-	account_balances, err := client.GetAccountHistory(filter)
+	account_balances, err := client.GetAccountBalances(filter)
 	if err != nil {
 		log.Printf("Could not fetch the history: %s", err)
 		return
 	}
 	log.Println(account_balances)
-	// endsection:get-account-history
+	// endsection:get-account-balances
 
 	// section:linked-events
 	batch := []Transfer{}

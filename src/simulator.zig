@@ -155,7 +155,7 @@ pub fn main() !void {
                 .cache_entries_accounts = 2048,
                 .cache_entries_transfers = 2048,
                 .cache_entries_posted = 2048,
-                .cache_entries_account_history = 2048,
+                .cache_entries_account_balances = 2048,
             },
         },
     };

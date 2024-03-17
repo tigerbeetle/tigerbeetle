@@ -458,9 +458,9 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   var transfers = await client.getAccountTransfers(filter)
-  var history = await client.getAccountHistory(filter)
+  var account_balances = await client.getAccountBalances(filter)
   assert.strictEqual(transfers.length, transfers_created.length)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   var timestamp = 0n;
   var i = 0;
@@ -468,7 +468,7 @@ test('can get account transfers', async (): Promise<void> => {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -481,10 +481,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.debits |  AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.strictEqual(transfers.length, transfers_created.length / 2)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   timestamp = 1n << 64n;
   i = 0;
@@ -492,7 +492,7 @@ test('can get account transfers', async (): Promise<void> => {
     assert.ok(transfer.timestamp < timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -505,10 +505,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits |  AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.strictEqual(transfers.length, transfers_created.length / 2)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   timestamp = 1n << 64n;
   i = 0;
@@ -516,7 +516,7 @@ test('can get account transfers', async (): Promise<void> => {
     assert.ok(transfer.timestamp < timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -529,10 +529,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.strictEqual(transfers.length, transfers_created.length / 2)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   timestamp = 0n;
   i = 0;
@@ -540,7 +540,7 @@ test('can get account transfers', async (): Promise<void> => {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -553,17 +553,17 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.strictEqual(transfers.length, transfers_created.length / 2)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   i = 0;
   for (var transfer of transfers) {
     assert.ok(timestamp < transfer.timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -576,10 +576,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.deepStrictEqual(transfers, [])
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   // Query the first 5 transfers for accountC ORDER BY DESC:
   filter = {
@@ -590,10 +590,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits | AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.strictEqual(transfers.length, transfers_created.length / 2)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   timestamp = 1n << 64n;
   i = 0;
@@ -601,7 +601,7 @@ test('can get account transfers', async (): Promise<void> => {
     assert.ok(timestamp > transfer.timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -614,17 +614,17 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits | AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.strictEqual(transfers.length, transfers_created.length / 2)
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   i = 0;
   for (var transfer of transfers) {
     assert.ok(timestamp > transfer.timestamp);
     timestamp = transfer.timestamp;
 
-    assert.ok(history[i].timestamp == transfer.timestamp);
+    assert.ok(account_balances[i].timestamp == transfer.timestamp);
     i++;
   }
 
@@ -637,10 +637,10 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits | AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
-  history = await client.getAccountHistory(filter)
+  account_balances = await client.getAccountBalances(filter)
 
   assert.deepStrictEqual(transfers, [])
-  assert.strictEqual(history.length, transfers.length)
+  assert.strictEqual(account_balances.length, transfers.length)
 
   // Invalid account:
   filter = {
@@ -651,7 +651,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
   // Invalid timestamp min:
   filter = {
@@ -662,7 +662,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
   // Invalid timestamp max:
   filter = {
@@ -673,7 +673,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
   // Invalid timestamp range:
   filter = {
@@ -684,7 +684,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
   // Zero limit:
   filter = {
@@ -695,7 +695,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
   // Empty flags:
   filter = {
@@ -706,7 +706,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: AccountFilterFlags.none,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
   // Invalid flags:
   filter = {
@@ -717,7 +717,7 @@ test('can get account transfers', async (): Promise<void> => {
     flags: 0xFFFF,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
-  assert.deepStrictEqual((await client.getAccountHistory(filter)), [])
+  assert.deepStrictEqual((await client.getAccountBalances(filter)), [])
 
 })
 

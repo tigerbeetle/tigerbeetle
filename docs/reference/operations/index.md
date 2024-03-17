@@ -10,7 +10,7 @@ There are six operations available to clients:
 - [`lookup_transfers`](./lookup_transfers.md): fetch `Transfer`s by `id`
 - [`get_account_transfers`](./get_account_transfers.md): fetch `Transfer`s
 by `debit_account_id` or `credit_account_id`
-- [`get_account_history`](./get_account_history.md): fetch the historical account balance by the `Account`'s `id`.
+- [`get_account_balances`](./get_account_balances.md): fetch the historical account balance by the `Account`'s `id`.
 
 ## Events and Results
 
@@ -26,11 +26,11 @@ Each operation has a corresponding _event_ and _result_ type.
 Client implementations provide an API for sending batched events and decoding the corresponding
 batched results.
 
-| Operation               | Event                                                  | Result                                                         |
-| ----------------------- | ------------------------------------------------------ | -------------------------------------------------------------- |
-| `create_accounts`       | [`Account`](./create_accounts.md#Event)                | [`CreateAccountResult`](./create_accounts.md#Result)           |
-| `create_transfers`      | [`Transfer`](./create_transfers.md#Event)              | [`CreateTransferResult`](./create_transfers.md#Result)         |
-| `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)             | [`Account`](./lookup_accounts.md#Result) or nothing            |
-| `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)           | [`Transfer`](./lookup_transfers.md#Result) or nothing          |
-| `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event)    | [`Transfer`](./get_account_transfers.md#Result) or nothing     |
-| `get_account_history`   | [`AccountFilter`](./get_account_history.md#Event)      | [`AccountBalance`](./get_account_history.md#Result) or nothing |
+| Operation               | Event                                                  | Result                                                          |
+| ----------------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
+| `create_accounts`       | [`Account`](./create_accounts.md#Event)                | [`CreateAccountResult`](./create_accounts.md#Result)            |
+| `create_transfers`      | [`Transfer`](./create_transfers.md#Event)              | [`CreateTransferResult`](./create_transfers.md#Result)          |
+| `lookup_accounts`       | [`Account.id`](./lookup_accounts.md#Event)             | [`Account`](./lookup_accounts.md#Result) or nothing             |
+| `lookup_transfers`      | [`Transfer.id`](./lookup_transfers.md#Event)           | [`Transfer`](./lookup_transfers.md#Result) or nothing           |
+| `get_account_transfers` | [`AccountFilter`](./get_account_transfers.md#Event)    | [`Transfer`](./get_account_transfers.md#Result) or nothing      |
+| `get_account_balances`  | [`AccountFilter`](./get_account_balances.md#Event)     | [`AccountBalance`](./get_account_balances.md#Result) or nothing |

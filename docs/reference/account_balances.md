@@ -7,7 +7,8 @@ sidebar_position: 3
 An `AccountBalance` is a record storing the [`Account`](./accounts.md)'s balance
 at a given point in time.
 
-Only Accounts with the flag [`history`](./accounts.md#flagshistory) set retain the history of balances.
+Only Accounts with the flag [`history`](./accounts.md#flagshistory) set retain
+[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
 
 ## Fields
 
@@ -27,7 +28,7 @@ Constraints:
 
 ### `debits_pending`
 
-Amount of [pending debits](./accounts.md#debits_pending). 
+Amount of [pending debits](./accounts.md#debits_pending).
 
 Constraints:
 

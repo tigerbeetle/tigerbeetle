@@ -6,7 +6,7 @@ sidebar_position: 4
 
 An `AccountFilter` is a record containing the filter parameters for querying
 the [account transfers](operations/get_account_transfers.md)
-and the [account historical balances](operations/get_account_history.md).
+and the [account historical balances](operations/get_account_balances.md).
 
 ## Fields
 
