@@ -21,7 +21,7 @@ events](../reference/operations/index.md) sent to the cluster in a single messag
 ## Batching Events
 
 To achieve high throughput, TigerBeetle amortizes the overhead of consensus and I/O by batching many
-operation events in each request. 
+operation events in each request.
 
 For the best performance, each request should batch as many events as possible. Typically this means
 funneling events through fewer client instances (e.g. a single client instance per process).
@@ -38,7 +38,7 @@ In the default configuration, the batch sizes are:
 | `create_accounts`       |                        8190 |                       8190 |
 | `create_transfers`      |                        8190 |                       8190 |
 | `get_account_transfers` |                           1 |                       8190 |
-| `get_account_history`   |                           1 |                       8190 |
+| `get_account_balances`  |                           1 |                       8190 |
 
 You can design your application to batch events manually. However, client instances automatically
 batch requests of the same operation type. Therefore, sharing the same client instance between
@@ -71,7 +71,7 @@ One downside of this approach is that events submitted by the application may be
 order. Without this intermediary API layer, TigerBeetle clients ensure that operations are applied
 in the order they are submitted. However, if operations are submitted to two different API layer
 instances, the operations may reach the TigerBeetle cluster in a different order, or one of the API
-instances could crash and restart mid-request. 
+instances could crash and restart mid-request.
 
 
 ```mermaid

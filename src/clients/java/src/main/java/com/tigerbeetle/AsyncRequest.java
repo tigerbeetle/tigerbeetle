@@ -54,10 +54,10 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
                 Request.Operations.GET_ACCOUNT_TRANSFERS, filter.batch);
     }
 
-    public static AsyncRequest<AccountBalanceBatch> getAccountHistory(
+    public static AsyncRequest<AccountBalanceBatch> getAccountBalances(
             final NativeClient nativeClient, final AccountFilter filter) {
         return new AsyncRequest<AccountBalanceBatch>(nativeClient,
-                Request.Operations.GET_ACCOUNT_HISTORY, filter.batch);
+                Request.Operations.GET_ACCOUNT_BALANCES, filter.batch);
     }
 
     public static AsyncRequest<AccountBatch> echo(final NativeClient nativeClient,

@@ -451,7 +451,7 @@ if err != nil {
 log.Println(transfers)
 ```
 
-## Get Account History
+## Get Account Balances
 
 NOTE: This is a preview API that is subject to breaking changes once we have
 a stable querying API.
@@ -461,7 +461,7 @@ pagination capabilities.
 
 Only accounts created with the flag
 [`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-the history of balances.
+[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
 
 The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
@@ -478,7 +478,7 @@ filter = AccountFilter{
 		Reversed: true, // Sort by timestamp in reverse-chronological order.
 	}.ToUint32(),
 }
-account_balances, err := client.GetAccountHistory(filter)
+account_balances, err := client.GetAccountBalances(filter)
 if err != nil {
 	log.Printf("Could not fetch the history: %s", err)
 	return

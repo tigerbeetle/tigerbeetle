@@ -96,7 +96,7 @@ export interface Client {
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   getAccountTransfers: (filter: AccountFilter) => Promise<Transfer[]>
-  getAccountHistory: (filter: AccountFilter) => Promise<AccountBalance[]>
+  getAccountBalances: (filter: AccountFilter) => Promise<AccountBalance[]>
   destroy: () => void
 }
 
@@ -132,7 +132,7 @@ export function createClient (args: ClientInitArgs): Client {
     lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
     lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
     getAccountTransfers(filter) { return request(Operation.get_account_transfers, [filter]) },
-    getAccountHistory(filter) { return request(Operation.get_account_history, [filter]) },
+    getAccountBalances(filter) { return request(Operation.get_account_balances, [filter]) },
     destroy() { binding.deinit(context) },
   }
 }

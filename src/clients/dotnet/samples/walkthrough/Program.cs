@@ -161,7 +161,7 @@ using (var client = new Client(clusterID, addresses))
     transfers = client.GetAccountTransfers(filter);
     // endsection:get-account-transfers
 
-    // section:get-account-history
+    // section:get-account-balances
     filter = new AccountFilter
     {
         AccountId = 2,
@@ -172,9 +172,9 @@ using (var client = new Client(clusterID, addresses))
             AccountFilterFlags.Credits | // Include transfer from the credit side.
             AccountFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
     };
-    var account_balances = client.GetAccountHistory(filter);
-    // endsection:get-account-history
-    
+    var account_balances = client.GetAccountBalances(filter);
+    // endsection:get-account-balances
+
     // section:linked-events
     var batch = new System.Collections.Generic.List<Transfer>();
 

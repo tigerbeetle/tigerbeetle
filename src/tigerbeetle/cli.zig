@@ -47,8 +47,8 @@ const CliArgs = union(enum) {
         cache_transfers: flags.ByteSize = .{ .bytes = constants.cache_transfers_size_default },
         cache_transfers_pending: flags.ByteSize =
             .{ .bytes = constants.cache_transfers_pending_size_default },
-        cache_account_history: flags.ByteSize =
-            .{ .bytes = constants.cache_account_history_size_default },
+        cache_account_balances: flags.ByteSize =
+            .{ .bytes = constants.cache_account_balances_size_default },
         cache_grid: flags.ByteSize = .{ .bytes = constants.grid_cache_size_default },
         memory_lsm_manifest: flags.ByteSize =
             .{ .bytes = constants.lsm_manifest_memory_size_default },
@@ -74,10 +74,10 @@ const CliArgs = union(enum) {
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
-        cache_account_history: ?[]const u8 = null,
+        cache_account_balances: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
-        account_history: bool = false,
+        account_balances: bool = false,
         transfer_count: usize = 10_000_000,
         transfer_pending: bool = false,
         query_count: usize = 100,
@@ -196,7 +196,7 @@ pub const Command = union(enum) {
         cache_accounts: u32,
         cache_transfers: u32,
         cache_transfers_pending: u32,
-        cache_account_history: u32,
+        cache_account_balances: u32,
         storage_size_limit: u64,
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
@@ -219,10 +219,10 @@ pub const Command = union(enum) {
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
-        cache_account_history: ?[]const u8 = null,
+        cache_account_balances: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
-        account_history: bool = false,
+        account_balances: bool = false,
         transfer_count: usize = 10_000_000,
         transfer_pending: bool = false,
         query_count: usize = 100,
@@ -332,7 +332,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
             const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
             const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
-            const AccountHistoryValuesCache = groove_config.account_history.ObjectsCache.Cache;
+            const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
 
             const addresses = parse_addresses(allocator, start.addresses);
 
@@ -404,10 +404,10 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         TransfersPendingValuesCache,
                         start.cache_transfers_pending,
                     ),
-                    .cache_account_history = parse_cache_size_to_count(
-                        StateMachine.AccountHistoryGrooveValue,
-                        AccountHistoryValuesCache,
-                        start.cache_account_history,
+                    .cache_account_balances = parse_cache_size_to_count(
+                        StateMachine.AccountBalancesGrooveValue,
+                        AccountBalancesValuesCache,
+                        start.cache_account_balances,
                     ),
                     .cache_grid_blocks = parse_cache_size_to_count(
                         [constants.block_size]u8,
@@ -442,7 +442,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cache_accounts = benchmark.cache_accounts,
                     .cache_transfers = benchmark.cache_transfers,
                     .cache_transfers_pending = benchmark.cache_transfers_pending,
-                    .cache_account_history = benchmark.cache_account_history,
+                    .cache_account_balances = benchmark.cache_account_balances,
                     .cache_grid = benchmark.cache_grid,
                     .account_count = benchmark.account_count,
                     .transfer_count = benchmark.transfer_count,

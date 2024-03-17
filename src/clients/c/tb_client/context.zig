@@ -72,7 +72,7 @@ pub fn ContextType(
                 .lookup_accounts,
                 .lookup_transfers,
                 .get_account_transfers,
-                .get_account_history,
+                .get_account_balances,
             };
             inline for (allowed_operations) |operation| {
                 if (op == @intFromEnum(operation)) {

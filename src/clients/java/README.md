@@ -481,7 +481,7 @@ filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 transfers = client.getAccountTransfers(filter);
 ```
 
-## Get Account History
+## Get Account Balances
 
 NOTE: This is a preview API that is subject to breaking changes once we have
 a stable querying API.
@@ -491,7 +491,7 @@ pagination capabilities.
 
 Only accounts created with the flag
 [`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-the history of balances.
+[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
 
 The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
@@ -505,7 +505,7 @@ filter.setLimit(10); // Limit to ten balances at most.
 filter.setDebits(true); // Include transfer from the debit side.
 filter.setCredits(true); // Include transfer from the credit side.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
-AccountBalanceBatch account_balances = client.getAccountHistory(filter);
+AccountBalanceBatch account_balances = client.getAccountBalances(filter);
 ```
 
 ## Linked Events

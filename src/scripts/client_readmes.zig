@@ -374,7 +374,7 @@ fn readme_root(ctx: *Context) !void {
     }
 
     {
-        ctx.header(2, "Get Account History");
+        ctx.header(2, "Get Account Balances");
         ctx.paragraph(
             \\NOTE: This is a preview API that is subject to breaking changes once we have
             \\a stable querying API.
@@ -384,12 +384,12 @@ fn readme_root(ctx: *Context) !void {
             \\
             \\Only accounts created with the flag
             \\[`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-            \\the history of balances.
+            \\[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
             \\
             \\The balances in the response are sorted by `timestamp` in chronological or
             \\reverse-chronological order.
         );
-        ctx.code_section("get-account-history");
+        ctx.code_section("get-account-balances");
     }
 
     {

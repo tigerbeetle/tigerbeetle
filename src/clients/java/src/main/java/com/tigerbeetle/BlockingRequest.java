@@ -69,10 +69,10 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
                 Request.Operations.GET_ACCOUNT_TRANSFERS, filter.batch);
     }
 
-    public static BlockingRequest<AccountBalanceBatch> getAccountHistory(
+    public static BlockingRequest<AccountBalanceBatch> getAccountBalances(
             final NativeClient nativeClient, final AccountFilter filter) {
         return new BlockingRequest<AccountBalanceBatch>(nativeClient,
-                Request.Operations.GET_ACCOUNT_HISTORY, filter.batch);
+                Request.Operations.GET_ACCOUNT_BALANCES, filter.batch);
     }
 
     public static BlockingRequest<AccountBatch> echo(final NativeClient nativeClient,

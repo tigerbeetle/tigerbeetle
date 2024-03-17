@@ -585,7 +585,7 @@ let filter = {
 const account_transfers = await client.getAccountTransfers(filter);
 ```
 
-## Get Account History
+## Get Account Balances
 
 NOTE: This is a preview API that is subject to breaking changes once we have
 a stable querying API.
@@ -595,7 +595,7 @@ pagination capabilities.
 
 Only accounts created with the flag
 [`history`](https://docs.tigerbeetle.com/reference/accounts#flagshistory) set retain
-the history of balances.
+[historical balances](https://docs.tigerbeetle.com/reference/operations/get_account_balances).
 
 The balances in the response are sorted by `timestamp` in chronological or
 reverse-chronological order.
@@ -610,7 +610,7 @@ filter = {
     AccountFilterFlags.credits | // Include transfer from the credit side.
     AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
-const account_balances = await client.getAccountHistory(filter);
+const account_balances = await client.getAccountBalances(filter);
 ```
 
 ## Linked Events

@@ -1261,16 +1261,16 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(false);
             final var accountTransfers = client.getAccountTransfers(filter);
-            final var accountHistory = client.getAccountHistory(filter);
+            final var accountBalances = client.getAccountBalances(filter);
             assertTrue(accountTransfers.getLength() == 10);
-            assertTrue(accountHistory.getLength() == 10);
+            assertTrue(accountBalances.getLength() == 10);
             long timestamp = 0;
             while (accountTransfers.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) > 0);
                 timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(accountHistory.next());
-                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
+                assertTrue(accountBalances.next());
+                assertEquals(accountTransfers.getTimestamp(), accountBalances.getTimestamp());
             }
         }
 
@@ -1287,17 +1287,17 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(true);
             final var accountTransfers = client.getAccountTransfers(filter);
-            final var accountHistory = client.getAccountHistory(filter);
+            final var accountBalances = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers.getLength() == 10);
-            assertTrue(accountHistory.getLength() == 10);
+            assertTrue(accountBalances.getLength() == 10);
             long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
             while (accountTransfers.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) < 0);
                 timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(accountHistory.next());
-                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
+                assertTrue(accountBalances.next());
+                assertEquals(accountTransfers.getTimestamp(), accountBalances.getTimestamp());
             }
         }
 
@@ -1314,17 +1314,17 @@ public class IntegrationTest {
             filter.setCredits(false);
             filter.setReversed(false);
             final var accountTransfers = client.getAccountTransfers(filter);
-            final var accountHistory = client.getAccountHistory(filter);
+            final var accountBalances = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers.getLength() == 5);
-            assertTrue(accountHistory.getLength() == 5);
+            assertTrue(accountBalances.getLength() == 5);
             long timestamp = 0;
             while (accountTransfers.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) > 0);
                 timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(accountHistory.next());
-                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
+                assertTrue(accountBalances.next());
+                assertEquals(accountTransfers.getTimestamp(), accountBalances.getTimestamp());
             }
         }
 
@@ -1341,18 +1341,18 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(true);
             final var accountTransfers = client.getAccountTransfers(filter);
-            final var accountHistory = client.getAccountHistory(filter);
+            final var accountBalances = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers.getLength() == 5);
-            assertTrue(accountHistory.getLength() == 5);
+            assertTrue(accountBalances.getLength() == 5);
 
             long timestamp = Long.MIN_VALUE; // MIN_VALUE is the unsigned MAX_VALUE.
             while (accountTransfers.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers.getTimestamp(), timestamp) < 0);
                 timestamp = accountTransfers.getTimestamp();
 
-                assertTrue(accountHistory.next());
-                assertEquals(accountTransfers.getTimestamp(), accountHistory.getTimestamp());
+                assertTrue(accountBalances.next());
+                assertEquals(accountTransfers.getTimestamp(), accountBalances.getTimestamp());
             }
         }
 
@@ -1371,43 +1371,43 @@ public class IntegrationTest {
 
             // First 5 items:
             final var accountTransfers1 = client.getAccountTransfers(filter);
-            final var accountHistory1 = client.getAccountHistory(filter);
+            final var accountBalances1 = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers1.getLength() == 5);
-            assertTrue(accountHistory1.getLength() == 5);
+            assertTrue(accountBalances1.getLength() == 5);
 
             long timestamp = 0;
             while (accountTransfers1.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers1.getTimestamp(), timestamp) > 0);
                 timestamp = accountTransfers1.getTimestamp();
 
-                assertTrue(accountHistory1.next());
-                assertEquals(accountTransfers1.getTimestamp(), accountHistory1.getTimestamp());
+                assertTrue(accountBalances1.next());
+                assertEquals(accountTransfers1.getTimestamp(), accountBalances1.getTimestamp());
             }
 
             // Next 5 items from this timestamp:
             filter.setTimestampMin(timestamp + 1);
             final var accountTransfers2 = client.getAccountTransfers(filter);
-            final var accountHistory2 = client.getAccountHistory(filter);
+            final var accountBalances2 = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers2.getLength() == 5);
-            assertTrue(accountHistory2.getLength() == 5);
+            assertTrue(accountBalances2.getLength() == 5);
 
             while (accountTransfers2.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers2.getTimestamp(), timestamp) > 0);
                 timestamp = accountTransfers2.getTimestamp();
 
-                assertTrue(accountHistory2.next());
-                assertEquals(accountTransfers2.getTimestamp(), accountHistory2.getTimestamp());
+                assertTrue(accountBalances2.next());
+                assertEquals(accountTransfers2.getTimestamp(), accountBalances2.getTimestamp());
             }
 
             // No more results after that timestamp:
             filter.setTimestampMin(timestamp + 1);
             final var accountTransfers3 = client.getAccountTransfers(filter);
-            final var accountHistory3 = client.getAccountHistory(filter);
+            final var accountBalances3 = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers3.getLength() == 0);
-            assertTrue(accountHistory3.getLength() == 0);
+            assertTrue(accountBalances3.getLength() == 0);
         }
 
         {
@@ -1425,7 +1425,7 @@ public class IntegrationTest {
 
             // First 5 items:
             final var accountTransfers1 = client.getAccountTransfers(filter);
-            final var accountHistory1 = client.getAccountHistory(filter);
+            final var accountBalances1 = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers1.getLength() == 5);
             assertTrue(accountTransfers1.getLength() == 5);
@@ -1435,33 +1435,33 @@ public class IntegrationTest {
                 assertTrue(Long.compareUnsigned(accountTransfers1.getTimestamp(), timestamp) < 0);
                 timestamp = accountTransfers1.getTimestamp();
 
-                assertTrue(accountHistory1.next());
-                assertEquals(accountTransfers1.getTimestamp(), accountHistory1.getTimestamp());
+                assertTrue(accountBalances1.next());
+                assertEquals(accountTransfers1.getTimestamp(), accountBalances1.getTimestamp());
             }
 
             // Next 5 items from this timestamp:
             filter.setTimestampMax(timestamp - 1);
             final var accountTransfers2 = client.getAccountTransfers(filter);
-            final var accountHistory2 = client.getAccountHistory(filter);
+            final var accountBalances2 = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers2.getLength() == 5);
-            assertTrue(accountHistory2.getLength() == 5);
+            assertTrue(accountBalances2.getLength() == 5);
 
             while (accountTransfers2.next()) {
                 assertTrue(Long.compareUnsigned(accountTransfers2.getTimestamp(), timestamp) < 0);
                 timestamp = accountTransfers2.getTimestamp();
 
-                assertTrue(accountHistory2.next());
-                assertEquals(accountTransfers2.getTimestamp(), accountHistory2.getTimestamp());
+                assertTrue(accountBalances2.next());
+                assertEquals(accountTransfers2.getTimestamp(), accountBalances2.getTimestamp());
             }
 
             // No more results before that timestamp:
             filter.setTimestampMax(timestamp - 1);
             final var accountTransfers3 = client.getAccountTransfers(filter);
-            final var accountHistory3 = client.getAccountHistory(filter);
+            final var accountBalances3 = client.getAccountBalances(filter);
 
             assertTrue(accountTransfers3.getLength() == 0);
-            assertTrue(accountHistory3.getLength() == 0);
+            assertTrue(accountBalances3.getLength() == 0);
         }
 
         // For those tests it doesn't matter using the sync or async version. We use the async
@@ -1471,7 +1471,7 @@ public class IntegrationTest {
             // Empty filter:
             final var filter = new AccountFilter();
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1485,7 +1485,7 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(false);
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1499,7 +1499,7 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(false);
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1513,7 +1513,7 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(false);
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1527,7 +1527,7 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(false);
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1541,7 +1541,7 @@ public class IntegrationTest {
             filter.setCredits(true);
             filter.setReversed(false);
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
 
         {
@@ -1555,7 +1555,7 @@ public class IntegrationTest {
             filter.setCredits(false);
             filter.setReversed(false);
             assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
-            assertTrue(client.getAccountHistoryAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
         }
     }
 

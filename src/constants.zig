@@ -150,7 +150,7 @@ pub const cache_transfers_pending_size_default = config.process.cache_transfers_
 
 /// The default size of historical balances in-memory cache:
 /// This impacts the amount of memory allocated at initialization by the server.
-pub const cache_account_history_size_default = config.process.cache_account_history_size_default;
+pub const cache_account_balances_size_default = config.process.cache_account_balances_size_default;
 
 /// The size of the client replies zone.
 pub const client_replies_size = clients_max * message_size_max;
