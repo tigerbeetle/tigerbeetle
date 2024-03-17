@@ -65,8 +65,9 @@ pub const SuperBlockHeader = extern struct {
     /// The version of the superblock format in use, reserved for major breaking changes.
     version: u16,
 
-    /// Align the next fields.
-    reserved_start: u32 = 0,
+    /// The release that the data file was originally formatted by.
+    /// (Upgrades do not update this field.)
+    release_format: vsr.Release,
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
     sequence: u64,
@@ -396,9 +397,9 @@ pub const SuperBlockHeader = extern struct {
     pub fn set_checksum(superblock: *SuperBlockHeader) void {
         assert(superblock.copy < constants.superblock_copies);
         assert(superblock.version == SuperBlockVersion);
+        assert(superblock.release_format.value > 0);
         assert(superblock.flags == 0);
 
-        assert(superblock.reserved_start == 0);
         assert(stdx.zeroed(&superblock.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.checkpoint.reserved));
@@ -420,8 +421,7 @@ pub const SuperBlockHeader = extern struct {
 
     /// Does not consider { checksum, copy } when comparing equality.
     pub fn equal(a: *const SuperBlockHeader, b: *const SuperBlockHeader) bool {
-        assert(a.reserved_start == 0);
-        assert(b.reserved_start == 0);
+        assert(a.release_format.value == b.release_format.value);
 
         assert(stdx.zeroed(&a.reserved));
         assert(stdx.zeroed(&b.reserved));
@@ -729,6 +729,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .copy = 0,
                 .version = SuperBlockVersion,
                 .sequence = 0,
+                .release_format = options.release,
                 .cluster = options.cluster,
                 .parent = 0,
                 .vsr_state = .{
@@ -1502,6 +1503,7 @@ test "SuperBlockHeader" {
 
     var a = std.mem.zeroes(SuperBlockHeader);
     a.version = SuperBlockVersion;
+    a.release_format = vsr.Release.minimum;
     a.set_checksum();
 
     assert(a.copy == 0);

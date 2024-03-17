@@ -126,6 +126,7 @@ fn test_quorums_working(
         header.* = std.mem.zeroInit(SuperBlockHeader, .{
             .copy = @as(u8, @intCast(i)),
             .version = SuperBlockVersion,
+            .release_format = vsr.Release.minimum,
             .sequence = copies[i].sequence,
             .parent = checksums[copies[i].sequence - 1],
             .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
@@ -280,6 +281,7 @@ pub fn fuzz_quorum_repairs(
             header.* = std.mem.zeroInit(SuperBlockHeader, .{
                 .copy = @as(u8, @intCast(i)),
                 .version = SuperBlockVersion,
+                .release_format = vsr.Release.minimum,
                 .sequence = 123,
                 .vsr_state = std.mem.zeroInit(SuperBlockHeader.VSRState, .{
                     .replica_id = members[1],
