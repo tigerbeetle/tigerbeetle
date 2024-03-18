@@ -3367,9 +3367,11 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.op);
 
             if (self.syncing == .canceling_commit and stage_new != .cleanup) {
+                if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
+                self.commit_prepare = null;
+                self.commit_stage = .idle;
                 return self.sync_cancel_commit_callback();
             }
-            assert(self.syncing == .idle);
 
             const stage_old = self.commit_stage;
             assert(stage_old != @as(std.meta.Tag(CommitStage), stage_new));
@@ -3381,6 +3383,7 @@ pub fn ReplicaType(
                     CommitStage.next_journal,
                 else => stage_new,
             };
+            assert(self.syncing == .idle or self.commit_stage == .cleanup);
 
             // Reset the repair-sync timeout anytime that a commit makes progress.
             if (self.commit_stage != .next_journal and
@@ -8444,14 +8447,8 @@ pub fn ReplicaType(
             assert(self.grid.write_queue.empty());
             assert(self.grid.read_iops.executing() == 0);
             assert(self.grid.write_iops.executing() == 0);
-
-            if (self.commit_stage == .idle) {
-                assert(self.commit_prepare == null);
-            } else {
-                if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
-                self.commit_prepare = null;
-                self.commit_stage = .idle;
-            }
+            assert(self.commit_stage == .idle);
+            assert(self.commit_prepare == null);
 
             var grid_reads = self.grid_reads.iterate();
             while (grid_reads.next()) |grid_read| {
