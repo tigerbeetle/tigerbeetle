@@ -33,9 +33,18 @@ const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 const log_level = std.log.Level.err;
 
 const releases = .{
-    .{ .release = 1, .release_client_min = 1 },
-    .{ .release = 2, .release_client_min = 1 },
-    .{ .release = 3, .release_client_min = 1 },
+    .{
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+    },
+    .{
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 2 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+    },
+    .{
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 3 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+    },
 };
 
 // TODO Test client eviction once it no longer triggers a client panic.
@@ -1273,7 +1282,7 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         try c.request(data.request, data.request);
 
         t.replica(.R_).stop();
-        try t.replica(.R_).open_upgrade(&[_]u16{ 1, 2 });
+        try t.replica(.R_).open_upgrade(&[_]u8{ 1, 2 });
 
         // Prevent the upgrade from committing so that we can verify that the replica is still
         // running version 1.
@@ -1303,7 +1312,7 @@ test "Cluster: upgrade: R=1" {
     try c.request(20, 20);
 
     t.replica(.R_).stop();
-    try t.replica(.R0).open_upgrade(&[_]u16{ 1, 2 });
+    try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
     t.run();
 
     try expectEqual(t.replica(.R0).health(), .up);
@@ -1320,8 +1329,8 @@ test "Cluster: upgrade: state-sync to new release" {
     try c.request(20, 20);
 
     t.replica(.R_).stop();
-    try t.replica(.R0).open_upgrade(&[_]u16{ 1, 2 });
-    try t.replica(.R1).open_upgrade(&[_]u16{ 1, 2 });
+    try t.replica(.R0).open_upgrade(&[_]u8{ 1, 2 });
+    try t.replica(.R1).open_upgrade(&[_]u8{ 1, 2 });
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
 
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
@@ -1337,7 +1346,7 @@ test "Cluster: upgrade: state-sync to new release" {
     try expectEqual(t.replica(.R2).commit(), checkpoint_2);
 
     // Start R2 up with v2 available, and it recovers.
-    try t.replica(.R2).open_upgrade(&[_]u16{ 1, 2 });
+    try t.replica(.R2).open_upgrade(&[_]u8{ 1, 2 });
     try expectEqual(t.replica(.R2).health(), .up);
     try expectEqual(t.replica(.R2).release(), 2);
     try expectEqual(t.replica(.R2).commit(), checkpoint_2);
@@ -1573,10 +1582,19 @@ const TestReplicas = struct {
         }
     }
 
-    pub fn open_upgrade(t: *const TestReplicas, releases_bundled: []const u16) !void {
+    pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
+        var releases_bundled = vsr.ReleaseList{};
+        for (releases_bundled_patch) |patch| {
+            releases_bundled.append_assume_capacity(vsr.Release.from(.{
+                .major = 0,
+                .minor = 0,
+                .patch = patch,
+            }));
+        }
+
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.restart_replica(r, releases_bundled) catch |err| {
+            t.cluster.restart_replica(r, releases_bundled.const_slice()) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -1632,7 +1650,16 @@ const TestReplicas = struct {
     }
 
     pub fn release(t: *const TestReplicas) u16 {
-        return t.get(.release);
+        var value_all: ?u16 = null;
+        for (t.replicas.const_slice()) |r| {
+            const value = t.cluster.replicas[r].release.triple().patch;
+            if (value_all) |all| {
+                assert(all == value);
+            } else {
+                value_all = value;
+            }
+        }
+        return value_all.?;
     }
 
     pub fn status(t: *const TestReplicas) vsr.Status {

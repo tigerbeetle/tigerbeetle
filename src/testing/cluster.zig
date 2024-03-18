@@ -32,8 +32,8 @@ const superblock_zone_size = @import("../vsr/superblock.zig").superblock_zone_si
 pub const ReplicaHealth = enum { up, down };
 
 pub const Release = struct {
-    release: u16,
-    release_client_min: u16,
+    release: vsr.Release,
+    release_client_min: vsr.Release,
 };
 
 /// Integer values represent exit codes.
@@ -109,7 +109,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         // cluster's clocks do not desynchronize too far to recover.
         replica_times: []Time,
         replica_health: []ReplicaHealth,
-        replica_upgrades: []?u16,
+        replica_upgrades: []?vsr.Release,
         replica_count: u8,
         standby_count: u8,
 
@@ -148,9 +148,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 options.releases[0 .. options.releases.len - 1],
                 options.releases[1..],
             ) |release_a, release_b| {
-                assert(release_a.release < release_b.release);
-                assert(release_a.release_client_min <= release_b.release);
-                assert(release_a.release_client_min <= release_b.release_client_min);
+                assert(release_a.release.value < release_b.release.value);
+                assert(release_a.release_client_min.value <= release_b.release.value);
+                assert(release_a.release_client_min.value <= release_b.release_client_min.value);
             }
 
             const node_count = options.replica_count + options.standby_count;
@@ -238,7 +238,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(replica_health);
             @memset(replica_health, .up);
 
-            const replica_upgrades = try allocator.alloc(?u16, node_count);
+            const replica_upgrades = try allocator.alloc(?vsr.Release, node_count);
             errdefer allocator.free(replica_upgrades);
             @memset(replica_upgrades, null);
 
@@ -343,7 +343,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 try cluster.replica_open(@intCast(replica_index), .{
                     .nonce = nonce,
                     .release = options.releases[0].release,
-                    .releases_bundled = &[_]u16{options.releases[0].release},
+                    .releases_bundled = &[_]vsr.Release{options.releases[0].release},
                 });
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
@@ -423,18 +423,20 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn restart_replica(
             cluster: *Self,
             replica_index: u8,
-            releases_bundled: []const u16,
+            releases_bundled: []const vsr.Release,
         ) !void {
             assert(cluster.replica_health[replica_index] == .down);
             assert(cluster.replica_upgrades[replica_index] == null);
-            vsr.verify_release_list(releases_bundled);
+
+            const release = releases_bundled[0];
+            vsr.verify_release_list(releases_bundled, release);
 
             defer maybe(cluster.replica_health[replica_index] == .up);
             defer assert(cluster.replica_upgrades[replica_index] == null);
 
             try cluster.replica_open(replica_index, .{
                 .nonce = cluster.replicas[replica_index].nonce + 1,
-                .release = releases_bundled[0],
+                .release = release,
                 .releases_bundled = releases_bundled,
             });
             cluster.replica_enable(replica_index);
@@ -480,11 +482,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         fn replica_open(cluster: *Self, replica_index: u8, options: struct {
             nonce: u128,
-            release: u16,
-            releases_bundled: []const u16,
+            release: vsr.Release,
+            releases_bundled: []const vsr.Release,
         }) !void {
             const release_client_min = for (cluster.options.releases) |release| {
-                if (release.release == options.release) {
+                if (release.release.value == options.release.value) {
                     break release.release_client_min;
                 }
             } else unreachable;
@@ -519,8 +521,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
-        fn replica_release_execute_soon(replica: *Replica, release: u16) void {
-            assert(replica.release != release);
+        fn replica_release_execute_soon(replica: *Replica, release: vsr.Release) void {
+            assert(replica.release.value != release.value);
 
             const cluster: *Self = @ptrCast(@alignCast(replica.test_context.?));
             assert(cluster.replica_upgrades[replica.replica] == null);
@@ -534,10 +536,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             if (cluster.replica_health[replica.replica] == .up) {
                 // The replica is trying to upgrade to a newer release at runtime.
                 assert(replica.journal.status != .init);
-                assert(replica.release < release);
+                assert(replica.release.value < release.value);
             } else {
                 assert(replica.journal.status == .init);
-                maybe(replica.release < release);
+                maybe(replica.release.value < release.value);
             }
 
             cluster.replica_upgrades[replica.replica] = release;
@@ -562,7 +564,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.crash_replica(replica_index);
 
-            if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release)) |_| {
+            const release_available = for (replica.releases_bundled.const_slice()) |r| {
+                if (r.value == release.value) break true;
+            } else false;
+
+            if (release_available) {
                 // Disable faults while restarting to ensure that the cluster doesn't get stuck due
                 // to too many replicas in status=recovering_head.
                 const faulty = cluster.storages[replica_index].faulty;
@@ -796,10 +802,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .wal_op_max = wal_op_max,
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
-                    .release = replica.release,
+                    .release = replica.release.triple().patch,
                     .release_max = replica.releases_bundled.get(
                         replica.releases_bundled.count() - 1,
-                    ),
+                    ).triple().patch,
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else

@@ -63,7 +63,105 @@ pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").Checkpoi
 pub const Version: u16 = 0;
 
 /// A ReleaseList is ordered from lowest-to-highest version.
-pub const ReleaseList = stdx.BoundedArray(u16, constants.vsr_releases_max);
+pub const ReleaseList = stdx.BoundedArray(Release, constants.vsr_releases_max);
+
+pub const Release = extern struct {
+    value: u32,
+
+    comptime {
+        assert(@sizeOf(Release) == 4);
+        assert(@sizeOf(Release) == @sizeOf(ReleaseTriple));
+        assert(stdx.no_padding(Release));
+    }
+
+    pub const zero = Release.from(.{ .major = 0, .minor = 0, .patch = 0 });
+    pub const minimum = Release.from(.{ .major = 0, .minor = 0, .patch = 1 });
+
+    pub fn from(release_triple: ReleaseTriple) Release {
+        return std.mem.bytesAsValue(Release, std.mem.asBytes(&release_triple)).*;
+    }
+
+    pub fn triple(release: *const Release) ReleaseTriple {
+        return std.mem.bytesAsValue(ReleaseTriple, std.mem.asBytes(release)).*;
+    }
+
+    pub fn format(
+        release: Release,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        const release_triple = release.triple();
+        return writer.print("{}.{}.{}", .{
+            release_triple.major,
+            release_triple.minor,
+            release_triple.patch,
+        });
+    }
+
+    pub fn max(a: Release, b: Release) Release {
+        if (a.value > b.value) {
+            return a;
+        } else {
+            return b;
+        }
+    }
+};
+
+pub const ReleaseTriple = extern struct {
+    patch: u8,
+    minor: u8,
+    major: u16,
+
+    comptime {
+        assert(@sizeOf(ReleaseTriple) == 4);
+        assert(stdx.no_padding(ReleaseTriple));
+    }
+
+    pub fn parse(string: []const u8) error{InvalidRelease}!ReleaseTriple {
+        var parts = std.mem.splitScalar(u8, string, '.');
+        const major = parts.first();
+        const minor = parts.next() orelse return error.InvalidRelease;
+        const patch = parts.next() orelse return error.InvalidRelease;
+        if (parts.next() != null) return error.InvalidRelease;
+        return .{
+            .major = std.fmt.parseUnsigned(u16, major, 10) catch return error.InvalidRelease,
+            .minor = std.fmt.parseUnsigned(u8, minor, 10) catch return error.InvalidRelease,
+            .patch = std.fmt.parseUnsigned(u8, patch, 10) catch return error.InvalidRelease,
+        };
+    }
+};
+
+test "ReleaseTriple.parse" {
+    const tests = [_]struct {
+        string: []const u8,
+        result: error{InvalidRelease}!ReleaseTriple,
+    }{
+        // Valid:
+        .{ .string = "0.0.1", .result = .{ .major = 0, .minor = 0, .patch = 1 } },
+        .{ .string = "0.1.0", .result = .{ .major = 0, .minor = 1, .patch = 0 } },
+        .{ .string = "1.0.0", .result = .{ .major = 1, .minor = 0, .patch = 0 } },
+
+        // Invalid characters:
+        .{ .string = "v0.0.1", .result = error.InvalidRelease },
+        .{ .string = "0.0.1v", .result = error.InvalidRelease },
+        // Invalid separators:
+        .{ .string = "0.0.0.1", .result = error.InvalidRelease },
+        .{ .string = "0..0.1", .result = error.InvalidRelease },
+        // Overflow (and near-overflow):
+        .{ .string = "0.0.255", .result = .{ .major = 0, .minor = 0, .patch = 255 } },
+        .{ .string = "0.0.256", .result = error.InvalidRelease },
+        .{ .string = "0.255.0", .result = .{ .major = 0, .minor = 255, .patch = 0 } },
+        .{ .string = "0.256.0", .result = error.InvalidRelease },
+        .{ .string = "65535.0.0", .result = .{ .major = 65535, .minor = 0, .patch = 0 } },
+        .{ .string = "65536.0.0", .result = error.InvalidRelease },
+    };
+    for (tests) |t| {
+        try std.testing.expectEqualDeep(ReleaseTriple.parse(t.string), t.result);
+    }
+}
 
 pub const ProcessType = enum { replica, client };
 
@@ -571,8 +669,8 @@ test "ReconfigurationRequest" {
 }
 
 pub const UpgradeRequest = extern struct {
-    release: u16,
-    reserved: [14]u8 = [_]u8{0} ** 14,
+    release: Release,
+    reserved: [12]u8 = [_]u8{0} ** 12,
 
     comptime {
         assert(@sizeOf(UpgradeRequest) == 16);
@@ -1097,7 +1195,7 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
     } else return null;
 }
 
-pub fn verify_release_list(releases: []const u16) void {
+pub fn verify_release_list(releases: []const Release, release_included: Release) void {
     assert(releases.len >= 1);
     assert(releases.len <= constants.vsr_releases_max);
 
@@ -1105,7 +1203,13 @@ pub fn verify_release_list(releases: []const u16) void {
         releases[0 .. releases.len - 1],
         releases[1..],
     ) |release_a, release_b| {
-        assert(release_a < release_b);
+        assert(release_a.value < release_b.value);
+    }
+
+    for (releases) |release| {
+        if (release.value == release_included.value) return;
+    } else {
+        @panic("verify_release_list_contains: release not found");
     }
 }
 
@@ -1122,7 +1226,7 @@ pub const Headers = struct {
     fn dvc_blank(op: u64) Header.Prepare {
         return .{
             .command = .prepare,
-            .release = 0,
+            .release = Release.zero,
             .operation = .reserved,
             .op = op,
             .cluster = 0,
@@ -1280,7 +1384,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .client = 6,
             .request = 7,
             .command = .prepare,
-            .release = 1,
+            .release = Release.minimum,
             .operation = @as(Operation, @enumFromInt(constants.vsr_operations_reserved + 8)),
             .op = 9,
             .view = 10,
@@ -1293,7 +1397,7 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .client = 3,
             .request = 4,
             .command = .prepare,
-            .release = 1,
+            .release = Release.minimum,
             .operation = @as(Operation, @enumFromInt(constants.vsr_operations_reserved + 5)),
             .op = 6,
             .view = 7,

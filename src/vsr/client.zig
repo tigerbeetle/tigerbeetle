@@ -141,7 +141,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         replica_count: u8,
 
         /// Only tests should ever override the release.
-        release: u16 = 1, // TODO Use real release number.
+        release: vsr.Release = constants.config.process.release,
 
         /// The total number of ticks elapsed since the client was initialized.
         ticks: u64 = 0,
@@ -579,7 +579,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(reply.header.valid_checksum());
             assert(reply.header.valid_checksum_body(reply.body()));
             assert(reply.header.command == .reply);
-            assert(reply.header.release == self.release);
+            assert(reply.header.release.value == self.release.value);
 
             if (reply.header.client != self.id) {
                 log.debug("{}: on_reply: ignoring (wrong client={})", .{
@@ -1079,7 +1079,7 @@ test "Client Batching" {
                 .view = message.header.view,
                 .command = .reply,
                 .replica = message.header.replica,
-                .release = 1, // TODO Use the real release number.
+                .release = vsr.Release.minimum,
                 .request_checksum = message.header.checksum,
                 .client = message.header.client,
                 .context = undefined, // computed below.

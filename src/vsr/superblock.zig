@@ -65,8 +65,9 @@ pub const SuperBlockHeader = extern struct {
     /// The version of the superblock format in use, reserved for major breaking changes.
     version: u16,
 
-    /// Align the next fields.
-    reserved_start: u32 = 0,
+    /// The release that the data file was originally formatted by.
+    /// (Upgrades do not update this field.)
+    release_format: vsr.Release,
 
     /// A monotonically increasing counter to locate the latest superblock at startup.
     sequence: u64,
@@ -159,7 +160,7 @@ pub const SuperBlockHeader = extern struct {
             replica_id: u128,
             members: vsr.Members,
             replica_count: u8,
-            release: u16,
+            release: vsr.Release,
         }) VSRState {
             return .{
                 .checkpoint = .{
@@ -363,9 +364,9 @@ pub const SuperBlockHeader = extern struct {
         /// `trigger_for_checkpoint(checkpoint_after(commit_min))` must be executed by this release.
         /// (Prepares with `operation=upgrade` are the exception – upgrades in the last
         /// `lsm_batch_multiple` before a checkpoint trigger may be replayed by a different release.
-        release: u16,
+        release: vsr.Release,
 
-        reserved: [474]u8 = [_]u8{0} ** 474,
+        reserved: [472]u8 = [_]u8{0} ** 472,
 
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
@@ -396,9 +397,9 @@ pub const SuperBlockHeader = extern struct {
     pub fn set_checksum(superblock: *SuperBlockHeader) void {
         assert(superblock.copy < constants.superblock_copies);
         assert(superblock.version == SuperBlockVersion);
+        assert(superblock.release_format.value > 0);
         assert(superblock.flags == 0);
 
-        assert(superblock.reserved_start == 0);
         assert(stdx.zeroed(&superblock.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.checkpoint.reserved));
@@ -420,8 +421,7 @@ pub const SuperBlockHeader = extern struct {
 
     /// Does not consider { checksum, copy } when comparing equality.
     pub fn equal(a: *const SuperBlockHeader, b: *const SuperBlockHeader) bool {
-        assert(a.reserved_start == 0);
-        assert(b.reserved_start == 0);
+        assert(a.release_format.value == b.release_format.value);
 
         assert(stdx.zeroed(&a.reserved));
         assert(stdx.zeroed(&b.reserved));
@@ -699,7 +699,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
         pub const FormatOptions = struct {
             cluster: u128,
-            release: u16,
+            release: vsr.Release,
             replica: u8,
             replica_count: u8,
         };
@@ -713,7 +713,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(!superblock.opened);
             assert(superblock.replica_index == null);
 
-            assert(options.release > 0);
+            assert(options.release.value > 0);
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
@@ -729,6 +729,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .copy = 0,
                 .version = SuperBlockVersion,
                 .sequence = 0,
+                .release_format = options.release,
                 .cluster = options.cluster,
                 .parent = 0,
                 .vsr_state = .{
@@ -752,7 +753,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .storage_size = 0,
                         .snapshots_block_checksum = 0,
                         .snapshots_block_address = 0,
-                        .release = 0,
+                        .release = vsr.Release.zero,
                     },
                     .replica_id = replica_id,
                     .members = members,
@@ -819,7 +820,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             free_set_reference: TrailerReference,
             client_sessions_reference: TrailerReference,
             storage_size: u64,
-            release: u16,
+            release: vsr.Release,
         };
 
         /// Must update the commit_min and commit_min_checksum.
@@ -835,7 +836,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.header.checksum !=
                 superblock.staging.vsr_state.checkpoint.header.checksum);
             assert(update.sync_op_min <= update.sync_op_max);
-            assert(update.release >= superblock.staging.vsr_state.checkpoint.release);
+            assert(update.release.value >= superblock.staging.vsr_state.checkpoint.release.value);
             assert(update.sync_view == 0 or
                 update.sync_view == superblock.staging.vsr_state.sync_view);
 
@@ -1502,6 +1503,7 @@ test "SuperBlockHeader" {
 
     var a = std.mem.zeroes(SuperBlockHeader);
     a.version = SuperBlockVersion;
+    a.release_format = vsr.Release.minimum;
     a.set_checksum();
 
     assert(a.copy == 0);

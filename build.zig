@@ -68,11 +68,9 @@ pub fn build(b: *std.Build) !void {
     ) orelse try shell.git_commit();
     options.addOption([]const u8, "git_commit", git_commit);
 
-    options.addOption(
-        []const u8,
-        "version",
-        b.option([]const u8, "version", "tigerbeetle --version") orelse try shell.git_tag(),
-    );
+    const release_version_string = b.option([]const u8, "version", "tigerbeetle --version");
+    options.addOption([]const u8, "version", release_version_string orelse try shell.git_tag());
+    options.addOption([]const u8, "release", release_version_string orelse "0.0.1");
 
     options.addOption(
         config.ConfigBase,

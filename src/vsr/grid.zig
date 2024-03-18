@@ -594,7 +594,8 @@ pub fn GridType(comptime Storage: type) type {
 
             const block_header = schema.header_from_block(block);
             assert(block_header.cluster == grid.superblock.working.cluster);
-            assert(block_header.release <= grid.superblock.working.vsr_state.checkpoint.release);
+            assert(block_header.release.value <=
+                grid.superblock.working.vsr_state.checkpoint.release.value);
 
             var reads_iterator = grid.read_global_queue.peek();
             while (reads_iterator) |read| : (reads_iterator = read.next) {
@@ -670,7 +671,8 @@ pub fn GridType(comptime Storage: type) type {
         ) void {
             const header = schema.header_from_block(block.*);
             assert(header.cluster == grid.superblock.working.cluster);
-            assert(header.release <= grid.superblock.working.vsr_state.checkpoint.release);
+            assert(header.release.value <=
+                grid.superblock.working.vsr_state.checkpoint.release.value);
 
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
@@ -823,7 +825,8 @@ pub fn GridType(comptime Storage: type) type {
             const header = schema.header_from_block(cache_block);
             assert(header.address == address);
             assert(header.cluster == grid.superblock.working.cluster);
-            assert(header.release <= grid.superblock.working.vsr_state.checkpoint.release);
+            assert(header.release.value <=
+                grid.superblock.working.vsr_state.checkpoint.release.value);
 
             if (header.checksum == checksum) {
                 if (constants.verify and
@@ -1106,7 +1109,8 @@ pub fn GridType(comptime Storage: type) type {
             if (result == .valid) {
                 const header = schema.header_from_block(result.valid);
                 assert(header.cluster == grid.superblock.working.cluster);
-                assert(header.release <= grid.superblock.working.vsr_state.checkpoint.release);
+                assert(header.release.value <=
+                    grid.superblock.working.vsr_state.checkpoint.release.value);
                 assert(header.address == read.address);
                 assert(header.checksum == read.checksum);
             }

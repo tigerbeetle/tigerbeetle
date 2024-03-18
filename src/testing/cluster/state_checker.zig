@@ -13,7 +13,7 @@ const ReplicaSet = std.StaticBitSet(constants.members_max);
 const Commits = std.ArrayList(struct {
     header: vsr.Header.Prepare,
     // null for operation=root and operation=upgrade
-    release: ?u16,
+    release: ?vsr.Release,
     replicas: ReplicaSet = ReplicaSet.initEmpty(),
 });
 
@@ -145,7 +145,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             if (replica.commit_min < state_checker.commits.items.len) {
                 const commit = &state_checker.commits.items[commit_b];
                 if (replica.op_checkpoint() < replica.commit_min) {
-                    if (commit.release) |release| assert(release == replica.release);
+                    if (commit.release) |release| assert(release.value == replica.release.value);
                 } else {
                     // When op_checkpoint==commit_min, we recovered from checkpoint, so it is ok if
                     // the release doesn't match. (commit_min is not actually being executed.)

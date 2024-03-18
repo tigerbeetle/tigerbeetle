@@ -31,9 +31,18 @@ const IdPermutation = @import("testing/id.zig").IdPermutation;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
 const releases = [_]Release{
-    .{ .release = 1, .release_client_min = 1 },
-    .{ .release = 2, .release_client_min = 1 },
-    .{ .release = 3, .release_client_min = 1 },
+    .{
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+    },
+    .{
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 2 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+    },
+    .{
+        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 3 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
+    },
 };
 
 pub const output = std.log.scoped(.cluster);
@@ -271,7 +280,7 @@ pub fn main() !void {
         {
             if (health == .down) continue;
             const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release == release_latest) {
+            if (replica.release.value == release_latest.value) {
                 break true;
             }
         } else false;
@@ -448,7 +457,7 @@ pub const Simulator = struct {
                 // (If down, the replica is waiting to be upgraded.)
                 maybe(simulator.cluster.replica_health[replica.replica] == .down);
 
-                if (replica.release != release_max) return false;
+                if (replica.release.value != release_max.value) return false;
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
             }
         }
@@ -710,19 +719,19 @@ pub const Simulator = struct {
         }
     }
 
-    fn core_release_max(simulator: *const Simulator) u16 {
+    fn core_release_max(simulator: *const Simulator) vsr.Release {
         assert(simulator.core.count() > 0);
 
-        var release_max: u16 = 0;
+        var release_max: vsr.Release = vsr.Release.zero;
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
-                release_max = @max(release_max, replica.release);
+                release_max = release_max.max(replica.release);
                 if (replica.upgrade_release) |release| {
-                    release_max = @max(release_max, release);
+                    release_max = release_max.max(release);
                 }
             }
         }
-        assert(release_max > 0);
+        assert(release_max.value > 0);
         return release_max;
     }
 

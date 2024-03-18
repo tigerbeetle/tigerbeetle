@@ -58,7 +58,7 @@ pub fn main() !void {
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
-            .release = 1, // TODO Use real release number.
+            .release = config.process.release,
         }, args.path),
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
@@ -180,10 +180,10 @@ const Command = struct {
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
-            // TODO Use real release numbers.
-            .release = 1,
-            .release_client_min = 1,
-            .releases_bundled = &[_]u16{1},
+            .release = config.process.release,
+            // TODO Where should this be set?
+            .release_client_min = config.process.release,
+            .releases_bundled = &[_]vsr.Release{config.process.release},
             .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -326,10 +326,12 @@ const Command = struct {
     }
 };
 
-fn replica_release_execute(replica: *Replica, release: u16) noreturn {
-    assert(release != replica.release);
+fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
+    assert(release.value != replica.release.value);
 
-    if (std.mem.indexOfScalar(u16, replica.releases_bundled.const_slice(), release) == null) {
+    for (replica.releases_bundled.const_slice()) |release_bundled| {
+        if (release_bundled.value == release.value) break;
+    } else {
         log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
             replica.replica,
             release,
