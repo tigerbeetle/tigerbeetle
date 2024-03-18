@@ -52,7 +52,7 @@ Consider this set of Transfers as part of a batch:
 | `E`      | `4`                | `false`      |
 
 If any of transfers `B`, `C`, or `D` fail (for example, due to
-[`exceeds_credits`](../reference/operations/create_transfers.md#exceeds_credits), then `B`, `C`, and `D` will
+[`exceeds_credits`](../reference/operations/create_transfers.md#exceeds_credits)), then `B`, `C`, and `D` will
 all fail. They are linked.
 
 Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`, and each other.
