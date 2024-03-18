@@ -25,12 +25,18 @@ const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_s
 const TableUsage = @import("table.zig").TableUsage;
 const TableType = @import("table.zig").TableType;
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
+const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
+const compaction_op_min = @import("compaction.zig").compaction_op_min;
+const Exhausted = @import("compaction.zig").Exhausted;
 
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const FreeSetEncoded = vsr.FreeSetEncodedType(Storage);
+
+const CompactionHelperType = @import("compaction.zig").CompactionHelperType;
+const CompactionHelper = CompactionHelperType(Grid);
 
 const Value = packed struct(u128) {
     id: u64,
@@ -118,6 +124,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             table_usage,
         );
         const ScanTree = ScanTreeType(*Environment, Tree, Storage);
+        const CompactionWork = stdx.BoundedArray(*Tree.Compaction, constants.lsm_levels);
 
         const State = enum {
             init,
@@ -127,6 +134,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             tree_init,
             manifest_log_open,
             fuzzing,
+            blipping,
             tree_compact,
             manifest_log_compact,
             grid_checkpoint,
@@ -149,6 +157,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_buffer: ScanBuffer,
         scan_results: []Value,
         scan_results_count: u32,
+        compaction_exhausted: bool = false,
+
+        compaction_blocks: []CompactionHelper.CompactionBlock,
 
         pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
@@ -187,6 +198,16 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.scan_results = try allocator.alloc(Value, scan_results_max);
             env.scan_results_count = 0;
             defer allocator.free(env.scan_results);
+
+            env.compaction_blocks = try allocator.alloc(CompactionHelper.CompactionBlock, 11);
+            defer allocator.free(env.compaction_blocks);
+
+            for (env.compaction_blocks) |*compaction_block| {
+                compaction_block.* = .{
+                    .block = try allocate_block(allocator),
+                };
+            }
+            defer for (env.compaction_blocks) |block| allocator.free(block.block);
 
             try env.open_then_apply(fuzz_ops);
         }
@@ -267,25 +288,99 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn compact(env: *Environment, op: u64) void {
-            env.change_state(.fuzzing, .tree_compact);
-            env.tree.compact(tree_compact_callback, op);
-            env.tick_until_state_change(.tree_compact, .fuzzing);
+            const compaction_beat = op % constants.lsm_batch_multiple;
+            const compaction_blocks = env.compaction_blocks;
 
-            if (op % @divExact(constants.lsm_batch_multiple, 2) == 0 and
-                op >= constants.lsm_batch_multiple)
-            {
+            const last_half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
+            const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
+
+            if (!last_beat and !last_half_beat) return;
+
+            var compaction_work = CompactionWork{};
+            for (&env.tree.compactions) |*compaction| {
+                if (last_half_beat and compaction.level_b % 2 != 0) continue;
+                if (last_beat and compaction.level_b % 2 == 0) continue;
+
+                const maybe_compaction_work = compaction.bar_setup(&env.tree, op);
+                if (maybe_compaction_work != null) {
+                    compaction_work.append_assume_capacity(compaction);
+                }
+            }
+
+            for (compaction_work.const_slice()) |compaction| {
+                if (compaction.bar != null and compaction.bar.?.move_table) {
+                    continue;
+                }
+                const source_a_immutable_block = compaction_blocks[0].block;
+                const target_index_blocks = CompactionHelper.BlockFIFO.init(compaction_blocks[1..3]);
+
+                const beat_blocks = .{
+                    .source_index_blocks = compaction_blocks[3..5],
+                    .source_value_blocks = .{
+                        CompactionHelper.BlockFIFO.init(compaction_blocks[5..7]),
+                        CompactionHelper.BlockFIFO.init(compaction_blocks[7..9]),
+                    },
+                    .target_value_blocks = CompactionHelper.BlockFIFO.init(compaction_blocks[9..11]),
+                };
+
+                compaction.bar_setup_budget(1, target_index_blocks, source_a_immutable_block);
+                compaction.beat_grid_reserve();
+                compaction.beat_blocks_assign(beat_blocks);
+
+                env.compaction_exhausted = false;
+                while (!env.compaction_exhausted) {
+                    env.change_state(.fuzzing, .blipping);
+                    compaction.blip_read(blip_callback, env);
+                    env.tick_until_state_change(.blipping, .fuzzing);
+
+                    env.change_state(.fuzzing, .blipping);
+                    compaction.blip_merge(blip_callback, env);
+                    env.tick_until_state_change(.blipping, .fuzzing);
+
+                    env.change_state(.fuzzing, .blipping);
+                    compaction.blip_write(blip_callback, env);
+                    env.tick_until_state_change(.blipping, .fuzzing);
+                }
+
+                compaction.beat_grid_forfeit();
+
+                for (compaction_blocks) |*block| {
+                    block.next = null;
+                    block.stage = .free;
+                }
+            }
+
+            if (op >= constants.lsm_batch_multiple) {
                 env.change_state(.fuzzing, .manifest_log_compact);
                 env.manifest_log.compact(manifest_log_compact_callback, op);
                 env.tick_until_state_change(.manifest_log_compact, .fuzzing);
             }
 
-            env.tree.compact_end();
+            for (compaction_work.const_slice()) |compaction| {
+                compaction.bar_apply_to_manifest();
+            }
 
-            if ((op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0 and
-                op >= constants.lsm_batch_multiple)
-            {
+            if (op >= constants.lsm_batch_multiple) {
                 env.manifest_log.compact_end();
             }
+
+            if (last_beat) {
+                env.tree.swap_mutable_and_immutable(
+                    snapshot_min_for_table_output(compaction_op_min(op)),
+                );
+
+                // Ensure tables haven't overflowed.
+                env.tree.manifest.assert_level_table_counts();
+            }
+        }
+        fn blip_callback(env_opaque: *anyopaque, maybe_exhausted: ?Exhausted) void {
+            const env: *Environment = @ptrCast(
+                @alignCast(env_opaque),
+            );
+            if (maybe_exhausted) |exhausted| {
+                env.compaction_exhausted = exhausted.bar;
+            }
+            env.change_state(.blipping, .fuzzing);
         }
 
         fn manifest_log_compact_callback(manifest_log: *ManifestLog) void {

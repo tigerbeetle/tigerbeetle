@@ -181,14 +181,14 @@ comptime {
     //   A    B    C    D    E
     //   |····|····|····|····|
     //
-    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
+    // - ("|" delineates bars, where a bar is a multiple of prepare batches.)
     // - ("·" is a prepare in the WAL.)
     // - The Replica triggers a checkpoint at "E".
     // - The entries between "A" and "D" are on-disk in level 0.
     // - The entries between "D" and "E" are in-memory in the immutable table.
     // - So the checkpoint only includes "A…D".
     //
-    // The journal must have at least two measures (batches) to ensure at least one is checkpointed.
+    // The journal must have at least two bars to ensure at least one is checkpointed.
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
     assert(journal_slot_count >= lsm_batch_multiple * 2);
     assert(journal_slot_count % lsm_batch_multiple == 0);
@@ -694,6 +694,10 @@ pub const aof_record = config.process.aof_record;
 /// Place us in a special recovery state, where we accept timestamps passed in to us. Used to
 /// replay our AOF.
 pub const aof_recovery = config.process.aof_recovery;
+
+/// The amount of memory allocated for compactions. Compactions will be deterministic regardless
+/// of how much memory you give them, but will run in fewer steps with more memory.
+pub const compaction_block_memory = config.process.compaction_block_memory;
 
 /// Maximum number of tree scans that can be performed by a single query.
 /// NOTE: Each condition in a query is a scan, for example `WHERE a=0 AND b=1` needs 2 scans.

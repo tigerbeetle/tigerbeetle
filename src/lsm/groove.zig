@@ -432,12 +432,6 @@ pub fn GrooveType(
 
         pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
 
-        compacting: ?struct {
-            /// Count which tree compactions are in progress.
-            pending: TreesBitSet = TreesBitSet.initFull(),
-            callback: Callback,
-        } = null,
-
         grid: *Grid,
         objects: ObjectTree,
         ids: IdTree,
@@ -1059,9 +1053,16 @@ pub fn GrooveType(
             }
         }
 
-        pub fn open_commence(groove: *Groove, manifest_log: *ManifestLog) void {
-            assert(groove.compacting == null);
+        pub fn compact(groove: *Groove, op: u64) void {
+            // Compact the objects_cache on the last beat of the bar, just like the trees do to
+            // their mutable tables.
+            const compaction_beat = op % constants.lsm_batch_multiple;
+            if (compaction_beat == constants.lsm_batch_multiple - 1) {
+                groove.objects_cache.compact();
+            }
+        }
 
+        pub fn open_commence(groove: *Groove, manifest_log: *ManifestLog) void {
             if (has_id) groove.ids.open_commence(manifest_log);
             groove.objects.open_commence(manifest_log);
 
@@ -1071,71 +1072,12 @@ pub fn GrooveType(
         }
 
         pub fn open_complete(groove: *Groove) void {
-            assert(groove.compacting == null);
-
             if (has_id) groove.ids.open_complete();
             groove.objects.open_complete();
 
             inline for (std.meta.fields(IndexTrees)) |field| {
                 @field(groove.indexes, field.name).open_complete();
             }
-        }
-
-        pub fn compact(groove: *Groove, callback: Callback, op: u64) void {
-            assert(groove.compacting == null);
-
-            // Compact the IdTree and ObjectTree.
-            if (has_id) groove.ids.compact(compact_tree_callback(.ids), op);
-            groove.objects.compact(compact_tree_callback(.objects), op);
-
-            inline for (std.meta.fields(IndexTrees)) |field| {
-                const compact_tree_callback_ = compact_tree_callback(.{ .index = field.name });
-                @field(groove.indexes, field.name).compact(compact_tree_callback_, op);
-            }
-
-            // Compact the objects_cache on the last beat of the bar, just like the trees do to
-            // their mutable tables.
-            const compaction_beat = op % constants.lsm_batch_multiple;
-            if (compaction_beat == constants.lsm_batch_multiple - 1) {
-                groove.objects_cache.compact();
-            }
-
-            groove.compacting = .{ .callback = callback };
-        }
-
-        fn compact_tree_callback(
-            comptime tree_field: TreeField,
-        ) *const fn (*TreeFor(tree_field)) void {
-            return struct {
-                fn tree_callback(tree: *TreeFor(tree_field)) void {
-                    // Derive the groove pointer from the tree using the tree_field.
-                    const groove = switch (tree_field) {
-                        .ids => @fieldParentPtr(Groove, "ids", tree),
-                        .objects => @fieldParentPtr(Groove, "objects", tree),
-                        .index => |field| blk: {
-                            const indexes: *align(@alignOf(IndexTrees)) IndexTrees =
-                                @alignCast(@fieldParentPtr(IndexTrees, field, tree));
-                            break :blk @fieldParentPtr(Groove, "indexes", indexes);
-                        },
-                    };
-
-                    assert(groove.compacting.?.pending.isSet(comptime tree_field.offset()));
-                    groove.compacting.?.pending.unset(comptime tree_field.offset());
-
-                    groove.compact_callback();
-                }
-            }.tree_callback;
-        }
-
-        fn compact_callback(groove: *Groove) void {
-            assert(groove.compacting != null);
-
-            // Guard until all pending sync ops complete.
-            if (groove.compacting.?.pending.count() > 0) return;
-
-            const callback = groove.compacting.?.callback;
-            groove.compacting = null;
-            callback(groove);
         }
 
         const TreeField = union(enum) {
@@ -1167,20 +1109,7 @@ pub fn GrooveType(
             };
         }
 
-        pub fn compact_end(groove: *Groove) void {
-            assert(groove.compacting == null);
-
-            if (has_id) groove.ids.compact_end();
-            groove.objects.compact_end();
-
-            inline for (std.meta.fields(IndexTrees)) |field| {
-                @field(groove.indexes, field.name).compact_end();
-            }
-        }
-
         pub fn assert_between_bars(groove: *const Groove) void {
-            assert(groove.compacting == null);
-
             if (has_id) groove.ids.assert_between_bars();
             groove.objects.assert_between_bars();
 

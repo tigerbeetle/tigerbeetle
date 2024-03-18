@@ -13,11 +13,16 @@ pub fn FIFO(comptime T: type) type {
         in: ?*T = null,
         out: ?*T = null,
         count: u64 = 0,
+
         // This should only be null if you're sure we'll never want to monitor `count`.
         name: ?[]const u8,
 
+        // If the number of elements is large, the constants.verify check in push() can be too
+        // expensive. Allow the user to gate it. Could also be a comptime param?
+        verify_push: bool = true,
+
         pub fn push(self: *Self, elem: *T) void {
-            if (constants.verify) assert(!self.contains(elem));
+            if (constants.verify and self.verify_push) assert(!self.contains(elem));
 
             assert(elem.next == null);
             if (self.in) |in| {

@@ -8879,7 +8879,7 @@ pub fn ReplicaType(
 
             if (self.op == self.op_checkpoint()) {
                 // The head op almost always exceeds op_checkpoint because the
-                // previous checkpoint trigger is ahead of op_checkpoint by a measure.
+                // previous checkpoint trigger is ahead of op_checkpoint by a bar.
                 //
                 // However, state sync arrives at the op_checkpoint unconventionally –
                 // the ops between the checkpoint and the previous checkpoint trigger may not be
