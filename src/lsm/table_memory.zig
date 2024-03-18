@@ -79,7 +79,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn put(table: *TableMemory, value: *const Value) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count < value_count_max);
-
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <=

@@ -269,6 +269,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 assert(manifest_level.contains(table));
             }
             assert(table.snapshot_max >= snapshot);
+            assert(table.snapshot_min <= snapshot);
             manifest_level.set_snapshot_max(snapshot, table_ref);
             assert(table.snapshot_max == snapshot);
 
@@ -437,6 +438,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const level: u8 = @intCast(index);
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);
+                // TODO(metric): This is a great metric to add.
             }
         }
 

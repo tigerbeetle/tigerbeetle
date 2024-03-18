@@ -124,6 +124,7 @@ const ConfigProcess = struct {
     grid_missing_tables_max: usize = 3,
     aof_record: bool = false,
     aof_recovery: bool = false,
+    compaction_block_memory: usize = 256 * 1024 * 1024,
 };
 
 /// Configurations which are tunable per-cluster.
@@ -259,6 +260,7 @@ pub const configs = struct {
             .grid_missing_blocks_max = 3,
             .grid_missing_tables_max = 2,
             .verify = true,
+            .compaction_block_memory = 16 * 1024 * 1024,
         },
         .cluster = .{
             .clients_max = 4 + 3,
