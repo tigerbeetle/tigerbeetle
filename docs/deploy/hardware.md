@@ -19,7 +19,8 @@ accounts or transfers. It is more important to provision sufficient storage spac
 data file, than to provision high performance storage.
 
 A replica's data file may reside on local storage or else on remote storage. The most important
-concern is to ensure independent fault domains across replicas.
+concern is to ensure [independent fault domains](./cluster.md#hardware-fault-tolerance) across
+replicas.
 
 The operator may consider the use of RAID 10 to reduce the need for remote recovery if a replica's
 disk fails.
