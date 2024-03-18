@@ -65,6 +65,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     };
     log.info("version={s} sha={s}", .{ version_info.version, version_info.sha });
 
+    try shell.env.put("TIGERBEETLE_RELEASE", version_info.version);
+
     if (cli_args.build) {
         try build(shell, languages, version_info);
     }
@@ -159,12 +161,10 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dtarget={target}
                 \\    -Drelease={release}
                 \\    -Dgit-commit={commit}
-                \\    -Dversion={version}
             , .{
                 .target = target,
                 .release = if (debug) "false" else "true",
                 .commit = info.sha,
-                .version = info.version,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
@@ -233,9 +233,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     try shell.pushd("./src/clients/go");
     defer shell.popd();
 
-    try shell.zig("build go_client -Drelease -Dconfig=production -Dversion={version}", .{
-        .version = info.version,
-    });
+    try shell.zig("build go_client -Drelease -Dconfig=production", .{});
 
     const files = try shell.exec_stdout("git ls-files", .{});
     var files_lines = std.mem.tokenize(u8, files, "\n");
