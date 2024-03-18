@@ -183,7 +183,7 @@ TigerBeetle IDs consist of:
 
 When creating multiple objects during the same millisecond, we increment the random bytes rather
 than generating new random bytes. Furthermore, it is important that IDs are stored in little-endian
-with the random bytes as the lower-order bits and the timestamp as the higher-order bits.  These
+with the random bytes as the lower-order bits and the timestamp as the higher-order bits. These
 details ensure that a sequence of objects have strictly increasing IDs according to the server,
 which improves database optimization.
 

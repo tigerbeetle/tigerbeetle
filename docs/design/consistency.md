@@ -54,13 +54,12 @@ applications?
 - Requests retried by their original client session receive identical replies.
 - Requests retried by a different client (same request body, different session) may receive
   [different replies](#consistency-with-foreign-databases).
-- Events within a request are executed in sequential order. The effects of a given event will be
-  observable when the next event within that request is applied.
-- Events within a request do not interleave with events from other requests. (TODO: Can timeouts
-  interleave batches, or should we shift the batch so that timeouts land entirely before/after?)
+- Events within a request are executed in sequence. The effects of a given event are observable when
+  the next event within that request is applied.
+- Events within a request do not interleave with events from other requests.
 - All events within a request batch are committed, or none are. Note that this does not mean that
-  all of the events in a batch will either succeed or fail. Events succeed or fail independently
-  unless they are explicitly [linked](./client-requests.md#linked-events)
+  all of the events in a batch will succeed, or that all will fail. Events succeed or fail
+  independently unless they are explicitly [linked](./client-requests.md#linked-events)
 
 #### [Events](../reference/operations/index.md)
 

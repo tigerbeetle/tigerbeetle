@@ -8,7 +8,7 @@ A two-phase transfer moves funds in stages:
 
 1. Reserve funds ([pending](#reserve-funds-pending-transfer))
 2. Resolve funds ([post](#post-pending-transfer), [void](#void-pending-transfer), or
-   [timeout](#timeout))
+   [expire](#expire-pending-transfer))
 
 The name "two-phase transfer" is a reference to the [two-phase commit protocol for distributed
 transactions](https://en.wikipedia.org/wiki/Two-phase_commit_protocol).
@@ -71,11 +71,11 @@ field:
 * [`ledger`](../reference/transfers.md#ledger)
 * [`code`](../reference/transfers.md#code)
 
-### Timeout
+### Expire Pending Transfer
 
 A pending transfer may optionally be created with a [timeout](../reference/transfers.md#timeout). If
-the timeout interval passes before the transfer is either posted or voided, the full amount will be
-voided.
+the timeout interval passes before the transfer is either posted or voided, the transfer expires and
+the full amount is returned to the original account.
 
 Note that `timeout`s are given as intervals, specified in seconds, rather than as absolute
 timestamps. For more details on why, read the page about [Time in TigerBeetle](./time.md).
