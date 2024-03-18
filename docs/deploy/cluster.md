@@ -25,8 +25,10 @@ Given a cluster of 6 replicas:
   serializability, provided that at least 3/6 machines have not failed (provided that the primary
   has not also failed) or provided that at least 4/6 machines have not failed (if the primary also
   failed and a new primary needs to be elected).
-- A cluster preserves durability (surviving, detecting and repairing corruption of any data file)
-  provided that the cluster remains available.
+- A cluster preserves durability (surviving, detecting, and repairing corruption of any data file)
+  provided that the cluster remains available. If machines go offline temporarily and the cluster
+  becomes available again later, the cluster will be able to repair data file corruption once
+  availability is restored.
 - A cluster will correctly remain unavailable if too many machine failures have occurred to preserve
   data. In other words, TigerBeetle is designed to operate correctly or else to shut down safely if
   safe operation with respect to strict serializability is no longer possible due to permanent data
