@@ -498,7 +498,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.writing(address, null) != .create);
             // It's safe to release an address that is being read from,
             // because the superblock will not allow it to be overwritten before
-            // the end of the measure.
+            // the end of the bar.
 
             grid.cache.demote(address);
             grid.free_set.release(address);

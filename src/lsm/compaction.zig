@@ -1,6 +1,6 @@
-//! Compaction moves or merges a table's values into the next level.
+//! Compaction moves or merges a table's values from the previous level.
 //!
-//! Each Compaction is paced to run in one half-bar.
+//! Each Compaction is paced to run in an arbitrary amount of beats, by the forest.
 //!
 //!
 //! Compaction overview:

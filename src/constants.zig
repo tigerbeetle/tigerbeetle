@@ -181,14 +181,14 @@ comptime {
     //   A    B    C    D    E
     //   |····|····|····|····|
     //
-    // - ("|" delineates measures, where a measure is a multiple of prepare batches.)
+    // - ("|" delineates bars, where a bar is a multiple of prepare batches.)
     // - ("·" is a prepare in the WAL.)
     // - The Replica triggers a checkpoint at "E".
     // - The entries between "A" and "D" are on-disk in level 0.
     // - The entries between "D" and "E" are in-memory in the immutable table.
     // - So the checkpoint only includes "A…D".
     //
-    // The journal must have at least two measures (batches) to ensure at least one is checkpointed.
+    // The journal must have at least two bars to ensure at least one is checkpointed.
     assert(journal_slot_count >= Config.Cluster.journal_slot_count_min);
     assert(journal_slot_count >= lsm_batch_multiple * 2);
     assert(journal_slot_count % lsm_batch_multiple == 0);
