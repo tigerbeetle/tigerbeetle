@@ -7,6 +7,8 @@ sidebar_position: 2
 TigerBeetle is designed to operate and provide more than adequate performance even on commodity
 hardware.
 
+## Storage
+
 NVMe is preferred to SSD for high performance deployments.
 
 However, spinning rust is perfectly acceptable, especially where a cluster is expected to be long
@@ -22,14 +24,20 @@ concern is to ensure independent fault domains across replicas.
 The operator may consider the use of RAID 10 to reduce the need for remote recovery if a replica's
 disk fails.
 
+## Memory
+
 ECC memory is recommended for production deployments.
-
-TigerBeetle requires only a single core per replica machine. TigerBeetle at present does not utilize
-more cores, but may in future.
-
-There are no restrictions on sharing a server with other tenant processes.
 
 A replica requires at least 2 GiB RAM per machine. Between 16 GiB and 32 GiB or more (depending on
 budget) is recommended to be allocated to each replica for caching. TigerBeetle uses static
 allocation and will use exactly how much memory is explicitly allocated to it for caching via
 command line argument.
+
+## CPU
+
+TigerBeetle requires only a single core per replica machine. TigerBeetle at present does not utilize
+more cores, but may in future.
+
+## Multitenancy
+
+There are no restrictions on sharing a server with other tenant processes.
