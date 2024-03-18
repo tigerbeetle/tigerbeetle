@@ -8416,7 +8416,6 @@ pub fn ReplicaType(
                 .idle,
                 .next,
                 .next_pipeline,
-                .cleanup,
                 .prefetch_state_machine,
                 .compact_state_machine,
                 => unreachable,
@@ -8425,6 +8424,7 @@ pub fn ReplicaType(
                 .setup_client_replies,
                 .checkpoint_data,
                 .checkpoint_superblock,
+                .cleanup,
                 => {},
             }
 
