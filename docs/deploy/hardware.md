@@ -28,7 +28,7 @@ disk fails.
 
 ECC memory is recommended for production deployments.
 
-A replica requires at least 2 GiB RAM per machine. Between 16 GiB and 32 GiB or more (depending on
+A replica requires at least 6 GiB RAM per machine. Between 16 GiB and 32 GiB or more (depending on
 budget) is recommended to be allocated to each replica for caching. TigerBeetle uses static
 allocation and will use exactly how much memory is explicitly allocated to it for caching via
 command line argument.
