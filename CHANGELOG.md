@@ -1,5 +1,16 @@
 # TigerBeetle Changelog
 
+## 2024-03-19
+
+- Bump version to 0.15.x
+- Starting with 0.15.x, TigerBeetle is ready for production use, guarantees to never lose data, and
+  provides forward upgrade path through storage stability. 
+
+### TigerTracks 🎧
+
+- [Immigrant Song - Live 1972](https://open.spotify.com/track/2aH2dcPnwoQwhLsXFezU2r?si=eead2c0cd17c429e)
+
+
 ## 2024-03-18
 
 ### Safety And Performance
