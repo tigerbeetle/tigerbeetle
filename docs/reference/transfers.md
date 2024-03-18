@@ -49,9 +49,6 @@ Fields used by each mode of transfer:
 
 This is a unique identifier for the transaction.
 
-As an example, you might generate a [ULID](../design/data-modeling.md#time-based-identifiers) to
-identify each transaction.
-
 Constraints:
 
 * Type is 128-bit unsigned integer (16 bytes)
@@ -151,8 +148,9 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this transfer to an
 external entity or event.
 
-As an example, you might use a [ULID](../design/data-modeling.md#time-based-identifiers)
-that ties together a group of transfers.
+As an example, you might generate a [TigerBeetle Time-Based
+Identifier](../design/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties
+together a group of transfers.
 
 For more information, see [Data Modeling](../design/data-modeling.md#user_data).
 
@@ -272,47 +270,12 @@ Constraints:
 
 #### `flags.linked`
 
-When the `linked` flag is specified, it links a transfer with the next
-transfer in the batch, to create a chain of transfers, of arbitrary
-length, which all succeed or fail in creation together. The tail of a
-chain is denoted by the first transfer without this flag. The last
-transfer in a batch may therefore never have `flags.linked` set as
-this would leave a chain open-ended (see
-[`linked_event_chain_open`](./operations/create_transfers.md#linked_event_chain_open)).
+This flag links the result of this transfer to the outcome of the next transfer in the request such
+that they will either succeed or fail together.
 
-Multiple chains of individual transfers may coexist within a batch to
-succeed or fail independently. Transfers within a chain are executed
-within order, or are rolled back on error, so that the effect of each
-transfer in the chain is visible to the next, and so that the chain is
-either visible or invisible as a unit to subsequent transfers after the
-chain. The transfer that was the first to break the chain will have a
-unique error result. Other transfers in the chain will have their error
-result set to
-[`linked_event_failed`](./operations/create_transfers.md#linked_event_failed).
+The last transfer in a chain of linked transfers does **not** have this flag set.
 
-Consider this set of transfers as part of a batch:
-
-| Transfer | Index within batch | flags.linked |
-|----------|--------------------|--------------|
-| `A`      | `0`                | `false`      |
-| `B`      | `1`                | `true`       |
-| `C`      | `2`                | `true`       |
-| `D`      | `3`                | `false`      |
-| `E`      | `4`                | `false`      |
-
-If any of transfers `B`, `C`, or `D` fail (for example, due to
-[`exceeds_credits`](./operations/create_transfers.md#exceeds_credits),
-then `B`, `C`, and `D` will all fail. They are linked.
-
-Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`,
-and each other.
-
-After the chain of linked transfers has executed, the fact that they were
-linked will not be saved.
-To save the association between transfers, it must be
-[encoded into the data model](../design/data-modeling.md), for example by
-adding an ID to one of the [user data](../design/data-modeling.md#user_data)
-fields.
+You can read more about [linked events](../design/client-requests.md#linked-events).
 
 ##### Examples
 

@@ -89,8 +89,9 @@ Constraints:
 This is an optional 128-bit secondary identifier to link this account to an
 external entity or event.
 
-As an example, you might use a [ULID](../design/data-modeling.md#time-based-identifiers)
-that ties together a group of accounts.
+As an example, you might use a
+[ULID](../design/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
+a group of accounts.
 
 For more information, see [Data Modeling](../design/data-modeling.md#user_data).
 
@@ -170,31 +171,12 @@ Constraints:
 
 #### `flags.linked`
 
-When the `linked` flag is specified, it links an account with the next
-account in the batch, to create a chain of accounts, of arbitrary
-length, which all succeed or fail in creation together. The tail of a
-chain is denoted by the first account without this flag. The last
-account in a batch may therefore never have `flags.linked` set as
-this would leave a chain open-ended (see
-[`linked_event_chain_open`](./operations/create_accounts.md#linked_event_chain_open)).
+This flag links the result of this account creation to the result of the next one in the request,
+such that they will either succeed or fail together.
 
-Multiple chains or individual accounts may coexist within a batch to
-succeed or fail independently. Accounts within a chain are executed
-in order, or are rolled back on error, so that the effect of each
-account in the chain is visible to the next, and so that the chain is
-either visible or invisible as a unit to subsequent accounts after the
-chain. The account that was the first to break the chain will have a
-unique error result. Other accounts in the chain will have their error
-result set to
-[`linked_event_failed`](./operations/create_accounts.md#linked_event_failed).
+The last account in a chain of linked accounts does **not** have this flag set.
 
-
-After the chain of account operations has executed, the fact that they were
-linked will not be saved.
-To save the association between accounts, it must be
-[encoded into the data model](../design/data-modeling.md), for example by
-adding an ID to one of the [user data](../design/data-modeling.md#user_data)
-fields.
+You can read more about [linked events](../design/client-requests.md#linked-events).
 
 #### `flags.debits_must_not_exceed_credits`
 

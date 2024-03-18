@@ -4,8 +4,8 @@ sidebar_position: 4
 
 # Client Sessions
 
-A _client session_ is a sequence of [requests](./client-requests.md) and replies sent between a client
-and a cluster.
+A _client session_ is a sequence of [requests](./client-requests.md) and replies sent between a
+client and a cluster.
 
 A client session may have **at most one in-flight request** — i.e. at most one unique request on the
 network for which a reply has not been received. This simplifies consistency and allows the cluster

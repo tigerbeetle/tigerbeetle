@@ -7,16 +7,60 @@ sidebar_position: 3
 A _request_ is a [batch](#batching-events) of one or more [operation
 events](../reference/operations/index.md) sent to the cluster in a single message.
 
-- All events within a request batch must be of the same
-  [operation](../reference/operations/index.md) type. You cannot, for example, create accounts and
-  transfers in the same request.
-- The cluster commits an entire batch at once. Events are applied in series, such that successive
-  events observe the effects of previous ones and event timestamps are [totally
-  ordered](time.md#timestamps-are-totally-ordered).
-- Events within a request [succeed or fail](../reference/operations/create_transfers.md#result)
-  independently unless they are explicitly [linked](../reference/transfers.md#flagslinked).
-- The cluster returns a single reply for each unique request it commits. The reply contains a
-  [result](../reference/operations/create_transfers.md#result) for each event in the request.
+All events within a request batch must be of the same [operation](../reference/operations/index.md)
+type. You cannot, for example, create accounts and transfers in the same request.
+
+The cluster commits an entire batch at once. Events are applied in series, such that successive
+events observe the effects of previous ones and event timestamps are [totally
+ordered](time.md#timestamps-are-totally-ordered).
+
+The cluster returns a single reply for each unique request it commits. The reply contains a
+[result](../reference/operations/create_transfers.md#result) for each event in the request.
+
+## Linked Events
+
+Events within a request [succeed or fail](../reference/operations/create_transfers.md#result)
+independently unless they are explicitly linked using the `flags.linked`
+([`Account.flags.linked`](../reference/accounts.md#flagslinked) or
+[`Transfer.flags.linked`](../reference/transfers.md#flagslinked)).
+
+When the `linked` flag is specified, it links the outcome of a Transfer or Account creation with the
+outcome of the next one in the request. These chains of events will all succeed or fail together.
+
+**The last event in a chain is denoted by the first Transfer or Account without this flag.**
+
+The last Transfer or Account in a batch may never have the `flags.linked` set, as it would leave a
+chain open-ended. Attempting to do so will result in the
+[`linked_event_chain_open`](../reference/operations/create_transfers.md#linked_event_chain_open) error.
+
+Multiple chains of events may coexist within a batch to succeed or fail independently. 
+
+Events within a chain are executed in order, or are rolled back on error, so that the effect of each
+event in the chain is visible to the next. Each chain is either visible or invisible as a unit to
+subsequent transfers after the chain. The event that was the first to fail within a chain will have
+a unique error result. Other events in the chain will have their error result set to
+[`linked_event_failed`](../reference/operations/create_transfers.md#linked_event_failed).
+
+Consider this set of Transfers as part of a batch:
+
+| Transfer | Index within batch | flags.linked |
+|----------|--------------------|--------------|
+| `A`      | `0`                | `false`      |
+| `B`      | `1`                | `true`       |
+| `C`      | `2`                | `true`       |
+| `D`      | `3`                | `false`      |
+| `E`      | `4`                | `false`      |
+
+If any of transfers `B`, `C`, or `D` fail (for example, due to
+[`exceeds_credits`](../reference/operations/create_transfers.md#exceeds_credits)), then `B`, `C`, and `D` will
+all fail. They are linked.
+
+Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`, and each other.
+
+After the chain of linked events has executed, the fact that they were linked will not be saved. To
+save the association between Transfers or Accounts, it must be [encoded into the data
+model](../design/data-modeling.md), for example by adding an ID to one of the [user
+data](../design/data-modeling.md#user_data) fields.
 
 ## Batching Events
 
