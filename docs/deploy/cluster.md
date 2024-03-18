@@ -2,9 +2,9 @@
 sidebar_position: 1
 ---
 
-# Cluster
+# The TigerBeetle Cluster
 
-A TigerBeetle cluster is a set of machines each running the TigerBeetle server for strict
+A TigerBeetle **cluster** is a set of machines each running the TigerBeetle server for strict
 serializability, high availability and durability. The TigerBeetle server is a single binary.
 
 Each server operates on a single local data file.
