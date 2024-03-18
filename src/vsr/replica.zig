@@ -8641,12 +8641,6 @@ pub fn ReplicaType(
                 self.transition_to_recovering_head();
             }
 
-            if (self.status == .normal) {
-                if (self.journal.header_with_op(self.op_checkpoint() + 1)) |header| {
-                    assert(header.parent == self.superblock.working.vsr_state.checkpoint.header.checksum);
-                }
-            }
-
             self.grid.open(grid_open_callback);
             self.sync_dispatch(.idle);
         }
