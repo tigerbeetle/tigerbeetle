@@ -8,7 +8,7 @@ Documentation for (roughly) code in the `src/lsm` directory.
 
 # Glossary
 
-- _bar_/_measure_: `lsm_batch_multiple` beats; unit of incremental compaction.
+- _bar_: `lsm_batch_multiple` beats; unit of incremental compaction.
 - _beat_: `op % lsm_batch_multiple`; Single step of an incremental compaction.
 - _groove_: A collection of LSM trees, storing objects and their indices.
 - _immutable table_: In-memory table; one per tree. Used to periodically flush the mutable table to
@@ -45,7 +45,7 @@ Tree compaction runs to the sound of music!
 Compacting LSM trees involves merging and moving tables into the next levels as needed.
 To avoid write amplification stalls and bound latency, compaction is done incrementally.
 
-A full compaction phase is denoted as a bar or measure, using terms from music notation.
+A full compaction phase is denoted as a bar, using terms from music notation.
 Each bar consists of `lsm_batch_multiple` beats or "compaction ticks" of work.
 A compaction tick executes asynchronously immediately after every commit, with
 `beat = commit.op % lsm_batch_multiple`.
