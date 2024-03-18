@@ -31,6 +31,5 @@ Client libraries for .Net, Go, Java, and NodeJS are available in the respective 
 | Java          |<https://central.sonatype.com/artifact/com.tigerbeetle/tigerbeetle-java>   |
 | NodeJS        |<https://www.npmjs.com/package/tigerbeetle-node>                           |
 
-**Note:** TigerBeetle is not yet production-ready. In particular, the protocol and data file formats
-may change and might not be compatible across different releases. Please make sure that the version
-of the client library used matches the version of `tigerbeetle` binary.
+**Note:** Please make sure that the version of the client library used matches the version of
+`tigerbeetle` binary.
