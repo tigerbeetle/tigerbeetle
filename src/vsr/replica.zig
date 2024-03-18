@@ -3366,10 +3366,9 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (self.syncing == .canceling_commit) {
+            if (self.syncing == .canceling_commit and stage_new != .cleanup) {
                 return self.sync_cancel_commit_callback();
             }
-            assert(self.syncing == .idle);
 
             const stage_old = self.commit_stage;
             assert(stage_old != @as(std.meta.Tag(CommitStage), stage_new));
@@ -3381,6 +3380,7 @@ pub fn ReplicaType(
                     CommitStage.next_journal,
                 else => stage_new,
             };
+            assert(self.syncing == .idle or self.commit_stage == .cleanup);
 
             // Reset the repair-sync timeout anytime that a commit makes progress.
             if (self.commit_stage != .next_journal and
