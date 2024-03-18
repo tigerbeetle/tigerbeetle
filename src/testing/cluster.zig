@@ -542,6 +542,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 maybe(replica.release.value < release.value);
             }
 
+            cluster.storages[replica.replica].reset();
             cluster.replica_upgrades[replica.replica] = release;
         }
 
