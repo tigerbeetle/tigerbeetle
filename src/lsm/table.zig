@@ -245,53 +245,46 @@ pub fn TableType(
             key_min: Key = undefined, // Inclusive.
             key_max: Key = undefined, // Inclusive.
 
-            index_block: BlockPtr,
-            data_block: BlockPtr,
+            index_block: BlockPtr = undefined,
+            data_block: BlockPtr = undefined,
 
             data_block_count: u32 = 0,
             value_count: u32 = 0,
             value_count_total: u32 = 0, // Count across the entire table.
 
-            pub fn init(allocator: mem.Allocator) !Builder {
-                const index_block = try allocate_block(allocator);
-                errdefer allocator.free(index_block);
+            state: enum { no_blocks, index_block, index_and_data_block } = .no_blocks,
 
-                const data_block = try allocate_block(allocator);
-                errdefer allocator.free(data_block);
+            pub fn set_index_block(builder: *Builder, block: BlockPtr) void {
+                assert(builder.state == .no_blocks);
+                assert(builder.data_block_count == 0);
+                assert(builder.value_count == 0);
+                assert(builder.value_count_total == 0);
 
-                return Builder{
-                    .index_block = index_block,
-                    .data_block = data_block,
-                };
+                builder.index_block = block;
+                builder.state = .index_block;
             }
 
-            pub fn deinit(builder: *Builder, allocator: mem.Allocator) void {
-                allocator.free(builder.index_block);
-                allocator.free(builder.data_block);
+            pub fn set_data_block(builder: *Builder, block: BlockPtr) void {
+                assert(builder.state == .index_block);
+                assert(builder.value_count == 0);
 
-                builder.* = undefined;
-            }
-
-            pub fn reset(builder: *Builder) void {
-                @memset(builder.index_block, 0);
-                @memset(builder.data_block, 0);
-
-                builder.* = .{
-                    .index_block = builder.index_block,
-                    .data_block = builder.data_block,
-                };
+                builder.data_block = block;
+                builder.state = .index_and_data_block;
             }
 
             pub fn data_block_values(builder: *Builder) []Value {
+                assert(builder.state == .index_and_data_block);
                 return Table.data_block_values(builder.data_block);
             }
 
             pub fn data_block_empty(builder: *const Builder) bool {
+                stdx.maybe(builder.state == .no_blocks);
                 assert(builder.value_count <= data.value_count_max);
                 return builder.value_count == 0;
             }
 
             pub fn data_block_full(builder: *const Builder) bool {
+                assert(builder.state == .index_and_data_block);
                 assert(builder.value_count <= data.value_count_max);
                 return builder.value_count == data.value_count_max;
             }
@@ -305,6 +298,8 @@ pub fn TableType(
             };
 
             pub fn data_block_finish(builder: *Builder, options: DataFinishOptions) void {
+                assert(builder.state == .index_and_data_block);
+
                 // For each block we write the sorted values,
                 // complete the block header, and add the block's max key to the table index.
 
@@ -383,14 +378,18 @@ pub fn TableType(
                 builder.data_block_count += 1;
                 builder.value_count_total += builder.value_count;
                 builder.value_count = 0;
+                builder.data_block = undefined;
+                builder.state = .index_block;
             }
 
             pub fn index_block_empty(builder: *const Builder) bool {
+                stdx.maybe(builder.state == .no_blocks);
                 assert(builder.data_block_count <= data_block_count_max);
                 return builder.data_block_count == 0;
             }
 
             pub fn index_block_full(builder: *const Builder) bool {
+                assert(builder.state != .no_blocks);
                 assert(builder.data_block_count <= data_block_count_max);
                 return builder.data_block_count == data_block_count_max;
             }
@@ -407,6 +406,7 @@ pub fn TableType(
                 builder: *Builder,
                 options: IndexFinishOptions,
             ) TreeTableInfo {
+                assert(builder.state == .index_block);
                 assert(options.address > 0);
                 assert(builder.data_block_empty());
                 assert(builder.data_block_count > 0);
@@ -449,13 +449,8 @@ pub fn TableType(
 
                 assert(info.snapshot_max == math.maxInt(u64));
 
-                // Reset the builder to its initial state, leaving the buffers untouched.
-                builder.* = .{
-                    .key_min = undefined,
-                    .key_max = undefined,
-                    .index_block = builder.index_block,
-                    .data_block = builder.data_block,
-                };
+                // Reset the builder to its initial state.
+                builder.* = .{};
 
                 return info;
             }

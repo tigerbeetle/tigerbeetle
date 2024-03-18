@@ -37,6 +37,7 @@ const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const BlockType = @import("schema.zig").BlockType;
 const tree = @import("tree.zig");
+const compaction = @import("compaction.zig");
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 const schema = @import("schema.zig");
 const TableInfo = schema.ManifestNode.TableInfo;
@@ -654,7 +655,12 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.blocks.count ==
                 manifest_log.blocks_closed + @intFromBool(manifest_log.entry_count > 0));
             assert(manifest_log.compact_blocks == null);
-            assert(op % @divExact(constants.lsm_batch_multiple, 2) == 0);
+
+            // TODO: Currently manifest compaction is hardcoded to run on the last beat of each
+            // half-bar.
+            // This is because otherwise it would mess with our grid reserve / forfeit ordering,
+            // since we now reserve / forfeit per beat.
+            assert((op + 1) % @divExact(constants.lsm_batch_multiple, 2) == 0);
 
             if (op < constants.lsm_batch_multiple or
                 manifest_log.superblock.working.vsr_state.op_compacted(op))
@@ -1141,10 +1147,10 @@ const Pace = struct {
         const block_entries_max = schema.ManifestNode.entry_count_max;
 
         const half_bar_append_entries_max = options.tree_count *
-            tree.compactions_max *
-            (tree.compaction_tables_input_max + // Update snapshot_max.
-            tree.compaction_tables_input_max + // Remove.
-            tree.compaction_tables_output_max); // Insert.
+            stdx.div_ceil(constants.lsm_levels, 2) *
+            (compaction.compaction_tables_input_max + // Update snapshot_max.
+            compaction.compaction_tables_input_max + // Remove.
+            compaction.compaction_tables_output_max); // Insert.
 
         // "A":
         const half_bar_append_blocks_max =
