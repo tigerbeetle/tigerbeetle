@@ -27,7 +27,7 @@ const Shell = @import("../shell.zig");
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CliArgs = struct {
-    version: []const u8,
+    run_number: u32,
     sha: []const u8,
     language: ?Language = null,
     build: bool = false,
@@ -47,10 +47,23 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     else
         LanguageSet.initFull();
 
+    // Run number is a monotonically incremented integer. Map it to a three-component version
+    // number.
+    const version = .{
+        .major = 0,
+        .minor = 15,
+        .patch = cli_args.run_number - 185,
+    };
+
     const version_info = VersionInfo{
-        .version = cli_args.version,
+        .version = try std.fmt.allocPrint(
+            shell.arena.allocator(),
+            "{[major]}.{[minor]}.{[patch]}",
+            version,
+        ),
         .sha = cli_args.sha,
     };
+    log.info("version={s} sha={s}", .{ version_info.version, version_info.sha });
 
     if (cli_args.build) {
         try build(shell, languages, version_info);
