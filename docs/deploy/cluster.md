@@ -44,12 +44,6 @@ tolerance.
 contain 2 replicas so that the loss of an entire site would not impair the availability of the
 cluster.
 
-If only 2 sites are able to be provisioned, it is recommended to tune the cluster so that at least
-4/6 replicas (instead of 3/6 replicas) acknowledge each transaction before commit. This would ensure
-that at least 1 replica in the other site will preserve data durability in the event that an entire
-site is permanently lost. Furthermore, this would ensure that the entire cluster would be able to be
-repaired once the lost site is restored.
-
 Sites should preferably be within a few milliseconds of each other, since each transaction must be
 replicated across sites before being committed.
 
