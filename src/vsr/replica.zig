@@ -3366,7 +3366,7 @@ pub fn ReplicaType(
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
 
-            if (self.syncing == .canceling_commit) {
+            if (self.syncing == .canceling_commit and stage_new != .cleanup) {
                 return self.sync_cancel_commit_callback();
             }
             assert(self.syncing == .idle);
