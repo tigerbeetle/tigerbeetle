@@ -14,7 +14,9 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     try shell.exec("git fetch origin --quiet", .{});
     try shell.exec("git switch --create release-{today} origin/main", .{ .today = today });
 
-    const merges = try shell.exec_stdout("git log --merges origin/release..origin/main", .{});
+    const merges = try shell.exec_stdout(
+        \\git log --merges --first-parent origin/release..origin/main
+    , .{});
     try shell.project_root.writeFile("./zig-cache/merges.txt", merges);
     log.info("merged PRs: ./zig-cache/merges.txt", .{});
 

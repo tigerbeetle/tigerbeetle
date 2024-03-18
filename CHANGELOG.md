@@ -1,5 +1,90 @@
 # TigerBeetle Changelog
 
+## 2024-03-18
+
+### Safety And Performance
+
+- [#1660](https://github.com/tigerbeetle/tigerbeetle/pull/1660)
+
+  Implement compaction pacing: traditionally LSM databases run compaction on a background thread.
+  In contrast compaction in tigerbeetle is deterministically interleaved with normal execution
+  process, to get predictable latencies and to guarantee that ingress can never outrun compaction.
+
+  In this PR, this "deterministic scheduling" is greatly improved, slicing compaction work into
+  smaller bites which are more evenly distributed across a bar of batched requests.
+
+- [#1722](https://github.com/tigerbeetle/tigerbeetle/pull/1722)
+
+  Include information about tigerbeetle version into the VSR protocol and the data file.
+
+- [#1732](https://github.com/tigerbeetle/tigerbeetle/pull/1732),
+  [#1743](https://github.com/tigerbeetle/tigerbeetle/pull/1743),
+  [#1742](https://github.com/tigerbeetle/tigerbeetle/pull/1742),
+  [#1720](https://github.com/tigerbeetle/tigerbeetle/pull/1720),
+  [#1719](https://github.com/tigerbeetle/tigerbeetle/pull/1719),
+  [#1705](https://github.com/tigerbeetle/tigerbeetle/pull/1705),
+  [#1708](https://github.com/tigerbeetle/tigerbeetle/pull/1708),
+  [#1707](https://github.com/tigerbeetle/tigerbeetle/pull/1707),
+  [#1723](https://github.com/tigerbeetle/tigerbeetle/pull/1723),
+  [#1706](https://github.com/tigerbeetle/tigerbeetle/pull/1706),
+  [#1700](https://github.com/tigerbeetle/tigerbeetle/pull/1700),
+  [#1696](https://github.com/tigerbeetle/tigerbeetle/pull/1696),
+  [#1686](https://github.com/tigerbeetle/tigerbeetle/pull/1686).
+
+  Many availability issues found by the simulator fixed!
+
+- [#1734](https://github.com/tigerbeetle/tigerbeetle/pull/1734)
+
+  Fix a buffer leak when `get_account_balances` is called on an invalid account.
+
+
+### Features
+
+- [#1671](https://github.com/tigerbeetle/tigerbeetle/pull/1671),
+  [#1713](https://github.com/tigerbeetle/tigerbeetle/pull/1713),
+  [#1709](https://github.com/tigerbeetle/tigerbeetle/pull/1709),
+  [#1688](https://github.com/tigerbeetle/tigerbeetle/pull/1688),
+  [#1691](https://github.com/tigerbeetle/tigerbeetle/pull/1691),
+  [#1690](https://github.com/tigerbeetle/tigerbeetle/pull/1690).
+
+  Many improvements to the documentation!
+
+- [#1733](https://github.com/tigerbeetle/tigerbeetle/pull/1733)
+
+  Rename `get_account_history` to `get_account_balances`.
+
+- [#1657](https://github.com/tigerbeetle/tigerbeetle/pull/1657)
+
+  Automatically expire pending transfers.
+
+- [#1682](https://github.com/tigerbeetle/tigerbeetle/pull/1682)
+
+  Implement in-place upgrades, so that the version of tigerbeetle binary can be updated without
+  recreating the data file from scratch.
+
+- [#1674](https://github.com/tigerbeetle/tigerbeetle/pull/1674)
+
+  Consistently use `MiB` rather than `MB` in the CLI interface.
+
+- [#1678](https://github.com/tigerbeetle/tigerbeetle/pull/1678)
+
+  Mark `--standby` and `benchmark` CLI arguments as experimental.
+
+### Internals
+
+- [#1726](https://github.com/tigerbeetle/tigerbeetle/pull/1726)
+
+  Unify PostedGroove and the index pending_status.
+
+- [#1681](https://github.com/tigerbeetle/tigerbeetle/pull/1681)
+
+  Include an entire header into checkpoint state to ease recovery after state sync.
+
+
+### TigerTracks 🎧
+
+- [Are You Gonna Go My Way](https://open.spotify.com/track/4LQOa4kXu0QAD88nMpr4fA?si=f7faf501919942b5)
+
 ## 2024-03-11
 
 ### Safety And Performance
