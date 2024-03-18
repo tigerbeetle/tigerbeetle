@@ -458,7 +458,6 @@ pub const Simulator = struct {
                 maybe(simulator.cluster.replica_health[replica.replica] == .down);
 
                 if (replica.release.value != release_max.value) return false;
-                assert(simulator.cluster.replica_health[replica.replica] == .up);
             }
         }
 
