@@ -504,6 +504,7 @@ pub const ManifestNode = struct {
         reserved: [1]u8 = .{0} ** 1,
 
         comptime {
+            assert(@sizeOf(TableInfo) == 128);
             assert(@alignOf(TableInfo) == 16);
             assert(stdx.no_padding(TableInfo));
         }
