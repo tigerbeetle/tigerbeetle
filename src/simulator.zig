@@ -451,13 +451,14 @@ pub const Simulator = struct {
         }
 
         // Even though there are no client requests in progress, the cluster may be upgrading.
-        const release_max = simulator.core_release_max();
+        const release_max = releases[simulator.replica_releases_limit - 1].release;
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
                 // (If down, the replica is waiting to be upgraded.)
                 maybe(simulator.cluster.replica_health[replica.replica] == .down);
 
                 if (replica.release.value != release_max.value) return false;
+                assert(simulator.cluster.replica_health[replica.replica] == .up);
             }
         }
 
@@ -716,22 +717,6 @@ pub const Simulator = struct {
         } else {
             return blocks_missing.items.len;
         }
-    }
-
-    fn core_release_max(simulator: *const Simulator) vsr.Release {
-        assert(simulator.core.count() > 0);
-
-        var release_max: vsr.Release = vsr.Release.zero;
-        for (simulator.cluster.replicas) |*replica| {
-            if (simulator.core.isSet(replica.replica)) {
-                release_max = release_max.max(replica.release);
-                if (replica.upgrade_release) |release| {
-                    release_max = release_max.max(release);
-                }
-            }
-        }
-        assert(release_max.value > 0);
-        return release_max;
     }
 
     fn on_cluster_reply(
