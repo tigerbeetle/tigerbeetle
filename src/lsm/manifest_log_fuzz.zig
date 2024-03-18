@@ -24,6 +24,7 @@ const ManifestLogOptions = @import("manifest_log.zig").Options;
 const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
 const tree = @import("./tree.zig");
+const compaction_tables_input_max = @import("./compaction.zig").compaction_tables_input_max;
 const TableInfo = schema.ManifestNode.TableInfo;
 
 const manifest_log_options = ManifestLogOptions{
@@ -152,7 +153,8 @@ fn generate_events(
     const fill_always = random.uintLessThan(usize, 4) == 0;
 
     // The maximum number of snapshot-max updates per half-bar.
-    const updates_max = tree.compactions_max * tree.compaction_tables_input_max;
+    // For now, half of the total compactions.
+    const updates_max = stdx.div_ceil(constants.lsm_levels, 2) * compaction_tables_input_max;
 
     while (events.items.len < events_count) {
         const fill = fill_always or random.boolean();
@@ -430,11 +432,12 @@ const Environment = struct {
 
     fn half_bar_commence(env: *Environment) !void {
         env.pending += 1;
+        const op = vsr.Checkpoint.checkpoint_after(
+            env.manifest_log.superblock.working.vsr_state.checkpoint.header.op,
+        );
         env.manifest_log.compact(
             manifest_log_compact_callback,
-            vsr.Checkpoint.checkpoint_after(
-                env.manifest_log.superblock.working.vsr_state.checkpoint.header.op,
-            ) + 1,
+            op,
         );
         env.wait(&env.manifest_log);
     }
