@@ -25,10 +25,8 @@ const vsr = @import("../../vsr.zig");
 const schema = @import("../../lsm/schema.zig");
 const Storage = @import("../storage.zig").Storage;
 
-/// After each compaction half measure, save the cumulative hash of all acquired grid blocks.
-///
-/// (Track half-measures instead of beats because the on-disk state mid-compaction is
-/// nondeterministic; it depends on IO progress.)
+/// After each compaction beat, save the cumulative hash of all acquired grid blocks.
+/// TODO: This was never implemented previously!
 const Compactions = std.ArrayList(u128);
 
 /// Maps from op_checkpoint to cumulative storage checksum.
