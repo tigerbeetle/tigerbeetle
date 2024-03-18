@@ -39,6 +39,15 @@ pub const std_options = struct {
 };
 
 pub fn main() !void {
+    // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
+    // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
+    // in build.zig doesn't work.
+    if (builtin.target.os.tag == .macos)
+        os.setrlimit(os.rlimit_resource.STACK, .{
+            .cur = 16 * 1024 * 1024,
+            .max = 16 * 1024 * 1024,
+        }) catch @panic("unable to adjust stack limit");
+
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
