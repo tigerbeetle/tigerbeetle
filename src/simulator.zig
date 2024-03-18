@@ -472,11 +472,12 @@ pub const Simulator = struct {
         simulator.cluster.state_checker.assert_cluster_convergence();
 
         // Check whether the replica is still repairing prepares/tables/replies.
+        const commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
-                for (replica.op_checkpoint() + 1..replica.op + 1) |op| {
-                    const header = replica.journal.header_with_op(op).?;
-                    if (!replica.journal.has_clean(header)) return false;
+                for (replica.op_checkpoint() + 1..commit_max + 1) |op| {
+                    const header = simulator.cluster.state_checker.header_with_op(op);
+                    if (!replica.journal.has_clean(&header)) return false;
                 }
                 // It's okay for a replica to miss some prepares older than the current checkpoint.
                 maybe(replica.journal.faulty.count > 0);
@@ -595,7 +596,7 @@ pub const Simulator = struct {
 
         // Don't check for missing uncommitted ops (since the StateChecker does not record them).
         // There may be uncommitted ops due to pulses/upgrades sent during liveness mode.
-        const commit_max = simulator.cluster.state_checker.commits.items.len - 1;
+        const commit_max: u64 = simulator.cluster.state_checker.commits.items.len - 1;
 
         var missing_op: ?u64 = null;
         for (simulator.cluster.replicas) |replica| {
