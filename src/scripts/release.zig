@@ -354,8 +354,6 @@ fn publish(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         const notes = try shell.print(
             \\{[version]s}
             \\
-            \\**Automated build. Do not use in production.**
-            \\
             \\**NOTE**: You must run the same version of server and client. We do
             \\not yet follow semantic versioning where all patch releases are
             \\interchangeable.
