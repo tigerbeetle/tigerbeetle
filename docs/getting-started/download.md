@@ -4,9 +4,11 @@ sidebar_position: 1
 
 # Download
 
+TigerBeetle is a single, small, statically linked binary. You can download it in the following ways:
+
 ## Bootstrap Script
 
-You can use the bootstrap script to download TigerBeetle:
+You can use the bootstrap script to easily download TigerBeetle:
 
 ### macOS/Linux
 
@@ -29,7 +31,7 @@ lack some of the instructions that the prebuilt binaries require (for example, A
 
 ## Direct Download
 
-TigerBeetle is a single, small, statically linked binary, download it here:
+You can download prebuilt binaries here:
 
 |               | Linux                            | Windows                          | MacOS                             |
 | :------------ | :------------------------------- | :------------------------------- | :-------------------------------- |
