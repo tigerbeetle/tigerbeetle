@@ -1,5 +1,24 @@
 # TigerBeetle Changelog
 
+## 2024-03-19
+
+- Bump version to 0.15.x
+- Starting with 0.15.x, TigerBeetle is ready for production use, preserves durability and
+  provides a forward upgrade path through storage stability.
+
+### Safety And Performance
+- [#1755](https://github.com/tigerbeetle/tigerbeetle/pull/1755)
+
+  Set TigerBeetle's block size to 512KB.
+
+  Previously, we used to have a block size of 1MB to help with approximate pacing. Now that pacing
+  can be tuned independently of block size, reduce this value (but not too much - make the roads
+  wider than you think) to help with read amplification on queries.
+
+### TigerTracks 🎧
+
+- [Immigrant Song - Live 1972](https://open.spotify.com/track/2aH2dcPnwoQwhLsXFezU2r?si=eead2c0cd17c429e)
+
 ## 2024-03-18
 
 ### Safety And Performance

@@ -1,6 +1,6 @@
 # tigerbeetle
 
-*TigerBeetle is a financial accounting database designed for mission critical safety and performance to power the future of financial services.*
+*TigerBeetle is a financial transactions database designed for mission critical safety and performance to power the next 30 years of OLTP.*
 
 ## Quickstart
 
@@ -121,17 +121,16 @@ For further reading:
 
 ## Next Steps
 
-Watch an introduction to TigerBeetle on [Zig
-SHOWTIME](https://www.youtube.com/watch?v=BH2jvJ74npM) for our design
-decisions regarding performance, safety, and financial accounting
+Watch an introduction to TigerBeetle on [The Primeagen](https://www.youtube.com/watch?v=sC1B3d9C_sI) for our design
+decisions regarding performance, safety, and financial accounting debit/credit
 primitives:
 
-[![A million financial transactions per second in
-Zig](https://img.youtube.com/vi/BH2jvJ74npM/0.jpg)](https://www.youtube.com/watch?v=BH2jvJ74npM)
+[![The FASTEST and SAFEST Database
+](https://img.youtube.com/vi/sC1B3d9C_sI/0.jpg)](https://www.youtube.com/watch?v=sC1B3d9C_sI)
 
 Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the
 problem of balance tracking at scale, and the solution of a
-purpose-built financial accounting database.
+purpose-built financial transactions database.
 
 Check out our [DESIGN doc](./docs/DESIGN.md) to see an overview of
 TigerBeetle's data structures, take a look at our
