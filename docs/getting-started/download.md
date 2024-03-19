@@ -24,6 +24,9 @@ git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && .\boot
 
 To build TigerBeetle from source, add `-build` as an argument to the bootstrap script.
 
+Note that building from source may be necessary for certain target CPUs, especially older ones, that
+lack some of the instructions that the prebuilt binaries require (for example, AES).
+
 ## Direct Download
 
 TigerBeetle is a single, small, statically linked binary, download it here:
