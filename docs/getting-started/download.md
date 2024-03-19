@@ -2,7 +2,29 @@
 sidebar_position: 1
 ---
 
-# Installation
+# Download
+
+## Bootstrap Script
+
+You can use the bootstrap script to download TigerBeetle:
+
+### macOS/Linux
+
+```shell
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && ./bootstrap.sh
+```
+
+### Windows
+
+```powershell
+git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle && .\bootstrap.ps1
+```
+
+### Build from Source
+
+To build TigerBeetle from source, add `-build` as an argument to the bootstrap script.
+
+## Direct Download
 
 TigerBeetle is a single, small, statically linked binary, download it here:
 
@@ -16,11 +38,14 @@ TigerBeetle is a single, small, statically linked binary, download it here:
 [tigerbeetle-x86_64-linux.zip]: https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-x86_64-linux.zip
 [tigerbeetle-x86_64-windows.zip]: https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-x86_64-windows.zip
 
+## Docker
+
 While not required (TigerBeetle is designed to be easy to deploy as a single binary), a Docker
 container is also available:
 
 <https://github.com/tigerbeetle/tigerbeetle/pkgs/container/tigerbeetle>
 
+## Client Libraries
 
 Client libraries for .Net, Go, Java, and NodeJS are available in the respective registries:
 
