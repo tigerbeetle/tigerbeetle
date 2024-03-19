@@ -406,6 +406,7 @@ pub fn exec_status_ok(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype
         .allocator = shell.gpa,
         .argv = argv.slice(),
         .cwd = cwd_path,
+        .env_map = &shell.env,
     }) catch return false;
     defer shell.gpa.free(res.stderr);
     defer shell.gpa.free(res.stdout);
@@ -448,6 +449,7 @@ pub fn exec_stdout_options(
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     child.cwd = cwd_path;
+    child.env_map = &shell.env;
 
     var stdout = std.ArrayList(u8).init(shell.gpa);
     var stderr = std.ArrayList(u8).init(shell.gpa);
@@ -522,6 +524,7 @@ pub fn exec_raw(
         .allocator = shell.arena.allocator(),
         .argv = argv.slice(),
         .cwd = cwd_path,
+        .env_map = &shell.env,
     });
 }
 
@@ -554,6 +557,7 @@ pub fn spawn_options(
 
     var child = std.ChildProcess.init(argv.slice(), shell.gpa);
     child.cwd = cwd_path;
+    child.env_map = &shell.env;
     child.stdin_behavior = options.stdin_behavior;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = options.stderr_behavior;
@@ -585,6 +589,7 @@ pub fn zig(shell: Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     var child = std.ChildProcess.init(argv.slice(), shell.gpa);
     child.cwd = cwd_path;
+    child.env_map = &shell.env;
     child.stdin_behavior = .Ignore;
     child.stdout_behavior = .Inherit;
     child.stderr_behavior = .Inherit;
