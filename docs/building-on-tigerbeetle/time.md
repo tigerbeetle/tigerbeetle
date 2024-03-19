@@ -19,8 +19,8 @@ operations.
 TigerBeetle uses physical time in addition to the logical time provided by the consensus algorithm.
 Financial transactions require physical time for multiple reasons, including:
 
-- **Liquidity** - TigerBeetle supports [Two-Phase Transfers](./two-phase-transfers.md) that reserve funds
-  and hold them in a pending state until they are posted, voided, or the transfer times out. A
+- **Liquidity** - TigerBeetle supports [Two-Phase Transfers](./two-phase-transfers.md) that reserve
+  funds and hold them in a pending state until they are posted, voided, or the transfer times out. A
   timeout is useful to ensure that the reserved funds are not held in limbo indefinitely.
 - **Compliance and Auditing** - For regulatory and security purposes, it is useful to have a
   specific idea of when (in terms of wall clock time) transfers took place.
@@ -35,8 +35,8 @@ the skew of their clock with respect to the other replicas. The system ensures t
 is within an acceptable window and may choose to stop processing transactions if the clocks are far
 out of sync.
 
-Importantly, the goal is not to reimplement or replace clock synchronization protocols, but to verify that the
-cluster is operating within acceptable error bounds.
+Importantly, the goal is not to reimplement or replace clock synchronization protocols, but to
+verify that the cluster is operating within acceptable error bounds.
 
 ## Why TigerBeetle Manages Timestamps
 
