@@ -1,4 +1,4 @@
-# Quickstart
+# Getting Started
 
 First, let's get TigerBeetle running!
 
