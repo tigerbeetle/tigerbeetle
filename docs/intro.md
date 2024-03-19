@@ -8,18 +8,12 @@ sidebar_position: 1
 TigerBeetle is a distributed financial accounting database designed
 for mission critical safety and performance.
 
-## Quickstart
+## Getting Started
 
-First, let's get TigerBeetle running!
-
-* [Single-node cluster with a single binary](./quick-start/single-binary.md)
-* [Three-node cluster with a single binary](./quick-start/single-binary-three.md)
-
-Or, you can run TigerBeetle with Docker:
-* [Single-node cluster with Docker](./quick-start/with-docker.md)
-* [Three-node cluster with Docker Compose](./quick-start/with-docker-compose.md)
-
-Then, let's [use the TigerBeetle CLI](./quick-start/cli-repl.md) to create accounts and transfers.
+Head over to [Getting Started](./getting-started/README.md) to
+[download](./getting-started/download.md) TigerBeetle, [run a
+cluster](./getting-started/single-binary.md), and try [creating accounts and transfers using the
+CLI](./getting-started/cli-repl.md).
 
 ## Designing for TigerBeetle
 

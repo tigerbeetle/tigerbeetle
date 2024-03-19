@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Use the CLI REPL to Create Accounts and Transfers
