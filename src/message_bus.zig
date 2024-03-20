@@ -35,7 +35,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         .client => constants.tcp_sndbuf_client,
     };
 
-    const Process = union(vsr.ProcessType) {
+    const ProcessID = union(vsr.ProcessType) {
         replica: u8,
         client: u128,
     };
@@ -96,18 +96,19 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             io: *IO,
         };
 
-        /// Initialize the MessageBus for the given cluster, configuration and replica/client process.
+        /// Initialize the MessageBus for the given cluster, configuration and
+        /// replica/client process.
         pub fn init(
             allocator: mem.Allocator,
             cluster: u128,
-            process: Process,
+            process_id: ProcessID,
             message_pool: *MessagePool,
             on_message_callback: *const fn (message_bus: *Self, message: *Message) void,
             options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
             assert(constants.connections_max > options.configuration.len);
-            assert(@as(vsr.ProcessType, process) == process_type);
+            assert(@as(vsr.ProcessType, process_id) == process_type);
 
             const connections = try allocator.alloc(Connection, constants.connections_max);
             errdefer allocator.free(connections);
@@ -122,8 +123,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             @memset(replicas_connect_attempts, 0);
 
             const prng_seed = switch (process_type) {
-                .replica => process.replica,
-                .client => @as(u64, @truncate(process.client)),
+                .replica => process_id.replica,
+                .client => @as(u64, @truncate(process_id.client)),
+            };
+
+            const process = switch (process_type) {
+                .replica => blk: {
+                    const tcp = try init_tcp(options.io, options.configuration[process_id.replica]);
+                    break :blk .{
+                        .replica = process_id.replica,
+                        .accept_fd = tcp.fd,
+                        .accept_address = tcp.address,
+                    };
+                },
+                .client => {},
             };
 
             var bus: Self = .{
@@ -131,17 +144,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 .io = options.io,
                 .cluster = cluster,
                 .configuration = options.configuration,
-                .process = switch (process_type) {
-                    .replica => blk: {
-                        const tcp = try init_tcp(options.io, options.configuration[process.replica]);
-                        break :blk .{
-                            .replica = process.replica,
-                            .accept_fd = tcp.fd,
-                            .accept_address = tcp.address,
-                        };
-                    },
-                    .client => {},
-                },
+                .process = process,
                 .on_message_callback = on_message_callback,
                 .connections = connections,
                 .replicas = replicas,
@@ -440,10 +443,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 terminating,
             } = .free,
             /// This is guaranteed to be valid only while state is connected.
-            /// It will be reset to IO.INVALID_SOCKET during the shutdown process and is always IO.INVALID_SOCKET if the
-            /// connection is unused (i.e. peer == .none). We use IO.INVALID_SOCKET instead of undefined here
-            /// for safety to ensure an error if the invalid value is ever used, instead of
-            /// potentially performing an action on an active fd.
+            /// It will be reset to IO.INVALID_SOCKET during the shutdown process and is always
+            /// IO.INVALID_SOCKET if the connection is unused (i.e. peer == .none). We use
+            /// IO.INVALID_SOCKET instead of undefined here for safety to ensure an error if the
+            /// invalid value is ever used, instead of potentially performing an action on an
+            /// active fd.
             fd: os.socket_t = IO.INVALID_SOCKET,
 
             /// This completion is used for all recv operations.
@@ -485,7 +489,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // The first replica's network address family determines the
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
-                connection.fd = bus.io.open_socket(family, os.SOCK.STREAM, os.IPPROTO.TCP) catch return;
+                connection.fd =
+                    bus.io.open_socket(family, os.SOCK.STREAM, os.IPPROTO.TCP) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
@@ -565,7 +570,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.state = .connected;
 
                 result catch |err| {
-                    log.err("error connecting to replica {}: {}", .{ connection.peer.replica, err });
+                    log.err("error connecting to replica {}: {}", .{
+                        connection.peer.replica,
+                        err,
+                    });
                     connection.terminate(bus, .close);
                     return;
                 };
@@ -576,7 +584,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.assert_recv_send_initial_state(bus);
                 connection.get_recv_message_and_recv(bus);
                 // A message may have been queued for sending while we were connecting:
-                // TODO Should we relax recv() and send() to return if `connection.state != .connected`?
+                // TODO Should we relax recv() and send() to return if `state != .connected`?
                 if (connection.state == .connected) connection.send(bus);
             }
 
@@ -646,7 +654,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// shutdown syscall should be made or not before proceeding to wait for
             /// currently in progress operations to complete and close the socket.
             /// I'll be back! (when the Connection is reused after being fully closed)
-            pub fn terminate(connection: *Connection, bus: *Self, how: enum { shutdown, close }) void {
+            pub fn terminate(
+                connection: *Connection,
+                bus: *Self,
+                how: enum { shutdown, close },
+            ) void {
                 assert(connection.peer != .none);
                 assert(connection.state != .free);
                 assert(connection.fd != IO.INVALID_SOCKET);
@@ -703,7 +715,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             fn parse_message(connection: *Connection, bus: *Self) ?*Message {
-                const data = connection.recv_message.?.buffer[connection.recv_parsed..connection.recv_progress];
+                const data = connection.recv_message.?
+                    .buffer[connection.recv_parsed..connection.recv_progress];
                 if (data.len < @sizeOf(Header)) {
                     connection.get_recv_message_and_recv(bus);
                     return null;
@@ -818,7 +831,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus.on_message_callback(bus, message);
             }
 
-            fn set_and_verify_peer(connection: *Connection, bus: *Self, header: *const Header) bool {
+            fn set_and_verify_peer(
+                connection: *Connection,
+                bus: *Self,
+                header: *const Header,
+            ) bool {
                 comptime assert(process_type == .replica);
 
                 assert(bus.cluster == header.cluster);
@@ -854,7 +871,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     },
                     .client => {
                         assert(connection.peer.client != 0);
-                        const result = bus.process.clients.getOrPutAssumeCapacity(connection.peer.client);
+                        const result =
+                            bus.process.clients.getOrPutAssumeCapacity(connection.peer.client);
                         // If there is a connection to this client, terminate and replace it:
                         if (result.found_existing) {
                             const old = result.value_ptr.*;
@@ -890,7 +908,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                     assert(connection.recv_progress > 0);
                     assert(connection.recv_parsed > 0);
-                    const data = recv_message.buffer[connection.recv_parsed..connection.recv_progress];
+                    const data =
+                        recv_message.buffer[connection.recv_parsed..connection.recv_progress];
                     stdx.copy_disjoint(.inexact, u8, new_message.buffer, data);
                     connection.recv_progress = data.len;
                     connection.recv_parsed = 0;
@@ -919,7 +938,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     on_recv,
                     &connection.recv_completion,
                     connection.fd,
-                    connection.recv_message.?.buffer[connection.recv_progress..constants.message_size_max],
+                    connection.recv_message.?
+                        .buffer[connection.recv_progress..constants.message_size_max],
                 );
             }
 
@@ -977,7 +997,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .connected);
                 connection.send_progress += result catch |err| {
                     // TODO: maybe don't need to close on *every* error
-                    log.err("error sending message to replica at {}: {}", .{ connection.peer, err });
+                    log.err("error sending message to replica at {}: {}", .{
+                        connection.peer,
+                        err,
+                    });
                     connection.terminate(bus, .shutdown);
                     return;
                 };
