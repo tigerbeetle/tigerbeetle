@@ -54,7 +54,6 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         cluster: u128,
         release: vsr.Release = vsr.Release.minimum,
         request_number: u32 = 1,
-        messages_available: u32 = constants.client_request_queue_max,
         request_inflight: ?Request = null,
         message_pool: *MessagePool,
 
@@ -164,14 +163,10 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         }
 
         pub fn get_message(self: *Self) *Message {
-            assert(self.messages_available > 0);
-            self.messages_available -= 1;
             return self.message_pool.get_message(null);
         }
 
         pub fn release_message(self: *Self, message: *Message) void {
-            assert(self.messages_available < constants.client_request_queue_max);
-            self.messages_available += 1;
             self.message_pool.unref(message);
         }
     };

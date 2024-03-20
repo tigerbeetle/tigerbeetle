@@ -1948,7 +1948,6 @@ const TestClients = struct {
                 if (client.request_inflight == null and
                     t.context.client_requests[c] > client.request_number)
                 {
-                    assert(client.messages_available == constants.client_request_queue_max);
                     const message = client.get_message();
                     errdefer client.release_message(message);
 

@@ -427,8 +427,6 @@ pub fn ContextType(
             result: PacketError![]const u8,
         ) void {
             const completion_ctx = self.implementation.completion_ctx;
-            assert(self.client.messages_available <= constants.client_request_queue_max);
-
             const tb_client = api.context_to_client(&self.implementation);
             const bytes = result catch |err| {
                 packet.status = switch (err) {

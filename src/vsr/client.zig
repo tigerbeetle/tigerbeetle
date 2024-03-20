@@ -92,15 +92,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Used to locate the current primary, and provide more information to a partitioned primary.
         view: u32 = 0,
 
-        /// The number of messages available for requests.
-        ///
-        /// This budget is consumed by `get_message` and is replenished when a message is released.
-        ///
-        /// Note that `Client` sends a `.register` request automatically on behalf of the user, so,
-        /// until the first response is received, at most `constants.client_request_queue_max - 1`
-        /// requests can be submitted.
-        messages_available: u32 = constants.client_request_queue_max,
-
         /// Tracks the currently processing register message if any.
         register_inflight: ?*Message.Request = null,
 
@@ -175,8 +166,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             if (self.register_inflight) |message| self.release_message(message.base());
             if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
-
-            assert(self.messages_available == constants.client_request_queue_max);
             self.message_bus.deinit(allocator);
         }
 
@@ -264,7 +253,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             user_data: u128,
             message: *Message.Request,
         ) void {
-            assert(self.messages_available < constants.client_request_queue_max);
             assert(message.header.client == self.id);
             assert(message.header.release.value == self.release.value);
             assert(message.header.cluster == self.cluster);
@@ -306,17 +294,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// the reference is not guaranteed to be valid after both actions.
         /// Do NOT use the reference counter function `message.ref()` for storing the message.
         pub fn get_message(self: *Self) *Message {
-            assert(self.messages_available > 0);
-            self.messages_available -= 1;
-
             return self.message_bus.get_message(null);
         }
 
         /// Releases a message back to the message bus.
         pub fn release_message(self: *Self, message: *Message) void {
-            assert(self.messages_available < constants.client_request_queue_max);
-            self.messages_available += 1;
-
             self.message_bus.unref(message);
         }
 
@@ -452,7 +434,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             // Release request message to ensure that inflight's callback can submit a new one.
             self.release_message(inflight.message.base());
-            assert(self.messages_available > 0);
             inflight.message = undefined;
 
             if (inflight_vsr_operation == .register) {
@@ -612,7 +593,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.request < self.request_number);
             assert(message.header.view == 0);
             assert(message.header.size <= constants.message_size_max);
-            assert(self.messages_available < constants.client_request_queue_max);
 
             // We set the message checksums only when sending the request for the first time,
             // which is when we have the checksum of the latest reply available to set as `parent`,
