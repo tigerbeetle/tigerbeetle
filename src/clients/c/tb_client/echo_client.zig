@@ -52,6 +52,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
         id: u128,
         cluster: u128,
+        release: vsr.Release = vsr.Release.minimum,
         request_number: u32 = 1,
         messages_available: u32 = constants.client_request_queue_max,
         request_inflight: ?Request = null,
@@ -146,6 +147,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         ) void {
             assert(message.header.client == self.id);
             assert(message.header.cluster == self.cluster);
+            assert(message.header.release.value == self.release.value);
             assert(!message.header.operation.vsr_reserved());
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);

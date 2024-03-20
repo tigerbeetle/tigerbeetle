@@ -267,7 +267,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(self.messages_available < constants.client_request_queue_max);
             assert(!message.header.operation.vsr_reserved());
             assert(message.header.client == self.id);
-            assert(message.header.release == self.release);
+            assert(message.header.release.value == self.release.value);
             assert(message.header.cluster == self.cluster);
             assert(message.header.command == .request);
             assert(message.header.size >= @sizeOf(Header));
