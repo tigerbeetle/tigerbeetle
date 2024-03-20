@@ -892,6 +892,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             manifest_log.blocks.advance_tail();
 
             const block: BlockPtr = manifest_log.blocks.tail().?;
+            // The ManifestLog acquires block addresses eagerly here, rather than deferring until
+            // close_block(). This is because the open block's address must be inserted into
+            // `table_extents` at the same time the entry is appended to the open block.
             const block_address = manifest_log.grid.acquire(manifest_log.grid_reservation.?);
 
             const header = mem.bytesAsValue(vsr.Header.Block, block[0..@sizeOf(vsr.Header)]);
