@@ -552,7 +552,7 @@ pub fn StateMachineType(
                     comptime assert(event_size > 0);
                     comptime assert(batch_max > 0);
 
-                    // TODO(batiati) Clients do not validate batch size == 0,
+                    // Clients do not validate batch size == 0,
                     // and even the simulator can generate requests with no events.
                     maybe(input.len == 0);
 

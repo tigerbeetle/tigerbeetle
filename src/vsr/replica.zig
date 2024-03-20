@@ -4747,6 +4747,18 @@ pub fn ReplicaType(
             // - client bug
             // - client memory corruption
             // - client/replica version mismatch
+            if (!message.header.operation.valid(StateMachine)) {
+                log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
+                    self.replica,
+                    message.header.client,
+                    @intFromEnum(message.header.operation),
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .invalid_request_operation,
+                );
+                return true;
+            }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
                 if (!StateMachine.input_valid(operation, message.body())) {
                     log.err(
@@ -4763,17 +4775,6 @@ pub fn ReplicaType(
                     );
                     return true;
                 }
-            } else if (!message.header.operation.vsr_reserved()) {
-                log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
-                    self.replica,
-                    message.header.client,
-                    @intFromEnum(message.header.operation),
-                });
-                self.send_eviction_message_to_client(
-                    message.header.client,
-                    .invalid_request_operation,
-                );
-                return true;
             }
 
             if (self.solo()) {
