@@ -371,20 +371,43 @@ pub fn exec_options(
     child.cwd = cwd_path;
     child.env_map = &shell.env;
     child.stdin_behavior = .Ignore;
+
     if (options.echo) {
         child.stdout_behavior = .Inherit;
         child.stderr_behavior = .Inherit;
+        echo_command(argv.slice());
+
+        const term = try child.spawnAndWait();
+        switch (term) {
+            .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
+            else => return error.CommandFailed,
+        }
     } else {
-        child.stdout_behavior = .Ignore;
-        child.stderr_behavior = .Ignore;
-    }
+        var stdout = std.ArrayList(u8).init(shell.gpa);
+        defer stdout.deinit();
 
-    if (options.echo) echo_command(argv.slice());
-    const term = try child.spawnAndWait();
+        var stderr = std.ArrayList(u8).init(shell.gpa);
+        defer stderr.deinit();
 
-    switch (term) {
-        .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
-        else => return error.CommandFailed,
+        child.stdout_behavior = .Pipe;
+        child.stderr_behavior = .Pipe;
+        errdefer {
+            echo_command(argv.slice());
+            std.debug.print("stdout:{s}\n", .{stdout.items});
+            std.debug.print("stderr:{s}\n", .{stderr.items});
+        }
+
+        try child.spawn();
+        try child.collectOutput(
+            &stdout,
+            &stderr,
+            128 * 1024 * 1024,
+        );
+        const term = try child.wait();
+        switch (term) {
+            .Exited => |code| if (code != 0) return error.NonZeroExitStatus,
+            else => return error.CommandFailed,
+        }
     }
 }
 

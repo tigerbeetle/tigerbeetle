@@ -24,7 +24,6 @@ process: std.ChildProcess,
 pub fn init(
     gpa: std.mem.Allocator,
     options: struct {
-        echo: bool = true,
         prebuilt: ?[]const u8 = null,
     },
 ) !TmpTigerBeetle {
@@ -64,7 +63,7 @@ pub fn init(
     defer gpa.free(data_file);
 
     try shell.exec_options(
-        .{ .echo = options.echo },
+        .{ .echo = false },
         "{tigerbeetle} format --cluster=0 --replica=0 --replica-count=1 {data_file}",
         .{ .tigerbeetle = tigerbeetle, .data_file = data_file },
     );

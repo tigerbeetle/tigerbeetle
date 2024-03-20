@@ -28,6 +28,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     // Integration tests.
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+        log.info("testing sample '{s}'", .{sample});
+
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
@@ -58,6 +60,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         inline for (image_tags) |image_tag| {
             const image = "mcr.microsoft.com/dotnet/sdk:" ++ image_tag;
+            log.info("testing docker image: '{s}'", .{image});
 
             for (0..5) |attempt| {
                 if (attempt > 0) std.time.sleep(1 * std.time.ns_per_min);

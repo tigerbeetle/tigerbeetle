@@ -33,8 +33,18 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // Building the server before running the integrated tests:
     try shell.zig("build install -Drelease -Dconfig=production", .{});
     try shell.exec("go test", .{});
+    {
+        log.info("testing `types` package helpers", .{});
+
+        try shell.pushd("./pkg/types");
+        defer shell.popd();
+
+        try shell.exec("go test", .{});
+    }
 
     inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+        log.info("testing sample '{s}'", .{sample});
+
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
@@ -46,14 +56,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         }
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec("go run main.go", .{});
-    }
-
-    // Test the `types` package helpers
-    {
-        try shell.pushd("./pkg/types");
-        defer shell.popd();
-
-        try shell.exec("go test", .{});
     }
 }
 
