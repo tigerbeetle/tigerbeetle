@@ -291,8 +291,9 @@ pub fn ContextType(
                 return self.on_complete(packet, error.TooMuchData);
             }
 
-            packet.batch_link = null;
-            packet.batch_data = @ptrFromInt(packet.data_size);
+            packet.batch_next = null;
+            packet.batch_tail = packet;
+            packet.batch_size = packet.data_size;
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
@@ -307,22 +308,11 @@ pub fn ContextType(
 
                     // Check for pending packets of the same operation which can be batched.
                     if (root.operation != packet.operation) continue;
-                    if (@intFromPtr(root.batch_data) + packet.data_size > constants.message_body_size_max) continue;
+                    if (root.batch_size + packet.data_size > constants.message_body_size_max) continue;
 
-                    // Queue packet to the root for batching.
-                    // The root's .batch_data is always the total message body size of the chain.
-                    // The packet following root.batch_link will have its .batch_data be the tail
-                    // which must point to the last packet in the linked batch for O(1) append.
-                    if (root.batch_link) |next| {
-                        next.batch_data.?.batch_link = packet;
-                        next.batch_data = packet;
-                    } else {
-                        root.batch_link = packet;
-                        packet.batch_data = packet;
-                    }
-
-                    // Accumulate the root's batch_size with the packets to track message body size.
-                    root.batch_data = @ptrFromInt(@intFromPtr(root.batch_data) + packet.data_size);
+                    root.batch_size += packet.data_size;
+                    root.batch_tail.?.batch_next = packet;
+                    root.batch_tail = packet;
                     return;
                 }
             }
@@ -337,10 +327,6 @@ pub fn ContextType(
             const message = self.client.get_message().build(.request);
             errdefer self.client.release_message(message.base());
 
-            // The root packet's internal .data contains the total .batch_size for the message.
-            const batch_size = @intFromPtr(packet.batch_data);
-            assert(batch_size <= constants.message_body_size_max);
-
             const operation: StateMachine.Operation = @enumFromInt(packet.operation);
             message.header.* = .{
                 .release = self.client.release,
@@ -349,21 +335,21 @@ pub fn ContextType(
                 .cluster = self.client.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(@sizeOf(vsr.Header) + batch_size),
+                .size = @intCast(@sizeOf(vsr.Header) + packet.batch_size),
             };
 
             // Copy all batched packet event data into the message.
             var offset: u32 = 0;
             var it: ?*Packet = packet;
             while (it) |batched| {
-                it = batched.batch_link;
+                it = batched.batch_next;
 
                 const event_data = @as([*]const u8, @ptrCast(batched.data.?))[0..batched.data_size];
                 stdx.copy_disjoint(.inexact, u8, message.body()[offset..], event_data);
                 offset += @intCast(event_data.len);
             }
 
-            assert(offset == batch_size);
+            assert(offset == packet.batch_size);
             self.client.raw_request(
                 Context.on_result,
                 @bitCast(UserData{
@@ -404,7 +390,7 @@ pub fn ContextType(
                     var it: ?*Packet = packet;
                     var event_offset: u32 = 0;
                     while (it) |batched| {
-                        it = batched.batch_link;
+                        it = batched.batch_next;
 
                         const event_count = @divExact(batched.data_size, @sizeOf(StateMachine.Event(operation)));
                         const results = demuxer.decode(event_offset, event_count);

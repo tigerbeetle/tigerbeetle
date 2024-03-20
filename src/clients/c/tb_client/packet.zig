@@ -9,9 +9,10 @@ pub const Packet = extern struct {
     status: Status,
     data_size: u32,
     data: ?*anyopaque,
-    batch_link: ?*Packet,
-    batch_data: ?*Packet,
-    reserved: [2]?*anyopaque,
+    batch_next: ?*Packet,
+    batch_tail: ?*Packet,
+    batch_size: u32,
+    reserved: [8]u8,
 
     comptime {
         assert(@sizeOf(Packet) == 64);
