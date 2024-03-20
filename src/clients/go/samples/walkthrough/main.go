@@ -14,6 +14,12 @@ func main() {
 	fmt.Println("Import ok!")
 	// endsection:imports
 
+	// section:id
+	uniqueId := ID();
+	// endsection:id
+	// uniqueId declared but not used.
+	_ = uniqueId;
+
 	// section:client
 	tbAddress := os.Getenv("TB_ADDRESS")
 	if len(tbAddress) == 0 {

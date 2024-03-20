@@ -20,6 +20,10 @@ using (var client = new Client(clusterID, addresses))
 using (var client = new Client(clusterID, addresses))
 {
 
+    // section:id
+    var uniqueId = ID.Create();
+    // endsection:id
+
     // section:create-accounts
     var accounts = new[] {
         new Account

@@ -4,6 +4,12 @@ const { createClient } = require("tigerbeetle-node");
 console.log("Import ok!");
 // endsection:imports
 
+// section:id
+const { id } = require("tigerbeetle-node");
+
+const unique_id = id();
+// endsection:id
+
 const {
   AccountFlags,
   TransferFlags,

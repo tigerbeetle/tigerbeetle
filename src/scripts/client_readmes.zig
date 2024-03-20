@@ -191,6 +191,15 @@ fn readme_root(ctx: *Context) !void {
     }
 
     {
+        ctx.header(2, "Generating IDs");
+        ctx.paragraph(
+            \\The client library includes a helper function for generating IDs according to the
+            \\[recommended scheme](https://docs.tigerbeetle.com/design/data-modeling#id).
+        );
+        ctx.code_section("id");
+    }
+
+    {
         ctx.header(2, "Creating Accounts");
         ctx.paragraph(
             \\See details for account fields in the [Accounts

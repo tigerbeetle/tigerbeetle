@@ -144,6 +144,15 @@ The following are valid addresses:
 * `127.0.0.1:3000` (interpreted as `127.0.0.1:3000`)
 * `127.0.0.1` (interpreted as `127.0.0.1:3001`, `3001` is the default port)
 
+## Generating IDs
+
+The client library includes a helper function for generating IDs according to the
+[recommended scheme](https://docs.tigerbeetle.com/design/data-modeling#id).
+
+```java
+final var uniqueId = UInt128.id();
+```
+
 ## Creating Accounts
 
 See details for account fields in the [Accounts

@@ -8,6 +8,10 @@ public final class Main {
         System.out.println("Import ok!");
         // endsection:imports
 
+        // section:id
+        final var uniqueId = UInt128.id();
+        // endsection:id
+
         // section:client
         String replicaAddress = System.getenv("TB_ADDRESS");
         byte[] clusterID = UInt128.asBytes(0);
