@@ -674,7 +674,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         fatal(.correctness, "state checker error: {}", .{err});
                     };
                 },
-                .compaction_completed => {},
+                .compaction_completed => {
+                    cluster.storage_checker.replica_compact(Replica, replica) catch |err| {
+                        fatal(.correctness, "storage checker error: {}", .{err});
+                    };
+                },
                 .checkpoint_commenced => {
                     cluster.log_replica(.checkpoint_commenced, replica.replica);
                 },

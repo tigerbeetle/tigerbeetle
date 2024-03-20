@@ -3,6 +3,9 @@
 //! At each replica compact and checkpoint, check that storage is byte-for-byte identical across
 //! replicas.
 //!
+//! Areas verified between compaction bars:
+//! - Acquired Grid blocks (when ¬syncing) (excluding an open manifest block)
+//!
 //! Areas verified at checkpoint:
 //! - SuperBlock vsr_state.checkpoint
 //! - ClientReplies (when repair finishes)
@@ -25,8 +28,8 @@ const vsr = @import("../../vsr.zig");
 const schema = @import("../../lsm/schema.zig");
 const Storage = @import("../storage.zig").Storage;
 
-/// After each compaction beat, save the cumulative hash of all acquired grid blocks.
-/// TODO: This was never implemented previously!
+/// After each compaction bar, save the cumulative hash of all acquired grid blocks.
+/// (Excluding the open manifest log block, if any.)
 const Compactions = std.ArrayList(u128);
 
 /// Maps from op_checkpoint to cumulative storage checksum.
@@ -100,6 +103,65 @@ pub const StorageChecker = struct {
         checker.compactions.deinit();
     }
 
+    pub fn replica_compact(
+        checker: *StorageChecker,
+        comptime Replica: type,
+        replica: *const Replica,
+    ) !void {
+        const superblock: *const SuperBlock = &replica.superblock;
+        // If we are recovering from a crash, don't test the checksum until we are caught up.
+        // Until then our grid's checksum is too far ahead.
+        if (superblock.working.vsr_state.op_compacted(replica.commit_min)) return;
+        // If we are syncing, our grid will not be up to date.
+        if (superblock.working.vsr_state.sync_op_max > 0) return;
+
+        const bar_beat_count = constants.lsm_batch_multiple;
+        if ((replica.commit_min + 1) % bar_beat_count != 0) return;
+
+        // The ManifestLog acquires a single address (for the "open" block) potentially multiple
+        // bars before writing the corresponding block. (The open block is closed and written when
+        // it fills up, or at the next checkpoint.) The StorageChecker must avoid checking that
+        // block – until it is written, the content in the grid is undefined.
+        //
+        // See also: ManifestLog.acquire_block().
+        const manifest_address_open = address: {
+            const manifest_log = &replica.state_machine.forest.manifest_log;
+            if (manifest_log.blocks_closed == manifest_log.blocks.count) {
+                break :address null;
+            } else {
+                const open_block = manifest_log.blocks.tail().?;
+                const open_block_header =
+                    std.mem.bytesAsValue(vsr.Header.Block, open_block[0..@sizeOf(vsr.Header)]);
+                assert(open_block_header.checksum == 0);
+                assert(open_block_header.address > 0);
+                break :address open_block_header.address;
+            }
+        };
+
+        const checksum = checker.checksum_grid(superblock, manifest_address_open);
+        log.debug("{?}: replica_compact: op={} area=grid checksum={x:0>32}", .{
+            superblock.replica_index,
+            replica.commit_min,
+            checksum,
+        });
+
+        const compactions_index = @divExact(replica.commit_min + 1, bar_beat_count) - 1;
+        if (compactions_index == checker.compactions.items.len) {
+            try checker.compactions.append(checksum);
+        } else {
+            const checksum_expect = checker.compactions.items[compactions_index];
+            if (checksum_expect != checksum) {
+                log.err("{?}: replica_compact: mismatch " ++
+                    "area=grid expect={x:0>32} actual={x:0>32}", .{
+                    superblock.replica_index,
+                    checksum_expect,
+                    checksum,
+                });
+                return error.StorageMismatch;
+            }
+        }
+    }
+
     pub fn replica_checkpoint(checker: *StorageChecker, superblock: *const SuperBlock) !void {
         const syncing = superblock.working.vsr_state.sync_op_max > 0;
 
@@ -149,7 +211,7 @@ pub const StorageChecker = struct {
                 checkpoint.put(.client_replies, checker.checksum_client_replies(superblock));
             }
             if (areas.contains(.grid)) {
-                checkpoint.put(.grid, checker.checksum_grid(superblock));
+                checkpoint.put(.grid, checker.checksum_grid(superblock, null));
             }
             break :checkpoint checkpoint;
         };
@@ -247,7 +309,12 @@ pub const StorageChecker = struct {
         return checksum.checksum();
     }
 
-    fn checksum_grid(checker: *StorageChecker, superblock: *const SuperBlock) u128 {
+    fn checksum_grid(
+        checker: *StorageChecker,
+        superblock: *const SuperBlock,
+        // If non-null, ignore this one (acquired) block.
+        address_skip: ?u64,
+    ) u128 {
         const free_set_size = superblock.working.vsr_state.checkpoint.free_set_size;
 
         if (free_set_size > 0) {
@@ -282,11 +349,16 @@ pub const StorageChecker = struct {
         checker.free_set.decode(checker.free_set_buffer[0..free_set_size]);
         defer checker.free_set.reset();
 
+        // address_skip lets us ignore a block that has been acquired but not yet written.
+        if (address_skip) |address| assert(!checker.free_set.is_free(address));
+
         var stream = vsr.ChecksumStream.init();
         var blocks_missing: usize = 0;
         var blocks_acquired = checker.free_set.blocks.iterator(.{});
         while (blocks_acquired.next()) |block_address_index| {
             const block_address: u64 = block_address_index + 1;
+            if (block_address == address_skip) continue;
+
             const block = superblock.storage.grid_block(block_address) orelse {
                 log.err("{}: checksum_grid: missing block_address={}", .{
                     superblock.replica_index.?,
