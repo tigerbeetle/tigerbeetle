@@ -167,6 +167,7 @@ pub const Header = extern struct {
         if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
         if (self.nonce_reserved != 0) return "nonce_reserved != 0";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
+        if (self.size > constants.message_size_max) return "size > message_size_max";
         if (self.epoch != 0) return "epoch != 0";
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
 

@@ -533,8 +533,41 @@ pub fn StateMachineType(
             callback(self);
         }
 
+        pub fn input_valid(operation: Operation, input: []align(16) const u8) bool {
+            switch (operation) {
+                .pulse => {
+                    if (input.len != 0) return false;
+                },
+                inline .get_account_transfers, .get_account_balances => |comptime_operation| {
+                    const event_size = @sizeOf(Event(comptime_operation));
+
+                    if (input.len != event_size) return false;
+                },
+                inline else => |comptime_operation| {
+                    const event_size = @sizeOf(Event(comptime_operation));
+                    const batch_max = comptime constants.batch_max.operation_batch_max(
+                        comptime_operation,
+                    );
+
+                    comptime assert(event_size > 0);
+                    comptime assert(batch_max > 0);
+
+                    // TODO(batiati) Clients do not validate batch size == 0,
+                    // and even the simulator can generate requests with no events.
+                    maybe(input.len == 0);
+
+                    if (input.len % event_size != 0) return false;
+                    if (input.len > batch_max * event_size) return false;
+                },
+            }
+
+            return true;
+        }
+
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
-        pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) u8) void {
+        pub fn prepare(self: *StateMachine, operation: Operation, input: []align(16) const u8) void {
+            assert(input_valid(operation, input));
+
             self.prepare_timestamp += switch (operation) {
                 .pulse => 0,
                 .create_accounts => mem.bytesAsSlice(Account, input).len,
@@ -567,6 +600,7 @@ pub fn StateMachineType(
             _ = op;
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
+            assert(input_valid(operation, input));
 
             tracer.start(
                 &self.tracer_slot,
@@ -1169,6 +1203,7 @@ pub fn StateMachineType(
         ) usize {
             _ = client;
             assert(op != 0);
+            assert(input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             tracer.start(
@@ -2083,7 +2118,7 @@ const TestContext = struct {
         .lsm_batch_multiple = 1,
         .vsr_operations_reserved = 128,
     });
-    const message_body_size_max = 32 * @sizeOf(Account);
+    const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
     superblock: SuperBlock,
@@ -2587,7 +2622,11 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == commit_operation);
                 assert(!context.busy);
 
-                const reply_actual_buffer = try allocator.alignedAlloc(u8, 16, 4096);
+                const reply_actual_buffer = try allocator.alignedAlloc(
+                    u8,
+                    16,
+                    TestContext.message_body_size_max,
+                );
                 defer allocator.free(reply_actual_buffer);
 
                 context.state_machine.prepare_timestamp += 1;
@@ -3442,6 +3481,96 @@ test "get_account_balances: invalid filter" {
         \\ get_account_balances_result T2 0 3 0 0
         \\ commit get_account_balances
     );
+}
+
+test "StateMachine: input_validate" {
+    const StateMachine = StateMachineType(
+        @import("testing/storage.zig").Storage,
+        global_constants.state_machine_config,
+    );
+    const Operation = StateMachine.Operation;
+
+    const allocator = std.testing.allocator;
+    const input = try allocator.alignedAlloc(u8, 16, 2 * global_constants.message_body_size_max);
+    defer allocator.free(input);
+
+    const Event = struct { operation: Operation, min: usize, max: usize, size: usize };
+    const events: []const Event = &.{
+        .{
+            .operation = .pulse,
+            .min = 0,
+            .max = 0,
+            .size = 0,
+        },
+        .{
+            .operation = .create_accounts,
+            .min = 0,
+            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+            .size = @sizeOf(Account),
+        },
+        .{
+            .operation = .create_transfers,
+            .min = 0,
+            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+            .size = @sizeOf(Transfer),
+        },
+        .{
+            .operation = .lookup_accounts,
+            .min = 0,
+            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+            .size = @sizeOf(u128),
+        },
+        .{
+            .operation = .lookup_transfers,
+            .min = 0,
+            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+            .size = @sizeOf(u128),
+        },
+        .{
+            .operation = .get_account_transfers,
+            .min = 1,
+            .max = 1,
+            .size = @sizeOf(AccountFilter),
+        },
+        .{
+            .operation = .get_account_balances,
+            .min = 1,
+            .max = 1,
+            .size = @sizeOf(AccountFilter),
+        },
+    };
+
+    for (std.enums.values(Operation), events) |operation, event| {
+        assert(event.operation == operation);
+
+        try std.testing.expect(StateMachine.input_valid(
+            event.operation,
+            input[0..0],
+        ) == (event.min == 0));
+
+        if (event.size == 0) {
+            assert(event.min == 0);
+            assert(event.max == 0);
+            continue;
+        }
+
+        try std.testing.expect(StateMachine.input_valid(
+            event.operation,
+            input[0 .. 1 * event.size],
+        ));
+        try std.testing.expect(StateMachine.input_valid(
+            event.operation,
+            input[0 .. event.max * event.size],
+        ));
+        try std.testing.expect(!StateMachine.input_valid(
+            event.operation,
+            input[0 .. (event.max + 1) * event.size],
+        ));
+        try std.testing.expect(!StateMachine.input_valid(
+            event.operation,
+            input[0 .. 3 * (event.size / 2)],
+        ));
+    }
 }
 
 test "StateMachine: Demuxer" {

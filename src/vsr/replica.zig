@@ -4767,6 +4767,22 @@ pub fn ReplicaType(
             if (self.ignore_request_message_upgrade(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
+
+            // Only valid requests are accepted.
+            if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
+                if (!StateMachine.input_valid(operation, message.body())) {
+                    log.debug(
+                        "{}: on_request: ignoring invalid request (operation={s}, input_len={})",
+                        .{
+                            self.replica,
+                            @tagName(operation),
+                            message.body().len,
+                        },
+                    );
+                    return true;
+                }
+            }
+
             return false;
         }
 
