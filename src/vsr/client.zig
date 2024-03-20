@@ -256,6 +256,10 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         pub fn on_message(message_bus: *MessageBus, message: *Message) void {
+            assert(message.header.size >= @sizeOf(Header));
+            assert(message.header.size <= constants.message_size_max);
+            assert(message.header.size % @alignOf(Header) == 0);
+
             const self = @fieldParentPtr(Self, "message_bus", message_bus);
             log.debug("{}: on_message: {}", .{ self.id, message.header });
             if (message.header.invalid()) |reason| {

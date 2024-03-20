@@ -718,7 +718,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         return null;
                     }
 
-                    if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
+                    if (header.size < @sizeOf(Header) or
+                        header.size > constants.message_size_max or
+                        header.size % @alignOf(Header) != 0)
+                    {
                         log.err("header with invalid size {d} received from peer {}", .{
                             header.size,
                             connection.peer,

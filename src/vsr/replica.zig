@@ -1274,6 +1274,9 @@ pub fn ReplicaType(
             assert(self.opened);
             assert(self.loopback_queue == null);
             assert(message.references > 0);
+            assert(message.header.size >= @sizeOf(Header));
+            assert(message.header.size <= constants.message_size_max);
+            assert(message.header.size % @alignOf(Header) == 0);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {

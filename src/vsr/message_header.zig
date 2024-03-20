@@ -70,6 +70,7 @@ pub const Header = extern struct {
 
     comptime {
         assert(@sizeOf(Header) == 256);
+        assert(@alignOf(Header) == 16);
         assert(stdx.no_padding(Header));
         assert(@offsetOf(Header, "reserved_command") % @sizeOf(u256) == 0);
     }
@@ -161,12 +162,16 @@ pub const Header = extern struct {
     }
 
     /// Returns null if all fields are set correctly according to the command, or else a warning.
-    /// This does not verify that checksum is valid, and expects that this has already been done.
+    /// Checksum and size fields affect framing and must be pre-validated by the caller.
+    /// For performance reasons, checksum validity is not asserted redundantly.
     pub fn invalid(self: *const Header) ?[]const u8 {
+        assert(self.size >= @sizeOf(Header));
+        assert(self.size <= constants.message_size_max);
+        assert(self.size % @alignOf(Header) != 0);
+
         if (self.checksum_padding != 0) return "checksum_padding != 0";
         if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
         if (self.nonce_reserved != 0) return "nonce_reserved != 0";
-        if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
         if (self.epoch != 0) return "epoch != 0";
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
 
