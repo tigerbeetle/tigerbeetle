@@ -105,14 +105,14 @@ pub fn main(
         try std.ArrayListUnmanaged(tb.Account).initCapacity(allocator, account_count_per_batch);
     defer batch_accounts.deinit(allocator);
 
-    // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10000ms+.
-    const batch_latency_histogram = try allocator.alloc(u64, 10001);
+    // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10_000ms+.
+    const batch_latency_histogram = try allocator.alloc(u64, 10_001);
     @memset(batch_latency_histogram, 0);
     defer allocator.free(batch_latency_histogram);
 
-    var query_latency_ns =
-        try std.ArrayListUnmanaged(u64).initCapacity(allocator, cli_args.query_count);
-    defer query_latency_ns.deinit(allocator);
+    const query_latency_histogram = try allocator.alloc(u64, 10_001);
+    @memset(query_latency_histogram, 0);
+    defer allocator.free(query_latency_histogram);
 
     var batch_transfers =
         try std.ArrayListUnmanaged(tb.Transfer).initCapacity(allocator, transfer_count_per_batch);
@@ -151,7 +151,7 @@ pub fn main(
         .rng = rng,
         .timer = try std.time.Timer.start(),
         .batch_latency_histogram = batch_latency_histogram,
-        .query_latency_ns = query_latency_ns,
+        .query_latency_histogram = query_latency_histogram,
         .batch_transfers = batch_transfers,
         .batch_start_ns = 0,
         .transfer_count = cli_args.transfer_count,
@@ -191,7 +191,7 @@ const Benchmark = struct {
     rng: std.rand.DefaultPrng,
     timer: std.time.Timer,
     batch_latency_histogram: []u64,
-    query_latency_ns: std.ArrayListUnmanaged(u64),
+    query_latency_histogram: []u64,
     batch_transfers: std.ArrayListUnmanaged(tb.Transfer),
     batch_start_ns: usize,
     transfers_sent: usize,
@@ -445,7 +445,9 @@ const Benchmark = struct {
                 transfer.credit_account_id == account_id);
         }
 
-        b.query_latency_ns.appendAssumeCapacity(batch_end_ns - b.batch_start_ns);
+        const ms_time = @divTrunc(batch_end_ns - b.batch_start_ns, std.time.ns_per_ms);
+        b.query_latency_histogram[@min(ms_time, b.query_latency_histogram.len - 1)] += 1;
+
         b.query_index += 1;
         b.query_account_transfers();
     }
@@ -453,20 +455,13 @@ const Benchmark = struct {
     fn summary_query(b: *Benchmark) void {
         const total_ns = b.timer.read();
 
-        const less_than_ns = (struct {
-            fn lessThan(_: void, ns1: u64, ns2: u64) bool {
-                return ns1 < ns2;
-            }
-        }).lessThan;
-        std.mem.sort(u64, b.query_latency_ns.items, {}, less_than_ns);
-
         const stdout = std.io.getStdOut().writer();
 
         stdout.print("\n{} queries in {d:.2} s\n", .{
             b.query_count,
             @as(f64, @floatFromInt(total_ns)) / std.time.ns_per_s,
         }) catch unreachable;
-        print_deciles(stdout, "query", b.query_latency_ns.items);
+        print_percentiles_histogram(stdout, "query", b.query_latency_histogram);
 
         b.done = true;
     }

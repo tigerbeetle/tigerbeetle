@@ -34,8 +34,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
 
     const benchmark_result = try shell.exec_stdout("./tigerbeetle benchmark", .{});
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
-    const batch_p90_ms = try get_measurement(benchmark_result, "batch latency p90", "ms");
-    const query_p90_ms = try get_measurement(benchmark_result, "query latency p90", "ms");
+    const batch_p99_ms = try get_measurement(benchmark_result, "batch latency p99", "ms");
+    const query_p99_ms = try get_measurement(benchmark_result, "query latency p99", "ms");
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
 
     try upload_run(shell, Run{
@@ -47,8 +47,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .label = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .label = "executable size", .value = executable_size_bytes, .unit = "bytes" },
             .{ .label = "TPS", .value = tps, .unit = "count" },
-            .{ .label = "batch p90", .value = batch_p90_ms, .unit = "ms" },
-            .{ .label = "query p90", .value = query_p90_ms, .unit = "ms" },
+            .{ .label = "batch p99", .value = batch_p99_ms, .unit = "ms" },
+            .{ .label = "query p99", .value = query_p99_ms, .unit = "ms" },
             .{ .label = "RSS", .value = rss_bytes, .unit = "bytes" },
         },
     });
@@ -64,8 +64,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .name = "executable size", .value = executable_size_bytes, .unit = "bytes" },
             .{ .name = "TPS", .value = tps, .unit = "count" },
-            .{ .name = "batch p90", .value = batch_p90_ms, .unit = "ms" },
-            .{ .name = "query p90", .value = query_p90_ms, .unit = "ms" },
+            .{ .name = "batch p99", .value = batch_p99_ms, .unit = "ms" },
+            .{ .name = "query p99", .value = query_p99_ms, .unit = "ms" },
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
         },
     }) catch |err| {
