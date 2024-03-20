@@ -259,6 +259,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.command == .request);
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);
+            assert(message.header.operation.valid(StateMachine));
 
             // Register before appending to request_queue.
             self.register();

@@ -242,8 +242,9 @@ fn request(
         .status = .ok,
         .data_size = @intCast(packet_data.len),
         .data = packet_data.ptr,
-        .batch_link = undefined,
-        .batch_data = undefined,
+        .batch_next = undefined,
+        .batch_tail = undefined,
+        .batch_size = undefined,
         .reserved = undefined,
     };
 
