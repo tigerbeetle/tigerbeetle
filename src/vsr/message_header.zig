@@ -167,6 +167,7 @@ pub const Header = extern struct {
         if (self.checksum_body_padding != 0) return "checksum_body_padding != 0";
         if (self.nonce_reserved != 0) return "nonce_reserved != 0";
         if (self.size < @sizeOf(Header)) return "size < @sizeOf(Header)";
+        if (self.size > constants.message_size_max) return "size > message_size_max";
         if (self.epoch != 0) return "epoch != 0";
         if (!stdx.zeroed(&self.reserved_frame)) return "reserved_frame != 0";
 
@@ -1237,6 +1238,8 @@ pub const Header = extern struct {
             no_session = 1,
             release_too_low = 2,
             release_too_high = 3,
+            invalid_request_operation = 4,
+            invalid_request_body = 5,
 
             comptime {
                 for (std.enums.values(Reason), 0..) |reason, index| {
