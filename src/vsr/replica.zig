@@ -4743,16 +4743,36 @@ pub fn ReplicaType(
                 return true;
             }
 
-            if (!message.header.operation.valid(StateMachine)) {
-                // Some possible causes:
-                // - client bug
-                // - client memory corruption
-                // - client/replica version mismatch
+            // Some possible causes:
+            // - client bug
+            // - client memory corruption
+            // - client/replica version mismatch
+            if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
+                if (!StateMachine.input_valid(operation, message.body())) {
+                    log.err(
+                        "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
+                        .{
+                            self.replica,
+                            @tagName(operation),
+                            message.body().len,
+                        },
+                    );
+                    self.send_eviction_message_to_client(
+                        message.header.client,
+                        .invalid_request_body,
+                    );
+                    return true;
+                }
+            } else if (!message.header.operation.vsr_reserved()) {
                 log.err("{}: on_request: ignoring invalid operation (client={} operation={})", .{
                     self.replica,
                     message.header.client,
                     @intFromEnum(message.header.operation),
                 });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .invalid_request_operation,
+                );
                 return true;
             }
 
@@ -4767,21 +4787,6 @@ pub fn ReplicaType(
             if (self.ignore_request_message_upgrade(message)) return true;
             if (self.ignore_request_message_duplicate(message)) return true;
             if (self.ignore_request_message_preparing(message)) return true;
-
-            // Only valid requests are accepted.
-            if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
-                if (!StateMachine.input_valid(operation, message.body())) {
-                    log.debug(
-                        "{}: on_request: ignoring invalid request (operation={s}, input_len={})",
-                        .{
-                            self.replica,
-                            @tagName(operation),
-                            message.body().len,
-                        },
-                    );
-                    return true;
-                }
-            }
 
             return false;
         }
