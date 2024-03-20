@@ -183,13 +183,13 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     return error.ReplicaTransitionedToInvalidState;
                 }
 
-                const message = client.register_inflight orelse client.request_inflight.?.message;
-                assert(message.header.client == header_b.?.client);
-                assert(message.header.checksum == header_b.?.request_checksum);
-                assert(message.header.request == header_b.?.request);
-                assert(message.header.command == .request);
-                assert(message.header.operation == header_b.?.operation);
-                assert(message.header.size == header_b.?.size);
+                const request = client.register_inflight orelse client.request_inflight.?.message;
+                assert(request.header.client == header_b.?.client);
+                assert(request.header.checksum == header_b.?.request_checksum);
+                assert(request.header.request == header_b.?.request);
+                assert(request.header.command == .request);
+                assert(request.header.operation == header_b.?.operation);
+                assert(request.header.size == header_b.?.size);
                 // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
                 // prepare body's accounts/transfers.
             }

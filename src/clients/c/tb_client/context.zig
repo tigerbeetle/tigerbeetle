@@ -383,7 +383,7 @@ pub fn ContextType(
             const self = user_data.self;
             const packet = user_data.packet;
 
-            // Submit the next pending packet after having VSR completed this one.
+            // Submit the next pending packet now that VSR completed this one.
             if (self.pending.pop()) |packet_next| {
                 self.submit(packet_next);
             }

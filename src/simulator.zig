@@ -838,13 +838,13 @@ pub const Simulator = struct {
             // Count the number of clients that are still waiting for a `register` to complete,
             // since they may start one at any time.
             reserved += @intFromBool(c.session == 0);
-            // Count the number of requests queued.
+            // Count the number of non-register requests queued.
             reserved += @intFromBool(c.request_inflight != null);
         }
         // +1 for the potential request — is there room in the sequencer's queue?
         if (reserved + 1 > simulator.reply_sequence.free()) return;
 
-        // Make sure that the client is free to send a new request
+        // Make sure that the client is ready to send a new request.
         if (client.request_inflight != null) return;
         const request_message = client.get_message();
         errdefer client.release_message(request_message);

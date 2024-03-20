@@ -104,7 +104,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Tracks the currently processing register message if any.
         register_inflight: ?*Message.Request = null,
 
-        /// Tracks a currently processing request message submitted by `raw_request`.
+        /// Tracks a currently processing (non-register) request message submitted by `raw_request`.
         request_inflight: ?Request = null,
 
         /// The number of ticks without a reply before the client resends the inflight request.
@@ -265,7 +265,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             message: *Message.Request,
         ) void {
             assert(self.messages_available < constants.client_request_queue_max);
-            assert(!message.header.operation.vsr_reserved());
             assert(message.header.client == self.id);
             assert(message.header.release.value == self.release.value);
             assert(message.header.cluster == self.cluster);
@@ -390,11 +389,13 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             else if (self.request_inflight) |inflight|
                 inflight
             else {
+                assert(reply.header.request < self.request_number);
                 log.debug("{}: on_reply: ignoring (no inflight request)", .{self.id});
                 return;
             };
 
             if (reply.header.request < inflight.message.header.request) {
+                assert(self.register_inflight == null);
                 log.debug("{}: on_reply: ignoring (request {} < {})", .{
                     self.id,
                     reply.header.request,
@@ -403,6 +404,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 return;
             }
 
+            assert(reply.header.request == inflight.message.header.request);
             assert(reply.header.request_checksum == inflight.message.header.checksum);
             const inflight_vsr_operation = inflight.message.header.operation;
             const inflight_request = inflight.message.header.request;
@@ -418,11 +420,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             if (self.on_reply_callback) |on_reply_callback| {
                 on_reply_callback(self, inflight.message, reply);
             }
-
-            // Eagerly release request message, to ensure that user's callback can submit a new one.
-            self.release_message(inflight.message.base());
-            assert(self.messages_available > 0);
-            inflight.message = undefined;
 
             log.debug("{}: on_reply: user_data={} request={} size={} {s}", .{
                 self.id,
@@ -452,6 +449,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             }
 
             self.request_timeout.stop();
+
+            // Release request message to ensure that inflight's callback can submit a new one.
+            self.release_message(inflight.message.base());
+            assert(self.messages_available > 0);
+            inflight.message = undefined;
 
             if (inflight_vsr_operation == .register) {
                 assert(self.session == 0);
@@ -530,6 +532,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Registers a session with the cluster for the client, if this has not yet been done.
         fn register(self: *Self) void {
             if (self.request_number > 0) return;
+            assert(self.request_inflight == null);
+            assert(self.register_inflight == null);
 
             const message = self.get_message().build(.request);
             errdefer self.release_message(message.base());
@@ -549,8 +553,6 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             log.debug("{}: register: registering a session with the cluster", .{self.id});
 
-            assert(self.request_inflight == null);
-            assert(self.register_inflight == null);
             self.register_inflight = message;
 
             self.send_request_for_the_first_time(message);
@@ -596,9 +598,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         }
 
         fn send_request_for_the_first_time(self: *Self, message: *Message.Request) void {
-            if (self.register_inflight) |inflight| {
+            if (self.register_inflight) |register_inflight| {
+                assert(register_inflight == message);
                 maybe(self.request_inflight != null);
-                assert(inflight == message);
             } else {
                 assert(self.register_inflight == null);
                 assert(self.request_inflight.?.message == message);

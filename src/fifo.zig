@@ -15,7 +15,7 @@ pub fn FIFO(comptime T: type) type {
         count: u64 = 0,
 
         // This should only be null if you're sure we'll never want to monitor `count`.
-        name: ?[*:0]const u8,
+        name: ?[]const u8,
 
         // If the number of elements is large, the constants.verify check in push() can be too
         // expensive. Allow the user to gate it. Could also be a comptime param?
@@ -96,7 +96,7 @@ pub fn FIFO(comptime T: type) type {
         fn plot(self: Self) void {
             if (self.name) |name| {
                 tracer.plot(
-                    .{ .queue_count = .{ .queue_name = std.mem.span(name) } },
+                    .{ .queue_count = .{ .queue_name = name } },
                     @as(f64, @floatFromInt(self.count)),
                 );
             }

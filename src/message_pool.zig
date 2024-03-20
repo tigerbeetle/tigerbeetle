@@ -49,7 +49,8 @@ pub const messages_max_client = messages_max: {
     sum += constants.replicas_max; // Connection.recv_message
     // Connection.send_queue:
     sum += constants.replicas_max * constants.connection_send_queue_max_client;
-    sum += constants.client_request_queue_max; // Client.request_queue
+    sum += 1; // Client.register_inflight
+    sum += 1; // Client.request_inflight
     // Handle bursts (e.g. Connection.parse_message, or sending a ping when the send queue is full).
     sum += 1;
 
