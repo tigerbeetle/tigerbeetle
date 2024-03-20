@@ -709,7 +709,12 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return null;
                 }
 
-                const header: *const Header = @alignCast(mem.bytesAsValue(Header, data[0..@sizeOf(Header)]));
+                // If the message bus receives more than one message at a time, subsequent messages
+                // might not be aligned to 16. These messages would be copied over to a fresh
+                // `Message` anyway, fixing the alignment issue, but care must be taken to
+                // ensure header alignment before that.
+                var header: Header = undefined;
+                @memcpy(mem.asBytes(&header), data[0..@sizeOf(Header)]);
 
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {
@@ -739,7 +744,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         // This has the same effect as an asymmetric network where, for a short time
                         // bounded by the time it takes to ping, we can hear from a peer before we
                         // can send back to them.
-                        .replica => if (!connection.set_and_verify_peer(bus, header)) {
+                        .replica => if (!connection.set_and_verify_peer(bus, &header)) {
                             log.err(
                                 "message from unexpected peer: peer={} header={}",
                                 .{ connection.peer, header },
