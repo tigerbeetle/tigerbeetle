@@ -3495,54 +3495,58 @@ test "StateMachine: input_validate" {
     defer allocator.free(input);
 
     const Event = struct { operation: Operation, min: usize, max: usize, size: usize };
-    const events: []const Event = &.{
-        .{
-            .operation = .pulse,
-            .min = 0,
-            .max = 0,
-            .size = 0,
-        },
-        .{
-            .operation = .create_accounts,
-            .min = 0,
-            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
-            .size = @sizeOf(Account),
-        },
-        .{
-            .operation = .create_transfers,
-            .min = 0,
-            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
-            .size = @sizeOf(Transfer),
-        },
-        .{
-            .operation = .lookup_accounts,
-            .min = 0,
-            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
-            .size = @sizeOf(u128),
-        },
-        .{
-            .operation = .lookup_transfers,
-            .min = 0,
-            .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
-            .size = @sizeOf(u128),
-        },
-        .{
-            .operation = .get_account_transfers,
-            .min = 1,
-            .max = 1,
-            .size = @sizeOf(AccountFilter),
-        },
-        .{
-            .operation = .get_account_balances,
-            .min = 1,
-            .max = 1,
-            .size = @sizeOf(AccountFilter),
-        },
+    const events = comptime events: {
+        var array: []const Event = &.{};
+        for (std.enums.values(Operation)) |operation| {
+            array = switch (operation) {
+                .pulse => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 0,
+                    .max = 0,
+                    .size = 0,
+                }},
+                .create_accounts => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 0,
+                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+                    .size = @sizeOf(Account),
+                }},
+                .create_transfers => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 0,
+                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+                    .size = @sizeOf(Transfer),
+                }},
+                .lookup_accounts => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 0,
+                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Account)),
+                    .size = @sizeOf(u128),
+                }},
+                .lookup_transfers => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 0,
+                    .max = @divExact(global_constants.message_body_size_max, @sizeOf(Transfer)),
+                    .size = @sizeOf(u128),
+                }},
+                .get_account_transfers => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 1,
+                    .max = 1,
+                    .size = @sizeOf(AccountFilter),
+                }},
+                .get_account_balances => array ++ [_]Event{.{
+                    .operation = operation,
+                    .min = 1,
+                    .max = 1,
+                    .size = @sizeOf(AccountFilter),
+                }},
+            };
+        }
+        break :events array;
     };
 
-    for (std.enums.values(Operation), events) |operation, event| {
-        assert(event.operation == operation);
-
+    for (events) |event| {
         try std.testing.expect(StateMachine.input_valid(
             event.operation,
             input[0..0],
