@@ -38,29 +38,14 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
     const query_p99_ms = try get_measurement(benchmark_result, "query latency p99", "ms");
     const rss_bytes = try get_measurement(benchmark_result, "rss", "bytes");
 
-    try upload_run(shell, Run{
-        // Use commit timestamp, rather wall clock time here. That way, it is possible to re-bench
-        // mark the entire history while getting a comparable time series.
-        .timestamp = commit_timestamp,
-        .revision = cli_args.sha,
-        .measurements = &[_]Measurement{
-            .{ .label = "build time", .value = build_time_ms, .unit = "ms" },
-            .{ .label = "executable size", .value = executable_size_bytes, .unit = "bytes" },
-            .{ .label = "TPS", .value = tps, .unit = "count" },
-            .{ .label = "batch p99", .value = batch_p99_ms, .unit = "ms" },
-            .{ .label = "query p99", .value = query_p99_ms, .unit = "ms" },
-            .{ .label = "RSS", .value = rss_bytes, .unit = "bytes" },
-        },
-    });
-
-    upload_nyrkio(shell, NyrkioRun{
+    const batch = MetricBatch{
         .timestamp = commit_timestamp,
         .attributes = .{
             .git_repo = "https://github.com/tigerbeetle/tigerbeetle",
             .git_commit = cli_args.sha,
             .branch = "main",
         },
-        .metrics = &[_]NyrkioRun.Metric{
+        .metrics = &[_]Metric{
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .name = "executable size", .value = executable_size_bytes, .unit = "bytes" },
             .{ .name = "TPS", .value = tps, .unit = "count" },
@@ -68,7 +53,11 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CliArgs) !void {
             .{ .name = "query p99", .value = query_p99_ms, .unit = "ms" },
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
         },
-    }) catch |err| {
+    };
+
+    try upload_run(shell, &batch);
+
+    upload_nyrkio(shell, &batch) catch |err| {
         log.err("failed to upload Nyrkiö metrics: {}", .{err});
     };
 }
@@ -88,19 +77,7 @@ fn get_measurement(
     return try std.fmt.parseInt(u64, cut.prefix, 10);
 }
 
-const Measurement = struct {
-    label: []const u8,
-    value: u64,
-    unit: []const u8,
-};
-
-const Run = struct {
-    timestamp: u64,
-    revision: []const u8,
-    measurements: []const Measurement,
-};
-
-fn upload_run(shell: *Shell, run: Run) !void {
+fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
     const token = try shell.env_get("DEVHUBDB_PAT");
     try shell.exec(
         \\git clone --depth 1
@@ -120,7 +97,7 @@ fn upload_run(shell: *Shell, run: Run) !void {
         defer file.close();
 
         try file.seekFromEnd(0);
-        try std.json.stringify(run, .{}, file.writer());
+        try std.json.stringify(batch, .{}, file.writer());
         try file.writeAll("\n");
     }
 
@@ -130,12 +107,13 @@ fn upload_run(shell: *Shell, run: Run) !void {
     try shell.exec("git push", .{});
 }
 
-const NyrkioRun = struct {
-    const Metric = struct {
-        name: []const u8,
-        unit: []const u8,
-        value: u64,
-    };
+const Metric = struct {
+    name: []const u8,
+    unit: []const u8,
+    value: u64,
+};
+
+const MetricBatch = struct {
     timestamp: u64,
     metrics: []const Metric,
     attributes: struct {
@@ -145,9 +123,13 @@ const NyrkioRun = struct {
     },
 };
 
-fn upload_nyrkio(shell: *Shell, run: NyrkioRun) !void {
+fn upload_nyrkio(shell: *Shell, batch: *const MetricBatch) !void {
     const token = try shell.env_get("NYRKIO_TOKEN");
-    const payload = try std.json.stringifyAlloc(shell.arena.allocator(), [_]NyrkioRun{run}, .{});
+    const payload = try std.json.stringifyAlloc(
+        shell.arena.allocator(),
+        [_]*const MetricBatch{batch}, // Nyrkiö needs an _array_ of batches.
+        .{},
+    );
     try shell.exec(
         \\curl -s -X POST --fail-with-body
         \\    -H {content_type}
