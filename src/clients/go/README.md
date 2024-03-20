@@ -119,7 +119,7 @@ The client library includes a helper function for generating IDs according to th
 [recommended scheme](https://docs.tigerbeetle.com/design/data-modeling#id).
 
 ```go
-_uniqueId := ID();
+uniqueId := ID();
 ```
 
 ## Creating Accounts
