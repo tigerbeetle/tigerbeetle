@@ -16,15 +16,19 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // We need to build the tigerbeetle-node library manually for samples/testers to work.
     try shell.exec("npm install", .{});
 
-    inline for (.{ "test", "benchmark" }) |tester| {
+    for ([_][]const u8{ "test", "benchmark" }) |tester| {
+        log.info("testing {s}s", .{tester});
+
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
         defer tmp_beetle.deinit(gpa);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
-        try shell.exec("node ./dist/" ++ tester, .{});
+        try shell.exec("node ./dist/{tester}", .{ .tester = tester });
     }
 
-    inline for (.{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+    inline for ([_][]const u8{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
+        log.info("testing sample '{s}'", .{sample});
+
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
@@ -39,7 +43,10 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // Container smoke tests.
     if (builtin.target.os.tag == .linux) {
         try shell.exec("npm pack --quiet", .{});
+
         for ([_][]const u8{ "node:18", "node:18-alpine" }) |image| {
+            log.info("testing docker image: '{s}'", .{image});
+
             try shell.exec(
                 \\docker run
                 \\--security-opt seccomp=unconfined
