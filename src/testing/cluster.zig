@@ -606,7 +606,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             message.header.* = .{
                 .release = client.release,
                 .client = client.id,
-                .request = undefined, // Set by client.raw_request.
+                .request = 0, // Set by client.raw_request.
                 .cluster = client.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, request_operation),

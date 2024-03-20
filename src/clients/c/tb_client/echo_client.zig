@@ -126,7 +126,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
             message.header.* = .{
                 .client = self.id,
-                .request = undefined, // Set by raw_request() below.
+                .request = 0, // Set by raw_request() below.
                 .cluster = self.cluster,
                 .command = .request,
                 .release = vsr.Release.minimum,

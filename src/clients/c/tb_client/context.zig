@@ -331,11 +331,11 @@ pub fn ContextType(
             message.header.* = .{
                 .release = self.client.release,
                 .client = self.client.id,
-                .request = undefined, // Set by client.raw_request.
+                .request = 0, // Set by client.raw_request.
                 .cluster = self.client.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @intCast(@sizeOf(vsr.Header) + packet.batch_size),
+                .size = @sizeOf(vsr.Header) + packet.batch_size,
             };
 
             // Copy all batched packet event data into the message.

@@ -233,7 +233,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
 
             message.header.* = .{
                 .client = self.id,
-                .request = undefined, // Set inside `raw_request` down below.
+                .request = 0, // Set inside `raw_request` down below.
                 .cluster = self.cluster,
                 .command = .request,
                 .release = self.release,
@@ -260,6 +260,11 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             assert(message.header.size >= @sizeOf(Header));
             assert(message.header.size <= constants.message_size_max);
             assert(message.header.operation.valid(StateMachine));
+            assert(message.header.timestamp == 0 or constants.aof_recovery);
+            assert(message.header.view == 0);
+            assert(message.header.parent == 0);
+            assert(message.header.session == 0);
+            assert(message.header.request == 0);
 
             // Register before appending to request_queue.
             self.register();
