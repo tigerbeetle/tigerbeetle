@@ -383,13 +383,19 @@ pub fn ContextType(
             const self = user_data.self;
             const packet = user_data.packet;
 
-            // Submit the next pending packet now that VSR completed this one.
+            // Submit the next pending packet now that VSR has completed this one.
             if (self.pending.pop()) |packet_next| {
                 self.submit(packet_next);
             }
 
             switch (op) {
                 inline else => |operation| {
+                    // on_result should never be called with an operation not green-lit by request()
+                    // This also guards from passing an unsupported operation into DemuxerType.
+                    if (comptime operation_event_size(@intFromEnum(operation)) == null) {
+                        unreachable;
+                    }
+
                     // Demuxer expects []u8 but VSR callback provides []const u8.
                     // The bytes are known to come from a Message body that will be soon discarded
                     // therefor it's safe to @constCast and potentially modify the data in-place.
