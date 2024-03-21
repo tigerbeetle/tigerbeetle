@@ -600,7 +600,7 @@ pub const Simulator = struct {
 
         var missing_op: ?u64 = null;
         for (simulator.cluster.replicas) |replica| {
-            if (simulator.core.isSet(replica.replica)) {
+            if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 assert(simulator.cluster.replica_health[replica.replica] == .up);
                 if (replica.op > replica.commit_min) {
                     for (replica.commit_min + 1..@min(replica.op, commit_max) + 1) |op| {
