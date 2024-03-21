@@ -447,7 +447,8 @@ pub const Simulator = struct {
         assert(simulator.requests_sent == simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client| {
-            assert(client.request_queue.count == 0);
+            assert(client.register_inflight == null);
+            assert(client.request_inflight == null);
         }
 
         // Even though there are no client requests in progress, the cluster may be upgrading.
@@ -837,14 +838,14 @@ pub const Simulator = struct {
             // Count the number of clients that are still waiting for a `register` to complete,
             // since they may start one at any time.
             reserved += @intFromBool(c.session == 0);
-            // Count the number of requests queued.
-            reserved += c.request_queue.count;
+            // Count the number of non-register requests queued.
+            reserved += @intFromBool(c.request_inflight != null);
         }
         // +1 for the potential request — is there room in the sequencer's queue?
         if (reserved + 1 > simulator.reply_sequence.free()) return;
 
-        // Make sure that there is capacity in the client's request queue.
-        if (client.messages_available == 0) return;
+        // Make sure that the client is ready to send a new request.
+        if (client.request_inflight != null) return;
         const request_message = client.get_message();
         errdefer client.release_message(request_message);
 
@@ -862,7 +863,7 @@ pub const Simulator = struct {
         );
         // Since we already checked the client's request queue for free space, `client.request()`
         // should always queue the request.
-        assert(request_message == client.request_queue.tail_ptr().?.message.base());
+        assert(request_message == client.request_inflight.?.message.base());
         assert(request_message.header.size == @sizeOf(vsr.Header) + request_metadata.size);
         assert(request_message.header.into(.request).?.operation.cast(StateMachine) ==
             request_metadata.operation);

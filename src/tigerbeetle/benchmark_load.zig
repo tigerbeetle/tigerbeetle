@@ -473,19 +473,11 @@ const Benchmark = struct {
         payload: []u8,
     ) void {
         b.callback = callback;
-
-        const event_count = switch (operation) {
-            inline else => |op| @divExact(payload.len, @sizeOf(StateMachine.Event(op))),
-            .pulse => unreachable,
-        };
-
-        const batch = b.client.batch_get(operation, event_count) catch unreachable;
-        stdx.copy_disjoint(.exact, u8, batch.slice(), payload);
-
-        b.client.batch_submit(
-            @intCast(@intFromPtr(b)),
+        b.client.request(
             send_complete,
-            batch,
+            @intCast(@intFromPtr(b)),
+            operation,
+            payload,
         );
     }
 

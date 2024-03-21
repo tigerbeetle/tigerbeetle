@@ -12,6 +12,7 @@ comptime {
     _ = @import("tidy.zig");
 
     _ = @import("clients/c/test.zig");
+    _ = @import("clients/c/tb_client/echo_client.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
     _ = @import("clients/dotnet/dotnet_bindings.zig");
     _ = @import("clients/go/go_bindings.zig");

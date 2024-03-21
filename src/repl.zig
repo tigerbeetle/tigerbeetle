@@ -716,24 +716,14 @@ pub fn ReplType(comptime MessageBus: type) type {
                 return;
             }
 
-            const batch = repl.client.batch_get(operation, switch (operation) {
-                inline else => |op| @divExact(arguments.len, @sizeOf(StateMachine.Event(op))),
-                .pulse => unreachable,
-            }) catch unreachable;
-
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                batch.slice(),
-                arguments,
-            );
-
             repl.request_done = false;
+
             try repl.debug("Sending command: {}.\n", .{operation});
-            repl.client.batch_submit(
-                @intCast(@intFromPtr(repl)),
+            repl.client.request(
                 client_request_callback,
-                batch,
+                @intCast(@intFromPtr(repl)),
+                operation,
+                arguments,
             );
         }
 

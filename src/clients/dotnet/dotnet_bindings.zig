@@ -113,6 +113,7 @@ const type_mappings = .{
     .{ tb_client.tb_packet_t, TypeMapping{
         .name = "TBPacket",
         .visibility = .internal,
+        .private_fields = &.{"reserved"},
     } },
 };
 
@@ -289,7 +290,7 @@ fn emit_struct(
                     \\
                 , .{
                     to_case(field.name, .pascal),
-                    array.len,
+                    array.len * @sizeOf(array.child),
                 });
             },
             else => {},
@@ -298,6 +299,8 @@ fn emit_struct(
 
     // Fields
     inline for (type_info.fields) |field| {
+        const is_private = comptime mapping.is_private(field.name);
+
         switch (@typeInfo(field.type)) {
             .Array => try buffer.writer().print(
                 \\    {s} {s}Data {s};
@@ -305,7 +308,7 @@ fn emit_struct(
                 \\
             ,
                 .{
-                    if (mapping.visibility == .internal) "public" else "private",
+                    if (mapping.visibility == .internal and !is_private) "public" else "private",
                     to_case(field.name, .pascal),
                     to_case(field.name, .camel),
                 },
@@ -316,7 +319,7 @@ fn emit_struct(
                 \\
             ,
                 .{
-                    if (mapping.visibility == .internal) "public" else "private",
+                    if (mapping.visibility == .internal and !is_private) "public" else "private",
                     dotnet_type(field.type),
                     to_case(field.name, .camel),
                 },

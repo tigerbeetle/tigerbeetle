@@ -179,17 +179,17 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     if (client.id == header_b.?.client) break client;
                 } else unreachable;
 
-                if (client.request_queue.empty()) {
+                if (client.request_inflight == null) {
                     return error.ReplicaTransitionedToInvalidState;
                 }
 
-                const request = client.request_queue.head_ptr_const().?;
-                assert(request.message.header.client == header_b.?.client);
-                assert(request.message.header.checksum == header_b.?.request_checksum);
-                assert(request.message.header.request == header_b.?.request);
-                assert(request.message.header.command == .request);
-                assert(request.message.header.operation == header_b.?.operation);
-                assert(request.message.header.size == header_b.?.size);
+                const request = client.register_inflight orelse client.request_inflight.?.message;
+                assert(request.header.client == header_b.?.client);
+                assert(request.header.checksum == header_b.?.request_checksum);
+                assert(request.header.request == header_b.?.request);
+                assert(request.header.command == .request);
+                assert(request.header.operation == header_b.?.operation);
+                assert(request.header.size == header_b.?.size);
                 // `checksum_body` will not match; the leader's StateMachine updated the timestamps in the
                 // prepare body's accounts/transfers.
             }

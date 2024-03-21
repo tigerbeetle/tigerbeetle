@@ -1,6 +1,7 @@
 const std = @import("std");
 const stdx = @import("../../../stdx.zig");
 const assert = std.debug.assert;
+const testing = std.testing;
 const mem = std.mem;
 
 const constants = @import("../../../constants.zig");
@@ -17,30 +18,43 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         const Self = @This();
 
         // Exposing the same types the real client does:
-        pub usingnamespace blk: {
-            const Client = @import("../../../vsr/client.zig").Client(StateMachine_, MessageBus);
-            break :blk struct {
-                pub const StateMachine = Client.StateMachine;
-                pub const Error = Client.Error;
-                pub const Request = Client.Request;
-                pub const BatchError = Client.BatchError;
+        const VSRClient = @import("../../../vsr/client.zig").Client(StateMachine_, MessageBus);
+        pub const StateMachine = VSRClient.StateMachine;
+        pub const Request = VSRClient.Request;
+
+        /// Custom Demuxer which treats Event(operation)s as results and echoes them back.
+        pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
+            return struct {
+                const Demuxer = @This();
+
+                results: []u8,
+                events_decoded: u32 = 0,
+
+                pub fn init(reply: []u8) Demuxer {
+                    return Demuxer{ .results = reply };
+                }
+
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
+                    // Double check the event offset/count are contiguously decoded from results.
+                    assert(self.events_decoded == event_offset);
+                    self.events_decoded += event_count;
+
+                    // Double check the results has enough event bytes to echo back.
+                    const byte_count = @sizeOf(StateMachine.Event(operation)) * event_count;
+                    assert(self.results.len >= byte_count);
+
+                    // Echo back the result bytes and consume the events.
+                    defer self.results = self.results[byte_count..];
+                    return self.results[0..byte_count];
+                }
             };
-        };
-
-        const EchoRequest = struct {
-            message: *Message.Request,
-            user_data: u128,
-            callback: Self.Request.Callback,
-        };
-
-        const RequestQueue = RingBuffer(EchoRequest, .{
-            .array = constants.client_request_queue_max,
-        });
+        }
 
         id: u128,
         cluster: u128,
-        messages_available: u32 = constants.client_request_queue_max,
-        request_queue: RequestQueue = RequestQueue.init(),
+        release: vsr.Release = vsr.Release.minimum,
+        request_number: u32 = 1,
+        request_inflight: ?Request = null,
         message_pool: *MessagePool,
 
         pub fn init(
@@ -64,101 +78,133 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             _ = allocator;
-            // Drains all pending requests before deiniting.
-            self.reply();
+            if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
         }
 
         pub fn tick(self: *Self) void {
-            self.reply();
+            const inflight = self.request_inflight orelse return;
+            self.request_inflight = null;
+
+            // Allocate a reply message.
+            const reply = self.get_message().build(.request);
+            defer self.release_message(reply.base());
+
+            // Copy the request message's entire content including header into the reply.
+            const operation = inflight.message.header.operation.cast(Self.StateMachine);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                reply.buffer,
+                inflight.message.buffer,
+            );
+
+            // Similarly to the real client, release the request message before invoking the
+            // callback. This necessitates a `copy_disjoint` above.
+            self.release_message(inflight.message.base());
+            inflight.callback(
+                inflight.user_data,
+                operation,
+                reply.body(),
+            );
         }
 
-        pub fn batch_get(
+        pub fn request(
             self: *Self,
-            operation: Self.StateMachine.Operation,
-            event_count: usize,
-        ) Self.BatchError!Batch {
-            const body_size = switch (operation) {
-                inline else => |batch_operation| blk: {
-                    break :blk @sizeOf(Self.StateMachine.Event(batch_operation)) * event_count;
-                },
+            callback: Request.Callback,
+            user_data: u128,
+            operation: StateMachine.Operation,
+            events: []const u8,
+        ) void {
+            const event_size: usize = switch (operation) {
+                inline else => |operation_comptime| @sizeOf(StateMachine.Event(operation_comptime)),
             };
-            assert(body_size <= constants.message_body_size_max);
+            assert(events.len <= constants.message_body_size_max);
+            assert(events.len % event_size == 0);
 
-            if (self.messages_available == 0) return error.TooManyOutstanding;
-            const message = self.get_message();
-            errdefer self.release(message);
+            const message = self.get_message().build(.request);
+            errdefer self.release_message(message.base());
 
-            const message_request = message.build(.request);
-            message_request.header.* = .{
+            message.header.* = .{
                 .client = self.id,
-                .request = 0,
+                .request = 0, // Set by raw_request() below.
                 .cluster = self.cluster,
                 .command = .request,
-                .operation = vsr.Operation.from(Self.StateMachine, operation),
-                .size = @intCast(@sizeOf(Header) + body_size),
                 .release = vsr.Release.minimum,
+                .operation = vsr.Operation.from(StateMachine, operation),
+                .size = @intCast(@sizeOf(Header) + events.len),
             };
 
-            return Batch{ .message = message_request };
+            stdx.copy_disjoint(.exact, u8, message.body(), events);
+            self.raw_request(callback, user_data, message);
         }
 
-        pub const Batch = struct {
-            message: *Message.Request,
-
-            pub fn slice(batch: Batch) []u8 {
-                return batch.message.body();
-            }
-        };
-
-        pub fn batch_submit(
+        pub fn raw_request(
             self: *Self,
+            callback: Request.Callback,
             user_data: u128,
-            callback: Self.Request.Callback,
-            batch: Batch,
+            message: *Message.Request,
         ) void {
-            assert(!self.request_queue.full());
-            self.request_queue.push_assume_capacity(.{
-                .message = batch.message,
+            assert(message.header.client == self.id);
+            assert(message.header.cluster == self.cluster);
+            assert(message.header.release.value == self.release.value);
+            assert(!message.header.operation.vsr_reserved());
+            assert(message.header.size >= @sizeOf(Header));
+            assert(message.header.size <= constants.message_size_max);
+
+            message.header.request = self.request_number;
+            self.request_number += 1;
+
+            assert(self.request_inflight == null);
+            self.request_inflight = .{
+                .message = message,
                 .user_data = user_data,
                 .callback = callback,
-            });
+            };
         }
 
         pub fn get_message(self: *Self) *Message {
-            assert(self.messages_available > 0);
-            self.messages_available -= 1;
             return self.message_pool.get_message(null);
         }
 
-        pub fn release(self: *Self, message: *Message) void {
-            assert(self.messages_available < constants.client_request_queue_max);
-            self.messages_available += 1;
+        pub fn release_message(self: *Self, message: *Message) void {
             self.message_pool.unref(message);
         }
+    };
+}
 
-        fn reply(self: *Self) void {
-            while (self.request_queue.pop()) |request| {
-                const reply_message = self.message_pool.get_message(.request);
-                defer self.message_pool.unref(reply_message.base());
+test "Echo Demuxer" {
+    const StateMachine = @import("../../../state_machine.zig").StateMachineType(
+        @import("../../../testing/storage.zig").Storage,
+        constants.state_machine_config,
+    );
+    const MessageBus = @import("../../../message_bus.zig").MessageBusClient;
+    const Client = EchoClient(StateMachine, MessageBus);
 
-                const operation = request.message.header.operation.cast(Self.StateMachine);
-                stdx.copy_disjoint(
-                    .exact,
-                    u8,
-                    reply_message.buffer,
-                    request.message.buffer,
-                );
+    var prng = std.rand.DefaultPrng.init(42);
+    inline for ([_]StateMachine.Operation{
+        .create_accounts,
+        .create_transfers,
+    }) |operation| {
+        const Event = StateMachine.Event(operation);
+        var events: [@divExact(constants.message_body_size_max, @sizeOf(Event))]Event = undefined;
+        prng.fill(std.mem.asBytes(&events));
 
-                // Similarly to the real client, release the request message before invoking the
-                // callback. This necessitates a `copy_disjoint` above.
-                self.release(request.message.base());
+        for (0..events.len) |i| {
+            const events_total = i + 1;
+            const events_data = std.mem.sliceAsBytes(events[0..events_total]);
+            var demuxer = Client.DemuxerType(operation).init(events_data);
 
-                request.callback(
-                    request.user_data,
-                    operation,
-                    reply_message.body(),
-                );
+            var events_offset: usize = 0;
+            while (events_offset < events_total) {
+                const events_limit = events_total - events_offset;
+                const events_count = @max(1, prng.random().uintAtMost(usize, events_limit));
+                defer events_offset += events_count;
+
+                const reply_bytes = demuxer.decode(@intCast(events_offset), @intCast(events_count));
+                const reply: []Event = @alignCast(std.mem.bytesAsSlice(Event, reply_bytes));
+                try testing.expectEqual(&reply[0], &events[events_offset]);
+                try testing.expectEqual(reply.len, events[events_offset..][0..events_count].len);
             }
         }
-    };
+    }
 }

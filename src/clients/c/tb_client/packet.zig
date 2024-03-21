@@ -9,6 +9,15 @@ pub const Packet = extern struct {
     status: Status,
     data_size: u32,
     data: ?*anyopaque,
+    batch_next: ?*Packet,
+    batch_tail: ?*Packet,
+    batch_size: u32,
+    reserved: [8]u8,
+
+    comptime {
+        assert(@sizeOf(Packet) == 64);
+        assert(@alignOf(Packet) == 8);
+    }
 
     pub const Status = enum(u8) {
         ok,
@@ -40,6 +49,7 @@ pub const Packet = extern struct {
             if (self.popped == null) self.popped = self.pushed.swap(null, .Acquire);
             const packet = self.popped orelse return null;
             self.popped = packet.next;
+            packet.next = null;
             return packet;
         }
     };
