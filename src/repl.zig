@@ -59,6 +59,8 @@ pub const Parser = struct {
         create_transfers,
         lookup_accounts,
         lookup_transfers,
+        get_account_transfers,
+        get_account_balances,
     };
 
     pub const LookupSyntaxTree = struct {
@@ -69,6 +71,7 @@ pub const Parser = struct {
         account: tb.Account,
         transfer: tb.Transfer,
         id: LookupSyntaxTree,
+        account_filter: tb.AccountFilter,
     };
 
     pub const Statement = struct {
@@ -264,8 +267,24 @@ pub const Parser = struct {
             .help, .none => return,
             .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
             .create_transfers => .{ .transfer = std.mem.zeroInit(tb.Transfer, .{}) },
-            .lookup_accounts => .{ .id = .{ .id = 0 } },
-            .lookup_transfers => .{ .id = .{ .id = 0 } },
+            .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
+            .get_account_transfers, .get_account_balances => .{ .account_filter = tb.AccountFilter{
+                .account_id = 0,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = switch (operation) {
+                    .get_account_transfers => StateMachine.constants
+                        .batch_max.get_account_transfers,
+                    .get_account_balances => StateMachine.constants
+                        .batch_max.get_account_balances,
+                    else => unreachable,
+                },
+                .flags = .{
+                    .credits = true,
+                    .debits = true,
+                    .reversed = false,
+                },
+            } },
         };
         var object = default;
 
@@ -278,6 +297,7 @@ pub const Parser = struct {
             }
 
             // Expect comma separating objects.
+            // TODO: Not all operations allow multiple objects, e.g. get_account_transfers.
             if (parser.offset < parser.input.len and parser.input[parser.offset] == ',') {
                 parser.offset += 1;
                 inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
@@ -387,10 +407,18 @@ pub const Parser = struct {
             parser.offset = after_whitespace;
             try parser.print_current_position();
             try parser.printer.print_error(
-                \\Operation must be help, create_accounts, lookup_accounts,
-                \\create_transfers, or lookup_transfers. Got: '{s}'.
-                \\
-            ,
+                "Operation must be " ++
+                    comptime operations: {
+                    var names: []const u8 = "";
+                    for (std.enums.values(Operation), 0..) |operation, index| {
+                        if (operation == .none) continue;
+                        names = names ++
+                            (if (names.len > 0) ", " else "") ++
+                            (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
+                            @tagName(operation);
+                    }
+                    break :operations names;
+                } ++ ". Got: '{s}'.\n",
                 .{operation_identifier},
             );
             return Error.BadOperation;
@@ -454,6 +482,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 .create_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
+                .get_account_transfers,
+                .get_account_balances,
                 => |operation| {
                     const state_machine_operation =
                         std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
@@ -504,7 +534,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                     Parser.Error.BadKeyValuePair,
                     Parser.Error.MissingEqualBetweenKeyValuePair,
                     Parser.Error.NoSyntaxMatch,
-                    // TODO: This will be more convenient to express
+                    // TODO(zig): This will be more convenient to express
                     // once https://github.com/ziglang/zig/issues/2473 is
                     // in.
                     => return,
@@ -544,6 +574,8 @@ pub fn ReplType(comptime MessageBus: type) type {
                 \\  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
                 \\  lookup_accounts id=1;
                 \\  lookup_accounts id=1, id=2;
+                \\  get_account_transfers account_id=1 flags=debits|credits;
+                \\  get_account_balances account_id=1 flags=debits|credits;
                 \\
                 \\
             , .{});
@@ -662,19 +694,19 @@ pub fn ReplType(comptime MessageBus: type) type {
             operation: StateMachine.Operation,
             arguments: []const u8,
         ) !void {
-            const operation_type =
-                if (operation == .create_accounts or
-                operation == .create_transfers)
-                "create"
-            else
-                "lookup";
-
-            const object_type =
-                if (operation == .create_accounts or
-                operation == .lookup_accounts)
-                "accounts"
-            else
-                "transfers";
+            const operation_type = switch (operation) {
+                .create_accounts, .create_transfers => "create",
+                .get_account_transfers, .get_account_balances => "get",
+                .lookup_accounts, .lookup_transfers => "lookup",
+                .pulse => unreachable,
+            };
+            const object_type = switch (operation) {
+                .create_accounts, .lookup_accounts => "accounts",
+                .create_transfers, .lookup_transfers => "transfers",
+                .get_account_transfers => "account transfers",
+                .get_account_balances => "account balances",
+                .pulse => unreachable,
+            };
 
             if (arguments.len == 0) {
                 try repl.fail(
@@ -687,8 +719,6 @@ pub fn ReplType(comptime MessageBus: type) type {
             const batch = repl.client.batch_get(operation, switch (operation) {
                 inline else => |op| @divExact(arguments.len, @sizeOf(StateMachine.Event(op))),
                 .pulse => unreachable,
-                .get_account_transfers => unreachable,
-                .get_account_balances => unreachable,
             }) catch unreachable;
 
             stdx.copy_disjoint(
@@ -708,7 +738,9 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_object(repl: *Repl, object: anytype) !void {
-            assert(@TypeOf(object.*) == tb.Account or @TypeOf(object.*) == tb.Transfer);
+            assert(@TypeOf(object.*) == tb.Account or
+                @TypeOf(object.*) == tb.Transfer or
+                @TypeOf(object.*) == tb.AccountBalance);
 
             try repl.printer.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).Struct.fields, 0..) |object_field, i| {
@@ -791,7 +823,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (lookup_account_results.len == 0) {
                         try repl.fail(
-                            "Failed to lookup account: {any}\n",
+                            "Cannot lookup account: {any}\n",
                             .{LookupAccountResult.account_not_found},
                         );
                     } else {
@@ -823,7 +855,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (lookup_transfer_results.len == 0) {
                         try repl.fail(
-                            "Failed to lookup transfer: {any}\n",
+                            "Cannot lookup transfer: {any}\n",
                             .{LookupTransferResult.transfer_not_found},
                         );
                     } else {
@@ -832,9 +864,41 @@ pub fn ReplType(comptime MessageBus: type) type {
                         }
                     }
                 },
+                .get_account_transfers => {
+                    const get_account_transfers_results = std.mem.bytesAsSlice(
+                        tb.Transfer,
+                        result,
+                    );
+
+                    if (get_account_transfers_results.len == 0) {
+                        try repl.fail(
+                            "Cannot get account transfers: {any}\n",
+                            .{LookupTransferResult.no_matching_results},
+                        );
+                    } else {
+                        for (get_account_transfers_results) |*transfer| {
+                            try repl.display_object(transfer);
+                        }
+                    }
+                },
+                .get_account_balances => {
+                    const get_account_transfers_results = std.mem.bytesAsSlice(
+                        tb.AccountBalance,
+                        result,
+                    );
+
+                    if (get_account_transfers_results.len == 0) {
+                        try repl.fail(
+                            "Cannot get account balances: {any}\n",
+                            .{LookupTransferResult.no_matching_results},
+                        );
+                    } else {
+                        for (get_account_transfers_results) |*balance| {
+                            try repl.display_object(balance);
+                        }
+                    }
+                },
                 .pulse => unreachable,
-                .get_account_transfers => unreachable,
-                .get_account_balances => unreachable,
             }
         }
 
@@ -868,6 +932,7 @@ pub const LookupAccountResult = enum(u32) {
 pub const LookupTransferResult = enum(u32) {
     ok = 0,
     transfer_not_found = 1,
+    no_matching_results = 2,
     comptime {
         for (std.enums.values(LookupTransferResult), 0..) |result, index| {
             assert(@intFromEnum(result) == index);
@@ -1112,6 +1177,64 @@ test "repl.zig: Parser single account successfully" {
         );
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
+        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
+    }
+}
+
+test "repl.zig: Parser account filter successfully" {
+    const tests = [_]struct {
+        in: []const u8,
+        operation: Parser.Operation,
+        want: tb.AccountFilter,
+    }{
+        .{
+            .in = "get_account_transfers account_id=1",
+            .operation = .get_account_transfers,
+            .want = tb.AccountFilter{
+                .account_id = 1,
+                .timestamp_min = 0,
+                .timestamp_max = 0,
+                .limit = StateMachine.constants.batch_max.get_account_transfers,
+                .flags = .{
+                    .credits = true,
+                    .debits = true,
+                    .reversed = false,
+                },
+            },
+        },
+        .{
+            .in =
+            \\get_account_balances account_id=1000
+            \\flags=debits|reversed limit=10
+            \\timestamp_min=1 timestamp_max=9999;
+            \\
+            ,
+            .operation = .get_account_balances,
+            .want = tb.AccountFilter{
+                .account_id = 1000,
+                .timestamp_min = 1,
+                .timestamp_max = 9999,
+                .limit = 10,
+                .flags = .{
+                    .credits = false,
+                    .debits = true,
+                    .reversed = true,
+                },
+            },
+        },
+    };
+
+    for (tests) |t| {
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        const statement = try Parser.parse_statement(
+            &arena,
+            t.in,
+            null_printer,
+        );
+
+        try std.testing.expectEqual(statement.operation, t.operation);
         try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&t.want));
     }
 }
