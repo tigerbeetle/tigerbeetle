@@ -20,11 +20,11 @@ CLI](./getting-started/cli-repl.md).
 When integrating TigerBeetle into your project, consider the
 following:
 
-- [TigerBeetle and consistency](./design/consistency.md)
-- [Modeling application data within TigerBeetle](./design/data-modeling.md)
-- [How two-phase transfers work](./design/two-phase-transfers.md)
-- [How client sessions work](./design/client-sessions.md)
-- [How client requests work](./design/client-requests.md)
+- [TigerBeetle and consistency](./building-on-tigerbeetle/consistency.md)
+- [Modeling application data within TigerBeetle](./building-on-tigerbeetle/data-modeling.md)
+- [How two-phase transfers work](./building-on-tigerbeetle/two-phase-transfers.md)
+- [How client sessions work](./building-on-tigerbeetle/client-sessions.md)
+- [How client requests work](./building-on-tigerbeetle/client-requests.md)
 
 ## Recipes
 

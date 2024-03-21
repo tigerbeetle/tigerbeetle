@@ -20,15 +20,15 @@ pairs of same-ledger accounts.
 
 A simple currency exchange involves four accounts:
 
-  - A _source account_ `A₁`, on ledger `1`.
-  - A _destination account_ `A₂`, on ledger `2`.
-  - A _source liquidity account_ `L₁`, on ledger `1`.
-  - A _destination liquidity account_ `L₂`, on ledger `2`.
+- A _source account_ `A₁`, on ledger `1`.
+- A _destination account_ `A₂`, on ledger `2`.
+- A _source liquidity account_ `L₁`, on ledger `1`.
+- A _destination liquidity account_ `L₂`, on ledger `2`.
 
 and two linked transfers:
 
-  - A transfer `T₁` from the _source account_ to the _source liquidity account_.
-  - A transfer `T₂` from the _destination liquidity account_ to the _destination account_.
+- A transfer `T₁` from the _source account_ to the _source liquidity account_.
+- A transfer `T₂` from the _destination liquidity account_ to the _destination account_.
 
 The transfer amounts vary according to the exchange rate.
 
@@ -46,7 +46,7 @@ INR). Assuming an exchange rate of `$1.00 = ₹82.42135`, `$100.00 = ₹8242.135
 |    USD |          `A₁` |           `L₁` |   10000 |           true |
 |    INR |          `L₂` |           `A₂` | 8242135 |          false |
 
-- Amounts are [represented as integers](../design/data-modeling.md#fractional-amounts-and-asset-scale).
+- Amounts are [represented as integers](../building-on-tigerbeetle/data-modeling.md#fractional-amounts-and-asset-scale).
 - Because both liquidity accounts belong to the same entity, the entity does not lose money on
   the transaction.
   - If the exchange rate is precise, the entity breaks even.
