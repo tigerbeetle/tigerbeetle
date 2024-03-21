@@ -44,6 +44,8 @@ To understand TigerBeetle's data model, see:
   - [`create_transfers`](./reference/operations/create_transfers.md)
   - [`lookup_accounts`](./reference/operations/lookup_accounts.md)
   - [`lookup_transfers`](./reference/operations/lookup_transfers.md)
+  - [`get_account_balances`](./reference/operations/get_account_balances.md)
+  - [`get_account_transfers`](./reference/operations/get_account_transfers.md)
 
 ## Contributing
 
