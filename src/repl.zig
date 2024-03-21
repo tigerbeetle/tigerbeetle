@@ -870,7 +870,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (get_account_transfers_results.len == 0) {
                         try repl.fail(
-                            "Failed to get account transfer: {any}\n",
+                            "Failed to get account transfers: {any}\n",
                             .{LookupTransferResult.no_matching_results},
                         );
                     } else {
