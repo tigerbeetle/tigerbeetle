@@ -15,24 +15,11 @@ Head over to [Getting Started](./getting-started/README.md) to
 cluster](./getting-started/single-binary.md), and try [creating accounts and transfers using the
 CLI](./getting-started/cli-repl.md).
 
-## Designing for TigerBeetle
+## Building on TigerBeetle
 
-When integrating TigerBeetle into your project, consider the
-following:
-
-- [TigerBeetle and consistency](./building-on-tigerbeetle/consistency.md)
-- [Modeling application data within TigerBeetle](./building-on-tigerbeetle/data-modeling.md)
-- [How two-phase transfers work](./building-on-tigerbeetle/two-phase-transfers.md)
-- [How client sessions work](./building-on-tigerbeetle/client-sessions.md)
-- [How client requests work](./building-on-tigerbeetle/client-requests.md)
-
-## Recipes
-
-Here are some common use-cases for TigerBeetle:
-
-- [Closing accounts](./building-on-tigerbeetle/recipes/close-account.md)
-- [Currency exchange](./building-on-tigerbeetle/recipes/currency-exchange.md)
-- [Multi-debit/credit transfers](./building-on-tigerbeetle/recipes/multi-debit-credit-transfers.md)
+Read more about [Building on TigerBeetle](./building-on-tigerbeetle/README.md) to understand the
+data model, learn how to integrate TigerBeetle into your system, and see some advanced design
+patterns.
 
 ## Client libraries
 
@@ -43,8 +30,6 @@ TigerBeetle cluster:
 - [Go](/src/clients/go/README.md)
 - [Java](/src/clients/java/README.md)
 - [Node.js](/src/clients/node/README.md)
-
-### Sample code
 
 Within each client library README you will find links to sample code.
 
