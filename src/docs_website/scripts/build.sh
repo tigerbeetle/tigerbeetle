@@ -31,7 +31,7 @@ echo '{ "label": "Client Libraries", "position": 5 }' >> pages/clients/_category
 find pages -type f | xargs -I {} sed -i "s@/src/clients/@$repo/blob/main/src/clients/@g" {}
 
 for page in $(ls pages/*.md); do
-    if ! [[ "$page" == "pages/intro.md" ]] && \
+    if ! [[ "$page" == "pages/README.md" ]] && \
        ! [[ "$page" == "pages/FAQ.md" ]] && \
        ! [[ "$page" == "pages/installation.md" ]]; then
         rm "$page"
