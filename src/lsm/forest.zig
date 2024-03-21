@@ -377,6 +377,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             forest.compaction_progress = .trees_or_manifest;
             forest.compaction_pipeline.beat(forest, op, compact_callback);
+            if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
+                assert(forest.compaction_pipeline.compactions.count() == 0);
+                assert(forest.compaction_pipeline.bar_active.count() == 0);
+            }
 
             // Manifest log compaction. Run on the last beat of the bar.
             // TODO: Figure out a plan wrt the pacing here. Putting it on the last beat kinda-sorta
