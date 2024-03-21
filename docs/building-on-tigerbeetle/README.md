@@ -1,29 +1,41 @@
 # Building on TigerBeetle
 
-TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md) and
-[`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
-design, it provides excellent performance, integrated business logic, and powerful invariants.
+TigerBeetle is a domain-specific, Online Transaction Processing (OLTP) database. It has a fixed
+schema consisting of [`Account`s](../reference/accounts.md) and
+[`Transfer`s](../reference/transfers.md). In return for this prescriptive design, it provides
+excellent performance, integrated business logic, and powerful invariants.
 
 To help you get started building on TigerBeetle, here is a quick overview of the most important
 concepts:
 
-- the two main data structures in TB are Accounts and Transfers. Accounts track balances
+## Data Model Overview
 
-## Accounts
+- [`Account`s](../reference/accounts.md) track balances for users or other entities.
+- [`Transfer`s](../reference/transfers.md) move funds between `Account`s.
+- Account balances and transfer amounts are represented as debits and credits. Double-entry
+  bookkeeping ensures your accounting maintains consistency.
+- Accounts are partitioned into Ledgers, which may represent different currencies, assets,
+  liabilities, etc. or they may be used to support multitenancy. Only accounts on the same ledger
+  can transact directly, but you can use atomically linked transfers to implement [cross-currency
+  transactions](../recipes/currency-exchange.md).
+- TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfers.md), which can
+  hold funds in a pending state and can be used to synchronize transfers with external systems.
 
-## Transfers
+## TigerBeetle in Your System Architecture
 
-## Debits and Credits
+TigerBeetle is an Online Transaction Processing (OLTP) database built for safety and performance.
 
-- double entry bookkeeping - every transfer debits one account and increases another
-- note about multi-debits / credits
+It is not a general purpose database, like PostgreSQL or MySQL. Instead, TigerBeetle works alongside
+your general purpose database and should be used to handle the hot path of transaction processing.
 
-## Ledgers
+Many fields on the `Account` and `Transfer` data structures are stored in TigerBeetle as simple
+numbers. You may want to include metadata about ledgers, account and transfer types, etc in your
+general purpose database or directly in your application code.
 
-- not represented in TB directly
-- metadata is stored outside of TB
-- asset scale
-- link to currency exchange
-- can be one ledger per currency or type of value, or can do subledgers for customers in a
-  multi-tenant setup
-- one way to think about it is groups of accounts that cannot transfer between one another directly
+For more information relevant to integrating TigerBeetle into your system, take a look at the
+following pages:
+
+- [Client Requests](./client-requests.md)
+- [Client Sessions](./client-sessions.md)
+- [Consistency](./consistency.md)
+- [Time](./time.md)
