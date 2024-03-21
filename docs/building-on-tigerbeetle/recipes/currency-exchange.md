@@ -1,3 +1,7 @@
+---
+sidebar_position: 1
+---
+
 # Currency Exchange
 
 Some applications require multiple currencies. For example, a bank may hold balances in many
@@ -10,12 +14,12 @@ facilitated by an entity called the _liquidity provider_.
 
 ## Data Modeling
 
-Distinct [`ledger`](../reference/accounts.md#ledger) values denote different currencies
+Distinct [`ledger`](../../reference/accounts.md#ledger) values denote different currencies
 (or other asset types). Transfers between pairs of accounts with different `ledger`s are
-[not permitted](../reference/operations/create_transfers.md#accounts_must_have_the_same_ledger).
+[not permitted](../../reference/operations/create_transfers.md#accounts_must_have_the_same_ledger).
 
 Instead, currency exchange is implemented by creating two
-[atomically linked](../reference/transfers.md#flagslinked) different-ledger transfers between two
+[atomically linked](../../reference/transfers.md#flagslinked) different-ledger transfers between two
 pairs of same-ledger accounts.
 
 A simple currency exchange involves four accounts:
@@ -46,7 +50,7 @@ INR). Assuming an exchange rate of `$1.00 = ₹82.42135`, `$100.00 = ₹8242.135
 |    USD |          `A₁` |           `L₁` |   10000 |           true |
 |    INR |          `L₂` |           `A₂` | 8242135 |          false |
 
-- Amounts are [represented as integers](../building-on-tigerbeetle/data-modeling.md#fractional-amounts-and-asset-scale).
+- Amounts are [represented as integers](../data-modeling.md#fractional-amounts-and-asset-scale).
 - Because both liquidity accounts belong to the same entity, the entity does not lose money on
   the transaction.
   - If the exchange rate is precise, the entity breaks even.

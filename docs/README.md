@@ -30,9 +30,9 @@ following:
 
 Here are some common use-cases for TigerBeetle:
 
-- [Closing accounts](./recipes/close-account.md)
-- [Currency exchange](./recipes/currency-exchange.md)
-- [Multi-debit/credit transfers](./recipes/multi-debit-credit-transfers.md)
+- [Closing accounts](./building-on-tigerbeetle/recipes/close-account.md)
+- [Currency exchange](./building-on-tigerbeetle/recipes/currency-exchange.md)
+- [Multi-debit/credit transfers](./building-on-tigerbeetle/recipes/multi-debit-credit-transfers.md)
 
 ## Client libraries
 

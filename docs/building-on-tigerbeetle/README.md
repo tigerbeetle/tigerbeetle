@@ -17,7 +17,7 @@ concepts:
 - Accounts are partitioned into [Ledgers](./data-modeling.md#ledgers), which may represent different
   currencies, assets, liabilities, etc. or they may be used to support multitenancy. Only accounts
   on the same ledger can transact directly, but you can use atomically linked transfers to implement
-  [cross-currency transactions](../recipes/currency-exchange.md).
+  [cross-currency transactions](./recipes/currency-exchange.md).
 - TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfers.md), which can
   hold funds in a pending state and can be used to synchronize transfers with external systems.
 
@@ -39,3 +39,11 @@ following pages:
 - [Client Sessions](./client-sessions.md)
 - [Consistency](./consistency.md)
 - [Time](./time.md)
+
+## Advanced Recipes
+
+Depending on your use case, you may find these additional design patterns helpful:
+
+- [Currency Exchange](./recipes/currency-exchange.md)
+- [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md)
+- [Closing Accounts](./recipes/close-account.md)

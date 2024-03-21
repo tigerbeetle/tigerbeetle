@@ -192,7 +192,7 @@ The transfer was not created. The accounts referred to by
 [`Transfer.credit_account_id`](../transfers.md#credit_account_id) must have an identical
 [`ledger`](../accounts.md#ledger).
 
-[Currency exchange](../../recipes/currency-exchange.md) is implemented with multiple transfers.
+[Currency exchange](../../building-on-tigerbeetle/recipes/currency-exchange.md) is implemented with multiple transfers.
 
 ### `transfer_must_have_the_same_ledger_as_accounts`
 

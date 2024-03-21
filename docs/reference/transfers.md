@@ -127,7 +127,7 @@ Constraints:
 
 - For representing fractional amounts (e.g. `$12.34`), see
   [Fractional Amounts](../building-on-tigerbeetle/data-modeling.md#fractional-amounts-and-asset-scale).
-- For balancing transfers, see [Close Account](../recipes/close-account.md).
+- For balancing transfers, see [Close Account](../building-on-tigerbeetle/recipes/close-account.md).
 
 ### `pending_id`
 
@@ -279,7 +279,7 @@ You can read more about [linked events](../building-on-tigerbeetle/client-reques
 
 ##### Examples
 
-- [Currency Exchange](../recipes/currency-exchange.md)
+- [Currency Exchange](../building-on-tigerbeetle/recipes/currency-exchange.md)
 
 #### `flags.pending`
 
@@ -316,7 +316,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ##### Examples
 
-- [Close Account](../recipes/close-account.md)
+- [Close Account](../building-on-tigerbeetle/recipes/close-account.md)
 
 #### `flags.balancing_credit`
 
@@ -341,7 +341,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ##### Examples
 
-- [Close Account](../recipes/close-account.md)
+- [Close Account](../building-on-tigerbeetle/recipes/close-account.md)
 
 ### `timestamp`
 

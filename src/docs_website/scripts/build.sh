@@ -25,7 +25,7 @@ for client in $clients; do
 
     cp ../../src/clients/$client/README.md pages/clients/$client.md
 done
-echo '{ "label": "Client Libraries", "position": 6 }' >> pages/clients/_category_.json
+echo '{ "label": "Client Libraries", "position": 5 }' >> pages/clients/_category_.json
 
 # Everything else will be rewritten as a link into GitHub.
 find pages -type f | xargs -I {} sed -i "s@/src/clients/@$repo/blob/main/src/clients/@g" {}

@@ -16,7 +16,7 @@ The TigerBeetle data model consists of [`Account`s](../reference/accounts.md),
 
 Ledgers partition accounts into groups that may represent a currency or asset type or any other
 logical grouping. Only accounts on the same ledger can transact directly, but you can use atomically
-linked transfers to implement [currency exchange](../recipes/currency-exchange.md).
+linked transfers to implement [currency exchange](./recipes/currency-exchange.md).
 
 Ledgers are only stored in TigerBeetle as a numeric identifier on the
 [account](../reference/accounts.md#ledger) and [transfer](../reference/transfers.md) data
@@ -87,7 +87,7 @@ look something like this:
 
 [`Transfer`s] in TigerBeetle debit a single account and credit a single account. You can read more
 about implementing compound transfers in [Multi-Debit, Multi-Credit
-Transfers](../recipes/multi-debit-credit-transfers.md).
+Transfers](./recipes/multi-debit-credit-transfers.md).
 
 ## Fractional Amounts and Asset Scale
 
@@ -153,7 +153,7 @@ is:
 
 Any of the `user_data` fields can be used as a group identifier for objects that will be queried
 together. For example, for multiple transfers used for [currency
-exchange](../recipes/currency-exchange.md).
+exchange](./recipes/currency-exchange.md).
 
 ## `id`
 
@@ -168,7 +168,7 @@ Note that `id`s are unique per cluster -- not per ledger. You should attach a se
 the [`user_data`](#user_data) field if you want to store a connection between multiple `Account`s or
 multiple `Transfer`s that are related to one another. For example, different currency `Account`s
 belonging to the same user or multiple `Transfer`s that are part of a [currency
-exchange](../recipes/currency-exchange.md).
+exchange](./recipes/currency-exchange.md).
 
 [TigerBeetle Time-Based Identifiers](#tigerbeetle-time-based-identifiers-recommended) are
 recommended for most applications.

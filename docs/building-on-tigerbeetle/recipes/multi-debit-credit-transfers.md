@@ -1,3 +1,7 @@
+---
+sidebar_position: 2
+---
+
 # Multi-Debit, Multi-Credit Transfers
 
 TigerBeetle is designed for maximum performance. In order to keep it lean, the database only supports simple transfers with a single debit and a single credit.
@@ -6,7 +10,7 @@ However, you'll probably run into cases where you want transactions with multipl
 
 Read on to see how to implement one-to-many and many-to-many transfers!
 
-> Note that all of these examples use the [Linked Transfers flag (`flags.linked`)](../reference/transfers.md#flagslinked) to ensure that all of the transfers succeed or fail together.
+> Note that all of these examples use the [Linked Transfers flag (`flags.linked`)](../../reference/transfers.md#flagslinked) to ensure that all of the transfers succeed or fail together.
 
 ## One-to-Many Transfers
 

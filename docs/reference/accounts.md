@@ -19,7 +19,7 @@ Accounts **cannot be deleted** after creation. This provides a strong guarantee 
 -- and the account record is only 128 bytes.
 
 If an account is no longer in use, you may want to [zero out its
-balance](../recipes/close-account.md).
+balance](../building-on-tigerbeetle/recipes/close-account.md).
 
 ## Fields
 
