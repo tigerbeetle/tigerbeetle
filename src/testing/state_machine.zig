@@ -168,10 +168,19 @@ pub fn StateMachineType(
             return false;
         }
 
+        pub fn input_valid(
+            operation: Operation,
+            input: []align(16) const u8,
+        ) bool {
+            _ = operation;
+            _ = input;
+            return true;
+        }
+
         pub fn prepare(
             state_machine: *StateMachine,
             operation: Operation,
-            input: []align(16) u8,
+            input: []align(16) const u8,
         ) void {
             _ = state_machine;
             _ = operation;
