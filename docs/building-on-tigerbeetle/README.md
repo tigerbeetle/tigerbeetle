@@ -16,8 +16,9 @@ concepts:
   bookkeeping ensures your accounting maintains consistency.
 - Accounts are partitioned into [Ledgers](./data-modeling.md#ledgers), which may represent different
   currencies, assets, liabilities, etc. or they may be used to support multitenancy. Only accounts
-  on the same ledger can transact directly, but you can use atomically linked transfers to implement
-  [cross-currency transactions](./recipes/currency-exchange.md).
+  on the same ledger can transact directly, but you can use atomically [linked
+  transfers](./client-requests.md#linked-events) to implement [cross-currency
+  transactions](./recipes/currency-exchange.md).
 - TigerBeetle has first-class support for [two-phase transfers](./two-phase-transfers.md), which can
   hold funds in a pending state and can be used to synchronize transfers with external systems.
 
@@ -25,7 +26,7 @@ concepts:
 
 TigerBeetle is an Online Transaction Processing (OLTP) database built for safety and performance.
 
-It is not a general purpose database, like PostgreSQL or MySQL. Instead, TigerBeetle works alongside
+It is not a general purpose database like PostgreSQL or MySQL. Instead, TigerBeetle works alongside
 your general purpose database and should be used to handle the hot path of transaction processing.
 
 Many fields on the `Account` and `Transfer` data structures are stored in TigerBeetle as simple
