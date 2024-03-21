@@ -410,10 +410,12 @@ pub const Parser = struct {
                 "Operation must be " ++
                     comptime operations: {
                     var names: []const u8 = "";
-                    for (std.enums.values(Operation)) |operation| {
+                    for (std.enums.values(Operation), 0..) |operation, index| {
                         if (operation == .none) continue;
-                        if (names.len > 0) names = names ++ ", ";
-                        names = names ++ @tagName(operation);
+                        names = names ++
+                            (if (names.len > 0) ", " else "") ++
+                            (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
+                            @tagName(operation);
                     }
                     break :operations names;
                 } ++ ". Got: '{s}'.\n",
@@ -821,7 +823,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (lookup_account_results.len == 0) {
                         try repl.fail(
-                            "Failed to lookup account: {any}\n",
+                            "Cannot lookup account: {any}\n",
                             .{LookupAccountResult.account_not_found},
                         );
                     } else {
@@ -853,7 +855,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (lookup_transfer_results.len == 0) {
                         try repl.fail(
-                            "Failed to lookup transfer: {any}\n",
+                            "Cannot lookup transfer: {any}\n",
                             .{LookupTransferResult.transfer_not_found},
                         );
                     } else {
@@ -870,7 +872,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (get_account_transfers_results.len == 0) {
                         try repl.fail(
-                            "Failed to get account transfers: {any}\n",
+                            "Cannot get account transfers: {any}\n",
                             .{LookupTransferResult.no_matching_results},
                         );
                     } else {
@@ -887,7 +889,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                     if (get_account_transfers_results.len == 0) {
                         try repl.fail(
-                            "Failed to get account balances: {any}\n",
+                            "Cannot get account balances: {any}\n",
                             .{LookupTransferResult.no_matching_results},
                         );
                     } else {
