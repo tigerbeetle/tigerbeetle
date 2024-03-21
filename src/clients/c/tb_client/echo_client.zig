@@ -22,7 +22,7 @@ pub fn EchoClient(comptime StateMachine_: type, comptime MessageBus: type) type 
         pub const StateMachine = VSRClient.StateMachine;
         pub const Request = VSRClient.Request;
 
-        /// Custom Demuxer which treats Event(operation)'s and results and echoes them back.
+        /// Custom Demuxer which treats Event(operation)s as results and echoes them back.
         pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
             return struct {
                 const Demuxer = @This();

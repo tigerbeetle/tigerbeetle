@@ -39,6 +39,8 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         /// Clients re-expose their own DemuxerType over using StateMachine's as it allows them to
         /// reinterpret the MessageBus reply bytes outside of the standard flow (i.e. to echo back
         /// Events instead of Results in the case of `echo_client.zig`).
+        ///
+        /// TODO: Change StateMachine Demuxer to take/give bytes and re-export its alias instead.
         pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
             return struct {
                 const Demuxer = @This();
