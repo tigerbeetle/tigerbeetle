@@ -297,6 +297,7 @@ pub const Parser = struct {
             }
 
             // Expect comma separating objects.
+            // TODO: Not all operations allow multiple objects, e.g. get_account_transfers.
             if (parser.offset < parser.input.len and parser.input[parser.offset] == ',') {
                 parser.offset += 1;
                 inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
