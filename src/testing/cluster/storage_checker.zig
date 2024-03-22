@@ -30,7 +30,11 @@ const Storage = @import("../storage.zig").Storage;
 
 /// After each compaction bar, save the cumulative hash of all acquired grid blocks.
 /// (Excluding the open manifest log block, if any.)
-const Compactions = std.ArrayList(u128);
+///
+/// This is sparse – not every compaction is necessarily recorded.
+/// For example, the StorageChecker will not check the grid if the replica is still state syncing,
+/// which may cause a bar to be skipped over.
+const Compactions = std.AutoHashMap(u64, u128);
 
 /// Maps from op_checkpoint to cumulative storage checksum.
 ///
@@ -145,11 +149,7 @@ pub const StorageChecker = struct {
             checksum,
         });
 
-        const compactions_index = @divExact(replica.commit_min + 1, bar_beat_count) - 1;
-        if (compactions_index == checker.compactions.items.len) {
-            try checker.compactions.append(checksum);
-        } else {
-            const checksum_expect = checker.compactions.items[compactions_index];
+        if (checker.compactions.get(replica.commit_min)) |checksum_expect| {
             if (checksum_expect != checksum) {
                 log.err("{?}: replica_compact: mismatch " ++
                     "area=grid expect={x:0>32} actual={x:0>32}", .{
@@ -159,6 +159,8 @@ pub const StorageChecker = struct {
                 });
                 return error.StorageMismatch;
             }
+        } else {
+            try checker.compactions.putNoClobber(replica.commit_min, checksum);
         }
     }
 
