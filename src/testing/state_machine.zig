@@ -53,15 +53,15 @@ pub fn StateMachineType(
                 reply: []Result(operation),
                 offset: u32 = 0,
 
-                pub fn init(reply: []Result(operation)) Demuxer {
-                    return .{ .reply = reply };
+                pub fn init(reply: []u8) Demuxer {
+                    return .{ .reply = @alignCast(std.mem.bytesAsSlice(Result(operation), reply)) };
                 }
 
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
                     assert(self.offset == event_offset);
                     assert(event_offset + event_count <= self.reply.len);
                     defer self.offset += event_count;
-                    return self.reply[self.offset..][0..event_count];
+                    return std.mem.sliceAsBytes(self.reply[self.offset..][0..event_count]);
                 }
             };
         }

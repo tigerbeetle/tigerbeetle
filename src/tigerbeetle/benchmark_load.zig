@@ -484,7 +484,7 @@ const Benchmark = struct {
     fn send_complete(
         user_data: u128,
         operation: StateMachine.Operation,
-        result: []const u8,
+        result: []u8,
     ) void {
         const b: *Benchmark = @ptrFromInt(@as(usize, @intCast(user_data)));
         const callback = b.callback.?;

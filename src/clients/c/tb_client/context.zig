@@ -363,7 +363,7 @@ pub fn ContextType(
         fn on_result(
             raw_user_data: u128,
             op: StateMachine.Operation,
-            reply: []const u8,
+            reply: []u8,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
             const self = user_data.self;

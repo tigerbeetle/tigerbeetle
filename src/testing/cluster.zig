@@ -630,7 +630,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         fn request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
-            result: []const u8,
+            result: []u8,
         ) void {
             _ = user_data;
             _ = operation;
