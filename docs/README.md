@@ -15,9 +15,9 @@ Head over to [Getting Started](./getting-started/README.md) to
 cluster](./getting-started/single-binary.md), and try [creating accounts and transfers using the
 CLI](./getting-started/cli-repl.md).
 
-## Building on TigerBeetle
+## Developing on TigerBeetle
 
-Read more about [Building on TigerBeetle](./develop/README.md) to understand the
+Read more about [Developing on TigerBeetle](./develop/README.md) to understand the
 data model, learn how to integrate TigerBeetle into your system, and see some advanced design
 patterns.
 

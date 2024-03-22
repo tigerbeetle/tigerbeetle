@@ -1,4 +1,4 @@
-# Building on TigerBeetle
+# Developing Applications on TigerBeetle
 
 TigerBeetle is a domain-specific, Online Transaction Processing (OLTP) database. It has a fixed
 schema consisting of [`Account`s](../reference/accounts.md) and
