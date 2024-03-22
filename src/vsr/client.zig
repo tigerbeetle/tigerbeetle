@@ -440,6 +440,9 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 }
             } else {
                 // The message is the result of raw_request(), so invoke the user callback.
+                // NOTE: the callback is allowed to mutate `reply.body()` so ensure the message has
+                // no other references or uses before this callback.
+                assert(reply.references == 1);
                 inflight.callback(
                     inflight.user_data,
                     inflight_vsr_operation.cast(StateMachine),
