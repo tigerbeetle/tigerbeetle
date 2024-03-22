@@ -85,6 +85,9 @@ pub fn ScanMergeUnionType(
                 callback: Callback,
                 pending_count: u32,
             },
+
+            /// The scan was aborted and will not yield any more values.
+            aborted,
         },
         streams: stdx.BoundedArray(KWayMergeScanStream, constants.lsm_scans_max),
 
@@ -146,7 +149,7 @@ pub fn ScanMergeUnionType(
                     .idle => assert(state_before == .idle),
                     .seeking => continue,
                     .needs_data => assert(state_before == .needs_data),
-                    .buffering => unreachable,
+                    .buffering, .aborted => unreachable,
                 }
 
                 self.state.buffering.pending_count += 1;
@@ -173,7 +176,7 @@ pub fn ScanMergeUnionType(
                     },
                 },
                 .needs_data => return error.ReadAgain,
-                .buffering => unreachable,
+                .buffering, .aborted => unreachable,
             }
         }
 

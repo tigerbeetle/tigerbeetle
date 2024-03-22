@@ -15,6 +15,11 @@ const vsr = @import("vsr.zig");
 const snapshot_latest = @import("lsm/tree.zig").snapshot_latest;
 const ScopeCloseMode = @import("lsm/tree.zig").ScopeCloseMode;
 const WorkloadType = @import("state_machine/workload.zig").WorkloadType;
+const GrooveType = @import("lsm/groove.zig").GrooveType;
+const ForestType = @import("lsm/forest.zig").ForestType;
+const ScanBuffer = @import("lsm/scan_buffer.zig").ScanBuffer;
+const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
+const ScanEvaluatorType = @import("lsm/scan_builder.zig").ScanEvaluatorType;
 
 const Direction = @import("direction.zig").Direction;
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
@@ -46,9 +51,6 @@ pub fn StateMachineType(
     return struct {
         const StateMachine = @This();
         const Grid = @import("vsr/grid.zig").GridType(Storage);
-        const GrooveType = @import("lsm/groove.zig").GrooveType;
-        const ForestType = @import("lsm/forest.zig").ForestType;
-        const ScanLookupType = @import("lsm/scan_lookup.zig").ScanLookupType;
 
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
@@ -392,12 +394,15 @@ pub fn StateMachineType(
             }
         };
 
+        const ExpirePendingTransfers = ExpirePendingTransfersType(TransfersGroove, Storage);
+
         /// Since scan lookups are used one at a time, it's safe to access
         /// the union's fields and reuse the same memory for all ScanLookup instances.
         const ScanLookup = union(enum) {
             null,
             transfer: TransfersScanLookup,
             account_balances: AccountBalancesScanLookup,
+            expire_pending_transfers: ExpirePendingTransfers.ScanLookup,
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -437,7 +442,7 @@ pub fn StateMachineType(
         scan_result_count: u32 = 0,
         scan_next_tick: Grid.NextTick = undefined,
 
-        expire_pending_transfers_pulse_timestamp: u64 = TimestampRange.timestamp_min,
+        expire_pending_transfers: ExpirePendingTransfers = .{},
 
         open_callback: ?*const fn (*StateMachine) void = null,
         compact_callback: ?*const fn (*StateMachine) void = null,
@@ -580,14 +585,14 @@ pub fn StateMachineType(
         }
 
         pub fn pulse_reset(self: *StateMachine) void {
-            self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_min;
+            self.expire_pending_transfers.reset();
         }
 
         pub fn pulse(self: *const StateMachine) bool {
             assert(!global_constants.aof_recovery);
-            assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
+            assert(self.expire_pending_transfers.pulse_timestamp >= TimestampRange.timestamp_min);
 
-            return self.expire_pending_transfers_pulse_timestamp <= self.prepare_timestamp;
+            return self.expire_pending_transfers.pulse_timestamp <= self.prepare_timestamp;
         }
 
         pub fn prefetch(
@@ -998,91 +1003,6 @@ pub fn StateMachineType(
 
             var scan_buffer = std.mem.bytesAsSlice(
                 Transfer,
-                self.scan_buffer[0..@sizeOf(Transfer)],
-            );
-            // We only need the first result.
-            assert(scan_buffer.len == 1);
-
-            const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
-            const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
-
-            // WHERE `expires_at > prefetch_timestamp`
-            // Scanning `Transfers` that _will_ expire, so we can determine the _next_ timestamp
-            // it will require to execute `expire_pending_transfers` again.
-            // We must do it before scanning for expired transfers to reuse the same buffer.
-            var scan = scan_builder.scan_range(
-                .expires_at,
-                self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                transfers_groove.prefetch_snapshot.?,
-                .{
-                    .timestamp = TimestampRange.timestamp_min,
-                    .field = self.prefetch_timestamp + 1,
-                },
-                .{
-                    .timestamp = TimestampRange.timestamp_max,
-                    .field = TimestampRange.timestamp_max,
-                },
-                .ascending,
-            );
-
-            var scan_lookup = self.scan_lookup.get(.transfer);
-            scan_lookup.* = TransfersScanLookup.init(
-                &self.forest.grooves.transfers,
-                scan,
-            );
-
-            scan_lookup.read(
-                scan_buffer,
-                &prefetch_expire_pending_transfers_scan_next_callback,
-            );
-        }
-
-        fn prefetch_expire_pending_transfers_scan_next_callback(scan_lookup: *TransfersScanLookup) void {
-            const self: *StateMachine = ScanLookup.parent(.transfer, scan_lookup);
-            const results = scan_lookup.slice();
-
-            if (results.len == 0) {
-                // If there is no transfer to expire, set the value as `timestamp_max`.
-                self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_max;
-            } else {
-                assert(results.len == 1);
-
-                const t = &results[0];
-                assert(t.flags.pending);
-                assert(t.timeout > 0);
-
-                const expires_at = t.timestamp + t.timeout_ns();
-                assert(self.prefetch_timestamp < expires_at);
-
-                log.debug("expire_pending_transfers_pulse_timestamp: {}", .{expires_at});
-
-                self.expire_pending_transfers_pulse_timestamp = expires_at;
-            }
-
-            self.scan_result_count = 0;
-            self.scan_lookup = .null;
-            self.forest.scan_buffer_pool.reset();
-            self.forest.grooves.transfers.scan_builder.reset();
-
-            self.prefetch_expire_pending_transfers_scan();
-        }
-
-        fn prefetch_expire_pending_transfers_scan(self: *StateMachine) void {
-            assert(self.scan_result_count == 0);
-            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-
-            // When it's set to `timestamp_max` it means no transfers will expire
-            // in the next pulse.
-            assert(self.expire_pending_transfers_pulse_timestamp >= TimestampRange.timestamp_min);
-            maybe(self.expire_pending_transfers_pulse_timestamp == TimestampRange.timestamp_max);
-
-            // It's expected the next pulse timestamp be in a future timestamp
-            // _or_ to have been reset to `timestamp_min`.
-            assert(self.prefetch_timestamp < self.expire_pending_transfers_pulse_timestamp or
-                self.expire_pending_transfers_pulse_timestamp == TimestampRange.timestamp_min);
-
-            var scan_buffer = std.mem.bytesAsSlice(
-                Transfer,
                 self.scan_buffer[0 .. @sizeOf(Transfer) *
                     // We must be constrained to the same limit as `create_transfers`.
                     constants.batch_max.create_transfers],
@@ -1090,55 +1010,30 @@ pub fn StateMachineType(
             assert(scan_buffer.len == constants.batch_max.create_transfers);
 
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
-            const scan_builder: *TransfersGroove.ScanBuilder = &transfers_groove.scan_builder;
-
-            // WHERE `expires_at <= prefetch_timestamp`
-            // Scanning `Transfers` already expired at `prefetch_timestamp`.
-            var scan = scan_builder.scan_range(
-                .expires_at,
+            const scan = self.expire_pending_transfers.scan(
+                &transfers_groove.indexes.expires_at,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
                 transfers_groove.prefetch_snapshot.?,
-                .{
-                    .timestamp = TimestampRange.timestamp_min,
-                    .field = TimestampRange.timestamp_min,
-                },
-                .{
-                    .timestamp = TimestampRange.timestamp_max,
-                    .field = self.prefetch_timestamp,
-                },
-                .ascending,
+                self.prefetch_timestamp,
             );
 
-            var scan_lookup = self.scan_lookup.get(.transfer);
-            scan_lookup.* = TransfersScanLookup.init(
-                &self.forest.grooves.transfers,
+            const scan_lookup = self.scan_lookup.get(.expire_pending_transfers);
+            scan_lookup.* = ExpirePendingTransfers.ScanLookup.init(
+                transfers_groove,
                 scan,
             );
-
             scan_lookup.read(
                 scan_buffer,
                 &prefetch_expire_pending_transfers_scan_callback,
             );
         }
 
-        fn prefetch_expire_pending_transfers_scan_callback(scan_lookup: *TransfersScanLookup) void {
-            const self: *StateMachine = ScanLookup.parent(.transfer, scan_lookup);
+        fn prefetch_expire_pending_transfers_scan_callback(
+            scan_lookup: *ExpirePendingTransfers.ScanLookup,
+        ) void {
+            const self: *StateMachine = ScanLookup.parent(.expire_pending_transfers, scan_lookup);
+            self.expire_pending_transfers.finish(scan_lookup.state);
             self.scan_result_count = @intCast(scan_lookup.slice().len);
-
-            switch (scan_lookup.state) {
-                .buffer_finished => {
-                    // Case the buffer was completely filled with expired transfers,
-                    // then the next pulse will resume from the last one.
-                    const transfers = scan_lookup.slice();
-                    assert(transfers.len == constants.batch_max.create_transfers);
-
-                    const t = &transfers[transfers.len - 1];
-                    const timestamp_last = t.timestamp + t.timeout_ns();
-                    self.expire_pending_transfers_pulse_timestamp = timestamp_last + 1;
-                },
-                .scan_finished => {},
-                else => unreachable,
-            }
 
             self.scan_lookup = .null;
             self.forest.scan_buffer_pool.reset();
@@ -1655,8 +1550,8 @@ pub fn StateMachineType(
 
             if (t.timeout > 0) {
                 const expires_at = t.timestamp + t.timeout_ns();
-                if (expires_at < self.expire_pending_transfers_pulse_timestamp) {
-                    self.expire_pending_transfers_pulse_timestamp = expires_at;
+                if (expires_at < self.expire_pending_transfers.pulse_timestamp) {
+                    self.expire_pending_transfers.pulse_timestamp = expires_at;
                 }
             }
 
@@ -1783,8 +1678,8 @@ pub fn StateMachineType(
 
                 // In case the pending transfer's timeout is exactly the one we are using
                 // as flag, we need zero the valut to run the next `pulse`.
-                if (self.expire_pending_transfers_pulse_timestamp == expires_at) {
-                    self.expire_pending_transfers_pulse_timestamp = TimestampRange.timestamp_min;
+                if (self.expire_pending_transfers.pulse_timestamp == expires_at) {
+                    self.expire_pending_transfers.pulse_timestamp = TimestampRange.timestamp_min;
                 }
             }
 
@@ -2083,6 +1978,135 @@ fn sum_overflows(comptime Int: type, a: Int, b: Int) bool {
     comptime assert(Int != comptime_float);
     _ = std.math.add(Int, a, b) catch return true;
     return false;
+}
+
+/// Scans for all `Transfers` that already expired at any timestamp.
+/// A custom evaluator is used to stop at the first result where
+/// `expires_at > prefetch_timestamp` while updating the next pulse timestamp.
+/// This way we can achieve the same effect of two conditions with a single scan:
+/// ```
+/// WHERE expires_at <= prefetch_timestamp
+/// UNION
+/// WHERE expires_at > prefetch_timestamp LIMIT 1
+/// ```
+fn ExpirePendingTransfersType(
+    comptime TransfersGroove: type,
+    comptime Storage: type,
+) type {
+    return struct {
+        const ExpirePendingTransfers = @This();
+        const ValueNext = @import("lsm/scan_builder.zig").ValueNext;
+        const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
+
+        const Tree = std.meta.FieldType(TransfersGroove.IndexTrees, .expires_at);
+        const Key = Tree.Table.Key;
+        const Value = Tree.Table.Value;
+
+        // TODO(zig) Context should be `*ExpirePendingTransfers`,
+        // but its a dependency loop.
+        const Context = struct {};
+        const Scan = ScanEvaluatorType(
+            Tree,
+            Storage,
+            *Context,
+            value_next,
+            timestamp_from_value,
+        );
+
+        pub const ScanLookup = ScanLookupType(
+            TransfersGroove,
+            Scan,
+            Storage,
+        );
+
+        context: Context = undefined,
+        phase: union(enum) {
+            idle,
+            scanning: struct {
+                scan: Scan,
+                timestamp: u64,
+            },
+        } = .idle,
+        pulse_timestamp: u64 = TimestampRange.timestamp_min,
+
+        fn reset(self: *ExpirePendingTransfers) void {
+            assert(self.phase == .idle);
+            self.* = .{};
+        }
+
+        fn scan(
+            self: *ExpirePendingTransfers,
+            tree: *Tree,
+            buffer: *const ScanBuffer,
+            snapshot: u64,
+            timestamp: u64,
+        ) *Scan {
+            assert(self.phase == .idle);
+            assert(timestamp >= TimestampRange.timestamp_min and
+                timestamp <= TimestampRange.timestamp_max);
+
+            self.* = .{
+                .pulse_timestamp = TimestampRange.timestamp_max,
+                .phase = .{ .scanning = .{
+                    .timestamp = timestamp,
+                    .scan = Scan.init(
+                        &self.context,
+                        tree,
+                        buffer,
+                        snapshot,
+                        Tree.Table.key_from_value(&.{
+                            .field = TimestampRange.timestamp_min,
+                            .timestamp = TimestampRange.timestamp_min,
+                        }),
+                        Tree.Table.key_from_value(&.{
+                            .field = TimestampRange.timestamp_max,
+                            .timestamp = TimestampRange.timestamp_max,
+                        }),
+                        .ascending,
+                    ),
+                } },
+            };
+            return &self.phase.scanning.scan;
+        }
+
+        fn finish(self: *ExpirePendingTransfers, status: ScanLookupStatus) void {
+            assert(self.phase == .scanning);
+            switch (status) {
+                .scan_finished => if (self.pulse_timestamp <= self.phase.scanning.timestamp) {
+                    // There are no more transfers to expire in the next pulse.
+                    self.pulse_timestamp = TimestampRange.timestamp_max;
+                },
+                .buffer_finished => {
+                    // There are more transfers to expire than a single batch.
+                    assert(self.pulse_timestamp <= self.phase.scanning.timestamp);
+                },
+                else => unreachable,
+            }
+            self.phase = .idle;
+        }
+
+        inline fn value_next(context: *Context, value: *const Value) ValueNext {
+            const self: *ExpirePendingTransfers = @fieldParentPtr(
+                ExpirePendingTransfers,
+                "context",
+                context,
+            );
+            assert(self.phase == .scanning);
+
+            const expires_at: u64 = value.field;
+            self.pulse_timestamp = expires_at;
+
+            return if (expires_at <= self.phase.scanning.timestamp)
+                .include_and_continue
+            else
+                .exclude_and_stop;
+        }
+
+        inline fn timestamp_from_value(context: *Context, value: *const Value) u64 {
+            _ = context;
+            return value.timestamp;
+        }
+    };
 }
 
 const testing = std.testing;

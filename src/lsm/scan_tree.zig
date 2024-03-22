@@ -158,6 +158,9 @@ pub fn ScanTreeType(
                 callback: Callback,
                 pending_count: u32,
             },
+
+            /// The scan was aborted and will not yield any more values.
+            aborted,
         },
         levels: [constants.lsm_levels]ScanTreeLevel,
 
@@ -253,6 +256,11 @@ pub fn ScanTreeType(
             }
         }
 
+        pub fn abort(self: *ScanTree) void {
+            assert(self.state == .seeking or self.state == .needs_data);
+            self.state = .aborted;
+        }
+
         /// Moves the iterator to the next position and returns its `Value` or `null` if the
         /// iterator has no more values to iterate.
         /// May return `error.ReadAgain` if a data block needs to be loaded, in this case
@@ -271,6 +279,7 @@ pub fn ScanTreeType(
                 },
                 .needs_data => return error.ReadAgain,
                 .buffering => unreachable,
+                .aborted => return null,
             }
         }
 
