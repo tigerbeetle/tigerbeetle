@@ -59,8 +59,8 @@ Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`, and each o
 
 After the chain of linked events has executed, the fact that they were linked will not be saved. To
 save the association between Transfers or Accounts, it must be [encoded into the data
-model](../building-on-tigerbeetle/data-modeling.md), for example by adding an ID to one of the [user
-data](../building-on-tigerbeetle/data-modeling.md#user_data) fields.
+model](../develop/data-modeling.md), for example by adding an ID to one of the [user
+data](../develop/data-modeling.md#user_data) fields.
 
 ## Batching Events
 

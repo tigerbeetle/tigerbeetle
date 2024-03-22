@@ -43,7 +43,7 @@ Constraints:
 
 The maximum number of results that can be returned by this query.
 
-Limited by the [maximum message size](../building-on-tigerbeetle/client-requests.md#batching-events).
+Limited by the [maximum message size](../develop/client-requests.md#batching-events).
 
 Constraints:
 

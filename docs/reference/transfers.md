@@ -18,7 +18,7 @@ Transfers _cannot be modified_ after creation.
 
 Transfers can either be Single-Phase, where they are executed immediately, or Two-Phase, where
 they are first put in a Pending state and then either Posted or Voided. For more details on the
-latter, see the [Two-Phase Transfer guide](../building-on-tigerbeetle/two-phase-transfers.md).
+latter, see the [Two-Phase Transfer guide](../develop/two-phase-transfers.md).
 
 Fields used by each mode of transfer:
 
@@ -55,7 +55,7 @@ Constraints:
 - Must not be zero or `2^128 - 1`
 - Must not conflict with another transfer in the cluster
 
-See the [`id` section in the data modeling doc](../building-on-tigerbeetle/data-modeling.md#id) for more
+See the [`id` section in the data modeling doc](../develop/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
 
 Note that transfer IDs are unique for the cluster -- not the ledger. If you want to store a
@@ -126,8 +126,8 @@ Constraints:
 #### Examples
 
 - For representing fractional amounts (e.g. `$12.34`), see
-  [Fractional Amounts](../building-on-tigerbeetle/data-modeling.md#fractional-amounts-and-asset-scale).
-- For balancing transfers, see [Close Account](../building-on-tigerbeetle/recipes/close-account.md).
+  [Fractional Amounts](../develop/data-modeling.md#fractional-amounts-and-asset-scale).
+- For balancing transfers, see [Close Account](../develop/recipes/close-account.md).
 
 ### `pending_id`
 
@@ -135,7 +135,7 @@ If this transfer will post or void a pending transfer, `pending_id`
 references that pending transfer. If this is not a post or void
 transfer, it must be zero.
 
-See the section on [Two-Phase Transfers](../building-on-tigerbeetle/two-phase-transfers.md) for more information on how the `pending_id` is used.
+See the section on [Two-Phase Transfers](../develop/two-phase-transfers.md) for more information on how the `pending_id` is used.
 
 Constraints:
 
@@ -149,10 +149,10 @@ This is an optional 128-bit secondary identifier to link this transfer to an
 external entity or event.
 
 As an example, you might generate a [TigerBeetle Time-Based
-Identifier](../building-on-tigerbeetle/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties
+Identifier](../develop/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties
 together a group of transfers.
 
-For more information, see [Data Modeling](../building-on-tigerbeetle/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
@@ -165,7 +165,7 @@ external entity or event.
 
 As an example, you might use this field store an external timestamp.
 
-For more information, see [Data Modeling](../building-on-tigerbeetle/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
@@ -178,7 +178,7 @@ external entity or event.
 
 As an example, you might use this field to store a timezone or locale.
 
-For more information, see [Data Modeling](../building-on-tigerbeetle/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
@@ -229,7 +229,7 @@ on YouTube for more details.)
 This is an identifier that partitions the sets of accounts that can
 transact with each other.
 
-See [data modeling](../building-on-tigerbeetle/data-modeling.md#ledgers) for more details
+See [data modeling](../develop/data-modeling.md#ledgers) for more details
 about how to think about setting up your ledgers.
 
 Constraints:
@@ -275,23 +275,23 @@ that they will either succeed or fail together.
 
 The last transfer in a chain of linked transfers does **not** have this flag set.
 
-You can read more about [linked events](../building-on-tigerbeetle/client-requests.md#linked-events).
+You can read more about [linked events](../develop/client-requests.md#linked-events).
 
 ##### Examples
 
-- [Currency Exchange](../building-on-tigerbeetle/recipes/currency-exchange.md)
+- [Currency Exchange](../develop/recipes/currency-exchange.md)
 
 #### `flags.pending`
 
-Mark the transfer as a [pending transfer](../building-on-tigerbeetle/two-phase-transfers.md#reserve-funds-pending-transfer).
+Mark the transfer as a [pending transfer](../develop/two-phase-transfers.md#reserve-funds-pending-transfer).
 
 #### `flags.post_pending_transfer`
 
-Mark the transfer as a [post-pending transfer](../building-on-tigerbeetle/two-phase-transfers.md#post-pending-transfer).
+Mark the transfer as a [post-pending transfer](../develop/two-phase-transfers.md#post-pending-transfer).
 
 #### `flags.void_pending_transfer`
 
-Mark the transfer as a [void-pending transfer](../building-on-tigerbeetle/two-phase-transfers.md#void-pending-transfer).
+Mark the transfer as a [void-pending transfer](../develop/two-phase-transfers.md#void-pending-transfer).
 
 #### `flags.balancing_debit`
 
@@ -316,7 +316,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ##### Examples
 
-- [Close Account](../building-on-tigerbeetle/recipes/close-account.md)
+- [Close Account](../develop/recipes/close-account.md)
 
 #### `flags.balancing_credit`
 
@@ -341,7 +341,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ##### Examples
 
-- [Close Account](../building-on-tigerbeetle/recipes/close-account.md)
+- [Close Account](../develop/recipes/close-account.md)
 
 ### `timestamp`
 
@@ -351,7 +351,7 @@ UNIX epoch.
 It is set by TigerBeetle to the moment the transfer arrives at
 the cluster.
 
-You can read more about [Time in TigerBeetle](../building-on-tigerbeetle/time.md).
+You can read more about [Time in TigerBeetle](../develop/time.md).
 
 Constraints:
 

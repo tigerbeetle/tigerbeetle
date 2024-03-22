@@ -238,8 +238,8 @@ In response to a `request_reply`:
 
 See also:
 
-- [Integration: Client Session Lifecycle](../building-on-tigerbeetle/client-sessions.md#lifecycle)
-- [Integration: Client Session Eviction](../building-on-tigerbeetle/client-sessions.md#eviction)
+- [Integration: Client Session Lifecycle](../develop/client-sessions.md#lifecycle)
+- [Integration: Client Session Eviction](../develop/client-sessions.md#eviction)
 
 ## Protocol: Repair Grid
 

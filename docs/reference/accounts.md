@@ -19,7 +19,7 @@ Accounts **cannot be deleted** after creation. This provides a strong guarantee 
 -- and the account record is only 128 bytes.
 
 If an account is no longer in use, you may want to [zero out its
-balance](../building-on-tigerbeetle/recipes/close-account.md).
+balance](../develop/recipes/close-account.md).
 
 ## Fields
 
@@ -33,7 +33,7 @@ Constraints:
 - Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
 - Must not conflict with another account in the cluster
 
-See the [`id` section in the data modeling doc](../building-on-tigerbeetle/data-modeling.md#id) for more
+See the [`id` section in the data modeling doc](../develop/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
 
 Note that account IDs are unique for the cluster -- not per ledger. If you want to store a
@@ -90,10 +90,10 @@ This is an optional 128-bit secondary identifier to link this account to an
 external entity or event.
 
 As an example, you might use a
-[ULID](../building-on-tigerbeetle/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
+[ULID](../develop/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
 a group of accounts.
 
-For more information, see [Data Modeling](../building-on-tigerbeetle/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
@@ -106,7 +106,7 @@ external entity or event.
 
 As an example, you might use this field store an external timestamp.
 
-For more information, see [Data Modeling](../building-on-tigerbeetle/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
@@ -119,7 +119,7 @@ external entity or event.
 
 As an example, you might use this field to store a timezone or locale.
 
-For more information, see [Data Modeling](../building-on-tigerbeetle/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
@@ -139,7 +139,7 @@ Constraints:
 This is an identifier that partitions the sets of accounts that can
 transact with each other.
 
-See [data modeling](../building-on-tigerbeetle/data-modeling.md#ledgers) for more details
+See [data modeling](../develop/data-modeling.md#ledgers) for more details
 about how to think about setting up your ledgers.
 
 Constraints:
@@ -177,7 +177,7 @@ such that they will either succeed or fail together.
 
 The last account in a chain of linked accounts does **not** have this flag set.
 
-You can read more about [linked events](../building-on-tigerbeetle/client-requests.md#linked-events).
+You can read more about [linked events](../develop/client-requests.md#linked-events).
 
 #### `flags.debits_must_not_exceed_credits`
 
@@ -207,7 +207,7 @@ UNIX epoch.
 It is set by TigerBeetle to the moment the account arrives at
 the cluster.
 
-You can read more about [Time in TigerBeetle](../building-on-tigerbeetle/time.md).
+You can read more about [Time in TigerBeetle](../develop/time.md).
 
 Constraints:
 

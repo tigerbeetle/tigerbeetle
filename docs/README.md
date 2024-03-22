@@ -17,7 +17,7 @@ CLI](./getting-started/cli-repl.md).
 
 ## Building on TigerBeetle
 
-Read more about [Building on TigerBeetle](./building-on-tigerbeetle/README.md) to understand the
+Read more about [Building on TigerBeetle](./develop/README.md) to understand the
 data model, learn how to integrate TigerBeetle into your system, and see some advanced design
 patterns.
 

@@ -192,7 +192,7 @@ The transfer was not created. The accounts referred to by
 [`Transfer.credit_account_id`](../transfers.md#credit_account_id) must have an identical
 [`ledger`](../accounts.md#ledger).
 
-[Currency exchange](../../building-on-tigerbeetle/recipes/currency-exchange.md) is implemented with multiple transfers.
+[Currency exchange](../../develop/recipes/currency-exchange.md) is implemented with multiple transfers.
 
 ### `transfer_must_have_the_same_ledger_as_accounts`
 
@@ -338,7 +338,7 @@ A transfer with the same `id` already exists, but with a different [`code`](../t
 A transfer with the same `id` already exists, and is identical to the transfer in the request.
 
 To correctly recover from application crashes
-[many applications](../../building-on-tigerbeetle/consistency.md#consistency-with-foreign-databases) should handle
+[many applications](../../develop/consistency.md#consistency-with-foreign-databases) should handle
 `exists` exactly as [`ok`](#ok).
 
 ### `overflows_debits_pending`
