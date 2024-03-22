@@ -4,23 +4,35 @@ sidebar_position: 1
 
 # Data Modeling
 
-TigerBeetle is a domain-specific database — its schema of [`Account`s](../reference/accounts.md) and
-[`Transfer`s](../reference/transfers.md) is built-in and fixed. In return for this prescriptive
-design, it provides excellent performance, integrated business logic, and powerful invariants.
+This section describes various aspects of the TigerBeetle data model and provides some suggestions
+for how you can map your application's requirements onto the data model.
 
-This section is a sample of techniques for mapping your application's requirements onto
-TigerBeetle's data model. Which (if any) of these techniques are suitable is highly
-application-specific.
+## Accounts, Transfers, and Ledgers
 
-When possible, round trips and coordination can be minimized by encoding application invariants
-directly in TigerBeetle rather than implementing them in the application itself (or with a foreign
-database). This is useful for both maintaining consistency and performance.
+The TigerBeetle data model consists of [`Account`s](../reference/accounts.md),
+[`Transfer`s](../reference/transfers.md), and ledgers.
+
+### Ledgers
+
+Ledgers partition accounts into groups that may represent a currency or asset type or any other
+logical grouping. Only accounts on the same ledger can transact directly, but you can use atomically
+linked transfers to implement [currency exchange](./recipes/currency-exchange.md).
+
+Ledgers are only stored in TigerBeetle as a numeric identifier on the
+[account](../reference/accounts.md#ledger) and [transfer](../reference/transfers.md) data
+structures. You may want to store additional metadata about each ledger in a [general-purpose
+database](./README.md#tigerbeetle-in-your-system-architecture).
+
+You can also use different ledgers to further partition accounts, beyond asset type. For example, if
+you have a multi-tenant setup where you are tracking balances for your customers' end-users, you
+might have a ledger for each of your customers. If customers have end-user accounts in multiple
+currencies, each of your customers would have multiple ledgers.
 
 ## Debits vs Credits
 
 TigerBeetle tracks each account's cumulative posted debits and cumulative posted credits. In
 double-entry accounting, an account balance is the difference between the two — computed as either
-`debits - credits` or `credits - debits` depending on the type of account. It is up to the
+`debits - credits` or `credits - debits`, depending on the type of account. It is up to the
 application to compute the balance from the cumulative debits/credits.
 
 From the database's perspective the distinction is arbitrary, but accounting conventions recommend
@@ -31,6 +43,7 @@ using a certain balance type for certain types of accounts.
 `balance = debits - credits`
 
 By convention, debit balances are used to represent:
+
 - Operator's Assets
 - Operator's Expenses
 
@@ -42,6 +55,7 @@ To enforce a positive (non-negative) debit balance, use
 `balance = credits - debits`
 
 By convention, credit balances are used to represent:
+
 - Operators's Liabilities
 - Equity in the Operator's Business
 - Operator's Income
@@ -69,11 +83,17 @@ look something like this:
 - A transfer from Alice to Bob would debit Alice's account and credit Bob's (decreasing the bank's
   liability to Alice while increasing the bank's liability to Bob).
 
+### Compound Transfers
+
+[`Transfer`s] in TigerBeetle debit a single account and credit a single account. You can read more
+about implementing compound transfers in [Multi-Debit, Multi-Credit
+Transfers](./recipes/multi-debit-credit-transfers.md).
+
 ## Fractional Amounts and Asset Scale
 
-To maximize precision and efficiency, [`Account`](../reference/accounts.md) debits/credits
-and [`Transfer`](../reference/transfers.md) amounts are unsigned 128-bit integers.
-However, currencies are often denominated in fractional amounts.
+To maximize precision and efficiency, [`Account`](../reference/accounts.md) debits/credits and
+[`Transfer`](../reference/transfers.md) amounts are unsigned 128-bit integers. However, currencies
+are often denominated in fractional amounts.
 
 To represent a fractional amount in TigerBeetle, **map the smallest useful unit of the fractional
 currency to 1**. Consider all amounts in TigerBeetle as a multiple of that unit.
@@ -82,8 +102,8 @@ Applications may rescale the integer amounts as necessary when rendering or inte
 systems. But when working with fractional amounts, calculations should be performed on the integers
 to avoid loss of precision due to floating-point approximations.
 
-TigerBeetle stores information precisely and efficiently, while applications can still
-present fractional amounts to their users in a way that they are familiar with seeing them.
+TigerBeetle stores information precisely and efficiently, while applications can still present
+fractional amounts to their users in a way that they are familiar with seeing them.
 
 ### Asset Scale
 
@@ -99,8 +119,8 @@ _asset scale_. For example, representing USD in cents uses an asset scale of `2`
 
 ### Oversized Amounts
 
-The other direction works as well. If the smallest useful unit of a currency is `10,000,000 ¤`,
-then it can be scaled down to the integer `1`.
+The other direction works as well. If the smallest useful unit of a currency is `10,000,000 ¤`, then
+it can be scaled down to the integer `1`.
 
 The 128-bit representation defines the precision, but not the scale.
 
@@ -133,7 +153,7 @@ is:
 
 Any of the `user_data` fields can be used as a group identifier for objects that will be queried
 together. For example, for multiple transfers used for [currency
-exchange](../recipes/currency-exchange.md).
+exchange](./recipes/currency-exchange.md).
 
 ## `id`
 
@@ -148,7 +168,7 @@ Note that `id`s are unique per cluster -- not per ledger. You should attach a se
 the [`user_data`](#user_data) field if you want to store a connection between multiple `Account`s or
 multiple `Transfer`s that are related to one another. For example, different currency `Account`s
 belonging to the same user or multiple `Transfer`s that are part of a [currency
-exchange](../recipes/currency-exchange.md).
+exchange](./recipes/currency-exchange.md).
 
 [TigerBeetle Time-Based Identifiers](#tigerbeetle-time-based-identifiers-recommended) are
 recommended for most applications.
@@ -203,20 +223,6 @@ the identifier within the foreign database can be used as the `Account.id` withi
 
 To reuse the foreign identifier, it must conform to TigerBeetle's `id`
 [constraints](../reference/accounts.md#id).
-
-## `ledger`
-
-The `ledger` identifier on [`Account`s](../reference/accounts.md#ledger) partitions sets of accounts
-that can directly transact with one another. This is used to separate accounts representing
-different currencies or other asset types.
-
-[Currency exchange](../recipes/currency-exchange.md) or cross-ledger transfers are implemented with
-two or more linked transfers.
-
-You can also use different ledgers to further partition accounts, beyond asset type. For example, if
-you have a multi-tenant setup where you are tracking balances for your customers' end-users, you
-might have a ledger for each of your customers. If customers have end-user accounts in multiple
-currencies, each of your customers would have multiple ledgers.
 
 ## `code`
 

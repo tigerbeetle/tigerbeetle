@@ -16,8 +16,8 @@ The unique [identifier](accounts.md#id) of the account for which the results wil
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1`
+- Type is 128-bit unsigned integer (16 bytes)
+- Must not be zero or `2^128 - 1`
 
 ### `timestamp_min`
 
@@ -26,8 +26,8 @@ Optional; set to zero to disable the lower-bound filter.
 
 Constraints:
 
-* Type is 64-bit unsigned integer (8 bytes)
-* Must not be `2^64 - 1`
+- Type is 64-bit unsigned integer (8 bytes)
+- Must not be `2^64 - 1`
 
 ### `timestamp_max`
 
@@ -36,19 +36,19 @@ Optional; set to zero to disable the upper-bound filter.
 
 Constraints:
 
-* Type is 64-bit unsigned integer (8 bytes)
-* Must not be `2^64 - 1`
+- Type is 64-bit unsigned integer (8 bytes)
+- Must not be `2^64 - 1`
 
 ### `limit`
 
 The maximum number of results that can be returned by this query.
 
-Limited by the [maximum message size](../design/client-requests.md#batching-events).
+Limited by the [maximum message size](../develop/client-requests.md#batching-events).
 
 Constraints:
 
-* Type is 32-bit unsigned integer (4 bytes)
-* Must not be zero
+- Type is 32-bit unsigned integer (4 bytes)
+- Must not be zero
 
 ### `flags`
 
@@ -56,7 +56,7 @@ A bitfield that specifies querying behavior.
 
 Constraints:
 
-* Type is 32-bit unsigned integer (4 bytes)
+- Type is 32-bit unsigned integer (4 bytes)
 
 #### `flags.debits`
 
@@ -78,5 +78,5 @@ This space may be used for additional data in the future.
 
 Constraints:
 
-* Type is 24 bytes
-* Must be zero
+- Type is 24 bytes
+- Must be zero

@@ -33,7 +33,7 @@ The last Transfer or Account in a batch may never have the `flags.linked` set, a
 chain open-ended. Attempting to do so will result in the
 [`linked_event_chain_open`](../reference/operations/create_transfers.md#linked_event_chain_open) error.
 
-Multiple chains of events may coexist within a batch to succeed or fail independently. 
+Multiple chains of events may coexist within a batch to succeed or fail independently.
 
 Events within a chain are executed in order, or are rolled back on error, so that the effect of each
 event in the chain is visible to the next. Each chain is either visible or invisible as a unit to
@@ -44,7 +44,7 @@ a unique error result. Other events in the chain will have their error result se
 Consider this set of Transfers as part of a batch:
 
 | Transfer | Index within batch | flags.linked |
-|----------|--------------------|--------------|
+| -------- | ------------------ | ------------ |
 | `A`      | `0`                | `false`      |
 | `B`      | `1`                | `true`       |
 | `C`      | `2`                | `true`       |
@@ -59,8 +59,8 @@ Transfers `A` and `E` fail or succeed independently of `B`, `C`, `D`, and each o
 
 After the chain of linked events has executed, the fact that they were linked will not be saved. To
 save the association between Transfers or Accounts, it must be [encoded into the data
-model](../design/data-modeling.md), for example by adding an ID to one of the [user
-data](../design/data-modeling.md#user_data) fields.
+model](../develop/data-modeling.md), for example by adding an ID to one of the [user
+data](../develop/data-modeling.md#user_data) fields.
 
 ## Batching Events
 
@@ -116,7 +116,6 @@ order. Without this intermediary API layer, TigerBeetle clients ensure that oper
 in the order they are submitted. However, if operations are submitted to two different API layer
 instances, the operations may reach the TigerBeetle cluster in a different order, or one of the API
 instances could crash and restart mid-request.
-
 
 ```mermaid
 flowchart LR

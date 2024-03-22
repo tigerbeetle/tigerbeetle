@@ -1,3 +1,7 @@
+---
+sidebar_position: 3
+---
+
 # Close Account
 
 In accounting, a _closing entry_ calculates the net debit or credit balance for an account and then

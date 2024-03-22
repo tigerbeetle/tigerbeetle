@@ -9,7 +9,7 @@ An `Account` is a record storing the cumulative effect of committed
 
 ### Updates
 
-Account fields *cannot be changed by the user* after
+Account fields _cannot be changed by the user_ after
 creation. However, debits and credits fields are updated by
 TigerBeetle as transfers move money to and from an account.
 
@@ -19,7 +19,7 @@ Accounts **cannot be deleted** after creation. This provides a strong guarantee 
 -- and the account record is only 128 bytes.
 
 If an account is no longer in use, you may want to [zero out its
-balance](../recipes/close-account.md).
+balance](../develop/recipes/close-account.md).
 
 ## Fields
 
@@ -29,11 +29,11 @@ This is a unique, client-defined identifier for the account.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
-* Must not conflict with another account in the cluster
+- Type is 128-bit unsigned integer (16 bytes)
+- Must not be zero or `2^128 - 1` (the highest 128-bit unsigned integer)
+- Must not conflict with another account in the cluster
 
-See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
+See the [`id` section in the data modeling doc](../develop/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
 
 Note that account IDs are unique for the cluster -- not per ledger. If you want to store a
@@ -50,8 +50,8 @@ transfer resolves.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must be zero when the account is created
+- Type is 128-bit unsigned integer (16 bytes)
+- Must be zero when the account is created
 
 ### `debits_posted`
 
@@ -59,8 +59,8 @@ Amount of posted debits.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must be zero when the account is created
+- Type is 128-bit unsigned integer (16 bytes)
+- Must be zero when the account is created
 
 ### `credits_pending`
 
@@ -72,8 +72,8 @@ transfer resolves.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must be zero when the account is created
+- Type is 128-bit unsigned integer (16 bytes)
+- Must be zero when the account is created
 
 ### `credits_posted`
 
@@ -81,8 +81,8 @@ Amount of posted credits.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must be zero when the account is created
+- Type is 128-bit unsigned integer (16 bytes)
+- Must be zero when the account is created
 
 ### `user_data_128`
 
@@ -90,14 +90,14 @@ This is an optional 128-bit secondary identifier to link this account to an
 external entity or event.
 
 As an example, you might use a
-[ULID](../design/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
+[ULID](../develop/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties together
 a group of accounts.
 
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
+- Type is 128-bit unsigned integer (16 bytes)
 
 ### `user_data_64`
 
@@ -106,11 +106,11 @@ external entity or event.
 
 As an example, you might use this field store an external timestamp.
 
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
-* Type is 64-bit unsigned integer (8 bytes)
+- Type is 64-bit unsigned integer (8 bytes)
 
 ### `user_data_32`
 
@@ -119,11 +119,11 @@ external entity or event.
 
 As an example, you might use this field to store a timezone or locale.
 
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
-* Type is 32-bit unsigned integer (4 bytes)
+- Type is 32-bit unsigned integer (4 bytes)
 
 ### `reserved`
 
@@ -131,20 +131,21 @@ This space may be used for additional data in the future.
 
 Constraints:
 
-* Type is 4 bytes
-* Must be zero
+- Type is 4 bytes
+- Must be zero
 
 ### `ledger`
 
 This is an identifier that partitions the sets of accounts that can
 transact with each other.
 
-See [data modeling](../design/data-modeling.md#ledger) for more details
+See [data modeling](../develop/data-modeling.md#ledgers) for more details
 about how to think about setting up your ledgers.
 
 Constraints:
-* Type is 32-bit unsigned integer (4 bytes)
-* Must not be zero
+
+- Type is 32-bit unsigned integer (4 bytes)
+- Must not be zero
 
 ### `code`
 
@@ -156,8 +157,8 @@ Market Account and `2003` is Motor Vehicles and so on.
 
 Constraints:
 
-* Type is 16-bit unsigned integer (2 bytes)
-* Must not be zero
+- Type is 16-bit unsigned integer (2 bytes)
+- Must not be zero
 
 ### `flags`
 
@@ -165,8 +166,8 @@ A bitfield that toggles additional behavior.
 
 Constraints:
 
-* Type is 16-bit unsigned integer (2 bytes)
-* Some flags are mutually exclusive; see
+- Type is 16-bit unsigned integer (2 bytes)
+- Some flags are mutually exclusive; see
   [`flags_are_mutually_exclusive`](./operations/create_accounts.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
@@ -176,7 +177,7 @@ such that they will either succeed or fail together.
 
 The last account in a chain of linked accounts does **not** have this flag set.
 
-You can read more about [linked events](../design/client-requests.md#linked-events).
+You can read more about [linked events](../develop/client-requests.md#linked-events).
 
 #### `flags.debits_must_not_exceed_credits`
 
@@ -206,7 +207,7 @@ UNIX epoch.
 It is set by TigerBeetle to the moment the account arrives at
 the cluster.
 
-You can read more about [Time in TigerBeetle](../design/time.md).
+You can read more about [Time in TigerBeetle](../develop/time.md).
 
 Constraints:
 

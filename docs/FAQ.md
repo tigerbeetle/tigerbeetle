@@ -88,7 +88,7 @@ are created.
 In contrast to single-phase transfers, a two-phase transfer moves
 funds in stages.
 
-See [Two-phase transfers](./design/two-phase-transfers.md) for more
+See [Two-phase transfers](./develop/two-phase-transfers.md) for more
 detail.
 
 ## How does TigerBeetle fit into my architecture?
@@ -101,7 +101,7 @@ payment system.
 
 You might keep account metadata in your existing database (say,
 PostgreSQL or MongoDB). Then create an account in TigerBeetle with the
-[same identifier](./design/data-modeling.md#reuse-foreign-identifier) to
+[same identifier](./develop/data-modeling.md#reuse-foreign-identifier) to
 map it back to the account with metadata in your existing database.
 
 Then as you need to process transfers between accounts, you store
@@ -179,7 +179,7 @@ However, financial consistency requires more than this. TigerBeetle
 exposes a double-entry accounting API to guarantee that money cannot
 be created or destroyed, but only transferred from one account to
 another. And transfer history is immutable. You can read more about
-our consistency guarantees [here](./design/consistency.md).
+our consistency guarantees [here](./develop/consistency.md).
 
 ### Isolation
 

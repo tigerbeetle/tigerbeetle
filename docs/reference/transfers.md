@@ -12,13 +12,13 @@ the latter term is heavily overloaded in the context of databases.
 
 ### Updates
 
-Transfers *cannot be modified* after creation.
+Transfers _cannot be modified_ after creation.
 
 ## Modes
 
 Transfers can either be Single-Phase, where they are executed immediately, or Two-Phase, where
 they are first put in a Pending state and then either Posted or Voided. For more details on the
-latter, see the [Two-Phase Transfer guide](../design/two-phase-transfers.md).
+latter, see the [Two-Phase Transfer guide](../develop/two-phase-transfers.md).
 
 Fields used by each mode of transfer:
 
@@ -51,11 +51,11 @@ This is a unique identifier for the transaction.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must not be zero or `2^128 - 1`
-* Must not conflict with another transfer in the cluster
+- Type is 128-bit unsigned integer (16 bytes)
+- Must not be zero or `2^128 - 1`
+- Must not conflict with another transfer in the cluster
 
-See the [`id` section in the data modeling doc](../design/data-modeling.md#id) for more
+See the [`id` section in the data modeling doc](../develop/data-modeling.md#id) for more
 recommendations on choosing an ID scheme.
 
 Note that transfer IDs are unique for the cluster -- not the ledger. If you want to store a
@@ -69,11 +69,11 @@ This refers to the account to debit the transfer's [`amount`](#amount).
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* When `flags.post_pending_transfer` and `flags.void_pending_transfer` are unset:
-  * Must match an existing account
-  * Must not be the same as `credit_account_id`
-* When `flags.post_pending_transfer` or `flags.void_pending_transfer` are set:
+- Type is 128-bit unsigned integer (16 bytes)
+- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are unset:
+  - Must match an existing account
+  - Must not be the same as `credit_account_id`
+- When `flags.post_pending_transfer` or `flags.void_pending_transfer` are set:
   - If `debit_account_id` is zero, it will be automatically set to the pending transfer's
     `debit_account_id`.
   - If `debit_account_id` is nonzero, it must match the corresponding pending transfer's
@@ -85,11 +85,11 @@ This refers to the account to credit the transfer's [`amount`](#amount).
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* When `flags.post_pending_transfer` and `flags.void_pending_transfer` are unset:
-  * Must match an existing account
-  * Must not be the same as `debit_account_id`
-* When `flags.post_pending_transfer` or `flags.void_pending_transfer` are set:
+- Type is 128-bit unsigned integer (16 bytes)
+- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are unset:
+  - Must match an existing account
+  - Must not be the same as `debit_account_id`
+- When `flags.post_pending_transfer` or `flags.void_pending_transfer` are set:
   - If `credit_account_id` is zero, it will be automatically set to the pending transfer's
     `credit_account_id`.
   - If `credit_account_id` is nonzero, it must match the corresponding pending transfer's
@@ -107,27 +107,27 @@ and credited to the `credit_account_id` account.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* When `flags.post_pending_transfer` is set:
-  * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
-  * If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
-* When `flags.void_pending_transfer` is set:
-  * If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
-  * If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
-* When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero,
+- Type is 128-bit unsigned integer (16 bytes)
+- When `flags.post_pending_transfer` is set:
+  - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
+  - If `amount` is nonzero, it must be less than or equal to the pending transfer's `amount`.
+- When `flags.void_pending_transfer` is set:
+  - If `amount` is zero, it will be automatically be set to the pending transfer's `amount`.
+  - If `amount` is nonzero, it must be equal to the pending transfer's `amount`.
+- When `flags.balancing_debit` and/or `flags.balancing_credit` is set, if `amount` is zero,
   it will automatically be set to the maximum amount that does not violate the corresponding
   account limits. (Equivalent to setting `amount = 2^128 - 1`).
-* When all of the following flags are not set, `amount` must be nonzero:
-  * `flags.post_pending_transfer`
-  * `flags.void_pending_transfer`
-  * `flags.balancing_debit`
-  * `flags.balancing_credit`
+- When all of the following flags are not set, `amount` must be nonzero:
+  - `flags.post_pending_transfer`
+  - `flags.void_pending_transfer`
+  - `flags.balancing_debit`
+  - `flags.balancing_credit`
 
 #### Examples
 
 - For representing fractional amounts (e.g. `$12.34`), see
-  [Fractional Amounts](../design/data-modeling.md#fractional-amounts-and-asset-scale).
-- For balancing transfers, see [Close Account](../recipes/close-account.md).
+  [Fractional Amounts](../develop/data-modeling.md#fractional-amounts-and-asset-scale).
+- For balancing transfers, see [Close Account](../develop/recipes/close-account.md).
 
 ### `pending_id`
 
@@ -135,13 +135,13 @@ If this transfer will post or void a pending transfer, `pending_id`
 references that pending transfer. If this is not a post or void
 transfer, it must be zero.
 
-See the section on [Two-Phase Transfers](../design/two-phase-transfers.md) for more information on how the `pending_id` is used.
+See the section on [Two-Phase Transfers](../develop/two-phase-transfers.md) for more information on how the `pending_id` is used.
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
-* Must be zero if neither void nor pending transfer flag is set
-* Must match an existing transfer's [`id`](#id) if non-zero
+- Type is 128-bit unsigned integer (16 bytes)
+- Must be zero if neither void nor pending transfer flag is set
+- Must match an existing transfer's [`id`](#id) if non-zero
 
 ### `user_data_128`
 
@@ -149,14 +149,14 @@ This is an optional 128-bit secondary identifier to link this transfer to an
 external entity or event.
 
 As an example, you might generate a [TigerBeetle Time-Based
-Identifier](../design/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties
+Identifier](../develop/data-modeling.md#tigerbeetle-time-based-identifiers-recommended) that ties
 together a group of transfers.
 
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
-* Type is 128-bit unsigned integer (16 bytes)
+- Type is 128-bit unsigned integer (16 bytes)
 
 ### `user_data_64`
 
@@ -165,11 +165,11 @@ external entity or event.
 
 As an example, you might use this field store an external timestamp.
 
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
-* Type is 64-bit unsigned integer (8 bytes)
+- Type is 64-bit unsigned integer (8 bytes)
 
 ### `user_data_32`
 
@@ -178,11 +178,11 @@ external entity or event.
 
 As an example, you might use this field to store a timezone or locale.
 
-For more information, see [Data Modeling](../design/data-modeling.md#user_data).
+For more information, see [Data Modeling](../develop/data-modeling.md#user_data).
 
 Constraints:
 
-* Type is 32-bit unsigned integer (4 bytes)
+- Type is 32-bit unsigned integer (4 bytes)
 
 ### `timeout`
 
@@ -215,8 +215,8 @@ TigerBeetle makes a best-effort approach to remove pending balances of expired t
 
 Constraints:
 
-* Type is 32-bit unsigned integer (4 bytes)
-* Must be zero if `flags.pending` is *not* set
+- Type is 32-bit unsigned integer (4 bytes)
+- Must be zero if `flags.pending` is _not_ set
 
 The `timeout` is an interval in seconds rather than an absolute timestamp
 because this is more robust to clock skew between the cluster and the
@@ -229,19 +229,19 @@ on YouTube for more details.)
 This is an identifier that partitions the sets of accounts that can
 transact with each other.
 
-See [data modeling](../design/data-modeling.md#ledger) for more details
+See [data modeling](../develop/data-modeling.md#ledgers) for more details
 about how to think about setting up your ledgers.
 
 Constraints:
 
-* Type is 32-bit unsigned integer (4 bytes)
-* When `flags.post_pending_transfer` or `flags.void_pending_transfer` is set:
-  * If `ledger` is zero, it will be automatically be set to the pending transfer's `ledger`.
-  * If `ledger` is nonzero, it must match the `ledger` value on the pending transfer's
+- Type is 32-bit unsigned integer (4 bytes)
+- When `flags.post_pending_transfer` or `flags.void_pending_transfer` is set:
+  - If `ledger` is zero, it will be automatically be set to the pending transfer's `ledger`.
+  - If `ledger` is nonzero, it must match the `ledger` value on the pending transfer's
     `debit_account_id` **and** `credit_account_id`.
-* When `flags.post_pending_transfer` and `flags.void_pending_transfer` are not set:
-  * `ledger` must not be zero.
-  * `ledger` must match the `ledger` value on the accounts referenced in
+- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are not set:
+  - `ledger` must not be zero.
+  - `ledger` must match the `ledger` value on the accounts referenced in
     `debit_account_id` **and** `credit_account_id`.
 
 ### `code`
@@ -251,11 +251,11 @@ transfer.
 
 Constraints:
 
-* Type is 16-bit unsigned integer (2 bytes)
-* When `flags.post_pending_transfer` or `flags.void_pending_transfer` is set:
-  * If `code` is zero, it will be automatically be set to the pending transfer's `code`.
-  * If `code` is nonzero, it must match the pending transfer's `code`.
-* When `flags.post_pending_transfer` and `flags.void_pending_transfer` are not set, `code` must not
+- Type is 16-bit unsigned integer (2 bytes)
+- When `flags.post_pending_transfer` or `flags.void_pending_transfer` is set:
+  - If `code` is zero, it will be automatically be set to the pending transfer's `code`.
+  - If `code` is nonzero, it must match the pending transfer's `code`.
+- When `flags.post_pending_transfer` and `flags.void_pending_transfer` are not set, `code` must not
   be zero.
 
 ### `flags`
@@ -264,8 +264,8 @@ This specifies (optional) transfer behavior.
 
 Constraints:
 
-* Type is 16-bit unsigned integer (2 bytes)
-* Some flags are mutually exclusive; see
+- Type is 16-bit unsigned integer (2 bytes)
+- Some flags are mutually exclusive; see
   [`flags_are_mutually_exclusive`](./operations/create_transfers.md#flags_are_mutually_exclusive).
 
 #### `flags.linked`
@@ -275,23 +275,23 @@ that they will either succeed or fail together.
 
 The last transfer in a chain of linked transfers does **not** have this flag set.
 
-You can read more about [linked events](../design/client-requests.md#linked-events).
+You can read more about [linked events](../develop/client-requests.md#linked-events).
 
 ##### Examples
 
-- [Currency Exchange](../recipes/currency-exchange.md)
+- [Currency Exchange](../develop/recipes/currency-exchange.md)
 
 #### `flags.pending`
 
-Mark the transfer as a [pending transfer](../design/two-phase-transfers.md#reserve-funds-pending-transfer).
+Mark the transfer as a [pending transfer](../develop/two-phase-transfers.md#reserve-funds-pending-transfer).
 
 #### `flags.post_pending_transfer`
 
-Mark the transfer as a [post-pending transfer](../design/two-phase-transfers.md#post-pending-transfer).
+Mark the transfer as a [post-pending transfer](../develop/two-phase-transfers.md#post-pending-transfer).
 
 #### `flags.void_pending_transfer`
 
-Mark the transfer as a [void-pending transfer](../design/two-phase-transfers.md#void-pending-transfer).
+Mark the transfer as a [void-pending transfer](../develop/two-phase-transfers.md#void-pending-transfer).
 
 #### `flags.balancing_debit`
 
@@ -316,7 +316,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ##### Examples
 
-- [Close Account](../recipes/close-account.md)
+- [Close Account](../develop/recipes/close-account.md)
 
 #### `flags.balancing_credit`
 
@@ -341,7 +341,7 @@ flags because posting or voiding a pending transfer will never exceed/overflow e
 
 ##### Examples
 
-- [Close Account](../recipes/close-account.md)
+- [Close Account](../develop/recipes/close-account.md)
 
 ### `timestamp`
 
@@ -351,7 +351,7 @@ UNIX epoch.
 It is set by TigerBeetle to the moment the transfer arrives at
 the cluster.
 
-You can read more about [Time in TigerBeetle](../design/time.md).
+You can read more about [Time in TigerBeetle](../develop/time.md).
 
 Constraints:
 
