@@ -380,7 +380,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @divExact(constants.lsm_batch_multiple, 2) - 1;
             const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
-            assert(@intFromBool(first_beat) + @intFromBool(last_half_beat) +
+            assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
             log.debug("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
