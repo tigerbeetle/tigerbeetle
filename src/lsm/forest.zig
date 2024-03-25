@@ -748,9 +748,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         /// If you think of a pipeline diagram, a pipeline slot is a single instruction.
         const PipelineSlot = struct {
-            info: CompactionInfo,
             pipeline: *CompactionPipeline,
             active_operation: BlipStage,
+            // Invariant: .{tree_id, level_b} == compactions[compaction_index].{tree_id, level_b}
+            tree_id: u16,
+            level_b: u8,
             compaction_index: usize,
         };
 
@@ -1183,11 +1185,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                             slot.active_operation = .write;
                             self.slot_running_count += 1;
-                            switch (Forest.tree_id_cast(slot.info.tree_id)) {
+                            switch (Forest.tree_id_cast(slot.tree_id)) {
                                 inline else => |tree_id| {
                                     self.tree_compaction(
                                         tree_id,
-                                        slot.info.level_b,
+                                        slot.level_b,
                                     ).blip_write(blip_callback, slot);
                                 },
                             }
@@ -1197,11 +1199,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                                 "blip_read on {}", .{i});
                             slot.active_operation = .read;
                             self.slot_running_count += 1;
-                            switch (Forest.tree_id_cast(slot.info.tree_id)) {
+                            switch (Forest.tree_id_cast(slot.tree_id)) {
                                 inline else => |tree_id| {
                                     self.tree_compaction(
                                         tree_id,
-                                        slot.info.level_b,
+                                        slot.level_b,
                                     ).blip_read(blip_callback, slot);
                                 },
                             }
@@ -1219,17 +1221,18 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                     self.slots[slot_idx] = .{
                         .pipeline = self,
-                        .info = self.compactions.slice()[active_compaction_index],
+                        .tree_id = self.compactions.slice()[active_compaction_index].tree_id,
+                        .level_b = self.compactions.slice()[active_compaction_index].level_b,
                         .active_operation = .read,
                         .compaction_index = active_compaction_index,
                     };
 
                     if (slot_idx == 0) {
-                        switch (Forest.tree_id_cast(self.slots[slot_idx].?.info.tree_id)) {
+                        switch (Forest.tree_id_cast(self.slots[slot_idx].?.tree_id)) {
                             inline else => |tree_id| {
                                 self.tree_compaction(
                                     tree_id,
-                                    self.slots[slot_idx].?.info.level_b,
+                                    self.slots[slot_idx].?.level_b,
                                 ).beat_blocks_assign(self.divide_blocks());
                             },
                         }
@@ -1239,11 +1242,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                     self.slot_running_count += 1;
                     self.slot_filled_count += 1;
 
-                    switch (Forest.tree_id_cast(self.slots[slot_idx].?.info.tree_id)) {
+                    switch (Forest.tree_id_cast(self.slots[slot_idx].?.tree_id)) {
                         inline else => |tree_id| {
                             self.tree_compaction(
                                 tree_id,
-                                self.slots[slot_idx].?.info.level_b,
+                                self.slots[slot_idx].?.level_b,
                             ).blip_read(blip_callback, &self.slots[slot_idx]);
                         },
                     }
@@ -1263,11 +1266,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                             slot.active_operation = .write;
                             self.slot_running_count += 1;
                             self.state = .drained;
-                            switch (Forest.tree_id_cast(slot.info.tree_id)) {
+                            switch (Forest.tree_id_cast(slot.tree_id)) {
                                 inline else => |tree_id| {
                                     self.tree_compaction(
                                         tree_id,
-                                        slot.info.level_b,
+                                        slot.level_b,
                                     ).blip_write(blip_callback, slot);
                                 },
                             }
@@ -1311,11 +1314,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             assert(self.slot_running_count > 0);
 
             log.debug("advance_pipeline_next_tick: calling blip_merge on cpu_slot", .{});
-            switch (Forest.tree_id_cast(cpu_slot.info.tree_id)) {
+            switch (Forest.tree_id_cast(cpu_slot.tree_id)) {
                 inline else => |tree_id| {
                     self.tree_compaction(
                         tree_id,
-                        cpu_slot.info.level_b,
+                        cpu_slot.level_b,
                     ).blip_merge(blip_callback, cpu_slot);
                 },
             }
