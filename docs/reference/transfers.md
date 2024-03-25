@@ -10,6 +10,11 @@ two accounts.
 In TigerBeetle, financial transactions are called "transfers" instead of "transactions" because
 the latter term is heavily overloaded in the context of databases.
 
+Note that transfers debit a single account and credit a single account on the same ledger. You can
+compose these into more complex transactions using the methods described in [Currency
+Exchange](../develop/recipes/currency-exchange.md) and [Multi-Debit, Multi-Credit
+Transfers](../develop/recipes/multi-debit-credit-transfers.md).
+
 ### Updates
 
 Transfers _cannot be modified_ after creation.
