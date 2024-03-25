@@ -54,7 +54,8 @@ pub fn ManifestCheckerType(comptime Forest: type) type {
             for (0..constants.lsm_levels) |level| {
                 checksum_stream.add(std.mem.asBytes(&level));
 
-                inline for (Forest.tree_id_range.min..Forest.tree_id_range.max + 1) |tree_id| {
+                inline for (Forest.tree_id_range.min..Forest.tree_id_range.max + 1) |tree_id_u16| {
+                    const tree_id: Forest.TreeID = @enumFromInt(tree_id_u16);
                     const tree_level = forest.tree_for_id_const(tree_id).manifest.levels[level];
                     var tree_tables = tree_level.tables.iterator_from_index(0, .ascending);
 
@@ -62,7 +63,7 @@ pub fn ManifestCheckerType(comptime Forest: type) type {
                     checksum_stream.add(std.mem.asBytes(&tree_level.table_count_visible));
                     while (tree_tables.next()) |tree_table| {
                         checksum_stream.add(std.mem.asBytes(&tree_table.encode(.{
-                            .tree_id = tree_id,
+                            .tree_id = tree_id_u16,
                             .event = .insert, // (Placeholder event).
                             .level = @intCast(level),
                         })));
