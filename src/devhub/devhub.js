@@ -8,8 +8,8 @@
 // - no TypeScript, no build step
 
 async function main() {
-  const runs = await fetchData();
-  const series = runsToSeries(runs);
+  const batches = await fetchData();
+  const series = batchesToSeries(batches);
   plotSeries(series, document.querySelector("#charts"));
 
   const releaseManager = getReleaseManager();
@@ -63,32 +63,32 @@ async function fetchData() {
 // form a single array which is what we want to plot.
 //
 // This doesn't depend on particular plotting library though.
-function runsToSeries(runs) {
+function batchesToSeries(batches) {
   const result = new Map();
-  for (const run of runs) {
-    for (const measurement of run.measurements) {
-      if (!result.has(measurement.label)) {
-        result.set(measurement.label, {
-          label: measurement.label,
+  for (const batch of batches) {
+    for (const metric of batch.metrics) {
+      if (!result.has(metric.name)) {
+        result.set(metric.label, {
+          name: metric.name,
           unit: undefined,
           value: [],
-          revision: [],
+          git_commit: [],
           timestamp: [],
         });
       }
 
-      const series = result.get(measurement.label);
-      assert(series.label == measurement.label);
+      const series = result.get(metric.name);
+      assert(series.name == metric.name);
 
       if (series.unit) {
-        assert(series.unit == measurement.unit);
+        assert(series.unit == metric.unit);
       } else {
-        series.unit = measurement.unit;
+        series.unit = metric.unit;
       }
 
-      series.value.push(measurement.value);
-      series.revision.push(run.revision);
-      series.timestamp.push(run.timestamp);
+      series.value.push(metric.value);
+      series.git_commit.push(batch.attributes.git_commit);
+      series.timestamp.push(batch.timestamp);
     }
   }
   return result.values();
@@ -99,7 +99,7 @@ function plotSeries(seriesList, rootNode) {
   for (const series of seriesList) {
     let options = {
       title: {
-        text: series.label,
+        text: series.name,
       },
       chart: {
         type: "line",
@@ -108,7 +108,7 @@ function plotSeries(seriesList, rootNode) {
           dataPointSelection: (event, chartContext, { dataPointIndex }) => {
             window.open(
               "https://github.com/tigerbeetle/tigerbeetle/commit/" +
-                series.revision[dataPointIndex],
+                series.git_commit[dataPointIndex],
             );
           },
         },
@@ -117,7 +117,7 @@ function plotSeries(seriesList, rootNode) {
         size: 4,
       },
       series: [{
-        name: series.label,
+        name: series.name,
         data: series.value,
       }],
       xaxis: {
@@ -137,7 +137,7 @@ function plotSeries(seriesList, rootNode) {
             const timestamp = new Date(series.timestamp[dataPointIndex] * 1000);
             const formattedDate = timestamp.toLocaleString();
             return `<div>${
-              series.revision[dataPointIndex]
+              series.git_commit[dataPointIndex]
             }</div><div>${formattedDate}</div>`;
           },
         },
