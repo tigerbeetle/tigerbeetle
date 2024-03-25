@@ -1223,6 +1223,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         "checkpoint_id={[checkpoint_id]x:0>32} " ++
                         "commit_min_checksum={[commit_min_checksum]} commit_min={[commit_min]} " ++
                         "commit_max={[commit_max]} log_view={[log_view]} view={[view]} " ++
+                        "sync_op_min={[sync_op_min]} sync_op_max={[sync_op_max]} " ++
                         "manifest_oldest_checksum={[manifest_oldest_checksum]} " ++
                         "manifest_oldest_address={[manifest_oldest_address]} " ++
                         "manifest_newest_checksum={[manifest_newest_checksum]} " ++
@@ -1245,6 +1246,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .commit_min_checksum = superblock.working.vsr_state.checkpoint.header.checksum,
                         .commit_min = superblock.working.vsr_state.checkpoint.header.op,
                         .commit_max = superblock.working.vsr_state.commit_max,
+                        .sync_op_min = superblock.working.vsr_state.sync_op_min,
+                        .sync_op_max = superblock.working.vsr_state.sync_op_max,
                         .log_view = superblock.working.vsr_state.log_view,
                         .view = superblock.working.vsr_state.view,
                         .manifest_oldest_checksum = superblock.working.vsr_state.checkpoint.manifest_oldest_checksum,
