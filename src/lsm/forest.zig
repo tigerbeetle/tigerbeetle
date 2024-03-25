@@ -1344,14 +1344,10 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn beat_grid_forfeit_all(self: *CompactionPipeline) void {
-            var i = self.compactions.count();
-            while (i > 0) {
-                i -= 1;
-
-                // We need to run this for all compactions that ran acquire - even if they
-                // transitioned to being finished, so we can't just use bar_active.
-                if (!self.beat_reserved.isSet(i)) continue;
-
+            // We need to run this for all compactions that ran acquire - even if they
+            // transitioned to being finished, so we can't just use bar_active.
+            var compactions_reserved = self.beat_reserved.iterator(.{});
+            while (compactions_reserved.next()) |i| {
                 switch (Forest.tree_id_cast(self.compactions.slice()[i].tree_id)) {
                     inline else => |tree_id| {
                         self.tree_compaction(
