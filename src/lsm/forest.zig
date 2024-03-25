@@ -411,7 +411,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
             }
 
-            // Manifest log compaction. Run on the last beat of the bar.
+            // Manifest log compaction. Run on the last beat of each half-bar.
             // TODO: Figure out a plan wrt the pacing here. Putting it on the last beat kinda-sorta
             // balances out, because we expect to naturally do less other compaction work on the
             // last beat.
@@ -756,7 +756,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         const CompactionPipeline = @This();
 
         /// Some blocks need to be reserved for the lifetime of the bar, and can't
-        /// be shared between compactions, so these are all multipled by the number
+        /// be shared between compactions, so these are all multiplied by the number
         /// of concurrent compactions.
         /// TODO: This is currently the case for fixed half-bar scheduling.
         const block_count_bar_single: u64 = 3;
@@ -972,8 +972,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             self.slot_filled_count = 0;
             self.slot_running_count = 0;
 
-            // Setup loop, runs only on the first beat of every bar, before any async work is done.
-            // If we recovered from a checkpoint, we must avoid replaying one bar of
+            // Setup loop, runs only on the first beat of every half-bar, before any async work is
+            // done. If we recovered from a checkpoint, we must avoid replaying one bar of
             // compactions that were applied before the checkpoint. Repeating these ops'
             // compactions would actually perform different compactions than before,
             // causing the storage state of the replica to diverge from the cluster.

@@ -65,14 +65,14 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 
 const half_bar_beat_count = @divExact(constants.lsm_batch_multiple, 2);
 
-/// Information used when scheduling compactions. Kept unspecalized to make the forest
+/// Information used when scheduling compactions. Kept unspecialized to make the forest
 /// code easier.
 pub const CompactionInfo = struct {
     /// How many values, across all tables, need to be processed.
     compaction_tables_value_count: usize,
 
     // Keys are integers in TigerBeetle, with a maximum size of u256. Store these
-    // here, instead of Key, to keep this unspecalized.
+    // here, instead of Key, to keep this unspecialized.
     target_key_min: u256,
     target_key_max: u256,
 
@@ -88,7 +88,7 @@ pub const Exhausted = struct { bar: bool, beat: bool };
 const BlipCallback = *const fn (*anyopaque, ?Exhausted) void;
 pub const BlipStage = enum { read, merge, write, drained };
 
-// The following types need to specalize on Grid, but are used both by CompactionType and the
+// The following types need to specialize on Grid, but are used both by CompactionType and the
 // forest.
 pub fn CompactionHelperType(comptime Grid: type) type {
     return struct {
