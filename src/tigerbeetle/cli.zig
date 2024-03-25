@@ -86,6 +86,7 @@ const CliArgs = union(enum) {
         id_order: Command.Benchmark.IdOrder = .sequential,
         statsd: bool = false,
         addresses: ?[]const u8 = null,
+        seed: ?u64 = null,
     },
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
@@ -231,6 +232,7 @@ pub const Command = union(enum) {
         id_order: IdOrder = .sequential,
         statsd: bool = false,
         addresses: ?[]const net.Address = null,
+        seed: ?u64 = null,
     };
 
     format: struct {
@@ -453,6 +455,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .id_order = benchmark.id_order,
                     .statsd = benchmark.statsd,
                     .addresses = addresses,
+                    .seed = benchmark.seed,
                 },
             };
         },

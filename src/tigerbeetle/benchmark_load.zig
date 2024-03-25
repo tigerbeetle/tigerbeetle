@@ -129,7 +129,11 @@ pub fn main(
         );
     }
 
-    var rng = std.rand.DefaultPrng.init(42);
+    // If no seed was given, use a default seed for reproducibility.
+    const seed: usize = cli_args.seed orelse 42;
+    log.info("Benchmark seed = {}", .{seed});
+
+    var rng = std.rand.DefaultPrng.init(seed);
     const random = rng.random();
     const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
         .sequential => .{ .identity = {} },
