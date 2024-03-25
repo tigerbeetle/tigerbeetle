@@ -80,6 +80,7 @@ pub const CompactionInfo = struct {
     /// must be skipped by the caller.
     move_table: bool,
 
+    tree_id: u16,
     level_b: u8,
 };
 
@@ -211,133 +212,6 @@ pub fn CompactionHelperType(comptime Grid: type) type {
                 return value;
             }
         };
-    };
-}
-
-/// Helper for the forest to dynamically dispatch the underlying Compaction type.
-pub fn CompactionInterfaceType(comptime Grid: type, comptime tree_infos: anytype) type {
-    const Helpers = CompactionHelperType(Grid);
-
-    return struct {
-        const Dispatcher = T: {
-            @setEvalBranchQuota(100000); // TODO: Needed for the std.mem.eql below - could be less.
-            var type_info = @typeInfo(union(enum) {});
-
-            // Union fields for each compaction type.
-            for (tree_infos) |tree_info| {
-                const Compaction = tree_info.Tree.Compaction;
-                const type_name = @typeName(Compaction);
-
-                for (type_info.Union.fields) |field| {
-                    if (std.mem.eql(u8, field.name, type_name)) {
-                        break;
-                    }
-                } else {
-                    type_info.Union.fields = type_info.Union.fields ++
-                        [_]std.builtin.Type.UnionField{.{
-                        .name = type_name,
-                        .type = *Compaction,
-                        .alignment = @alignOf(*Compaction),
-                    }};
-                }
-            }
-
-            // We need a tagged union for dynamic dispatching.
-            type_info.Union.tag_type = blk: {
-                const union_fields = type_info.Union.fields;
-                var tag_fields: [union_fields.len]std.builtin.Type.EnumField =
-                    undefined;
-                for (&tag_fields, union_fields, 0..) |*tag_field, union_field, i| {
-                    tag_field.* = .{
-                        .name = union_field.name,
-                        .value = i,
-                    };
-                }
-
-                break :blk @Type(.{ .Enum = .{
-                    .tag_type = std.math.IntFittingRange(0, tag_fields.len - 1),
-                    .fields = &tag_fields,
-                    .decls = &.{},
-                    .is_exhaustive = true,
-                } });
-            };
-
-            break :T @Type(type_info);
-        };
-
-        const Self = @This();
-
-        dispatcher: Dispatcher,
-        info: CompactionInfo,
-
-        pub fn init(info: CompactionInfo, compaction: anytype) @This() {
-            const Compaction = @TypeOf(compaction.*);
-            const type_name = @typeName(Compaction);
-
-            return .{
-                .info = info,
-                .dispatcher = @unionInit(Dispatcher, type_name, compaction),
-            };
-        }
-
-        pub fn bar_setup_budget(
-            self: *const Self,
-            beats_max: u64,
-            target_index_blocks: Helpers.BlockFIFO,
-            source_a_immutable_block: BlockPtr,
-        ) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.bar_setup_budget(
-                    beats_max,
-                    target_index_blocks,
-                    source_a_immutable_block,
-                ),
-            };
-        }
-
-        pub fn beat_grid_reserve(self: *Self) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.beat_grid_reserve(),
-            };
-        }
-
-        pub fn beat_blocks_assign(self: *Self, blocks: Helpers.CompactionBlocks) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.beat_blocks_assign(blocks),
-            };
-        }
-
-        // TODO: Is there a better way to implement dynamic dispatch and callbacks for the methods
-        // below?
-        pub fn blip_read(self: *Self, callback: BlipCallback) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.blip_read(callback, self),
-            };
-        }
-
-        pub fn blip_merge(self: *Self, callback: BlipCallback) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.blip_merge(callback, self),
-            };
-        }
-
-        pub fn blip_write(self: *Self, callback: BlipCallback) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.blip_write(callback, self),
-            };
-        }
-
-        pub fn beat_grid_forfeit(self: *Self) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.beat_grid_forfeit(),
-            };
-        }
-
-        pub fn bar_apply_to_manifest(self: *Self) void {
-            return switch (self.dispatcher) {
-                inline else => |compaction_impl| compaction_impl.bar_apply_to_manifest(),
-            };
-        }
     };
 }
 
@@ -792,6 +666,7 @@ pub fn CompactionType(
                 .target_key_min = compaction.bar.?.range_b.key_min,
                 .target_key_max = compaction.bar.?.range_b.key_max,
                 .move_table = compaction.bar.?.move_table,
+                .tree_id = tree.config.id,
                 .level_b = compaction.level_b,
             };
         }

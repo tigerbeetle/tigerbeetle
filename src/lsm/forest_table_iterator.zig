@@ -71,10 +71,11 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                 for (iterator.tree_id..Forest.tree_id_range.max + 1) |tree_id_runtime| {
                     iterator.tree_id = @intCast(tree_id_runtime);
 
-                    switch (tree_id_runtime) {
-                        inline Forest.tree_id_range.min...Forest.tree_id_range.max => |tree_id| {
-                            const tree_info = Forest.tree_infos[tree_id - Forest.tree_id_range.min];
-                            assert(tree_info.tree_id == tree_id);
+                    switch (Forest.tree_id_cast(iterator.tree_id)) {
+                        inline else => |tree_id| {
+                            const tree_info =
+                                Forest.tree_infos[@intFromEnum(tree_id) - Forest.tree_id_range.min];
+                            assert(tree_info.tree_id == @intFromEnum(tree_id));
 
                             const tree_iterator = &@field(iterator.trees, tree_info.tree_name);
                             if (tree_iterator.next(
@@ -82,7 +83,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                                 iterator.level,
                             )) |table| {
                                 return table.encode(.{
-                                    .tree_id = tree_id,
+                                    .tree_id = @intFromEnum(tree_id),
                                     .level = iterator.level,
                                     // Dummy event, doesn't really mean anything in this context.
                                     // (We are reusing the schema's TableInfo type since it is
@@ -91,7 +92,6 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
                                 });
                             }
                         },
-                        else => unreachable,
                     }
                 }
                 assert(iterator.tree_id == Forest.tree_id_range.max);

@@ -16,7 +16,7 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const NodePool = @import("node_pool.zig").NodePool(constants.lsm_manifest_node_size, 16);
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
-const CompactionInterfaceType = @import("compaction.zig").CompactionInterfaceType;
+const CompactionInfo = @import("compaction.zig").CompactionInfo;
 const CompactionHelperType = @import("compaction.zig").CompactionHelperType;
 const BlipStage = @import("compaction.zig").BlipStage;
 const Exhausted = @import("compaction.zig").Exhausted;
@@ -154,6 +154,30 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         break :tree_infos tree_infos_sorted[0..];
     };
 
+    const _TreeID = comptime tree_id: {
+        var fields: []const std.builtin.Type.EnumField = &.{};
+        for (_tree_infos) |tree_info| {
+            fields = fields ++ [1]std.builtin.Type.EnumField{.{
+                .name = tree_info.tree_name,
+                .value = tree_info.tree_id,
+            }};
+        }
+        break :tree_id @Type(.{ .Enum = .{
+            .tag_type = u16,
+            .fields = fields,
+            .decls = &.{},
+            .is_exhaustive = true,
+        } });
+    };
+
+    comptime {
+        assert(std.enums.values(_TreeID).len == _tree_infos.len);
+        for (std.enums.values(_TreeID)) |tree_id| {
+            const tree_info = _tree_infos[@intFromEnum(tree_id) - _tree_infos[0].tree_id];
+            assert(tree_id == @as(_TreeID, @enumFromInt(tree_info.tree_id)));
+        }
+    }
+
     const Grid = GridType(_Storage);
 
     return struct {
@@ -169,6 +193,11 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         pub const groove_config = groove_cfg;
         pub const Grooves = _Grooves;
         pub const GroovesOptions = _GroovesOptions;
+        // TreeID is an enum with a value for each tree type.
+        // Individual trees use `u16` to store their own id, to avoid dependency on the entire
+        // forest.
+        // Use `tree_id_cast` function to convert this type-erased u16 to a TreeID.
+        pub const TreeID = _TreeID;
         pub const tree_infos = _tree_infos;
         pub const tree_id_range = .{
             .min = tree_infos[0].tree_id,
@@ -315,14 +344,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(table.label.level < constants.lsm_levels);
             assert(table.label.event != .remove);
 
-            switch (table.tree_id) {
-                inline tree_id_range.min...tree_id_range.max => |tree_id| {
+            if (table.tree_id < tree_id_range.min or table.tree_id > tree_id_range.max) {
+                log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
+                @panic("Forest.manifest_log_open_event: unknown table in manifest");
+            }
+            switch (tree_id_cast(table.tree_id)) {
+                inline else => |tree_id| {
                     var tree: *TreeForIdType(tree_id) = forest.tree_for_id(tree_id);
                     tree.open_table(table);
-                },
-                else => {
-                    log.err("manifest_log_open_event: unknown table in manifest: {}", .{table});
-                    @panic("Forest.manifest_log_open_event: unknown table in manifest");
                 },
             }
         }
@@ -430,19 +459,24 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // that is requested.
             if (last_beat or last_half_beat) {
                 for (forest.compaction_pipeline.compactions.slice()) |*compaction| {
-                    if (compaction.info.level_b % 2 == 0 and last_half_beat) continue;
-                    if (compaction.info.level_b % 2 != 0 and last_beat) continue;
+                    if (compaction.level_b % 2 == 0 and last_half_beat) continue;
+                    if (compaction.level_b % 2 != 0 and last_beat) continue;
 
                     assert(forest.manifest_log_progress == .compacting or
                         forest.manifest_log_progress == .done);
-                    compaction.bar_apply_to_manifest();
+                    switch (tree_id_cast(compaction.tree_id)) {
+                        inline else => |tree_id| {
+                            forest.tree_for_id(tree_id).compactions[compaction.level_b]
+                                .bar_apply_to_manifest();
+                        },
+                    }
                 }
             }
 
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
             if (last_beat) {
-                inline for (tree_id_range.min..tree_id_range.max + 1) |tree_id| {
+                inline for (comptime std.enums.values(TreeID)) |tree_id| {
                     const tree = tree_for_id(forest, tree_id);
 
                     log.debug("swap_mutable_and_immutable({s})", .{tree.config.name});
@@ -531,16 +565,20 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             callback(forest);
         }
 
-        fn TreeForIdType(comptime tree_id: u16) type {
-            const tree_info = tree_infos[tree_id - tree_id_range.min];
-            assert(tree_info.tree_id == tree_id);
+        pub fn tree_id_cast(tree_id: u16) TreeID {
+            return @enumFromInt(tree_id);
+        }
+
+        fn TreeForIdType(comptime tree_id: TreeID) type {
+            const tree_info = tree_infos[@intFromEnum(tree_id) - tree_id_range.min];
+            assert(tree_info.tree_id == @intFromEnum(tree_id));
 
             return tree_info.Tree;
         }
 
-        pub fn tree_for_id(forest: *Forest, comptime tree_id: u16) *TreeForIdType(tree_id) {
-            const tree_info = tree_infos[tree_id - tree_id_range.min];
-            assert(tree_info.tree_id == tree_id);
+        pub fn tree_for_id(forest: *Forest, comptime tree_id: TreeID) *TreeForIdType(tree_id) {
+            const tree_info = tree_infos[@intFromEnum(tree_id) - tree_id_range.min];
+            assert(tree_info.tree_id == @intFromEnum(tree_id));
 
             var groove = &@field(forest.grooves, tree_info.groove_name);
 
@@ -553,10 +591,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
         pub fn tree_for_id_const(
             forest: *const Forest,
-            comptime tree_id: u16,
+            comptime tree_id: TreeID,
         ) *const TreeForIdType(tree_id) {
-            const tree_info = tree_infos[tree_id - tree_id_range.min];
-            assert(tree_info.tree_id == tree_id);
+            const tree_info = tree_infos[@intFromEnum(tree_id) - tree_id_range.min];
+            assert(tree_info.tree_id == @intFromEnum(tree_id));
 
             const groove = &@field(forest.grooves, tree_info.groove_name);
 
@@ -572,7 +610,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         /// (Invoked between beats.)
         fn verify_table_extents(forest: *const Forest) void {
             var tables_count: usize = 0;
-            inline for (tree_id_range.min..tree_id_range.max + 1) |tree_id| {
+            inline for (comptime std.enums.values(TreeID)) |tree_id| {
                 for (0..constants.lsm_levels) |level| {
                     const tree_level = forest.tree_for_id_const(tree_id).manifest.levels[level];
                     tables_count += tree_level.tables.len();
@@ -703,9 +741,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 }
 
 fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
-    // TODO: With all this trouble, why not just store the compaction memory here and move it out
-    // of Tree entirely...
-    const CompactionInterface = CompactionInterfaceType(Grid, Forest.tree_infos);
     const CompactionHelper = CompactionHelperType(Grid);
 
     return struct {
@@ -713,7 +748,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         /// If you think of a pipeline diagram, a pipeline slot is a single instruction.
         const PipelineSlot = struct {
-            interface: CompactionInterface,
+            info: CompactionInfo,
             pipeline: *CompactionPipeline,
             active_operation: BlipStage,
             compaction_index: usize,
@@ -729,7 +764,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         /// ultimately lives here.
         compaction_blocks: []CompactionHelper.CompactionBlock,
 
-        compactions: stdx.BoundedArray(CompactionInterface, compaction_count) = .{},
+        compactions: stdx.BoundedArray(CompactionInfo, compaction_count) = .{},
 
         bar_active: CompactionBitset = CompactionBitset.initEmpty(),
         beat_active: CompactionBitset = CompactionBitset.initEmpty(),
@@ -921,6 +956,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             const first_beat = compaction_beat == 0;
             const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
 
+            if (self.forest == null) self.forest = forest;
+            assert(self.forest == forest);
+
             self.slot_filled_count = 0;
             self.slot_running_count = 0;
 
@@ -939,7 +977,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // Iterate by levels first, then trees, as we expect similar levels to have similar
                 // time-of-death for writes. This helps internal SSD GC.
                 for (0..constants.lsm_levels) |level_b| {
-                    inline for (Forest.tree_id_range.min..Forest.tree_id_range.max + 1) |tree_id| {
+                    inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
                         var tree = Forest.tree_for_id(forest, tree_id);
                         assert(tree.compactions.len == constants.lsm_levels);
 
@@ -951,9 +989,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                             (compaction.level_b % 2 == 0 and half_beat))
                         {
                             if (compaction.bar_setup(tree, op)) |info| {
-                                self.compactions.append_assume_capacity(
-                                    CompactionInterface.init(info, compaction),
-                                );
+                                self.compactions.append_assume_capacity(info);
                                 log.debug("level_b={} tree={s} op={}", .{
                                     level_b,
                                     tree.config.name,
@@ -971,8 +1007,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                 var compaction_blocks = self.compaction_blocks;
                 for (self.compactions.slice(), 0..) |*compaction, i| {
-                    if (compaction.info.level_b % 2 == 0 and first_beat) continue;
-                    if (compaction.info.level_b % 2 != 0 and half_beat) continue;
+                    if (compaction.level_b % 2 == 0 and first_beat) continue;
+                    if (compaction.level_b % 2 != 0 and half_beat) continue;
 
                     // TODO: divide_blocks ensures blocks aren't aliased, this code should do
                     // the same.
@@ -988,7 +1024,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                     const ring_buffer = CompactionHelper.BlockFIFO.init(blocks);
 
-                    if (!compaction.info.move_table) {
+                    if (!compaction.move_table) {
                         // A compaction is marked as live at the start of a bar, unless it's
                         // move_table...
                         self.bar_active.set(i);
@@ -1000,11 +1036,15 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                         // budgets. This is because the target budget determines the beat grid
                         // block allocation, so whatever function calculates this in the future
                         // needs to itself be deterministic.
-                        compaction.bar_setup_budget(
-                            @divExact(constants.lsm_batch_multiple, 2),
-                            ring_buffer,
-                            immutable_table_a_block,
-                        );
+                        switch (Forest.tree_id_cast(compaction.tree_id)) {
+                            inline else => |tree_id| {
+                                self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
+                                    @divExact(constants.lsm_batch_multiple, 2),
+                                    ring_buffer,
+                                    immutable_table_a_block,
+                                );
+                            },
+                        }
                     }
                 }
             }
@@ -1017,18 +1057,20 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // way. Maybe move to a union enum for state.
             for (self.slots) |slot| assert(slot == null);
             assert(self.callback == null);
-            assert(self.forest == null);
 
             for (self.compactions.slice(), 0..) |*compaction, i| {
                 if (!self.bar_active.isSet(i)) continue;
-                if (compaction.info.move_table) continue;
+                if (compaction.move_table) continue;
 
                 self.beat_reserved.set(i);
-                compaction.beat_grid_reserve();
+                switch (Forest.tree_id_cast(compaction.tree_id)) {
+                    inline else => |tree_id| {
+                        self.tree_compaction(tree_id, compaction.level_b).beat_grid_reserve();
+                    },
+                }
             }
 
             self.callback = callback;
-            self.forest = forest;
 
             if (self.compactions.count() == 0) {
                 // No compactions - we're done! Likely we're < lsm_batch_multiple but it could
@@ -1060,7 +1102,6 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             const forest = self.forest.?;
 
             self.callback = null;
-            self.forest = null;
 
             callback(forest);
         }
@@ -1068,27 +1109,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         // TODO: It would be great to get rid of *anyopaque here. Batiati's scan approach
         // wouldn't compile for some reason.
         fn blip_callback(
-            compaction_interface_opaque: *anyopaque,
+            slot_opaque: *anyopaque,
             maybe_exhausted: ?Exhausted,
         ) void {
-            const compaction_interface: *CompactionInterface = @ptrCast(
-                @alignCast(compaction_interface_opaque),
-            );
-            const pipeline = @fieldParentPtr(
-                PipelineSlot,
-                "interface",
-                compaction_interface,
-            ).pipeline;
-
-            // TODO: Better way of getting the slot?
-            const slot = blk: for (0..3) |i| {
-                if (pipeline.slots[i]) |*slot| {
-                    if (&slot.interface == compaction_interface) {
-                        log.debug("matching slot is {}", .{i});
-                        break :blk slot;
-                    }
-                }
-            } else @panic("no matching slot");
+            const slot: *PipelineSlot = @ptrCast(@alignCast(slot_opaque));
+            const pipeline: *CompactionPipeline = slot.pipeline;
 
             // Currently only merge is allowed to tell us we're exhausted.
             // TODO: In future, this will be extended to read, which might be able to, based
@@ -1158,14 +1183,28 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                             slot.active_operation = .write;
                             self.slot_running_count += 1;
-                            slot.interface.blip_write(blip_callback);
+                            switch (Forest.tree_id_cast(slot.info.tree_id)) {
+                                inline else => |tree_id| {
+                                    self.tree_compaction(
+                                        tree_id,
+                                        slot.info.level_b,
+                                    ).blip_write(blip_callback, slot);
+                                },
+                            }
                         },
                         .write => {
                             log.debug("advance_pipeline: write done, calling " ++
                                 "blip_read on {}", .{i});
                             slot.active_operation = .read;
                             self.slot_running_count += 1;
-                            slot.interface.blip_read(blip_callback);
+                            switch (Forest.tree_id_cast(slot.info.tree_id)) {
+                                inline else => |tree_id| {
+                                    self.tree_compaction(
+                                        tree_id,
+                                        slot.info.level_b,
+                                    ).blip_read(blip_callback, slot);
+                                },
+                            }
                         },
                         .drained => unreachable,
                     }
@@ -1180,23 +1219,34 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                     self.slots[slot_idx] = .{
                         .pipeline = self,
-                        .interface = self.compactions.slice()[active_compaction_index],
+                        .info = self.compactions.slice()[active_compaction_index],
                         .active_operation = .read,
                         .compaction_index = active_compaction_index,
                     };
 
                     if (slot_idx == 0) {
-                        self.slots[slot_idx].?.interface.beat_blocks_assign(
-                            self.divide_blocks(),
-                        );
+                        switch (Forest.tree_id_cast(self.slots[slot_idx].?.info.tree_id)) {
+                            inline else => |tree_id| {
+                                self.tree_compaction(
+                                    tree_id,
+                                    self.slots[slot_idx].?.info.level_b,
+                                ).beat_blocks_assign(self.divide_blocks());
+                            },
+                        }
                     }
 
                     // We always start with a read.
                     self.slot_running_count += 1;
                     self.slot_filled_count += 1;
 
-                    self.slots[slot_idx].?.interface.blip_read(blip_callback);
-
+                    switch (Forest.tree_id_cast(self.slots[slot_idx].?.info.tree_id)) {
+                        inline else => |tree_id| {
+                            self.tree_compaction(
+                                tree_id,
+                                self.slots[slot_idx].?.info.level_b,
+                            ).blip_read(blip_callback, &self.slots[slot_idx]);
+                        },
+                    }
                     if (self.slot_filled_count == 3) {
                         self.state = .full;
                     }
@@ -1213,7 +1263,14 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                             slot.active_operation = .write;
                             self.slot_running_count += 1;
                             self.state = .drained;
-                            slot.interface.blip_write(blip_callback);
+                            switch (Forest.tree_id_cast(slot.info.tree_id)) {
+                                inline else => |tree_id| {
+                                    self.tree_compaction(
+                                        tree_id,
+                                        slot.info.level_b,
+                                    ).blip_write(blip_callback, slot);
+                                },
+                            }
                         },
                         else => {
                             slot.active_operation = .drained;
@@ -1254,7 +1311,14 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             assert(self.slot_running_count > 0);
 
             log.debug("advance_pipeline_next_tick: calling blip_merge on cpu_slot", .{});
-            cpu_slot.interface.blip_merge(blip_callback);
+            switch (Forest.tree_id_cast(cpu_slot.info.tree_id)) {
+                inline else => |tree_id| {
+                    self.tree_compaction(
+                        tree_id,
+                        cpu_slot.info.level_b,
+                    ).blip_merge(blip_callback, cpu_slot);
+                },
+            }
         }
 
         fn beat_grid_forfeit_all(self: *CompactionPipeline) void {
@@ -1266,13 +1330,26 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // transitioned to being finished, so we can't just use bar_active.
                 if (!self.beat_reserved.isSet(i)) continue;
 
-                // TODO: CompactionInterface internally stores a pointer to the real
-                // Compaction interface, so by-value is OK, but we're a bit all over the place.
-                self.compactions.slice()[i].beat_grid_forfeit();
+                switch (Forest.tree_id_cast(self.compactions.slice()[i].tree_id)) {
+                    inline else => |tree_id| {
+                        self.tree_compaction(
+                            tree_id,
+                            self.compactions.slice()[i].level_b,
+                        ).beat_grid_forfeit();
+                    },
+                }
                 self.beat_reserved.unset(i);
             }
 
             assert(self.beat_reserved.count() == 0);
+        }
+
+        fn tree_compaction(
+            self: *CompactionPipeline,
+            comptime tree_id: Forest.TreeID,
+            level_b: u8,
+        ) *Forest.TreeForIdType(tree_id).Compaction {
+            return &self.forest.?.tree_for_id(tree_id).compactions[level_b];
         }
     };
 }
