@@ -1,5 +1,49 @@
 # TigerBeetle Changelog
 
+## 2024-03-25 (Placeholder: no release yet)
+
+### Safety And Performance
+
+- [#1766](https://github.com/tigerbeetle/tigerbeetle/pull/1766)
+
+  Reject incoming client requests that have an unexpected message length.
+
+- [#1768](https://github.com/tigerbeetle/tigerbeetle/pull/1768)
+
+  Fix message alignment.
+
+- [#1772](https://github.com/tigerbeetle/tigerbeetle/pull/1772),
+  [#1786](https://github.com/tigerbeetle/tigerbeetle/pull/1786)
+
+  `StorageChecker` now verifies grid determinism at bar boundaries.
+
+- [#1776](https://github.com/tigerbeetle/tigerbeetle/pull/1776)
+
+  Fix VOPR liveness false positive when standby misses an op.
+
+### Features
+
+- [#1774](https://github.com/tigerbeetle/tigerbeetle/pull/1774)
+
+  Implement `get_account_transfers` and `get_account_balances` in the REPL.
+
+- [#1781](https://github.com/tigerbeetle/tigerbeetle/pull/1781),
+  [#1784](https://github.com/tigerbeetle/tigerbeetle/pull/1784),
+  [#1765](https://github.com/tigerbeetle/tigerbeetle/pull/1765)
+
+  Documentation improvements.
+
+### Internals
+
+- [#1640](https://github.com/tigerbeetle/tigerbeetle/pull/1640),
+  [#1782](https://github.com/tigerbeetle/tigerbeetle/pull/1782)
+
+  Move `request_queue` outside of `vsr.Client`.
+
+- [#1775](https://github.com/tigerbeetle/tigerbeetle/pull/1775)
+
+  Extract `CompactionPipeline` to a dedicated function.
+
 ## 2024-03-19
 
 - Bump version to 0.15.x
