@@ -68,7 +68,7 @@ function batchesToSeries(batches) {
   for (const batch of batches) {
     for (const metric of batch.metrics) {
       if (!result.has(metric.name)) {
-        result.set(metric.label, {
+        result.set(metric.name, {
           name: metric.name,
           unit: undefined,
           value: [],
