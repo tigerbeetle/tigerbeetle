@@ -18,6 +18,7 @@ const BuildOptions = struct {
     config_log_level: std.log.Level,
     tracer_backend: TracerBackend,
     hash_log_mode: HashLogMode,
+    git_commit: ?[40]u8,
     release: []const u8,
     config_aof_record: bool,
     config_aof_recovery: bool,
@@ -44,17 +45,17 @@ const build_options: BuildOptions = blk: {
 };
 
 fn launder_type(comptime T: type, comptime value: anytype) T {
-    if (T == bool) {
-        return value;
-    }
-    if (T == []const u8) {
+    if (T == bool or
+        T == []const u8 or
+        T == ?[40]u8)
+    {
         return value;
     }
     if (@typeInfo(T) == .Enum) {
         assert(@typeInfo(@TypeOf(value)) == .Enum);
         return @field(T, @tagName(value));
     }
-    undefined;
+    unreachable;
 }
 
 const vsr = @import("vsr.zig");
@@ -81,6 +82,7 @@ const ConfigProcess = struct {
     hash_log_mode: HashLogMode = .none,
     verify: bool,
     release: vsr.Release = vsr.Release.minimum,
+    git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
     storage_size_limit_max: u64 = 16 * 1024 * 1024 * 1024 * 1024,
@@ -309,6 +311,7 @@ pub const configs = struct {
         base.process.tracer_backend = build_options.tracer_backend;
         base.process.hash_log_mode = build_options.hash_log_mode;
         base.process.release = vsr.Release.from(release_triple);
+        base.process.git_commit = build_options.git_commit;
         base.process.aof_record = build_options.config_aof_record;
         base.process.aof_recovery = build_options.config_aof_recovery;
 

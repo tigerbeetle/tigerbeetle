@@ -65,11 +65,11 @@ pub fn build(b: *std.Build) !void {
         []const u8,
         "git-commit",
         "The git commit revision of the source code.",
-    ) orelse try shell.git_commit();
-    options.addOption([]const u8, "git_commit", git_commit);
+    ) orelse std.mem.trimRight(u8, b.exec(&.{ "git", "rev-parse", "--verify", "HEAD" }), "\n");
+    assert(git_commit.len == 40);
+    options.addOption(?[40]u8, "git_commit", git_commit[0..40].*);
 
     const release_version_string = b.env_map.get("TIGERBEETLE_RELEASE");
-    options.addOption([]const u8, "version", release_version_string orelse try shell.git_tag());
     options.addOption([]const u8, "release", release_version_string orelse "0.0.1");
 
     options.addOption(

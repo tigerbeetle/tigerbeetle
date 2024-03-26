@@ -11,6 +11,14 @@ const stdx = @import("stdx.zig");
 
 pub const config = @import("config.zig").configs.current;
 
+pub const semver = std.SemanticVersion{
+    .major = config.process.release.triple().major,
+    .minor = config.process.release.triple().minor,
+    .patch = config.process.release.triple().patch,
+    .pre = null,
+    .build = if (config.process.git_commit) |sha_full| sha_full[0..7] else null,
+};
+
 /// The maximum log level.
 /// One of: .err, .warn, .info, .debug
 pub const log_level: std.log.Level = config.process.log_level;
