@@ -22,7 +22,7 @@ Want to build from source locally? Add `-build` as an argument to the bootstrap 
 
 ## Running TigerBeetle
 
-Now create the TigerBeetle [data file](../internals/data_file.md) for each replica:
+Now create the TigerBeetle [data file](../about/internals/data_file.md) for each replica:
 
 ```console
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle

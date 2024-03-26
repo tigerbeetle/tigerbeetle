@@ -324,7 +324,7 @@ pub fn CompactionType(
             /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
             /// they are applied deterministically relative to other concurrent compactions.
             // Worst-case manifest updates:
-            // See docs/internals/lsm.md "Compaction Table Overlap" for more detail.
+            // See docs/about/internals/lsm.md "Compaction Table Overlap" for more detail.
             manifest_entries: stdx.BoundedArray(struct {
                 operation: enum {
                     insert_to_level_b,
