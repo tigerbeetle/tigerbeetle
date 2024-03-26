@@ -380,7 +380,7 @@ pub fn CompactionType(
                 timer_write: usize = 0,
             };
 
-            grid_reservation: ?Grid.Reservation,
+            grid_reservation: Grid.Reservation,
 
             // TODO: This is now always 0 / 1 so get rid of it and just use index_read_done?
             index_blocks_read_b: usize = 0,
@@ -1613,7 +1613,7 @@ pub fn CompactionType(
                 table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .release = release,
-                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation.?),
+                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation),
                     .snapshot_min = snapshot_min_for_table_output(bar.op_min),
                     .tree_id = compaction.tree_config.id,
                 });
@@ -1640,7 +1640,7 @@ pub fn CompactionType(
                 const table = table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .release = release,
-                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation.?),
+                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation),
                     .snapshot_min = snapshot_min_for_table_output(bar.op_min),
                     .tree_id = compaction.tree_config.id,
                 });
@@ -1821,17 +1821,11 @@ pub fn CompactionType(
             beat.assert_all_inactive();
             assert(bar.table_builder.data_block_empty());
 
-            if (beat.grid_reservation) |grid_reservation| {
-                log.debug("beat_grid_forfeit({s}): forfeiting {}", .{
-                    compaction.tree_config.name,
-                    grid_reservation,
-                });
-                compaction.grid.forfeit(grid_reservation);
-            } else {
-                log.debug("beat_grid_forfeit({s}): nothing to forfeit", .{
-                    compaction.tree_config.name,
-                });
-            }
+            log.debug("beat_grid_forfeit({s}): forfeiting {}", .{
+                compaction.tree_config.name,
+                beat.grid_reservation,
+            });
+            compaction.grid.forfeit(beat.grid_reservation);
 
             // Our beat is done!
             compaction.beat = null;
