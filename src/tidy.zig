@@ -149,13 +149,6 @@ const DeadDetector = struct {
         const entry_points: []const []const u8 = &.{
             "benchmark.zig",
             "binary_search_benchmark.zig",
-            "demo_01_create_accounts.zig",
-            "demo_02_lookup_accounts.zig",
-            "demo_03_create_transfers.zig",
-            "demo_04_create_pending_transfers.zig",
-            "demo_05_post_pending_transfers.zig",
-            "demo_06_void_pending_transfers.zig",
-            "demo_07_lookup_transfers.zig",
             "ewah_benchmark.zig",
             "fuzz_tests.zig",
             "integration_tests.zig",

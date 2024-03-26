@@ -272,26 +272,6 @@ pub fn build(b: *std.Build) !void {
 
         if (test_filter == null) {
             test_step.dependOn(&run_integration_tests.step);
-
-            // Test that our demos compile, but don't run them.
-            inline for (.{
-                "demo_01_create_accounts",
-                "demo_02_lookup_accounts",
-                "demo_03_create_transfers",
-                "demo_04_create_pending_transfers",
-                "demo_05_post_pending_transfers",
-                "demo_06_void_pending_transfers",
-                "demo_07_lookup_transfers",
-            }) |demo| {
-                const demo_exe = b.addExecutable(.{
-                    .name = demo,
-                    .root_source_file = .{ .path = "src/demos/" ++ demo ++ ".zig" },
-                    .target = target,
-                });
-                demo_exe.addModule("vsr", vsr_module);
-                demo_exe.addModule("vsr_options", vsr_options_module);
-                test_step.dependOn(&demo_exe.step);
-            }
         }
     }
 
