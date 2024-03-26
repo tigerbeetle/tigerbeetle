@@ -1,8 +1,8 @@
 ---
-sidebar_position: 5
+sidebar_position: 7
 ---
 
-## Is Tigerbeetle Ready For Production?
+## Production Readiness
 
 TigerBeetle was started in 2020 and you're watching us build the plane while we're flying it.
 
