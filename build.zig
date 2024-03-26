@@ -69,8 +69,11 @@ pub fn build(b: *std.Build) !void {
     assert(git_commit.len == 40);
     options.addOption(?[40]u8, "git_commit", git_commit[0..40].*);
 
-    const release_version_string = b.env_map.get("TIGERBEETLE_RELEASE");
-    options.addOption([]const u8, "release", release_version_string orelse "0.0.1");
+    options.addOption(
+        []const u8,
+        "release",
+        b.option([]const u8, "tigerbeetle-release", "Release triple.") orelse "0.0.1",
+    );
 
     options.addOption(
         config.ConfigBase,
