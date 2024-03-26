@@ -317,6 +317,8 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     };
     log.info("node version {s}", .{node_version});
 
+    try shell.zig("build node_client -Drelease -Dconfig=production", .{});
+
     try backup_create(shell.cwd, "package.json");
     defer backup_restore(shell.cwd, "package.json");
 
