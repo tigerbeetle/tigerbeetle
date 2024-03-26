@@ -159,7 +159,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         scan_results_count: u32,
         compaction_exhausted: bool = false,
 
-        compaction_blocks: []CompactionHelper.CompactionBlock,
+        block_pool: CompactionHelper.CompactionBlockFIFO,
+        block_pool_raw: []CompactionHelper.CompactionBlock,
 
         pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
             var env: Environment = undefined;
@@ -199,15 +200,25 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.scan_results_count = 0;
             defer allocator.free(env.scan_results);
 
-            env.compaction_blocks = try allocator.alloc(CompactionHelper.CompactionBlock, 11);
-            defer allocator.free(env.compaction_blocks);
+            // TODO: Pull out these constants. 3 is block_count_bar_single, 8 is
+            // minimum_block_count_beat.
+            const block_count = 3 * stdx.div_ceil(constants.lsm_levels, 2) + 8;
 
-            for (env.compaction_blocks) |*compaction_block| {
+            env.block_pool_raw = try allocator.alloc(CompactionHelper.CompactionBlock, block_count);
+            defer allocator.free(env.block_pool_raw);
+
+            env.block_pool = .{
+                .name = "block_pool",
+                .verify_push = false,
+            };
+
+            for (env.block_pool_raw) |*compaction_block| {
                 compaction_block.* = .{
                     .block = try allocate_block(allocator),
                 };
+                env.block_pool.push(compaction_block);
             }
-            defer for (env.compaction_blocks) |block| allocator.free(block.block);
+            defer for (env.block_pool_raw) |block| allocator.free(block.block);
 
             try env.open_then_apply(fuzz_ops);
         }
@@ -289,7 +300,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         pub fn compact(env: *Environment, op: u64) void {
             const compaction_beat = op % constants.lsm_batch_multiple;
-            const compaction_blocks = env.compaction_blocks;
 
             const last_half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2) - 1;
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
@@ -307,20 +317,23 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 }
             }
 
+            assert(env.block_pool.count == env.block_pool_raw.len);
+
             for (compaction_work.const_slice()) |compaction| {
                 if (compaction.bar != null and compaction.bar.?.move_table) {
                     continue;
                 }
-                const source_a_immutable_block = compaction_blocks[0].block;
-                const target_index_blocks = CompactionHelper.BlockFIFO.init(compaction_blocks[1..3]);
+                const source_a_immutable_block = env.block_pool.pop().?;
+                const target_index_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2);
 
                 const beat_blocks = .{
-                    .source_index_blocks = compaction_blocks[3..5],
+                    .source_index_block_a = env.block_pool.pop().?,
+                    .source_index_block_b = env.block_pool.pop().?,
                     .source_value_blocks = .{
-                        CompactionHelper.BlockFIFO.init(compaction_blocks[5..7]),
-                        CompactionHelper.BlockFIFO.init(compaction_blocks[7..9]),
+                        CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
+                        CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
                     },
-                    .target_value_blocks = CompactionHelper.BlockFIFO.init(compaction_blocks[9..11]),
+                    .target_value_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
                 };
 
                 compaction.bar_setup_budget(1, target_index_blocks, source_a_immutable_block);
@@ -342,12 +355,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     env.tick_until_state_change(.blipping, .fuzzing);
                 }
 
+                compaction.beat_blocks_unassign(&env.block_pool);
                 compaction.beat_grid_forfeit();
-
-                for (compaction_blocks) |*block| {
-                    block.next = null;
-                    block.stage = .free;
-                }
             }
 
             if (op >= constants.lsm_batch_multiple) {
@@ -357,8 +366,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             }
 
             for (compaction_work.const_slice()) |compaction| {
+                compaction.bar_blocks_unassign(&env.block_pool);
                 compaction.bar_apply_to_manifest();
             }
+
+            assert(env.block_pool.count == env.block_pool_raw.len);
 
             if (op >= constants.lsm_batch_multiple) {
                 env.manifest_log.compact_end();
