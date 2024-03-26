@@ -12,26 +12,18 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>1591</NoWarn> <!-- Disables the warning CS1591: Missing XML comment for publicly visible type or member -->
   </PropertyGroup>
-  <PropertyGroup>
-    <OS Condition="$([MSBuild]::IsOSPlatform('Windows'))">Windows</OS>
-  </PropertyGroup>
-  <Target Name="BuildZig" BeforeTargets="DispatchToInnerBuilds">
-    <Exec Command=".\zig\zig build dotnet_client -Drelease -Dconfig=production" WorkingDirectory="$(MSBuildProjectDirectory)\..\..\..\.." Condition="'$(OS)'=='Windows'" />
-    <Exec Command="./zig/zig build dotnet_client -Drelease -Dconfig=production" WorkingDirectory="$(MSBuildProjectDirectory)/../../../.." Condition="'$(OS)'!='Windows'" />
-
-    <ItemGroup>
-      <Content Include="runtimes\**\*.so">
-        <PackagePath>runtimes</PackagePath>
-        <Pack>true</Pack>
-      </Content>
-      <Content Include="runtimes\**\*.dylib">
-        <PackagePath>runtimes</PackagePath>
-        <Pack>true</Pack>
-      </Content>
-      <Content Include="runtimes\**\*.dll">
-        <PackagePath>runtimes</PackagePath>
-        <Pack>true</Pack>
-      </Content>
-    </ItemGroup>
-  </Target>
+  <ItemGroup>
+    <Content Include="runtimes\**\*.so">
+      <PackagePath>runtimes</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    <Content Include="runtimes\**\*.dylib">
+      <PackagePath>runtimes</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+    <Content Include="runtimes\**\*.dll">
+      <PackagePath>runtimes</PackagePath>
+      <Pack>true</Pack>
+    </Content>
+  </ItemGroup>
 </Project>

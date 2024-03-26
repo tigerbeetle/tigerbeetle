@@ -24,8 +24,7 @@
     "node": ">=14.0.0"
   },
   "scripts": {
-    "prepare": "node ./scripts/prepare.js",
-    "clean": "node ./scripts/clean.js"
+    "prepare": "tsc"
   },
   "author": "TigerBeetle, Inc",
   "license": "Apache-2.0",

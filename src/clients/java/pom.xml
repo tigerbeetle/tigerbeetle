@@ -205,54 +205,6 @@
     </pluginManagement>
 
     <plugins>
-      <!-- JNI tests -->
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>3.1.0</version>
-        <configuration>
-          <workingDirectory>${project.basedir}/../../../</workingDirectory>
-          <executable>${project.basedir}/../../../zig/zig${executable.extension}</executable>
-        </configuration>
-        <executions>
-          <execution>
-            <!-- Zig test:jni -->
-            <?m2e ignore?>
-            <id>zig-jni-test</id>
-            <phase>validate</phase>
-            <goals>
-              <goal>exec</goal>
-            </goals>
-            <configuration>
-              <environmentVariables>
-                  <JAVA_HOME>${java.home}</JAVA_HOME>
-              </environmentVariables>
-              <arguments>
-                <argument>build</argument>
-                <argument>test:jni</argument>
-              </arguments>
-            </configuration>
-          </execution>
-          <execution>
-            <!-- Zig build -->
-            <?m2e ignore?>
-            <id>zig-build</id>
-            <phase>validate</phase>
-            <goals>
-              <goal>exec</goal>
-            </goals>
-            <configuration>
-              <arguments>
-                <argument>build</argument>
-                <argument>java_client</argument>
-                <argument>-Drelease</argument>
-                <argument>-Dconfig=production</argument>
-              </arguments>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-
       <!-- Formatter -->
       <plugin>
         <groupId>net.revelc.code.formatter</groupId>

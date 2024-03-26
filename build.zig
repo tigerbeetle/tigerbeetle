@@ -812,6 +812,41 @@ fn node_client(
     bindings.addOptions("vsr_options", options);
     const bindings_step = b.addRunArtifact(bindings);
 
+    // Run `npm install` to get access to node headers.
+    var npm_install = b.addSystemCommand(&.{ "npm", "install" });
+    npm_install.cwd = "./src/clients/node";
+
+    // For windows, compile a set of all symbols that could be exported by node and write it to a
+    // `.def` file for `zig dlltool` to generate a `.lib` file from.
+    var write_def_file = b.addSystemCommand(&.{
+        "node", "--eval",
+        \\const headers = require('node-api-headers')
+        \\
+        \\const allSymbols = new Set()
+        \\for (const ver of Object.values(headers.symbols)) {
+        \\    for (const sym of ver.node_api_symbols) {
+        \\        allSymbols.add(sym)
+        \\    }
+        \\    for (const sym of ver.js_native_api_symbols) {
+        \\        allSymbols.add(sym)
+        \\    }
+        \\}
+        \\
+        \\fs.writeFileSync('./node.def', 'EXPORTS\n    ' + Array.from(allSymbols).join('\n    '))
+    });
+    write_def_file.cwd = "./src/clients/node";
+    write_def_file.step.dependOn(&npm_install.step);
+
+    var run_dll_tool = b.addSystemCommand(&.{
+        b.zig_exe, "dlltool",
+        "-m",      "i386:x86-64",
+        "-D",      "node.exe",
+        "-d",      "node.def",
+        "-l",      "node.lib",
+    });
+    run_dll_tool.cwd = "./src/clients/node";
+    run_dll_tool.step.dependOn(&write_def_file.step);
+
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{ .arch_os_abi = platform[0], .cpu_features = "baseline" }) catch unreachable;
         var b_isolated = builder_with_isolated_cache(b, cross_target);
@@ -825,8 +860,7 @@ fn node_client(
         });
         lib.linkLibC();
 
-        // This is provided by the node-api-headers package; make sure to run `npm install` under `src/clients/node`
-        // if you're running zig build node_client manually.
+        lib.step.dependOn(&npm_install.step);
         lib.addSystemIncludePath(.{ .path = "src/clients/node/node_modules/node-api-headers/include" });
         lib.linker_allow_shlib_undefined = true;
 
@@ -834,6 +868,7 @@ fn node_client(
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
 
+            lib.step.dependOn(&run_dll_tool.step);
             lib.addLibraryPath(.{ .path = "src/clients/node" });
             lib.linkSystemLibrary("node");
         }
@@ -844,10 +879,12 @@ fn node_client(
         lib.step.dependOn(&bindings_step.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/
-        const lib_install = b.addInstallArtifact(lib, .{});
-        lib_install.dest_dir = .{
-            .custom = "../src/clients/node/dist/bin/" ++ comptime strip_glibc_version(platform[0]),
-        };
+        const lib_install = b.addInstallFile(
+            lib.getEmittedBin(),
+            "../src/clients/node/dist/bin/" ++
+                comptime strip_glibc_version(platform[0]) ++
+                "/client.node",
+        );
         build_step.dependOn(&lib_install.step);
     }
 }

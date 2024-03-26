@@ -213,6 +213,7 @@ fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     };
     log.info("dotnet version {s}", .{dotnet_version});
 
+    try shell.zig("build dotnet_client -Drelease -Dconfig=production", .{});
     try shell.exec(
         \\dotnet pack TigerBeetle --configuration Release
         \\/p:AssemblyVersion={version} /p:Version={version}
@@ -280,6 +281,8 @@ fn build_java(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     };
     log.info("java version {s}", .{java_version});
 
+    try shell.zig("build java_client -Drelease -Dconfig=production", .{});
+
     try backup_create(shell.cwd, "pom.xml");
     defer backup_restore(shell.cwd, "pom.xml");
 
@@ -313,6 +316,8 @@ fn build_node(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         fatal("can't find nodejs", .{});
     };
     log.info("node version {s}", .{node_version});
+
+    try shell.zig("build node_client -Drelease -Dconfig=production", .{});
 
     try backup_create(shell.cwd, "package.json");
     defer backup_restore(shell.cwd, "package.json");
