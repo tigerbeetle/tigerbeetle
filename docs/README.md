@@ -47,6 +47,12 @@ To understand TigerBeetle's data model, see:
   - [`get_account_balances`](./reference/operations/get_account_balances.md)
   - [`get_account_transfers`](./reference/operations/get_account_transfers.md)
 
+## Dive Deeper
+
+Learn more about TigerBeetle's [mission, history](./about/README.md),
+[architecture](./about/architecture.md), approach to [safety](./about/safety.md) and
+[performance](./about/performance.md) in the [About section](./about/README.md).
+
 ## Contributing
 
 - [Watch our talks, listen to our podcasts](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md)
