@@ -383,7 +383,7 @@ pub const AOFReplayClient = struct {
     fn replay_callback(
         user_data: u128,
         operation: StateMachine.Operation,
-        result: []const u8,
+        result: []u8,
     ) void {
         _ = operation;
         _ = result;

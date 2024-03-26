@@ -21,44 +21,18 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
         const Self = @This();
 
         pub const StateMachine = StateMachine_;
-
+        pub const DemuxerType = StateMachine.DemuxerType;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
                 operation: StateMachine.Operation,
-                results: []const u8,
+                results: []u8,
             ) void;
 
             message: *Message.Request,
             user_data: u128,
             callback: Callback,
         };
-
-        /// Custom Demuxer which passes through to StateMachine.Demuxer.
-        ///
-        /// Clients re-expose their own DemuxerType over using StateMachine's as it allows them to
-        /// reinterpret the MessageBus reply bytes outside of the standard flow (i.e. to echo back
-        /// Events instead of Results in the case of `echo_client.zig`).
-        ///
-        /// TODO: Change StateMachine Demuxer to take/give bytes and re-export its alias instead.
-        pub fn DemuxerType(comptime operation: StateMachine.Operation) type {
-            return struct {
-                const Demuxer = @This();
-                const DemuxerBase = StateMachine.DemuxerType(operation);
-
-                base: DemuxerBase,
-
-                pub fn init(reply: []u8) Demuxer {
-                    const results = std.mem.bytesAsSlice(StateMachine.Result(operation), reply);
-                    return Demuxer{ .base = DemuxerBase.init(@alignCast(results)) };
-                }
-
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
-                    const results = self.base.decode(event_offset, event_count);
-                    return std.mem.sliceAsBytes(results);
-                }
-            };
-        }
 
         allocator: mem.Allocator,
 
@@ -466,6 +440,7 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
                 }
             } else {
                 // The message is the result of raw_request(), so invoke the user callback.
+                // NOTE: the callback is allowed to mutate `reply.body()` here.
                 inflight.callback(
                     inflight.user_data,
                     inflight_vsr_operation.cast(StateMachine),
@@ -641,104 +616,4 @@ pub fn Client(comptime StateMachine_: type, comptime MessageBus: type) type {
             );
         }
     };
-}
-
-// Stub StateMachine which supports one batchable and non-batchable Operation for testing.
-const TestStateMachine = struct {
-    const config = constants.state_machine_config;
-
-    pub const Operation = enum(u8) {
-        batched = config.vsr_operations_reserved + 0,
-        serial = config.vsr_operations_reserved + 1,
-    };
-
-    pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
-        if (operation.vsr_reserved()) return null;
-
-        return vsr.Operation.to(TestStateMachine, operation);
-    }
-
-    pub fn Event(comptime operation: Operation) type {
-        return switch (operation) {
-            .batched => [128]u8,
-            .serial => u128,
-        };
-    }
-
-    pub fn Result(comptime operation: Operation) type {
-        return switch (operation) {
-            .batched => u128,
-            .serial => u128,
-        };
-    }
-
-    pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
-        .batched = true,
-        .serial = false,
-    });
-
-    // Demuxer which gives each Event a Result 1:1.
-    pub fn DemuxerType(comptime operation: Operation) type {
-        return struct {
-            const Demuxer = @This();
-            const alignment = @alignOf(Result(operation));
-
-            results: []Result(operation),
-            offset: u32 = 0,
-
-            pub fn init(reply: []Result(operation)) Demuxer {
-                return .{ .results = reply };
-            }
-
-            pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []Result(operation) {
-                assert(self.offset == event_offset);
-                assert(self.results[event_offset..].len >= event_count);
-
-                // .batched uses consumes via the demux count passed in while .serial consumes all.
-                const demuxed: u32 = if (batch_logical_allowed.get(operation))
-                    event_count
-                else
-                    @intCast(self.results.len);
-
-                defer self.offset += @intCast(demuxed);
-                return self.results[event_offset..][0..demuxed];
-            }
-        };
-    }
-};
-
-test "Result Demuxer" {
-    const StateMachine = TestStateMachine;
-    const Result = StateMachine.Result(.batched);
-
-    const MessageBus = @import("../message_bus.zig").MessageBusClient;
-    const VSRClient = Client(StateMachine, MessageBus);
-
-    var results: [@divExact(constants.message_body_size_max, @sizeOf(Result))]Result = undefined;
-    for (0..results.len) |i| {
-        results[i] = i;
-    }
-
-    var prng = std.rand.DefaultPrng.init(42);
-    for (0..1000) |_| {
-        const events_total = @max(1, prng.random().uintAtMost(usize, results.len));
-        var demuxer = VSRClient.DemuxerType(.batched).init(std.mem.sliceAsBytes(results[0..events_total]));
-
-        var events_offset: usize = 0;
-        while (events_offset < events_total) {
-            const events_limit = events_total - events_offset;
-            const events_count = @max(1, prng.random().uintAtMost(usize, events_limit));
-
-            const reply_bytes = demuxer.decode(@intCast(events_offset), @intCast(events_count));
-            const reply: []Result = @alignCast(std.mem.bytesAsSlice(Result, reply_bytes));
-            try testing.expectEqual(&reply[0], &results[events_offset]);
-            try testing.expectEqual(reply.len, results[events_offset..][0..events_count].len);
-
-            for (reply, 0..) |result, i| {
-                try testing.expectEqual(result, @as(Result, events_offset + i));
-            }
-
-            events_offset += events_count;
-        }
-    }
 }

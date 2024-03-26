@@ -895,7 +895,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         fn client_request_callback(
             user_data: u128,
             operation: StateMachine.Operation,
-            result: []const u8,
+            result: []u8,
         ) void {
             client_request_callback_error(
                 user_data,

@@ -140,14 +140,15 @@ pub fn StateMachineType(
                 results: []DemuxerResult,
 
                 /// Create a Demuxer which can extract Results out of the reply bytes in-place.
-                pub fn init(reply: []DemuxerResult) Demuxer {
-                    return Demuxer{ .results = reply };
+                /// Bytes must be aligned to hold Results (normally originating from message).
+                pub fn init(reply: []u8) Demuxer {
+                    return Demuxer{ .results = @alignCast(mem.bytesAsSlice(DemuxerResult, reply)) };
                 }
 
-                /// Returns a slice into the the original reply bytes with Results matching the
-                /// Event range (offset and size). Each subsequent call to demux() must have ranges
-                /// that are disjoint and increase monotonically.
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []DemuxerResult {
+                /// Returns a slice of bytes in the original reply with Results matching the Event
+                /// range (offset and size). Each subsequent call to demux() must have ranges that
+                /// are disjoint and increase monotonically.
+                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
                     const demuxed = blk: {
                         if (comptime batch_logical_allowed.get(operation)) {
                             // Count all results from out slice which match the Event range,
@@ -168,7 +169,7 @@ pub fn StateMachineType(
                     // Return all results demuxed from the given Event, re-slicing them out of
                     // self.results to "consume" them from subsequent decode() calls.
                     defer self.results = self.results[demuxed..];
-                    return self.results[0..demuxed];
+                    return mem.sliceAsBytes(self.results[0..demuxed]);
                 }
             };
         }
@@ -3604,12 +3605,12 @@ test "StateMachine: Demuxer" {
             }
 
             // Demux events of random strides from the generated results.
-            var demuxer = StateMachine.DemuxerType(operation).init(results[0..reply_len]);
+            var demuxer = StateMachine.DemuxerType(operation).init(mem.sliceAsBytes(results[0..reply_len]));
             const event_count: u32 = @intCast(@max(1, prng.random().uintAtMost(usize, results.len)));
             var event_offset: u32 = 0;
             while (event_offset < event_count) {
                 const event_size = @max(1, prng.random().uintAtMost(u32, event_count - event_offset));
-                const reply = demuxer.decode(event_offset, event_size);
+                const reply: []Result = @alignCast(mem.bytesAsSlice(Result, demuxer.decode(event_offset, event_size)));
                 defer event_offset += event_size;
 
                 for (reply) |*result| {
