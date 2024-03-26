@@ -1,4 +1,4 @@
-# TigerStyle
+# Tiger Style
 
 TigerStyle has been moved into the [About section](./about/tiger-style.md).
 
