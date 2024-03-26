@@ -6,8 +6,6 @@ const mem = std.mem;
 const os = std.os;
 const log_main = std.log.scoped(.main);
 
-const build_options = @import("vsr_options");
-
 const vsr = @import("vsr");
 const constants = vsr.constants;
 const config = constants.config;
@@ -294,20 +292,16 @@ const Command = struct {
 
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
         const stdout = stdout_buffer.writer();
-        try std.fmt.format(
-            stdout,
-            "TigerBeetle version {s}\n",
-            .{build_options.version},
-        );
+        try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
 
         if (verbose) {
             try std.fmt.format(
                 stdout,
                 \\
-                \\git_commit="{s}"
+                \\git_commit="{?s}"
                 \\
             ,
-                .{build_options.git_commit},
+                .{constants.config.process.git_commit},
             );
 
             try stdout.writeAll("\n");

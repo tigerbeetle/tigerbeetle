@@ -564,8 +564,7 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_help(repl: *Repl) !void {
-            const version = build_options.version;
-            try repl.printer.print("TigerBeetle CLI Client " ++ version ++ "\n" ++
+            try repl.printer.print("TigerBeetle CLI Client {}\n" ++
                 \\  Hit enter after a semicolon to run a command.
                 \\
                 \\Examples:
@@ -578,7 +577,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                 \\  get_account_balances account_id=1 flags=debits|credits;
                 \\
                 \\
-            , .{});
+            , .{constants.semver});
         }
 
         pub fn run(

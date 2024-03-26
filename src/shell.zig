@@ -637,20 +637,6 @@ fn echo_command(argv: []const []const u8) void {
     std.debug.print("\n", .{});
 }
 
-/// Returns current git commit hash as an ASCII string.
-pub fn git_commit(shell: *Shell) ![]const u8 {
-    const stdout = try shell.exec_stdout("git rev-parse --verify HEAD", .{});
-    if (stdout.len != 40) return error.InvalidCommitFormat;
-    return stdout;
-}
-
-/// Returns current git tag.
-pub fn git_tag(shell: *Shell) ![]const u8 {
-    // --always is necessary in cases where we haven't yet `git fetch`-ed.
-    const stdout = try shell.exec_stdout("git describe --tags --always", .{});
-    return stdout;
-}
-
 /// On GitHub Actions runners, `git commit` fails with an "Author identity unknown" error.
 ///
 /// This function sets up appropriate environmental variables to correct that error.
