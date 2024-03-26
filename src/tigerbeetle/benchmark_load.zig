@@ -129,7 +129,11 @@ pub fn main(
         );
     }
 
-    var rng = std.rand.DefaultPrng.init(42);
+    // If no seed was given, use a default seed for reproducibility.
+    const seed: usize = cli_args.seed orelse 42;
+    log.info("Benchmark seed = {}", .{seed});
+
+    var rng = std.rand.DefaultPrng.init(seed);
     const random = rng.random();
     const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
         .sequential => .{ .identity = {} },
@@ -214,6 +218,8 @@ const Benchmark = struct {
             return;
         }
 
+        const random = b.rng.random();
+
         // Reset batch.
         b.batch_accounts.clearRetainingCapacity();
 
@@ -223,9 +229,9 @@ const Benchmark = struct {
         {
             b.batch_accounts.appendAssumeCapacity(.{
                 .id = b.account_id_permutation.encode(b.account_index + 1),
-                .user_data_128 = 0,
-                .user_data_64 = 0,
-                .user_data_32 = 0,
+                .user_data_128 = random.int(u128),
+                .user_data_64 = random.int(u64),
+                .user_data_32 = random.int(u32),
                 .reserved = 0,
                 .ledger = 2,
                 .code = 1,
