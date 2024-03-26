@@ -51,7 +51,6 @@ To understand TigerBeetle's data model, see:
 
 - [Watch our talks, listen to our podcasts](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md)
 - [Read HISTORY.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/HISTORY.md)
-- [Read DESIGN.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/DESIGN.md)
 - [Read TIGER_STYLE.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md)
 - [Read HACKING.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/HACKING.md)
 - And explore internal READMEs within the [TigerBeetle src directory](https://github.com/tigerbeetle/tigerbeetle/tree/main/src)
