@@ -4,15 +4,6 @@ on:
   workflow_call:
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: ./scripts/install_zig.sh
-      - run: zig/zig build lint
-    env:
-      SOURCE_REPO: ${{ github.event.pull_request.head.repo.clone_url }}
-
   docs_link_spellcheck:
     runs-on: ubuntu-latest
     steps:
