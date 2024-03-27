@@ -45,7 +45,9 @@ pub const Quorums = @import("superblock_quorums.zig").QuorumsType(.{
     .superblock_copies = constants.superblock_copies,
 });
 
-pub const SuperBlockVersion: u16 = 1;
+pub const SuperBlockVersion: u16 =
+    // Make sure that data files created by development builds are distinguished through version.
+    if (constants.config.process.release.value == vsr.Release.minimum.value) 0 else 1;
 
 const vsr_headers_reserved_size = constants.sector_size -
     ((constants.view_change_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
