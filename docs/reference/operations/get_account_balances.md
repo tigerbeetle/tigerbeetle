@@ -2,14 +2,14 @@
 
 Fetch the historical [`AccountBalance`](../account_balances.md)s of a given [`Account`](../accounts.md).
 
+**Only accounts created with the [`history`](../accounts.md#flagshistory) flag set retain historical
+balances.** This is off by default.
+
 - Each balance returned has a corresponding transfer with the same
   [`timestamp`](../transfers.md#timestamp). See the
   [`get_account_transfers`](get_account_transfers.md) operation for more details.
 
 - The amounts refer to the account balance recorded _after_ the transfer execution.
-
-- Only accounts created with the flag [`history`](../accounts.md#flagshistory) set retain
-  historical balances.
 
 - [Pending](../transfers.md#flagspending) balances automatically removed due to
   [timeout](../transfers.md#timeout) expiration don't change historical balances.
