@@ -351,6 +351,14 @@ fn print_value(
     field: []const u8,
     value: anytype,
 ) !void {
+    if (@TypeOf(value) == ?[40]u8) {
+        assert(std.mem.eql(u8, field, "process.git_commit"));
+        return std.fmt.format(writer, "{s}=\"{?s}\"\n", .{
+            field,
+            value,
+        });
+    }
+
     switch (@typeInfo(@TypeOf(value))) {
         .Fn => {}, // Ignore the log() function.
         .Pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
