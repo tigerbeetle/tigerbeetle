@@ -295,15 +295,6 @@ const Command = struct {
         try std.fmt.format(stdout, "TigerBeetle version {}\n", .{constants.semver});
 
         if (verbose) {
-            try std.fmt.format(
-                stdout,
-                \\
-                \\git_commit="{?s}"
-                \\
-            ,
-                .{constants.config.process.git_commit},
-            );
-
             try stdout.writeAll("\n");
             inline for (.{ "mode", "zig_version" }) |declaration| {
                 try print_value(stdout, "build." ++ declaration, @field(builtin, declaration));
