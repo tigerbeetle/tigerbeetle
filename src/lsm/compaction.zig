@@ -68,7 +68,8 @@ const half_bar_beat_count = @divExact(constants.lsm_batch_multiple, 2);
 /// Information used when scheduling compactions. Kept unspecialized to make the forest
 /// code easier.
 pub const CompactionInfo = struct {
-    /// How many values, across all tables, need to be processed.
+    /// How many values, across all input tables, need to be processed.
+    /// This is the total – it is fixed for the duration of the compaction.
     compaction_tables_value_count: usize,
 
     // Keys are integers in TigerBeetle, with a maximum size of u256. Store these
@@ -84,6 +85,11 @@ pub const CompactionInfo = struct {
     level_b: u8,
 };
 
+/// A bar is exhausted when all input values have been merged.
+/// A beat is exhausted when all of the input values scheduled for this beat (rounded up to the
+/// nearest full data block) have been merged.
+///
+/// Invariant: If `bar` is exhausted, then `beat` is always exhausted.
 pub const Exhausted = struct { bar: bool, beat: bool };
 const BlipCallback = *const fn (*anyopaque, ?Exhausted) void;
 pub const BlipStage = enum { read, merge, write, drained };
@@ -123,15 +129,18 @@ pub fn CompactionHelperType(comptime Grid: type) type {
         pub const CompactionBlockFIFO = FIFO(CompactionBlock);
 
         pub const BlockFIFO = struct {
+            /// Invariant: a CompactionBlock resides in the FIFO corresponding to its `stage`.
             free: CompactionBlockFIFO,
             pending: CompactionBlockFIFO,
             ready: CompactionBlockFIFO,
             ioing: CompactionBlockFIFO,
 
+            /// The (constant) total number of blocks in all four FIFOs.
             count: usize,
 
             /// All blocks start in free.
             pub fn init(block_pool: *CompactionBlockFIFO, count: usize) BlockFIFO {
+                assert(count > 0);
                 assert(count % 2 == 0);
                 assert(block_pool.count >= count);
 
@@ -303,6 +312,8 @@ pub fn CompactionType(
             /// Levels may choose to drop tombstones if keys aren't included in the lower levels.
             /// This invariant is always true for the last level as it doesn't have any lower ones.
             drop_tombstones: bool,
+            /// The total number of source values for this compaction.
+            /// This is fixed for the duration of the compaction.
             compaction_tables_value_count: u64,
             value_count_per_beat: u64 = 0,
 
@@ -332,7 +343,8 @@ pub fn CompactionType(
             source_b_position: Position = .{},
 
             /// At least 2 output index blocks needs to span beat boundaries, otherwise it wouldn't
-            /// be possible to pace at a more granular level than target tables.
+            /// be possible to pace at a more granular level than target tables. (That is, each beat
+            /// would need to write at least a full table.)
             target_index_blocks: ?Helpers.BlockFIFO,
 
             /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
@@ -798,9 +810,9 @@ pub fn CompactionType(
         // --------------------------------------------------
         // | R     | M       | W      | R      |           |
         // --------------------------------------------------
-        // |       | R      | M       | W      |           |
+        // |       | R       | M      | W      |           |
         // --------------------------------------------------
-        // |       |        | W      | C → E  | W          |
+        // |       |         | W      | C → E  | W         |
         // --------------------------------------------------
         //
         // Where → E means that the merge step indicated our work was complete for either this beat
@@ -844,6 +856,7 @@ pub fn CompactionType(
             const beat = &compaction.beat.?;
             const blocks = &beat.blocks.?;
 
+            assert(!beat.index_read_done);
             assert(beat.index_blocks_read_b == 0);
 
             assert(beat.read != null);
@@ -959,10 +972,12 @@ pub fn CompactionType(
                 const value_block_checksums = index_schema.data_checksums_used(index_block);
 
                 var free_blocks_used: usize = 0;
+                // Read at most half of the blocks, to smooth out reading over multiple steps.
                 const half_blocks_count = stdx.div_ceil(
                     beat.blocks.?.source_value_blocks[0].count,
                     2,
                 );
+                // Once our read buffer is full, end the loop.
                 while (i < value_blocks_used and free_blocks_used < half_blocks_count) {
                     var maybe_source_value_block =
                         beat.blocks.?.source_value_blocks[0].free_to_pending();
@@ -1500,7 +1515,7 @@ pub fn CompactionType(
 
         /// Copies values to `target` from our immutable table input. In the process, merge values
         /// with identical keys (last one wins) and collapse tombstones for secondary indexes.
-        /// Return the number of values written to the output and updates immutable table slice to
+        /// Return the number of values written to the target and updates immutable table slice to
         /// the non-processed remainder.
         fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
             const bar = &compaction.bar.?;

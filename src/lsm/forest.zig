@@ -805,6 +805,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // Invariant: .{tree_id, level_b} == compactions[compaction_index].{tree_id, level_b}
             tree_id: u16,
             level_b: u8,
+            /// Index within `CompactionPipeline.compactions`.
             compaction_index: usize,
         };
 
@@ -824,6 +825,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         bar_active: CompactionBitset = CompactionBitset.initEmpty(),
         beat_active: CompactionBitset = CompactionBitset.initEmpty(),
+        /// Set for compactions (within `compactions`) have an outstanding grid reservation.
         beat_reserved: CompactionBitset = CompactionBitset.initEmpty(),
 
         // TODO: This whole interface around slot_filled_count / slot_running_count needs to be
@@ -833,6 +835,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         slot_running_count: usize = 0,
 
         // Used for invoking the CPU work after a next_tick.
+        // Points to one of the `CompactionPipeline.slots`.
         cpu_slot: ?*PipelineSlot = null,
 
         state: enum { filling, full, draining, drained } = .filling,
@@ -1145,6 +1148,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                         "blip_callback: unsetting bar_active[{}]",
                         .{slot.compaction_index},
                     );
+                    // Unset bar_active for the *next* beat.
+                    // There may still be writes in-flight for this compaction.
                     pipeline.bar_active.unset(slot.compaction_index);
                 }
             }
