@@ -556,8 +556,6 @@ pub fn CompactionType(
             assert(compaction.bar == null);
             assert(compaction.beat == null);
 
-            var compaction_tables_value_count: usize = 0;
-
             // level_b 0 is special; unlike all the others which have level_a on disk, level 0's
             // level_a comes from the immutable table. This means that blip_read will be a partial,
             // no-op, and that the minimum input blocks are lowered by one.
@@ -567,8 +565,9 @@ pub fn CompactionType(
                     return null;
                 }
 
-                const values_count = tree.table_immutable.count();
-                assert(values_count > 0);
+                const table_immutable_values_count = tree.table_immutable.count();
+                assert(table_immutable_values_count > 0);
+                assert(table_immutable_values_count <= Table.value_count_max);
 
                 const range_b = tree.manifest.immutable_table_compaction_range(
                     tree.table_immutable.key_min(),
@@ -586,10 +585,10 @@ pub fn CompactionType(
                     tree.table_immutable.mutability.immutable.snapshot_min,
                     op,
                     range_b.tables.count() + 1,
-                    values_count,
+                    table_immutable_values_count,
                 });
 
-                compaction_tables_value_count += values_count;
+                var compaction_tables_value_count: usize = table_immutable_values_count;
                 for (range_b.tables.const_slice()) |*table| {
                     compaction_tables_value_count += table.table_info.value_count;
                 }
@@ -631,9 +630,10 @@ pub fn CompactionType(
                     compaction.level_b,
                 });
 
-                compaction_tables_value_count += table_a.value_count;
-                for (range_b.tables.const_slice()) |*table|
+                var compaction_tables_value_count: usize = table_a.value_count;
+                for (range_b.tables.const_slice()) |*table| {
                     compaction_tables_value_count += table.table_info.value_count;
+                }
 
                 compaction.bar = .{
                     .tree = tree,
@@ -685,7 +685,7 @@ pub fn CompactionType(
                 compaction.level_b < constants.lsm_levels - 1);
 
             return .{
-                .compaction_tables_value_count = compaction_tables_value_count,
+                .compaction_tables_value_count = compaction.bar.?.compaction_tables_value_count,
                 .target_key_min = compaction.bar.?.range_b.key_min,
                 .target_key_max = compaction.bar.?.range_b.key_max,
                 .move_table = compaction.bar.?.move_table,
