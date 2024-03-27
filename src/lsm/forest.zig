@@ -452,9 +452,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             ) - 1;
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
 
-            // Forfeit any remaining grid reservations.
-            forest.compaction_pipeline.beat_grid_forfeit_all();
-
             // Apply the changes to the manifest. This will run at the target compaction beat
             // that is requested.
             if (last_beat or last_half_beat) {
@@ -1112,6 +1109,10 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             for (self.slots) |slot| assert(slot == null);
 
             assert(self.callback != null and self.forest != null);
+
+            // Forfeit any remaining grid reservations.
+            self.beat_grid_forfeit_all();
+            assert(self.beat_reserved.count() == 0);
 
             const callback = self.callback.?;
             const forest = self.forest.?;
