@@ -467,10 +467,18 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     switch (tree_id_cast(compaction.tree_id)) {
                         inline else => |tree_id| {
                             forest.tree_for_id(tree_id).compactions[compaction.level_b]
+                                .bar_blocks_unassign(&forest.compaction_pipeline.block_pool);
+
+                            forest.tree_for_id(tree_id).compactions[compaction.level_b]
                                 .bar_apply_to_manifest();
                         },
                     }
                 }
+
+                // At the last beat or last half beat, all compactions must have returned their
+                // blocks to the block pool.
+                assert(forest.compaction_pipeline.block_pool.count ==
+                    forest.compaction_pipeline.block_pool_raw.len);
             }
 
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
@@ -742,9 +750,53 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
 fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
     const CompactionHelper = CompactionHelperType(Grid);
+    const CompactionBlockFIFO = CompactionHelper.CompactionBlockFIFO;
 
     return struct {
         const CompactionPipeline = @This();
+
+        /// Some blocks need to be reserved for the lifetime of the bar, and can't
+        /// be shared between compactions, so these are all multipled by the number
+        /// of concurrent compactions.
+        /// TODO: This is currently the case for fixed half-bar scheduling.
+        const block_count_bar_single: u64 = 3;
+
+        const block_count_bar_concurrent: u64 = blk: {
+            var block_count: u64 = 0;
+
+            block_count = block_count_bar_single;
+
+            // All trees can potentially compact concurrently.
+            block_count *= Forest.tree_infos.len;
+
+            // There can be up to half (rounded up) levels compacting at once with the half
+            // bar split.
+            block_count *= stdx.div_ceil(constants.lsm_levels, 2);
+
+            break :blk block_count;
+        };
+
+        /// Some blocks only need to be valid for a beat, after which they're used for
+        /// the next compaction.
+        const minimum_block_count_beat: u64 = blk: {
+            var minimum_block_count: u64 = 0;
+
+            // We need a minimum of 2 source value blocks; one from each table.
+            minimum_block_count += 2;
+
+            // We need a minimum of 1 output value block.
+            minimum_block_count += 1;
+
+            // Because we're a 3 stage pipeline, with the middle stage (merge) having a
+            // data dependency on both read and write value blocks, we need to split our
+            // memory in the middle. This results in a doubling of what we have so far.
+            minimum_block_count *= 2;
+
+            // We need a 2 source index blocks; one for each table.
+            minimum_block_count += 2;
+
+            break :blk minimum_block_count;
+        };
 
         /// If you think of a pipeline diagram, a pipeline slot is a single instruction.
         const PipelineSlot = struct {
@@ -761,10 +813,12 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         grid: *Grid,
 
+        block_pool: CompactionBlockFIFO,
+
         /// Raw, linear buffer of blocks + reads / writes that will be split up. The
         /// CompactionPipeline owns this memory, and anything pointing to a CompactionBlock
         /// ultimately lives here.
-        compaction_blocks: []CompactionHelper.CompactionBlock,
+        block_pool_raw: []CompactionHelper.CompactionBlock,
 
         compactions: stdx.BoundedArray(CompactionInfo, compaction_count) = .{},
 
@@ -799,36 +853,55 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 constants.compaction_block_memory,
                 block_count,
             });
+            assert(block_count >= block_count_bar_concurrent + minimum_block_count_beat);
 
-            const compaction_blocks = try allocator.alloc(
+            var block_pool: CompactionBlockFIFO = .{
+                .name = "block_pool",
+                .verify_push = false,
+            };
+
+            const block_pool_raw = try allocator.alloc(
                 CompactionHelper.CompactionBlock,
                 block_count,
             );
-            errdefer allocator.free(compaction_blocks);
+            errdefer allocator.free(block_pool_raw);
 
-            for (compaction_blocks, 0..) |*compaction_block, i| {
-                errdefer for (compaction_blocks[0..i]) |block| allocator.free(block.block);
+            for (block_pool_raw, 0..) |*compaction_block, i| {
+                errdefer for (block_pool_raw[0..i]) |block| allocator.free(block.block);
                 compaction_block.* = .{
                     .block = try allocate_block(allocator),
                 };
+                block_pool.push(compaction_block);
             }
-            errdefer for (compaction_blocks) |block| allocator.free(block.block);
+            errdefer for (block_pool_raw) |block| allocator.free(block.block);
 
             return .{
-                .compaction_blocks = compaction_blocks,
+                .block_pool = block_pool,
+                .block_pool_raw = block_pool_raw,
                 .grid = grid,
             };
         }
 
         pub fn deinit(self: *CompactionPipeline, allocator: mem.Allocator) void {
-            for (self.compaction_blocks) |block| allocator.free(block.block);
-            allocator.free(self.compaction_blocks);
+            for (self.block_pool_raw) |block| allocator.free(block.block);
+            allocator.free(self.block_pool_raw);
         }
 
         pub fn reset(self: *CompactionPipeline) void {
+            var block_pool: CompactionBlockFIFO = .{
+                .name = "block_pool",
+                .verify_push = false,
+            };
+
+            for (self.block_pool_raw) |*compaction_block| {
+                compaction_block.* = .{ .block = compaction_block.block };
+                block_pool.push(compaction_block);
+            }
+
             self.* = .{
                 .grid = self.grid,
-                .compaction_blocks = self.compaction_blocks,
+                .block_pool = block_pool,
+                .block_pool_raw = self.block_pool_raw,
             };
         }
 
@@ -840,111 +913,46 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         /// | Table A     | Table B       | Table A     | Table B       |
         /// -------------------------------------------------------------
         fn divide_blocks(self: *CompactionPipeline) CompactionHelper.CompactionBlocks {
-            // Some blocks only need to be valid for a beat, after which they're used for
-            // the next compaction.
-            const minimum_block_count_beat: u64 = blk: {
-                var minimum_block_count: u64 = 0;
+            assert(self.block_pool.count >= minimum_block_count_beat);
 
-                // We need a minimum of 2 source value blocks; one from each table.
-                minimum_block_count += 2;
+            // By the end, we must have consumed more than minimum_block_count_beat or our
+            // calculation there is wrong.
+            const block_pool_count_start = self.block_pool.count;
+            defer assert(block_pool_count_start - self.block_pool.count >=
+                minimum_block_count_beat);
 
-                // We need a minimum of 1 output value block.
-                minimum_block_count += 1;
-
-                // Because we're a 3 stage pipeline, with the middle stage (merge) having a
-                // data dependency on both read and write value blocks, we need to split our
-                // memory in the middle. This results in a doubling of what we have so far.
-                minimum_block_count *= 2;
-
-                break :blk minimum_block_count;
-            };
-
-            // Some blocks need to be reserved for the lifetime of the bar, and can't
-            // be shared between compactions, so these are all multipled by the number
-            // of trees:
-            const block_count_bar: u64 = blk: {
-                var block_count: u64 = 0;
-
-                // Source index blocks. For now, just require we have 2.
-                block_count += 2;
-
-                // Immutable value block. Used when level_a comes from the immutable table.
-                block_count += 1;
-
-                // Output index blocks. Minimum of 2 since one can be writing while the other
-                // is being used.
-                block_count += 2;
-
-                block_count *= Forest.tree_infos.len;
-
-                break :blk block_count;
-            };
-
-            assert(self.compaction_blocks.len >= block_count_bar + minimum_block_count_beat);
-
-            // Reserve the top of the block address space for the bar scoped blocks.
-            const blocks =
-                self.compaction_blocks[0 .. self.compaction_blocks.len - block_count_bar];
-            assert(blocks.len >= minimum_block_count_beat);
-
-            for (blocks) |*block| {
-                block.next = null;
-                block.stage = .free;
-            }
-
-            // Source index blocks is always 2 for now.
-            const source_index_blocks = blocks[0..2];
+            const source_index_block_a = self.block_pool.pop().?;
+            const source_index_block_b = self.block_pool.pop().?;
 
             // Split the remaining blocks equally, with the remainder going to the target pool.
             // TODO: Splitting equally is definitely not the best way!
             // TODO: If level_b is 0, level_a needs no memory at all.
-            var equal_split_count = @divFloor(blocks.len - 2, 3);
-            if (equal_split_count % 2 != 0) equal_split_count -= 1; // Must be even, for now.
-
-            const source_value_level_a = blocks[2..][0..equal_split_count];
-            const source_value_level_b = blocks[2 + equal_split_count ..][0..equal_split_count];
-
             // TODO: This wastes the remainder, but we have other code that requires the count
             // to be even for now.
-            const target_value_blocks =
-                blocks[2 + equal_split_count + equal_split_count ..][0..equal_split_count];
+            var equal_split_count = @divFloor(self.block_pool.count - 2, 3);
+            if (equal_split_count % 2 != 0) equal_split_count -= 1; // Must be even, for now.
 
-            log.debug("divide_blocks: block_count_bar={} source_index_blocks.len={} " ++
-                "source_value_level_a.len={} source_value_level_b.len={} " ++
-                " target_value_blocks.len={}", .{
-                block_count_bar,
-                source_index_blocks.len,
-                source_value_level_a.len,
-                source_value_level_b.len,
-                target_value_blocks.len,
+            log.debug("divide_blocks: block_count_bar_concurrent={} block_pool.count={} " ++
+                "source_value_level_a={} source_value_level_b={} " ++
+                " target_value_blocks={}", .{
+                block_count_bar_concurrent,
+                self.block_pool.count,
+                equal_split_count,
+                equal_split_count,
+                equal_split_count,
             });
 
-            {
-                const subdivision: []const []CompactionHelper.CompactionBlock = &.{
-                    source_index_blocks,
-                    source_value_level_a,
-                    source_value_level_b,
-                    target_value_blocks,
-                };
-                for (subdivision, 0..) |slice_a, i| {
-                    for (subdivision[0..i]) |slice_b| {
-                        assert(stdx.disjoint_slices(
-                            CompactionHelper.CompactionBlock,
-                            CompactionHelper.CompactionBlock,
-                            slice_a,
-                            slice_b,
-                        ));
-                    }
-                }
-            }
-
             return .{
-                .source_index_blocks = source_index_blocks,
+                .source_index_block_a = source_index_block_a,
+                .source_index_block_b = source_index_block_b,
                 .source_value_blocks = .{
-                    CompactionHelper.BlockFIFO.init(source_value_level_a),
-                    CompactionHelper.BlockFIFO.init(source_value_level_b),
+                    CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
+                    CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
                 },
-                .target_value_blocks = CompactionHelper.BlockFIFO.init(target_value_blocks),
+                .target_value_blocks = CompactionHelper.BlockFIFO.init(
+                    &self.block_pool,
+                    equal_split_count,
+                ),
             };
         }
 
@@ -1004,49 +1012,51 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             }
 
             if (first_beat or half_beat) {
+                // At the first beat or first half beat, the block pool must be full.
+                assert(self.block_pool.count == self.block_pool_raw.len);
+
                 if (first_beat)
                     self.bar_active = CompactionBitset.initEmpty();
 
-                var compaction_blocks = self.compaction_blocks;
                 for (self.compactions.slice(), 0..) |*compaction, i| {
                     if (compaction.level_b % 2 == 0 and first_beat) continue;
                     if (compaction.level_b % 2 != 0 and half_beat) continue;
+                    if (compaction.move_table) continue;
 
-                    // TODO: divide_blocks ensures blocks aren't aliased, this code should do
-                    // the same.
-                    const len = compaction_blocks.len; // Line length limits...
-                    const immutable_table_a_block = compaction_blocks[len - 1].block;
-                    const blocks = compaction_blocks[len - 3 .. len - 1];
-                    for (blocks) |*block| {
-                        block.next = null;
-                        block.stage = .free;
-                    }
+                    assert(
+                        self.block_pool.count >= minimum_block_count_beat + block_count_bar_single,
+                    );
 
-                    compaction_blocks.len -= 3;
+                    const block_pool_count_start = self.block_pool.count;
+                    defer assert(
+                        block_pool_count_start - self.block_pool.count == block_count_bar_single,
+                    );
 
-                    const ring_buffer = CompactionHelper.BlockFIFO.init(blocks);
+                    const immutable_table_a_block = self.block_pool.pop().?;
+                    const target_index_blocks = CompactionHelper.BlockFIFO.init(
+                        &self.block_pool,
+                        2,
+                    );
 
-                    if (!compaction.move_table) {
-                        // A compaction is marked as live at the start of a bar, unless it's
-                        // move_table...
-                        self.bar_active.set(i);
+                    // A compaction is marked as live at the start of a bar, unless it's
+                    // move_table...
+                    self.bar_active.set(i);
 
-                        // ... and has its bar scoped buffers and budget assigned.
-                        // TODO: This is an _excellent_ value to fuzz on.
-                        // NB: While compaction is deterministic regardless of how much memory
-                        // you give it, it's _not_ deterministic across different target
-                        // budgets. This is because the target budget determines the beat grid
-                        // block allocation, so whatever function calculates this in the future
-                        // needs to itself be deterministic.
-                        switch (Forest.tree_id_cast(compaction.tree_id)) {
-                            inline else => |tree_id| {
-                                self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
-                                    @divExact(constants.lsm_batch_multiple, 2),
-                                    ring_buffer,
-                                    immutable_table_a_block,
-                                );
-                            },
-                        }
+                    // ... and has its bar scoped buffers and budget assigned.
+                    // TODO: This is an _excellent_ value to fuzz on.
+                    // NB: While compaction is deterministic regardless of how much memory
+                    // you give it, it's _not_ deterministic across different target
+                    // budgets. This is because the target budget determines the beat grid
+                    // block allocation, so whatever function calculates this in the future
+                    // needs to itself be deterministic.
+                    switch (Forest.tree_id_cast(compaction.tree_id)) {
+                        inline else => |tree_id| {
+                            self.tree_compaction(tree_id, compaction.level_b).bar_setup_budget(
+                                @divExact(constants.lsm_batch_multiple, 2),
+                                target_index_blocks,
+                                immutable_table_a_block,
+                            );
+                        },
                     }
                 }
             }
@@ -1281,7 +1291,16 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                     }
                 }
             } else if (self.state == .drained) {
-                log.debug("advance_pipeline: final blip_write finished", .{});
+                // Reclaim our blocks from this compaction.
+                const slot = self.slots[0].?;
+                switch (Forest.tree_id_cast(slot.tree_id)) {
+                    inline else => |tree_id| {
+                        self.tree_compaction(
+                            tree_id,
+                            slot.level_b,
+                        ).beat_blocks_unassign(&self.block_pool);
+                    },
+                }
 
                 // TODO: Resetting these below variables like this isn't great.
                 self.beat_active.unset(self.slots[0].?.compaction_index);
