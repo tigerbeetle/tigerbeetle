@@ -712,6 +712,7 @@ pub fn CompactionType(
         ) void {
             // Limited to half bars for now.
             assert(beats_max <= @divExact(constants.lsm_batch_multiple, 2));
+            assert(beats_max > 0);
 
             assert(compaction.bar != null);
             assert(compaction.beat == null);
@@ -800,6 +801,10 @@ pub fn CompactionType(
             assert(compaction.beat.?.blocks == null);
             assert(!compaction.bar.?.move_table);
 
+            assert(blocks.source_value_blocks[0].count > 0);
+            assert(blocks.source_value_blocks[1].count > 0);
+            assert(blocks.target_value_blocks.count > 0);
+
             compaction.beat.?.blocks = blocks;
         }
 
@@ -884,7 +889,9 @@ pub fn CompactionType(
                 },
             }
 
+            if (bar.range_b.tables.count() == 0) assert(compaction.level_b == 0);
             assert(bar.source_b_position.index_block <= bar.range_b.tables.count());
+
             if (bar.range_b.tables.count() > 0 and
                 bar.source_b_position.index_block < bar.range_b.tables.count())
             {
@@ -948,9 +955,11 @@ pub fn CompactionType(
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
 
+            assert(beat.index_read_done);
             assert(beat.read != null);
             const read = &beat.read.?;
 
+            assert(read.pending_reads_index == 0);
             assert(read.pending_reads_data == 0);
 
             // TODO: The code for reading table_a and table_b are almost identical,
@@ -979,14 +988,8 @@ pub fn CompactionType(
                 );
                 // Once our read buffer is full, end the loop.
                 while (i < value_blocks_used and free_blocks_used < half_blocks_count) {
-                    var maybe_source_value_block =
-                        beat.blocks.?.source_value_blocks[0].free_to_pending();
-                    free_blocks_used += 1;
-
-                    // Once our read buffer is full, break out of the loop.
-                    if (maybe_source_value_block == null) break;
-
-                    const source_value_block = maybe_source_value_block.?;
+                    const source_value_block =
+                        beat.blocks.?.source_value_blocks[0].free_to_pending() orelse break;
 
                     source_value_block.target = compaction;
                     compaction.grid.read_block(
@@ -998,6 +1001,7 @@ pub fn CompactionType(
                     );
 
                     read.pending_reads_data += 1;
+                    free_blocks_used += 1;
                     i += 1;
                 }
             }
@@ -1280,8 +1284,8 @@ pub fn CompactionType(
             log.debug("blip_merge(): took {} to merge blocks", .{std.fmt.fmtDuration(d)});
 
             if (source_exhausted_bar) {
-                assert(compaction.set_source_a() == .exhausted and
-                    compaction.set_source_b() == .exhausted);
+                assert(compaction.set_source_a() == .exhausted);
+                assert(compaction.set_source_b() == .exhausted);
                 assert(bar.source_values_read_count == bar.source_values_merge_count);
 
                 // Sanity check our primary condition.
@@ -1773,8 +1777,10 @@ pub fn CompactionType(
             // Join on all outstanding writes before continuing.
             if (write.pending_writes != 0) return;
 
-            while (beat.blocks.?.target_value_blocks.ioing_to_free() != null) {}
-            while (compaction.bar.?.target_index_blocks.?.ioing_to_free() != null) {}
+            var freed: usize = 0;
+            while (beat.blocks.?.target_value_blocks.ioing_to_free() != null) freed += 1;
+            while (compaction.bar.?.target_index_blocks.?.ioing_to_free() != null) freed += 1;
+            assert(freed > 0);
 
             // Call the next tick handler directly. This callback is invoked async, so it's safe
             // from stack overflows.
@@ -1980,9 +1986,10 @@ pub fn CompactionType(
         }
 
         // TODO: Add benchmarks for these CPU merge methods.
-        fn copy(compaction: *Compaction, comptime source: enum { a, b }) void {
+        fn copy(compaction: *Compaction, source: enum { a, b }) void {
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
+            if (source == .a) assert(!bar.drop_tombstones);
 
             assert(bar.table_builder.value_count < Table.layout.block_value_count_max);
 
@@ -2022,6 +2029,7 @@ pub fn CompactionType(
         fn copy_drop_tombstones(compaction: *Compaction) void {
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
+            assert(bar.drop_tombstones);
 
             log.debug("blip_merge({s}: merging via copy_drop_tombstones()", .{
                 compaction.tree_config.name,
