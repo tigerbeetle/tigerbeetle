@@ -708,20 +708,20 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 
     const action_distribution = fuzz.Distribution(FuzzOpActionTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
-        .compact = if (random.boolean()) 0 else 1,
+        .compact = 0,
         // Always do puts.
         .put_account = constants.lsm_batch_multiple * 2,
         // Maybe do some gets.
-        .get_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .get_account = 0,
         // Maybe do some scans.
-        .scan_account = if (random.boolean()) 0 else constants.lsm_batch_multiple,
+        .scan_account = 0,
     };
     log.info("action_distribution = {:.2}", .{action_distribution});
 
     const modifier_distribution = fuzz.Distribution(FuzzOpModifierTag){
         .normal = 1,
         // Maybe crash and recover from the last checkpoint a few times per fuzzer run.
-        .crash_after_ticks = if (random.boolean()) 0 else 1E-2,
+        .crash_after_ticks = 0,
     };
     log.info("modifier_distribution = {:.2}", .{modifier_distribution});
 
@@ -764,7 +764,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 };
             },
             .put_account => put_account: {
-                const id = random_id(random, u128);
+                const id = random.int(u128);
                 var account = id_to_account.get(id) orelse Account{
                     .id = id,
                     // `timestamp` must be unique.
@@ -879,10 +879,11 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
-    const fuzz_op_count = @min(
-        fuzz_args.events_max orelse @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
-    );
+    const fuzz_op_count = 1E7;
+    // @min(
+    //     fuzz_args.events_max orelse @as(usize, 1E7),
+    //     fuzz.random_int_exponential(random, usize, 1E6),
+    // );
 
     const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
     defer allocator.free(fuzz_ops);

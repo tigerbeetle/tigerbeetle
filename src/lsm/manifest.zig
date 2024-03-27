@@ -434,10 +434,12 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         };
 
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
+            std.log.info("Level counts for {s}:", .{@typeName(Table)});
             for (&manifest.levels, 0..) |*manifest_level, index| {
                 const level: u8 = @intCast(index);
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);
+                std.log.info("Level: {} {}/{}", .{ level, manifest_level.table_count_visible, table_count_visible_max });
                 // TODO(metric): This is a great metric to add.
             }
         }

@@ -245,7 +245,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .tree_id_max = tree_id_range.max,
                 // TODO Make this a runtime argument (from the CLI, derived from storage-size-max if
                 // possible).
-                .forest_table_count_max = table_count_max,
+                .forest_table_count_max = table_count_max * tree_infos.len,
             });
             errdefer manifest_log.deinit(allocator);
 

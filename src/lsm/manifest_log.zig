@@ -145,6 +145,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
         pub fn init(allocator: mem.Allocator, grid: *Grid, options: Options) !ManifestLog {
             assert(options.tree_id_min <= options.tree_id_max);
 
+            std.log.info("options.forest_table_count_max={}", .{options.forest_table_count_max});
+
             const pace = Pace.init(.{
                 .tree_count = options.forest_tree_count(),
                 .tables_max = options.forest_table_count_max,
@@ -152,7 +154,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             });
 
             inline for (std.meta.fields(Pace)) |pace_field| {
-                log.debug("{?}: Manifest.Pace.{s} = {d}", .{
+                log.info("{?}: Manifest.Pace.{s} = {d}", .{
                     grid.superblock.replica_index,
                     pace_field.name,
                     @field(pace, pace_field.name),
