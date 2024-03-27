@@ -1137,6 +1137,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             if (maybe_exhausted) |exhausted| {
                 if (exhausted.beat) {
+                    assert(pipeline.state != .draining);
+                    assert(pipeline.state != .drained);
+
                     log.debug("blip_callback: entering draining state", .{});
                     pipeline.state = .draining;
                 }
@@ -1144,6 +1147,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 if (exhausted.bar) {
                     // If the bar is exhausted the beat must be exhausted too.
                     assert(pipeline.state == .draining);
+                    assert(pipeline.bar_active.isSet(slot.compaction_index));
+
                     log.debug(
                         "blip_callback: unsetting bar_active[{}]",
                         .{slot.compaction_index},
@@ -1162,6 +1167,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn advance_pipeline(self: *CompactionPipeline) void {
+            assert(self.slot_running_count == 0);
+
             const active_compaction_index = self.beat_active.findFirstSet() orelse {
                 log.debug("advance_pipeline: all compactions finished - " ++
                     "calling beat_finished_next_tick()", .{});
@@ -1174,6 +1181,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // Advanced any filled stages, making sure to start our IO before CPU.
                 for (self.slots[0..self.slot_filled_count], 0..) |*slot_wrapped, i| {
                     const slot: *PipelineSlot = &slot_wrapped.*.?;
+                    assert(slot.compaction_index == active_compaction_index);
 
                     switch (slot.active_operation) {
                         .read => {
