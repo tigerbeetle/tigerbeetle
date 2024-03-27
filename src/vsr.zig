@@ -75,6 +75,7 @@ pub const Release = extern struct {
     }
 
     pub const zero = Release.from(.{ .major = 0, .minor = 0, .patch = 0 });
+    // Minimum is used for all development builds, to distinguish them from production deployments.
     pub const minimum = Release.from(.{ .major = 0, .minor = 0, .patch = 1 });
 
     pub fn from(release_triple: ReleaseTriple) Release {
