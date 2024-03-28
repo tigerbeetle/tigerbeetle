@@ -37,8 +37,8 @@ command line argument.
 
 ## CPU
 
-TigerBeetle requires only a single core per replica machine. TigerBeetle at present does not utilize
-more cores, but may in future.
+TigerBeetle requires only a single core per replica machine. TigerBeetle at present [does not
+utilize more cores](../about/performance.md#single-core-by-design), but may in future.
 
 ## Multitenancy
 
