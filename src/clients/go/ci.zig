@@ -57,7 +57,8 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         defer tmp_beetle.deinit(gpa);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
-        try shell.exec("go run main.go", .{});
+        try shell.exec("go build main.go", .{});
+        try shell.exec("./main" ++ builtin.target.exeFileExt(), .{});
     }
 }
 
