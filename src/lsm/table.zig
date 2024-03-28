@@ -132,7 +132,7 @@ pub fn TableType(
         pub const data_block_count_max = layout.data_block_count_max;
         pub const block_count_max = index_block_count + data_block_count_max;
 
-        const index = schema.TableIndex.init(.{
+        pub const index = schema.TableIndex.init(.{
             .key_size = key_size,
             .data_block_count_max = data_block_count_max,
         });

@@ -915,7 +915,7 @@ pub fn CompactionType(
             const compaction: *Compaction = @alignCast(@ptrCast(parent.target));
             assert(compaction.bar != null);
             assert(compaction.beat != null);
-            assert(compaction.tree_config.id == schema.TableIndex.metadata(index_block).tree_id);
+            assert(compaction.tree_config.id == Table.index.block_metadata(index_block).tree_id);
 
             const beat = &compaction.beat.?;
 
@@ -1060,6 +1060,7 @@ pub fn CompactionType(
         fn blip_read_data_callback(grid_read: *Grid.Read, value_block: BlockPtrConst) void {
             const parent = @fieldParentPtr(Helpers.CompactionBlock, "read", grid_read);
             const compaction: *Compaction = @alignCast(@ptrCast(parent.target));
+            assert(compaction.tree_config.id == Table.data.block_metadata(value_block).tree_id);
 
             assert(compaction.bar != null);
             assert(compaction.beat != null);
