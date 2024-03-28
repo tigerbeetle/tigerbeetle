@@ -307,6 +307,7 @@ pub fn CompactionType(
             /// Number of beats we should aim to finish this compaction in. It might be fewer, but
             /// it'll never be more.
             beats_max: ?u64,
+            beats_finished: u64 = 0,
             compaction_tables_value_count: u64,
             value_count_per_beat: u64 = 0,
 
@@ -714,13 +715,9 @@ pub fn CompactionType(
             assert(!bar.move_table);
 
             assert(bar.value_count_per_beat == 0);
+            assert(bar.beats_max == null);
 
-            // TODO: Move this calculation into beat_grid_reserve, and subtract the values we've
-            // already done from it.
-            // This way we self correct our pacing and better spread the work out....
-            bar.value_count_per_beat = stdx.div_ceil(bar.compaction_tables_value_count, beats_max);
-            assert(bar.value_count_per_beat > 0);
-
+            bar.beats_max = beats_max;
             bar.target_index_blocks = target_index_blocks;
             assert(target_index_blocks.count > 0);
 
@@ -728,11 +725,9 @@ pub fn CompactionType(
             // be null!
             bar.source_a_immutable_block = source_a_immutable_block;
 
-            log.debug("bar_setup_budget({s}): bar.compaction_tables_value_count={} " ++
-                "bar.value_count_per_beat={}", .{
+            log.debug("bar_setup_budget({s}): bar.compaction_tables_value_count={}", .{
                 compaction.tree_config.name,
                 bar.compaction_tables_value_count,
-                bar.value_count_per_beat,
             });
         }
 
@@ -754,7 +749,18 @@ pub fn CompactionType(
             // If we're move_table, only the manifest is being updated, *not* the grid.
             assert(!bar.move_table);
 
-            assert(bar.value_count_per_beat > 0);
+            assert(bar.beats_max != null);
+
+            // Calculate how many values we have to compact each beat, to self-correct our pacing.
+            // Pacing will have imperfections due to rounding up to fill target value blocks and
+            // immutable table filtering duplicate values.
+            assert(bar.compaction_tables_value_count > bar.source_values_merge_count);
+            const beats_remaining = bar.beats_max.? - bar.beats_finished;
+            assert(beats_remaining > 0);
+            bar.value_count_per_beat = stdx.div_ceil(
+                bar.compaction_tables_value_count - bar.source_values_merge_count,
+                beats_remaining,
+            );
 
             // The +1 is for imperfections in pacing our immutable table, which might cause us
             // to overshoot by a single block (limited to 1 due to how the immutable table values
@@ -776,11 +782,13 @@ pub fn CompactionType(
             // (actually, we want to still panic but with something nicer like vsr.fail)
             const grid_reservation = compaction.grid.reserve(total_blocks_per_beat).?;
             log.debug("beat_grid_reserve({s}): total_blocks_per_beat={} " ++
-                "index_blocks_per_beat={} value_blocks_per_beat={}", .{
+                "index_blocks_per_beat={} value_blocks_per_beat={} " ++
+                "bar.value_count_per_beat={} ", .{
                 compaction.tree_config.name,
                 total_blocks_per_beat,
                 index_blocks_per_beat,
                 value_blocks_per_beat,
+                bar.value_count_per_beat,
             });
 
             compaction.beat = .{
@@ -1827,6 +1835,8 @@ pub fn CompactionType(
             beat.assert_all_inactive();
             assert(bar.table_builder.data_block_empty());
 
+            bar.beats_finished += 1;
+
             if (beat.grid_reservation) |grid_reservation| {
                 log.debug("beat_grid_forfeit({s}): forfeiting {}", .{
                     compaction.tree_config.name,
@@ -1894,6 +1904,11 @@ pub fn CompactionType(
             // Assert we've written all the values we've merged.
             // TODO: Can we assert target_values_merge_count > 0 here?
             assert(bar.target_values_merge_count == bar.target_values_write_count);
+
+            // Assert we've finished within the number of beats we were allocated.
+            // TODO(metric): Track the delta between target and actual.
+            if (!bar.move_table)
+                assert(bar.beats_finished <= bar.beats_max.?);
 
             // Mark the immutable table as flushed, if we were compacting into level 0.
             if (compaction.level_b == 0 and bar.table_info_a.immutable.len == 0)
