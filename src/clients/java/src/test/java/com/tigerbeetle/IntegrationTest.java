@@ -1661,7 +1661,7 @@ public class IntegrationTest {
             }
 
             this.process = new ProcessBuilder()
-                    .command(new String[] {exe, "start", "--addresses=0", "--cache-grid=512MiB",
+                    .command(new String[] {exe, "start", "--addresses=0", "--cache-grid=1024MiB",
                             TB_FILE})
                     .redirectOutput(Redirect.PIPE).redirectError(Redirect.INHERIT).start();
 
