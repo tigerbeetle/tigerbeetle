@@ -1,1 +1,0 @@
-docs/TIGER_STYLE.md
