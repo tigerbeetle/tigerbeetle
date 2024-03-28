@@ -16,7 +16,8 @@ especially transfers -- reliably.
 `id` field that is used as an idempotency key to ensure the same object is not created twice.
 
 **The client software, such as your app or web page, that the user interacts with should generate the
-`id` (not your API):**
+`id` (not your API). This `id` should be persisted locally before submission, and the same `id`
+should be used for subsequent retries.**
 
 1. User initiates a transfer.
 2. Client software (app, web page, etc) [generates the transfer `id`](./data-modeling.md#id).
@@ -34,7 +35,8 @@ The method described above handles various potential network failures. The reque
 before it reaches the API service or before it reaches TigerBeetle. Or, the response may be lost on
 the way back from TigerBeetle.
 
-Generating the `id` on the client side ensures that transfers can be safely retried.
+Generating the `id` on the client side ensures that transfers can be safely retried. The app must
+use the same `id` each time the transfer is resent.
 
 If the transfer was already created before and then retried, TigerBeetle will return the
 [`exists`](../reference/operations/create_transfers.md#exists) response code. If the transfer had
@@ -47,7 +49,7 @@ The method described above also handles potential restarts of the app or browser
 is in flight.
 
 It is important to **persist the `id` to local storage on the client's device before submitting the
-transfer**.
+transfer**. When the app or web page reloads, it should resubmit the transfer using the same `id`.
 
 This ensures that the operation can be safely retried even if the client app or browser restarts
 before receiving the response to the operation. Similar to the case of a network failure,
