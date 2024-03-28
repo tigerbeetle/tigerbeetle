@@ -72,7 +72,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(
         []const u8,
         "release",
-        b.option([]const u8, "tigerbeetle-release", "Release triple.") orelse "0.0.1",
+        b.option([]const u8, "config-release", "Release triple.") orelse "0.0.1",
     );
 
     options.addOption(
