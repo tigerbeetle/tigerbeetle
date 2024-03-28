@@ -1,6 +1,6 @@
 # We _could_ use `FROM scratch` here, but let's use alpine to ease debugging in case someone needs
 # to poke inside the container.
-FROM alpine:3.17
+FROM alpine:3.19
 
 RUN apk add --no-cache tini
 
