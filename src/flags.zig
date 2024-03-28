@@ -311,8 +311,12 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
                 "{s}: value exceeds 64-bit unsigned integer: '{s}'",
                 .{ flag, value },
             ),
-            error.InvalidCharacter => fatal(
-                "{s}: expected a size, but found '{s}' (invalid digit or suffix)",
+            error.MissingDigits => fatal(
+                "{s}: need digits in size '{s}'",
+                .{ flag, value },
+            ),
+            error.InvalidUnit => fatal(
+                "{s}: invalid unit in size '{s}', (needed KiB, MiB, GiB or TiB)",
                 .{ flag, value },
             ),
             error.BytesOverflow => fatal(
@@ -333,7 +337,8 @@ pub const ByteUnit = enum(u64) {
 
 const ByteSizeParseError = error{
     ParseOverflow,
-    InvalidCharacter,
+    MissingDigits,
+    InvalidUnit,
     BytesOverflow,
 };
 
@@ -342,6 +347,8 @@ pub const ByteSize = struct {
     unit: ByteUnit = .bytes,
 
     fn parse(value: []const u8) ByteSizeParseError!ByteSize {
+        assert(value.len != 0);
+
         const units = .{
             .{ &[_][]const u8{ "TiB", "tib" }, ByteUnit.tib },
             .{ &[_][]const u8{ "GiB", "gib" }, ByteUnit.gib },
@@ -349,38 +356,55 @@ pub const ByteSize = struct {
             .{ &[_][]const u8{ "KiB", "kib" }, ByteUnit.kib },
         };
 
-        const unit: struct {
+        const split: struct {
             value_input: []const u8,
-            unit: ByteUnit,
-        } = unit: inline for (units) |unit| {
-            const suffixes = unit[0];
-            const unit_kind = unit[1];
-            for (suffixes) |suffix_| {
-                if (std.mem.endsWith(u8, value, suffix_)) {
-                    break :unit .{
-                        .value_input = value[0 .. value.len - suffix_.len],
-                        .unit = unit_kind,
-                    };
-                }
+            unit_input: []const u8,
+        } = split: for (0..value.len) |i| {
+            if (!std.ascii.isDigit(value[i])) {
+                break :split .{
+                    .value_input = value[0..i],
+                    .unit_input = value[i..],
+                };
             }
-        } else break :unit .{ .value_input = value, .unit = ByteUnit.bytes };
+        } else {
+            break :split .{
+                .value_input = value,
+                .unit_input = "",
+            };
+        };
 
-        const amount = std.fmt.parseUnsigned(u64, unit.value_input, 10) catch |err| {
+        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
             switch (err) {
                 error.Overflow => {
                     return ByteSizeParseError.ParseOverflow;
                 },
                 error.InvalidCharacter => {
-                    return ByteSizeParseError.InvalidCharacter;
+                    // The only case this can happen is for the empty string
+                    return ByteSizeParseError.MissingDigits;
                 },
             }
         };
 
-        _ = std.math.mul(u64, amount, @intFromEnum(unit.unit)) catch {
+        const unit = if (split.unit_input.len > 0)
+            unit: inline for (units) |unit_| {
+                const suffixes = unit_[0];
+                const unit_kind = unit_[1];
+                for (suffixes) |suffix_| {
+                    if (std.mem.endsWith(u8, split.unit_input, suffix_)) {
+                        break :unit unit_kind;
+                    }
+                }
+            } else {
+                return ByteSizeParseError.InvalidUnit;
+            }
+        else
+            ByteUnit.bytes;
+
+        _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
             return ByteSizeParseError.BytesOverflow;
         };
 
-        return ByteSize{ .value = amount, .unit = unit.unit };
+        return ByteSize{ .value = amount, .unit = unit };
     }
 
     pub fn bytes(size: *const ByteSize) u64 {
@@ -1023,7 +1047,7 @@ test "flags" {
     try t.check(&.{ "values", "--size=3Mib" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: expected a size, but found '3Mib' (invalid digit or suffix)
+        \\error: --size: invalid unit in size '3Mib', (needed KiB, MiB, GiB or TiB)
         \\
     ));
 
