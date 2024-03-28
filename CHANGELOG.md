@@ -910,9 +910,7 @@ Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
 
 - [#1317](https://github.com/tigerbeetle/tigerbeetle/pull/1317)
 
-  In keeping with
-  [TigerStyle](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md#naming-things),
-  rename `reserved_nonce` to `nonce_reserved`.
+  In keeping with TigerStyle rename `reserved_nonce` to `nonce_reserved`.
 
 - [#1318](https://github.com/tigerbeetle/tigerbeetle/pull/1318)
 

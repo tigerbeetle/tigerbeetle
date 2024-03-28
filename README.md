@@ -127,7 +127,7 @@ primitives:
 [![The FASTEST and SAFEST Database
 ](https://img.youtube.com/vi/sC1B3d9C_sI/0.jpg)](https://www.youtube.com/watch?v=sC1B3d9C_sI)
 
-Read more about the [history](./docs/HISTORY.md) of TigerBeetle, the
+Read more about the [history](./docs/about/README.md#history) of TigerBeetle, the
 problem of balance tracking at scale, and the solution of a
 purpose-built financial transactions database.
 

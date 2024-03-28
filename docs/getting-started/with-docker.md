@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Single-Node Cluster with Docker
 
-First provision TigerBeetle's [data file](../internals/data_file.md):
+First provision TigerBeetle's [data file](../about/internals/data_file.md):
 
 ```console
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
