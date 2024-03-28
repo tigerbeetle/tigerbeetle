@@ -177,7 +177,7 @@ pub const TableIndex = struct {
         return index;
     }
 
-    pub fn metadata(index_block: BlockPtrConst) *const Metadata {
+    fn metadata(index_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(index_block);
         assert(header.command == .block);
         assert(header.block_type == .index);
@@ -186,6 +186,16 @@ pub const TableIndex = struct {
         assert(header_metadata.data_block_count <= header_metadata.data_block_count_max);
         assert(stdx.zeroed(&header_metadata.reserved));
         return header_metadata;
+    }
+
+    pub inline fn block_metadata(
+        schema: *const TableIndex,
+        index_block: BlockPtrConst,
+    ) *const Metadata {
+        const result = metadata(index_block);
+        assert(result.key_size == schema.key_size);
+        assert(result.data_block_count_max == schema.data_block_count_max);
+        return result;
     }
 
     pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
@@ -225,7 +235,7 @@ pub const TableIndex = struct {
     }
 
     pub inline fn data_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
-        const header_metadata = metadata(index_block);
+        const header_metadata = block_metadata(index, index_block);
         assert(header_metadata.data_block_count > 0);
         assert(header_metadata.data_block_count <= index.data_block_count_max);
         return header_metadata.data_block_count;
@@ -329,7 +339,7 @@ pub const TableData = struct {
         });
     }
 
-    pub fn metadata(data_block: BlockPtrConst) *const Metadata {
+    fn metadata(data_block: BlockPtrConst) *const Metadata {
         const header = header_from_block(data_block);
         assert(header.command == .block);
         assert(header.block_type == .data);
@@ -344,6 +354,16 @@ pub const TableData = struct {
             header.size);
 
         return header_metadata;
+    }
+
+    pub inline fn block_metadata(
+        schema: *const TableData,
+        data_block: BlockPtrConst,
+    ) *const Metadata {
+        const result = metadata(data_block);
+        assert(result.value_size == schema.value_size);
+        assert(result.value_count_max == schema.value_count_max);
+        return result;
     }
 
     pub inline fn block_values_bytes(
@@ -367,7 +387,7 @@ pub const TableData = struct {
         const header = header_from_block(data_block);
         assert(header.block_type == .data);
 
-        const used_values: u32 = metadata(data_block).value_count;
+        const used_values: u32 = block_metadata(schema, data_block).value_count;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
 

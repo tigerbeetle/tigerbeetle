@@ -416,7 +416,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
-                assert(schema.TableIndex.metadata(index_block).tree_id == context.tree.config.id);
+                assert(Table.index.block_metadata(index_block).tree_id == context.tree.config.id);
 
                 const blocks = Table.index_blocks_for_key(index_block, context.key) orelse {
                     // The key is not present in this table, check the next level.
@@ -444,7 +444,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
-                assert(schema.TableData.metadata(data_block).tree_id == context.tree.config.id);
+                assert(Table.data.block_metadata(data_block).tree_id == context.tree.config.id);
 
                 if (Table.data_block_search(data_block, context.key)) |value| {
                     context.callback(context, unwrap_tombstone(value));
