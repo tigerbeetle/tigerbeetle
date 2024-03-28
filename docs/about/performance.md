@@ -2,7 +2,7 @@
 sidebar_position: 4
 ---
 
-## Performance
+# Performance
 
 TigerBeetle provides more performance than a general-purpose relational database such as MySQL or an
 in-memory database such as Redis:
@@ -56,3 +56,17 @@ in-memory database such as Redis:
   will use cluster redundancy to mask the gray failure automatically without the user seeing any
   4-second latency spike. This is a relatively new performance technique in the literature known as
   "tail tolerance".
+
+## Single-Core By Design
+
+TigerBeetle uses a single core by design and uses a single leader node to process events. Adding
+more nodes can therefore increase reliability but not throughput.
+
+For a high-performance database, this may seem like an unusual choice. However, sharding in
+financial databases is notoriously difficult and contention issues often negate the would-be
+benefits. Specifically, a small number of hot accounts are often involved in a large proportion of
+the transactions so the shards responsible for those accounts become bottlenecks.
+
+For more details on when single-threaded implementations of algorithms outperform multi-threaded
+implementations, see ["Scalability! But at what
+COST?](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf).
