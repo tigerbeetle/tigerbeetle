@@ -312,6 +312,9 @@ pub fn CompactionType(
             /// Levels may choose to drop tombstones if keys aren't included in the lower levels.
             /// This invariant is always true for the last level as it doesn't have any lower ones.
             drop_tombstones: bool,
+            /// Number of beats we should aim to finish this compaction in. It might be fewer, but
+            /// it'll never be more.
+            beats_max: ?u64,
             /// The total number of source values for this compaction.
             /// This is fixed for the duration of the compaction.
             compaction_tables_value_count: u64,
@@ -608,6 +611,7 @@ pub fn CompactionType(
                     .compaction_tables_value_count = compaction_tables_value_count,
 
                     .target_index_blocks = null,
+                    .beats_max = null,
                 };
             } else {
                 const level_a = compaction.level_b - 1;
@@ -650,6 +654,7 @@ pub fn CompactionType(
                     .compaction_tables_value_count = compaction_tables_value_count,
 
                     .target_index_blocks = null,
+                    .beats_max = null,
                 };
 
                 // Append the entries to the manifest update queue here and now if we're doing
