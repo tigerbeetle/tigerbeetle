@@ -120,7 +120,7 @@ killing the process. If you are running Docker inside a virtual machine (such as
 Docker or Podman for macOS), try increasing the virtual machine memory limit.
 
 Alternatively, in a development environment, you can lower the size of the cache so TigerBeetle uses
-less memory. For example, set `--cache-grid=512MiB` when running `tigerbeetle start`.
+less memory. For example, set `--cache-grid=1024MiB` when running `tigerbeetle start`.
 
 ## Debugging panics
 
