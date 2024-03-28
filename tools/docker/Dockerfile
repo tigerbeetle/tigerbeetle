@@ -8,4 +8,9 @@ FROM alpine:3.17
 ARG TARGETARCH
 COPY tigerbeetle-${TARGETARCH} /tigerbeetle
 
+# Docker's default stop-signal is SIGTERM.
+# TigerBeetle does not have signal handlers, so "docker stop ..." with SIGINT hangs for several
+# seconds. Setting the signal to SIGKILL instead ensures that "docker stop" doesn't delay.
+STOPSIGNAL SIGKILL
+
 ENTRYPOINT ["/tigerbeetle"]
