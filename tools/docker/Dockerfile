@@ -2,10 +2,12 @@
 # to poke inside the container.
 FROM alpine:3.17
 
+RUN apk add --no-cache tini
+
 # NB: We are doing something unconventional here. To ensure that docker images contain the exact
 # same TigerBeetle binary we publish as our release, we don't build inside a container, and copy a
 # pre-existing binary instead.
 ARG TARGETARCH
 COPY tigerbeetle-${TARGETARCH} /tigerbeetle
 
-ENTRYPOINT ["/tigerbeetle"]
+ENTRYPOINT ["tini", "--", "/tigerbeetle"]
