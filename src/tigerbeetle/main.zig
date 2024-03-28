@@ -188,7 +188,6 @@ const Command = struct {
         const release_client_min = config.process.release;
         const releases_bundled = &[_]vsr.Release{config.process.release};
 
-        log_main.info("version={}", .{constants.semver});
         log_main.info("release={}", .{config.process.release});
         log_main.info("release_client_min={}", .{release_client_min});
         log_main.info("releases_bundled={any}", .{releases_bundled.*});
