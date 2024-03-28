@@ -1150,7 +1150,7 @@ const Pace = struct {
         const block_entries_max = schema.ManifestNode.entry_count_max;
 
         const half_bar_append_entries_max = options.tree_count *
-            stdx.div_ceil(constants.lsm_levels, 2) *
+            stdx.div_ceil(constants.lsm_levels, 2) * // Maximum number of compactions/half-bar.
             (compaction.compaction_tables_input_max + // Update snapshot_max.
             compaction.compaction_tables_input_max + // Remove.
             compaction.compaction_tables_output_max); // Insert.

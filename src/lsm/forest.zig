@@ -380,7 +380,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @divExact(constants.lsm_batch_multiple, 2) - 1;
             const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
-            assert(@intFromBool(first_beat) + @intFromBool(last_half_beat) +
+            assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
             log.debug("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
@@ -411,7 +411,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 assert(forest.compaction_pipeline.bar_active.count() == 0);
             }
 
-            // Manifest log compaction. Run on the last beat of the bar.
+            // Manifest log compaction. Run on the last beat of each half-bar.
             // TODO: Figure out a plan wrt the pacing here. Putting it on the last beat kinda-sorta
             // balances out, because we expect to naturally do less other compaction work on the
             // last beat.
@@ -451,9 +451,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 2,
             ) - 1;
             const last_beat = compaction_beat == constants.lsm_batch_multiple - 1;
-
-            // Forfeit any remaining grid reservations.
-            forest.compaction_pipeline.beat_grid_forfeit_all();
 
             // Apply the changes to the manifest. This will run at the target compaction beat
             // that is requested.
@@ -756,7 +753,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         const CompactionPipeline = @This();
 
         /// Some blocks need to be reserved for the lifetime of the bar, and can't
-        /// be shared between compactions, so these are all multipled by the number
+        /// be shared between compactions, so these are all multiplied by the number
         /// of concurrent compactions.
         /// TODO: This is currently the case for fixed half-bar scheduling.
         const block_count_bar_single: u64 = 3;
@@ -805,6 +802,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // Invariant: .{tree_id, level_b} == compactions[compaction_index].{tree_id, level_b}
             tree_id: u16,
             level_b: u8,
+            /// Index within `CompactionPipeline.compactions`.
             compaction_index: usize,
         };
 
@@ -824,6 +822,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
         bar_active: CompactionBitset = CompactionBitset.initEmpty(),
         beat_active: CompactionBitset = CompactionBitset.initEmpty(),
+        /// Set for compactions (within `compactions`) have an outstanding grid reservation.
         beat_reserved: CompactionBitset = CompactionBitset.initEmpty(),
 
         // TODO: This whole interface around slot_filled_count / slot_running_count needs to be
@@ -833,6 +832,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         slot_running_count: usize = 0,
 
         // Used for invoking the CPU work after a next_tick.
+        // Points to one of the `CompactionPipeline.slots`.
         cpu_slot: ?*PipelineSlot = null,
 
         state: enum { filling, full, draining, drained } = .filling,
@@ -972,8 +972,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             self.slot_filled_count = 0;
             self.slot_running_count = 0;
 
-            // Setup loop, runs only on the first beat of every bar, before any async work is done.
-            // If we recovered from a checkpoint, we must avoid replaying one bar of
+            // Setup loop, runs only on the first beat of every half-bar, before any async work is
+            // done. If we recovered from a checkpoint, we must avoid replaying one bar of
             // compactions that were applied before the checkpoint. Repeating these ops'
             // compactions would actually perform different compactions than before,
             // causing the storage state of the replica to diverge from the cluster.
@@ -1110,6 +1110,10 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             assert(self.callback != null and self.forest != null);
 
+            // Forfeit any remaining grid reservations.
+            self.beat_grid_forfeit_all();
+            assert(self.beat_reserved.count() == 0);
+
             const callback = self.callback.?;
             const forest = self.forest.?;
 
@@ -1134,6 +1138,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             if (maybe_exhausted) |exhausted| {
                 if (exhausted.beat) {
+                    assert(pipeline.state != .draining);
+                    assert(pipeline.state != .drained);
+
                     log.debug("blip_callback: entering draining state", .{});
                     pipeline.state = .draining;
                 }
@@ -1141,10 +1148,14 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 if (exhausted.bar) {
                     // If the bar is exhausted the beat must be exhausted too.
                     assert(pipeline.state == .draining);
+                    assert(pipeline.bar_active.isSet(slot.compaction_index));
+
                     log.debug(
                         "blip_callback: unsetting bar_active[{}]",
                         .{slot.compaction_index},
                     );
+                    // Unset bar_active for the *next* beat.
+                    // There may still be writes in-flight for this compaction.
                     pipeline.bar_active.unset(slot.compaction_index);
                 }
             }
@@ -1157,6 +1168,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn advance_pipeline(self: *CompactionPipeline) void {
+            assert(self.slot_running_count == 0);
+
             const active_compaction_index = self.beat_active.findFirstSet() orelse {
                 log.debug("advance_pipeline: all compactions finished - " ++
                     "calling beat_finished_next_tick()", .{});
@@ -1169,6 +1182,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // Advanced any filled stages, making sure to start our IO before CPU.
                 for (self.slots[0..self.slot_filled_count], 0..) |*slot_wrapped, i| {
                     const slot: *PipelineSlot = &slot_wrapped.*.?;
+                    assert(slot.compaction_index == active_compaction_index);
 
                     switch (slot.active_operation) {
                         .read => {
@@ -1344,14 +1358,10 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn beat_grid_forfeit_all(self: *CompactionPipeline) void {
-            var i = self.compactions.count();
-            while (i > 0) {
-                i -= 1;
-
-                // We need to run this for all compactions that ran acquire - even if they
-                // transitioned to being finished, so we can't just use bar_active.
-                if (!self.beat_reserved.isSet(i)) continue;
-
+            // We need to run this for all compactions that ran acquire - even if they
+            // transitioned to being finished, so we can't just use bar_active.
+            var compactions_reserved = self.beat_reserved.iterator(.{});
+            while (compactions_reserved.next()) |i| {
                 switch (Forest.tree_id_cast(self.compactions.slice()[i].tree_id)) {
                     inline else => |tree_id| {
                         self.tree_compaction(

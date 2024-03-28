@@ -705,6 +705,8 @@ pub const aof_recovery = config.process.aof_recovery;
 
 /// The amount of memory allocated for compactions. Compactions will be deterministic regardless
 /// of how much memory you give them, but will run in fewer steps with more memory.
+// TODO: Expose this as a CLI flag, to allow tuning of compaction rate.
+// (And use this current value as the default.)
 pub const compaction_block_memory = config.process.compaction_block_memory;
 
 /// Maximum number of tree scans that can be performed by a single query.
