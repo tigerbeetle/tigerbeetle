@@ -184,13 +184,21 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
+        // TODO Where should this be set?
+        const release_client_min = config.process.release;
+        const releases_bundled = &[_]vsr.Release{config.process.release};
+
+        log_main.info("release={}", .{config.process.release});
+        log_main.info("release_client_min={}", .{release_client_min});
+        log_main.info("releases_bundled={any}", .{releases_bundled.*});
+        log_main.info("git_commit={?s}", .{config.process.git_commit});
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = @intCast(args.addresses.len),
             .release = config.process.release,
-            // TODO Where should this be set?
-            .release_client_min = config.process.release,
-            .releases_bundled = &[_]vsr.Release{config.process.release},
+            .release_client_min = release_client_min,
+            .releases_bundled = releases_bundled,
             .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
