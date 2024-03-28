@@ -38,6 +38,9 @@ for page in $(ls pages/*.md); do
     fi
 done
 
+# The link validator doesn't like symlinks so we'll copy the file over instead.
+cp -f pages/TIGER_STYLE.md pages/about/tiger-style.md
+
 # Validate links
 npx remark --use remark-validate-links --frail pages
 
