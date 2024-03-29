@@ -1,5 +1,21 @@
 # Talks
 
+## March 22, 2024: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
+
+Joran Dirk Greef discusses how the world is becoming more transactional, why Online
+Transaction Processing (OLTP) needs to be redesigned for today's massive scale, and
+he goes into technical detail about how TigerBeetle achieves this.
+
+https://www.infoq.com/presentations/redesign-oltp/
+
+## February 26, 2024: The FASTEST and SAFEST Database
+
+Joran Dirk Greef gives an entertaining and informative overview of the problems TigerBeetle
+solves, technical details about how it works, and shows a demo of the simulator at the end.
+ThePrimeagen was blown away.
+
+https://youtu.be/sC1B3d9C_sI?si=Pn6OfKSkyLoHc2Z5
+
 ## March 27, 2023: A New Era for Database Design with TigerBeetle at QCon London 2023
 
 Joran Dirk Greef discusses pivotal moments in database design and how
@@ -11,9 +27,9 @@ https://www.youtube.com/watch?v=ehYcCTHRyFs
 ## March 9, 2023: How to Thought Lead and the Double Entry Accounting Database
 
 > I had a great chat with Joran of Tigerbeetle, the hottest animal
-  themed database on the market, about Zig, distributed database design,
-  and exchanging notes on how to Cross the Chasm with a brand new
-  database.
+> themed database on the market, about Zig, distributed database design,
+> and exchanging notes on how to Cross the Chasm with a brand new
+> database.
 
 https://www.youtube.com/watch?v=QwXddaB8tj0
 
@@ -145,7 +161,7 @@ distributed database design!
 
 https://www.youtube.com/watch?v=rNmZZLant9o
 
-## May 1, 2022:  TigerBeetle's LSM-Forest at HYTRADBOI '22
+## May 1, 2022: TigerBeetle's LSM-Forest at HYTRADBOI '22
 
 A fast-paced introduction to TigerBeetle's mission, architecture,
 global consensus, local storage engine, and our thinking on
