@@ -1336,7 +1336,7 @@ const ViewChangeHeadersSlice = struct {
     /// - When these are DVC headers for a log_view=V, we must be in view_change status working to
     ///   transition to a view beyond V. So we will never prepare anything else as part of view V.
     /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
-    ///   more ops), but those ops will laways be part of the log_view. If they were prepared during
+    ///   more ops), but those ops will always be part of the log_view. If they were prepared during
     ///   a view prior to the log_view, they would already be part of the headers.
     pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
         const header_newest = &headers.slice[0];

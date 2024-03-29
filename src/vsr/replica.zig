@@ -627,7 +627,7 @@ pub fn ReplicaType(
             // the last record in WAL. As a special case, during  the first open the last (and the
             // only) record in WAL is the root prepare.
             //
-            // Otherwise, the head is recovered from the superblock. When transitioninig to a
+            // Otherwise, the head is recovered from the superblock. When transitioning to a
             // view_change, replicas encode the current head into vsr_headers.
             //
             // It is a possibility that the head can't be recovered from the local data.
@@ -5569,7 +5569,7 @@ pub fn ReplicaType(
         /// Safety condition: repairing an old op must not overwrite a newer op from the next wrap.
         ///
         /// Availability condition: each committed op must be present either in a quorum of WALs or
-        /// it in a quorum of checkpoints.
+        /// in a quorum of checkpoints.
         ///
         /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
         /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
