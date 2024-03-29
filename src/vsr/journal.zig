@@ -2433,14 +2433,25 @@ test "recovery_cases" {
             parameters[j] = i & (1 << j) != 0;
         }
 
+        var case_fail: bool = false;
         var case_match: ?*const Case = null;
         for (&recovery_cases) |*case| {
-            if (case.check(parameters) catch true) {
+            // Assertion patterns (a0/a1) act as wildcards for the purpose of matching.
+            // Thus, it is possible for multiple cases to "match" a pattern iff they all fail an
+            // assertion. (For example, simultaneous op= and op<).
+            if (case.check(parameters) catch {
+                assert(case_match == null);
+
+                case_fail = true;
+                continue;
+            }) {
+                assert(!case_fail);
+
                 try std.testing.expectEqual(case_match, null);
                 case_match = case;
             }
         }
-        if (case_match == null) @panic("no matching case");
+        assert(case_fail == (case_match == null));
     }
 }
 
