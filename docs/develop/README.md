@@ -48,3 +48,10 @@ Depending on your use case, you may find these additional design patterns helpfu
 - [Currency Exchange](./recipes/currency-exchange.md)
 - [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md)
 - [Closing Accounts](./recipes/close-account.md)
+
+## Get in Touch
+
+If you have questions about how to map your application requirements to TigerBeetle, feel free to
+ask them in our [Community Slack](https://slack.tigerbeetle.com/invite).
+
+Or, if you would like more hands-on support, you can reach out directly to <joran@tigerbeetle.com>.
