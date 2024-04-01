@@ -1,6 +1,6 @@
 # TigerBeetle Changelog
 
-## 2024-03-25 (Placeholder: no release yet)
+## 2024-04-01 (Placeholder: no release yet)
 
 ### Safety And Performance
 
@@ -21,6 +21,14 @@
 
   Fix VOPR liveness false positive when standby misses an op.
 
+- [#1814](https://github.com/tigerbeetle/tigerbeetle/pull/1814)
+
+  Assert that the type-erased LSM block metadata matches the comptime one, specialized over `Tree`.
+
+- [#1797](https://github.com/tigerbeetle/tigerbeetle/pull/1797)
+
+  Use a FIFO as a block_pool instead of trying to slice arrays during compaction.
+
 ### Features
 
 - [#1774](https://github.com/tigerbeetle/tigerbeetle/pull/1774)
@@ -29,20 +37,69 @@
 
 - [#1781](https://github.com/tigerbeetle/tigerbeetle/pull/1781),
   [#1784](https://github.com/tigerbeetle/tigerbeetle/pull/1784),
-  [#1765](https://github.com/tigerbeetle/tigerbeetle/pull/1765)
+  [#1765](https://github.com/tigerbeetle/tigerbeetle/pull/1765),
+  [#1816](https://github.com/tigerbeetle/tigerbeetle/pull/1816),
+  [#1808](https://github.com/tigerbeetle/tigerbeetle/pull/1808),
+  [#1802](https://github.com/tigerbeetle/tigerbeetle/pull/1802),
+  [#1798](https://github.com/tigerbeetle/tigerbeetle/pull/1798),
+  [#1793](https://github.com/tigerbeetle/tigerbeetle/pull/1793),
+  [#1805](https://github.com/tigerbeetle/tigerbeetle/pull/1805)
 
   Documentation improvements.
+
+- [#1813](https://github.com/tigerbeetle/tigerbeetle/pull/1813)
+
+  Improve Docker experience by handling `SIGTERM` through [tini](https://github.com/krallin/tini).
+
+- [#1800](https://github.com/tigerbeetle/tigerbeetle/pull/1800)
+
+  For reproducible benchmarks, allow setting `--seed` on the CLI.
 
 ### Internals
 
 - [#1640](https://github.com/tigerbeetle/tigerbeetle/pull/1640),
-  [#1782](https://github.com/tigerbeetle/tigerbeetle/pull/1782)
+  [#1782](https://github.com/tigerbeetle/tigerbeetle/pull/1782),
+  [#1788](https://github.com/tigerbeetle/tigerbeetle/pull/1788)
 
   Move `request_queue` outside of `vsr.Client`.
 
 - [#1775](https://github.com/tigerbeetle/tigerbeetle/pull/1775)
 
   Extract `CompactionPipeline` to a dedicated function.
+
+- [#1773](https://github.com/tigerbeetle/tigerbeetle/pull/1773)
+
+  Replace compaction interface with comptime dispatch.
+
+- [#1796](https://github.com/tigerbeetle/tigerbeetle/pull/1796)
+
+  Remove the duplicated `CompactionInfo` value stored in `PipelineSlot`,
+  referencing it from the `Compaction` by its coordinates.
+
+- [#1809](https://github.com/tigerbeetle/tigerbeetle/pull/1809),
+  [#1807](https://github.com/tigerbeetle/tigerbeetle/pull/1807)
+
+  CLI output improvements.
+
+- [#1804](https://github.com/tigerbeetle/tigerbeetle/pull/1804),
+  [#1812](https://github.com/tigerbeetle/tigerbeetle/pull/1812),
+  [#1799](https://github.com/tigerbeetle/tigerbeetle/pull/1799),
+  [#1767](https://github.com/tigerbeetle/tigerbeetle/pull/1767)
+
+  Improvements in the client libraries CI.
+
+- [#1771](https://github.com/tigerbeetle/tigerbeetle/pull/1771),
+  [#1770](https://github.com/tigerbeetle/tigerbeetle/pull/1770),
+  [#1792](https://github.com/tigerbeetle/tigerbeetle/pull/1792)
+
+  Metrics adjustments for Devhub and Nyrkio integration.
+
+- [#1811](https://github.com/tigerbeetle/tigerbeetle/pull/1811),
+  [#1803](https://github.com/tigerbeetle/tigerbeetle/pull/1803),
+  [#1801](https://github.com/tigerbeetle/tigerbeetle/pull/1801),
+  [#1762](https://github.com/tigerbeetle/tigerbeetle/pull/1762)
+
+  Various bug fixes in the build script and removal of the "Do not use in production" warning.
 
 ## 2024-03-19
 
