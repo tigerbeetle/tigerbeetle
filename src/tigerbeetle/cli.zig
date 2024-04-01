@@ -69,6 +69,12 @@ const CliArgs = union(enum) {
         command: []const u8 = "",
     },
 
+    web: struct {
+        addresses: []const u8,
+        cluster: u128,
+        verbose: bool = false,
+    },
+
     // Experimental: the interface is subject to change.
     benchmark: struct {
         cache_accounts: ?[]const u8 = null,
@@ -210,6 +216,12 @@ pub const Command = union(enum) {
         statements: []const u8,
     };
 
+    pub const Web = struct {
+        addresses: []const net.Address,
+        cluster: u128,
+        verbose: bool,
+    };
+
     pub const Benchmark = struct {
         /// The ID order can affect the results of a benchmark significantly. Specifically,
         /// sequential is expected to be the best (since it can take advantage of various
@@ -244,6 +256,7 @@ pub const Command = union(enum) {
         verbose: bool,
     },
     repl: Repl,
+    web: Web,
     benchmark: Benchmark,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
@@ -428,6 +441,17 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cluster = repl.cluster,
                     .verbose = repl.verbose,
                     .statements = repl.command,
+                },
+            };
+        },
+        .web => |web| {
+            const addresses = parse_addresses(allocator, web.addresses);
+
+            return Command{
+                .web = .{
+                    .addresses = addresses,
+                    .cluster = web.cluster,
+                    .verbose = web.verbose,
                 },
             };
         },

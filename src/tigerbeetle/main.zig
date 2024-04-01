@@ -72,6 +72,7 @@ pub fn main() !void {
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
+        .web => |*args| try Command.web(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
     }
 }
@@ -332,6 +333,10 @@ const Command = struct {
     pub fn repl(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Repl) !void {
         const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
+    }
+    pub fn web(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Web) !void {
+        const Web = vsr.web.WebType(vsr.message_bus.MessageBusClient);
+        try Web.run(arena, args.addresses, args.cluster, args.verbose);
     }
 };
 

@@ -1,0 +1,12 @@
+.{
+    .name = "tigerbeetle",
+    .version = "0.15.3",
+    .minimum_zig_version = "0.11.0",
+    .dependencies = .{
+        // zap v0.5.0
+        .zap = .{
+            .url = "https://github.com/zigzap/zap/archive/refs/tags/v0.5.0.tar.gz",
+            .hash = "1220aabff84ad1d800f5657d6a49cb90dab3799765811ada27faf527be45dd315a4d",
+        },
+    },
+}

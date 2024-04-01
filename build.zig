@@ -471,6 +471,16 @@ pub fn build(b: *std.Build) !void {
     }
 
     {
+        const zap = b.dependency("zap", .{
+            .target = target,
+            .optimize = mode,
+            .openssl = false, // set to true to enable TLS support
+        });
+        tigerbeetle.addModule("zap", zap.module("zap"));
+        tigerbeetle.linkLibrary(zap.artifact("facil.io"));
+    }
+
+    {
         const vopr = b.addExecutable(.{
             .name = "vopr",
             .root_source_file = .{ .path = "src/vopr.zig" },

@@ -25,13 +25,13 @@ pub const Printer = struct {
     stdout: ?std.fs.File.Writer,
     stderr: ?std.fs.File.Writer,
 
-    fn print(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
+    pub fn print(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
         if (printer.stdout) |stdout| {
             try stdout.print(format, arguments);
         }
     }
 
-    fn print_error(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
+    pub fn print_error(printer: Printer, comptime format: []const u8, arguments: anytype) !void {
         if (printer.stderr) |stderr| {
             try stderr.print(format, arguments);
         }
