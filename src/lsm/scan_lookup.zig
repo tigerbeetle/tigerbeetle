@@ -10,6 +10,14 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 const GridType = @import("../vsr/grid.zig").GridType;
 const ScanType = @import("scan_builder.zig").ScanType;
 
+pub const ScanLookupStatus = enum {
+    idle,
+    scan,
+    lookup,
+    buffer_finished,
+    scan_finished,
+};
+
 /// Implements the lookup logic for loading objects from scans.
 pub fn ScanLookupType(
     comptime Groove: type,
@@ -22,14 +30,6 @@ pub fn ScanLookupType(
         const Object = Groove.ObjectTree.Table.Value;
 
         pub const Callback = *const fn (*ScanLookup) void;
-
-        pub const Status = enum {
-            idle,
-            scan,
-            lookup,
-            buffer_finished,
-            scan_finished,
-        };
 
         const LookupWorker = struct {
             scan_lookup: *ScanLookup,
@@ -60,7 +60,7 @@ pub fn ScanLookupType(
 
         buffer: ?[]Object,
         buffer_produced_len: usize,
-        state: Status,
+        state: ScanLookupStatus,
         callback: ?Callback,
 
         workers: [lookup_workers_max]LookupWorker = undefined,
