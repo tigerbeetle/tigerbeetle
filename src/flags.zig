@@ -1042,14 +1042,10 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=3Mib" }, snap(@src(),
-        \\stdout:
-        \\int: 0
-        \\size: 3145728
-        \\boolean: false
-        \\path: not-set
-        \\optional: null
-        \\choice: marlowe
+    try t.check(&.{ "values", "--size=3bogus" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: invalid unit in size '3bogus', (needed KiB, MiB, GiB or TiB)
         \\
     ));
 
