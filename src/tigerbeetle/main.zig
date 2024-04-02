@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const vsr_web = @import("web.zig");
 const assert = std.debug.assert;
 const fmt = std.fmt;
 const mem = std.mem;
@@ -335,7 +336,7 @@ const Command = struct {
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
     pub fn web(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Web) !void {
-        const Web = vsr.web.WebType(vsr.message_bus.MessageBusClient);
+        const Web = vsr_web.WebType(vsr.message_bus.MessageBusClient);
         try Web.run(arena, args.addresses, args.cluster, args.verbose);
     }
 };

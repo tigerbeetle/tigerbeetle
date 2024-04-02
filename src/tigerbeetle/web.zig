@@ -1,7 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const zap = @import("zap");
 const assert = std.debug.assert;
-const vsr = @import("vsr.zig");
+const vsr = @import("vsr");
 const constants = vsr.constants;
 const IO = vsr.io.IO;
 const Storage = vsr.storage.Storage;
@@ -67,6 +68,39 @@ pub fn WebType(comptime MessageBus: type) type {
                 },
             );
             web.client = &client;
+
+            try run_zap();
+        }
+
+        pub fn run_zap() !void {
+            var listener = zap.HttpListener.init(.{
+                .port = 3008,
+                .on_request = on_request,
+                .log = true,
+                .max_clients = 100000,
+            });
+            try listener.listen();
+
+            // web.client.batch_submit();
+
+            std.debug.print("Listening on 0.0.0.0:3008\n", .{});
+
+            zap.start(.{
+                .threads = 2,
+                .workers = 1, // 1 worker enables sharing state between threads
+            });
         }
     };
+}
+
+fn on_request(r: zap.Request) void {
+    if (r.path) |the_path| {
+        std.debug.print("PATH: {s}\n", .{the_path});
+    }
+
+    if (r.query) |the_query| {
+        std.debug.print("QUERY: {s}\n", .{the_query});
+    }
+
+    r.sendBody("<html><body><h1>Hello from ZAP!!!</h1></body></html>") catch return;
 }

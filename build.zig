@@ -111,12 +111,10 @@ pub fn build(b: *std.Build) !void {
     const vsr_options_module = options.createModule();
     const vsr_module = b.addModule("vsr", .{
         .source_file = .{ .path = "src/vsr.zig" },
-        .dependencies = &.{
-            .{
-                .name = "vsr_options",
-                .module = vsr_options_module,
-            },
-        },
+        .dependencies = &.{.{
+            .name = "vsr_options",
+            .module = vsr_options_module,
+        }},
     });
 
     {
@@ -152,6 +150,17 @@ pub fn build(b: *std.Build) !void {
     if (emit_llvm_ir) {
         _ = tigerbeetle.getEmittedLlvmIr();
     }
+
+    {
+        const zap = b.dependency("zap", .{
+            .target = target,
+            .optimize = mode,
+            .openssl = false, // set to true to enable TLS support
+        });
+        tigerbeetle.addModule("zap", zap.module("zap"));
+        tigerbeetle.linkLibrary(zap.artifact("facil.io"));
+    }
+
     tigerbeetle.addModule("vsr", vsr_module);
     tigerbeetle.addModule("vsr_options", vsr_options_module);
     b.installArtifact(tigerbeetle);
@@ -468,16 +477,6 @@ pub fn build(b: *std.Build) !void {
 
         const run_step = b.step("simulator_run", "Run the Simulator");
         run_step.dependOn(&run_cmd.step);
-    }
-
-    {
-        const zap = b.dependency("zap", .{
-            .target = target,
-            .optimize = mode,
-            .openssl = false, // set to true to enable TLS support
-        });
-        tigerbeetle.addModule("zap", zap.module("zap"));
-        tigerbeetle.linkLibrary(zap.artifact("facil.io"));
     }
 
     {
