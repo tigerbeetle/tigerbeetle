@@ -65,14 +65,15 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 
 const half_bar_beat_count = @divExact(constants.lsm_batch_multiple, 2);
 
-/// Information used when scheduling compactions. Kept unspecalized to make the forest
+/// Information used when scheduling compactions. Kept unspecialized to make the forest
 /// code easier.
 pub const CompactionInfo = struct {
-    /// How many values, across all tables, need to be processed.
+    /// How many values, across all input tables, need to be processed.
+    /// This is the total – it is fixed for the duration of the compaction.
     compaction_tables_value_count: usize,
 
     // Keys are integers in TigerBeetle, with a maximum size of u256. Store these
-    // here, instead of Key, to keep this unspecalized.
+    // here, instead of Key, to keep this unspecialized.
     target_key_min: u256,
     target_key_max: u256,
 
@@ -84,11 +85,16 @@ pub const CompactionInfo = struct {
     level_b: u8,
 };
 
+/// A bar is exhausted when all input values have been merged.
+/// A beat is exhausted when all of the input values scheduled for this beat (rounded up to the
+/// nearest full data block) have been merged.
+///
+/// Invariant: If `bar` is exhausted, then `beat` is always exhausted.
 pub const Exhausted = struct { bar: bool, beat: bool };
 const BlipCallback = *const fn (*anyopaque, ?Exhausted) void;
 pub const BlipStage = enum { read, merge, write, drained };
 
-// The following types need to specalize on Grid, but are used both by CompactionType and the
+// The following types need to specialize on Grid, but are used both by CompactionType and the
 // forest.
 pub fn CompactionHelperType(comptime Grid: type) type {
     return struct {
@@ -123,15 +129,18 @@ pub fn CompactionHelperType(comptime Grid: type) type {
         pub const CompactionBlockFIFO = FIFO(CompactionBlock);
 
         pub const BlockFIFO = struct {
+            /// Invariant: a CompactionBlock resides in the FIFO corresponding to its `stage`.
             free: CompactionBlockFIFO,
             pending: CompactionBlockFIFO,
             ready: CompactionBlockFIFO,
             ioing: CompactionBlockFIFO,
 
+            /// The (constant) total number of blocks in all four FIFOs.
             count: usize,
 
             /// All blocks start in free.
             pub fn init(block_pool: *CompactionBlockFIFO, count: usize) BlockFIFO {
+                assert(count > 0);
                 assert(count % 2 == 0);
                 assert(block_pool.count >= count);
 
@@ -303,10 +312,11 @@ pub fn CompactionType(
             /// Levels may choose to drop tombstones if keys aren't included in the lower levels.
             /// This invariant is always true for the last level as it doesn't have any lower ones.
             drop_tombstones: bool,
-
             /// Number of beats we should aim to finish this compaction in. It might be fewer, but
             /// it'll never be more.
             beats_max: ?u64,
+            /// The total number of source values for this compaction.
+            /// This is fixed for the duration of the compaction.
             compaction_tables_value_count: u64,
             value_count_per_beat: u64 = 0,
 
@@ -336,7 +346,8 @@ pub fn CompactionType(
             source_b_position: Position = .{},
 
             /// At least 2 output index blocks needs to span beat boundaries, otherwise it wouldn't
-            /// be possible to pace at a more granular level than target tables.
+            /// be possible to pace at a more granular level than target tables. (That is, each beat
+            /// would need to write at least a full table.)
             target_index_blocks: ?Helpers.BlockFIFO,
 
             /// Manifest log appends are queued up until `finish()` is explicitly called to ensure
@@ -384,7 +395,7 @@ pub fn CompactionType(
                 timer_write: usize = 0,
             };
 
-            grid_reservation: ?Grid.Reservation,
+            grid_reservation: Grid.Reservation,
 
             // TODO: This is now always 0 / 1 so get rid of it and just use index_read_done?
             index_blocks_read_b: usize = 0,
@@ -548,8 +559,6 @@ pub fn CompactionType(
             assert(compaction.bar == null);
             assert(compaction.beat == null);
 
-            var compaction_tables_value_count: usize = 0;
-
             // level_b 0 is special; unlike all the others which have level_a on disk, level 0's
             // level_a comes from the immutable table. This means that blip_read will be a partial,
             // no-op, and that the minimum input blocks are lowered by one.
@@ -559,8 +568,9 @@ pub fn CompactionType(
                     return null;
                 }
 
-                const values_count = tree.table_immutable.count();
-                assert(values_count > 0);
+                const table_immutable_values_count = tree.table_immutable.count();
+                assert(table_immutable_values_count > 0);
+                assert(table_immutable_values_count <= Table.value_count_max);
 
                 const range_b = tree.manifest.immutable_table_compaction_range(
                     tree.table_immutable.key_min(),
@@ -578,10 +588,10 @@ pub fn CompactionType(
                     tree.table_immutable.mutability.immutable.snapshot_min,
                     op,
                     range_b.tables.count() + 1,
-                    values_count,
+                    table_immutable_values_count,
                 });
 
-                compaction_tables_value_count += values_count;
+                var compaction_tables_value_count: usize = table_immutable_values_count;
                 for (range_b.tables.const_slice()) |*table| {
                     compaction_tables_value_count += table.table_info.value_count;
                 }
@@ -624,9 +634,10 @@ pub fn CompactionType(
                     compaction.level_b,
                 });
 
-                compaction_tables_value_count += table_a.value_count;
-                for (range_b.tables.const_slice()) |*table|
+                var compaction_tables_value_count: usize = table_a.value_count;
+                for (range_b.tables.const_slice()) |*table| {
                     compaction_tables_value_count += table.table_info.value_count;
+                }
 
                 compaction.bar = .{
                     .tree = tree,
@@ -679,7 +690,7 @@ pub fn CompactionType(
                 compaction.level_b < constants.lsm_levels - 1);
 
             return .{
-                .compaction_tables_value_count = compaction_tables_value_count,
+                .compaction_tables_value_count = compaction.bar.?.compaction_tables_value_count,
                 .target_key_min = compaction.bar.?.range_b.key_min,
                 .target_key_max = compaction.bar.?.range_b.key_max,
                 .move_table = compaction.bar.?.move_table,
@@ -706,6 +717,7 @@ pub fn CompactionType(
         ) void {
             // Limited to half bars for now.
             assert(beats_max <= @divExact(constants.lsm_batch_multiple, 2));
+            assert(beats_max > 0);
 
             assert(compaction.bar != null);
             assert(compaction.beat == null);
@@ -794,6 +806,10 @@ pub fn CompactionType(
             assert(compaction.beat.?.blocks == null);
             assert(!compaction.bar.?.move_table);
 
+            assert(blocks.source_value_blocks[0].count > 0);
+            assert(blocks.source_value_blocks[1].count > 0);
+            assert(blocks.target_value_blocks.count > 0);
+
             compaction.beat.?.blocks = blocks;
         }
 
@@ -804,9 +820,9 @@ pub fn CompactionType(
         // --------------------------------------------------
         // | R     | M       | W      | R      |           |
         // --------------------------------------------------
-        // |       | R      | M       | W      |           |
+        // |       | R       | M      | W      |           |
         // --------------------------------------------------
-        // |       |        | W      | C → E  | W          |
+        // |       |         | W      | C → E  | W         |
         // --------------------------------------------------
         //
         // Where → E means that the merge step indicated our work was complete for either this beat
@@ -850,6 +866,7 @@ pub fn CompactionType(
             const beat = &compaction.beat.?;
             const blocks = &beat.blocks.?;
 
+            assert(!beat.index_read_done);
             assert(beat.index_blocks_read_b == 0);
 
             assert(beat.read != null);
@@ -877,7 +894,9 @@ pub fn CompactionType(
                 },
             }
 
+            if (bar.range_b.tables.count() == 0) assert(compaction.level_b == 0);
             assert(bar.source_b_position.index_block <= bar.range_b.tables.count());
+
             if (bar.range_b.tables.count() > 0 and
                 bar.source_b_position.index_block < bar.range_b.tables.count())
             {
@@ -941,9 +960,11 @@ pub fn CompactionType(
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
 
+            assert(beat.index_read_done);
             assert(beat.read != null);
             const read = &beat.read.?;
 
+            assert(read.pending_reads_index == 0);
             assert(read.pending_reads_data == 0);
 
             // TODO: The code for reading table_a and table_b are almost identical,
@@ -965,19 +986,15 @@ pub fn CompactionType(
                 const value_block_checksums = index_schema.data_checksums_used(index_block);
 
                 var free_blocks_used: usize = 0;
+                // Read at most half of the blocks, to smooth out reading over multiple steps.
                 const half_blocks_count = stdx.div_ceil(
                     beat.blocks.?.source_value_blocks[0].count,
                     2,
                 );
+                // Once our read buffer is full, end the loop.
                 while (i < value_blocks_used and free_blocks_used < half_blocks_count) {
-                    var maybe_source_value_block =
-                        beat.blocks.?.source_value_blocks[0].free_to_pending();
-                    free_blocks_used += 1;
-
-                    // Once our read buffer is full, break out of the loop.
-                    if (maybe_source_value_block == null) break;
-
-                    const source_value_block = maybe_source_value_block.?;
+                    const source_value_block =
+                        beat.blocks.?.source_value_blocks[0].free_to_pending() orelse break;
 
                     source_value_block.target = compaction;
                     compaction.grid.read_block(
@@ -989,6 +1006,7 @@ pub fn CompactionType(
                     );
 
                     read.pending_reads_data += 1;
+                    free_blocks_used += 1;
                     i += 1;
                 }
             }
@@ -1272,8 +1290,8 @@ pub fn CompactionType(
             log.debug("blip_merge(): took {} to merge blocks", .{std.fmt.fmtDuration(d)});
 
             if (source_exhausted_bar) {
-                assert(compaction.set_source_a() == .exhausted and
-                    compaction.set_source_b() == .exhausted);
+                assert(compaction.set_source_a() == .exhausted);
+                assert(compaction.set_source_b() == .exhausted);
                 assert(bar.source_values_read_count == bar.source_values_merge_count);
 
                 // Sanity check our primary condition.
@@ -1507,7 +1525,7 @@ pub fn CompactionType(
 
         /// Copies values to `target` from our immutable table input. In the process, merge values
         /// with identical keys (last one wins) and collapse tombstones for secondary indexes.
-        /// Return the number of values written to the output and updates immutable table slice to
+        /// Return the number of values written to the target and updates immutable table slice to
         /// the non-processed remainder.
         fn fill_immutable_values(compaction: *Compaction, target: []Value) usize {
             const bar = &compaction.bar.?;
@@ -1620,7 +1638,7 @@ pub fn CompactionType(
                 table_builder.data_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .release = release,
-                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation.?),
+                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation),
                     .snapshot_min = snapshot_min_for_table_output(bar.op_min),
                     .tree_id = compaction.tree_config.id,
                 });
@@ -1647,7 +1665,7 @@ pub fn CompactionType(
                 const table = table_builder.index_block_finish(.{
                     .cluster = compaction.grid.superblock.working.cluster,
                     .release = release,
-                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation.?),
+                    .address = compaction.grid.acquire(compaction.beat.?.grid_reservation),
                     .snapshot_min = snapshot_min_for_table_output(bar.op_min),
                     .tree_id = compaction.tree_config.id,
                 });
@@ -1765,8 +1783,10 @@ pub fn CompactionType(
             // Join on all outstanding writes before continuing.
             if (write.pending_writes != 0) return;
 
-            while (beat.blocks.?.target_value_blocks.ioing_to_free() != null) {}
-            while (compaction.bar.?.target_index_blocks.?.ioing_to_free() != null) {}
+            var freed: usize = 0;
+            while (beat.blocks.?.target_value_blocks.ioing_to_free() != null) freed += 1;
+            while (compaction.bar.?.target_index_blocks.?.ioing_to_free() != null) freed += 1;
+            assert(freed > 0);
 
             // Call the next tick handler directly. This callback is invoked async, so it's safe
             // from stack overflows.
@@ -1828,17 +1848,11 @@ pub fn CompactionType(
             beat.assert_all_inactive();
             assert(bar.table_builder.data_block_empty());
 
-            if (beat.grid_reservation) |grid_reservation| {
-                log.debug("beat_grid_forfeit({s}): forfeiting {}", .{
-                    compaction.tree_config.name,
-                    grid_reservation,
-                });
-                compaction.grid.forfeit(grid_reservation);
-            } else {
-                log.debug("beat_grid_forfeit({s}): nothing to forfeit", .{
-                    compaction.tree_config.name,
-                });
-            }
+            log.debug("beat_grid_forfeit({s}): forfeiting {}", .{
+                compaction.tree_config.name,
+                beat.grid_reservation,
+            });
+            compaction.grid.forfeit(beat.grid_reservation);
 
             // Our beat is done!
             compaction.beat = null;
@@ -1978,9 +1992,10 @@ pub fn CompactionType(
         }
 
         // TODO: Add benchmarks for these CPU merge methods.
-        fn copy(compaction: *Compaction, comptime source: enum { a, b }) void {
+        fn copy(compaction: *Compaction, source: enum { a, b }) void {
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
+            if (source == .a) assert(!bar.drop_tombstones);
 
             assert(bar.table_builder.value_count < Table.layout.block_value_count_max);
 
@@ -2020,6 +2035,7 @@ pub fn CompactionType(
         fn copy_drop_tombstones(compaction: *Compaction) void {
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
+            assert(bar.drop_tombstones);
 
             log.debug("blip_merge({s}: merging via copy_drop_tombstones()", .{
                 compaction.tree_config.name,
