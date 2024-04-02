@@ -389,7 +389,7 @@ pub const ByteSize = struct {
             unit: inline for (units) |unit_| {
                 const suffix_ = unit_[0];
                 const unit_kind = unit_[1];
-                if (std.ascii.endsWithIgnoreCase(split.unit_input, suffix_)) {
+                if (std.ascii.eqlIgnoreCase(split.unit_input, suffix_)) {
                     break :unit unit_kind;
                 }
             } else {
