@@ -992,20 +992,37 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                         var tree = Forest.tree_for_id(forest, tree_id);
                         assert(tree.compactions.len == constants.lsm_levels);
 
-                        var compaction = &tree.compactions[level_b];
-
                         // This returns information on what compaction work needs to be done. In
                         // future, this will be used to schedule compactions in a more optimal way.
-                        if ((compaction.level_b % 2 != 0 and first_beat) or
-                            (compaction.level_b % 2 == 0 and half_beat))
+                        if ((level_b % 2 != 0 and first_beat) or
+                            (level_b % 2 == 0 and half_beat))
                         {
-                            if (compaction.bar_setup(tree, op)) |info| {
-                                self.compactions.append_assume_capacity(info);
-                                log.debug("level_b={} tree={s} op={}", .{
-                                    level_b,
-                                    tree.config.name,
-                                    op,
-                                });
+                            var do_compaction = true;
+
+                            // Try to coalesce tables in level_a before compacting into level_b.
+                            if (level_b > 0) {
+                                var compaction = &tree.compactions[level_b - 1];
+                                if (compaction.maybe_coalesce(tree, op)) |info| {
+                                    self.compactions.append_assume_capacity(info);
+                                    log.debug("level_b={} tree={s} op={}", .{
+                                        level_b,
+                                        tree.config.name,
+                                        op,
+                                    });
+                                    do_compaction = false;
+                                }
+                            }
+
+                            if (do_compaction) {
+                                var compaction = &tree.compactions[level_b];
+                                if (compaction.bar_setup(tree, op)) |info| {
+                                    self.compactions.append_assume_capacity(info);
+                                    log.debug("level_b={} tree={s} op={}", .{
+                                        level_b,
+                                        tree.config.name,
+                                        op,
+                                    });
+                                }
                             }
                         }
                     }

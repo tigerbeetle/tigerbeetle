@@ -265,6 +265,7 @@ pub fn CompactionType(
         const tombstone = Table.tombstone;
 
         const TableInfoA = union(enum) {
+            coalesce,
             immutable: []Value,
             disk: TableInfoReference,
         };
@@ -551,6 +552,57 @@ pub fn CompactionType(
         pub fn assert_between_bars(compaction: *const Compaction) void {
             assert(compaction.bar == null);
             assert(compaction.beat == null);
+        }
+
+        pub fn maybe_coalesce(compaction: *Compaction, tree: *Tree, op: u64) ?CompactionInfo {
+            const level = compaction.level_b;
+
+            const prng_seed = tree.compaction_op.?;
+            const manifest_level = tree.manifest.levels[level];
+            const tables = manifest_level.find_table_coalesce_window(
+                prng_seed,
+            ) orelse return null;
+
+            const range_b = Manifest.CompactionRange{
+                .key_min = tables.tables.get(0).table_info.key_min,
+                .key_max = tables.tables.get(tables.tables.count() - 1).table_info.key_max,
+                .tables = tables.tables,
+            };
+
+            var compaction_tables_value_count: usize = 0;
+            for (range_b.tables.const_slice()) |*table| {
+                compaction_tables_value_count += table.table_info.value_count;
+            }
+
+            std.log.debug("found coalesce window in {s}, level {}, tables {}/{}, values {}", .{
+                tree.config.name,              level,
+                tables.tables.count(),         tree.manifest.levels[level].tables.len(),
+                compaction_tables_value_count,
+            });
+
+            compaction.bar = .{
+                .tree = tree,
+                .op_min = compaction_op_min(op),
+
+                .move_table = false,
+                .table_info_a = .coalesce,
+                .range_b = range_b,
+                .drop_tombstones = false,
+
+                .compaction_tables_value_count = compaction_tables_value_count,
+
+                .target_index_blocks = null,
+                .beats_max = null,
+            };
+
+            return .{
+                .compaction_tables_value_count = compaction_tables_value_count,
+                .target_key_min = compaction.bar.?.range_b.key_min,
+                .target_key_max = compaction.bar.?.range_b.key_max,
+                .move_table = compaction.bar.?.move_table,
+                .tree_id = tree.config.id,
+                .level_b = level,
+            };
         }
 
         /// Perform the bar-wise setup, and returns the compaction work that needs to be done for
@@ -901,6 +953,9 @@ pub fn CompactionType(
                 },
                 .immutable => {
                     // Immutable values come from the in memory immutable table - no need to read.
+                },
+                .coalesce => {
+                    // Coalescing doesn't require reading from level_a.
                 },
             }
 
@@ -1314,7 +1369,9 @@ pub fn CompactionType(
                 // Sanity check our primary condition.
                 assert(bar.source_values_merge_count == bar.compaction_tables_value_count);
 
-                if (bar.table_info_a == .immutable) {
+                if (bar.table_info_a == .coalesce) {
+                    // Nothing to do
+                } else if (bar.table_info_a == .immutable) {
                     assert(bar.table_info_a.immutable.len == 0);
                 } else {
                     assert(blocks.source_value_blocks[0].ready.count == 0);
@@ -1336,7 +1393,10 @@ pub fn CompactionType(
             const bar = &compaction.bar.?;
             const beat = &compaction.beat.?;
 
-            if (bar.table_info_a == .immutable) {
+            if (bar.table_info_a == .coalesce) {
+                beat.source_a_values = null;
+                return .exhausted;
+            } else if (bar.table_info_a == .immutable) {
                 // Immutable table can never .need_read, since all its values come from memory.
                 assert(bar.source_a_immutable_block != null);
                 stdx.maybe(bar.source_a_immutable_values == null);
@@ -1460,7 +1520,9 @@ pub fn CompactionType(
             const beat = &compaction.beat.?;
             const blocks = &beat.blocks.?;
 
-            if (bar.table_info_a == .immutable) {
+            if (bar.table_info_a == .coalesce) {
+                return 0;
+            } else if (bar.table_info_a == .immutable) {
                 bar.source_a_immutable_values = beat.source_a_values;
 
                 if (beat.source_a_values != null and beat.source_a_values.?.len == 0) {
@@ -1935,7 +1997,8 @@ pub fn CompactionType(
                 assert(bar.beats_finished <= bar.beats_max.?);
 
             // Mark the immutable table as flushed, if we were compacting into level 0.
-            if (compaction.level_b == 0 and bar.table_info_a.immutable.len == 0) {
+            if (bar.table_info_a == .immutable and bar.table_info_a.immutable.len == 0) {
+                assert(compaction.level_b == 0);
                 bar.tree.table_immutable.mutability.immutable.flushed = true;
             }
 
@@ -1956,6 +2019,9 @@ pub fn CompactionType(
                 // These updates MUST precede insert_table() and move_table() since they use
                 // references to modify the ManifestLevel in-place.
                 switch (bar.table_info_a) {
+                    .coalesce => {
+                        // No level_a updates when coalescing.
+                    },
                     .immutable => {
                         if (bar.table_info_a.immutable.len == 0) {
                             manifest_removed_value_count = bar.tree.table_immutable.count();
