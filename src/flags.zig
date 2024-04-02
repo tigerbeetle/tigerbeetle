@@ -349,13 +349,6 @@ pub const ByteSize = struct {
     fn parse(value: []const u8) ByteSizeParseError!ByteSize {
         assert(value.len != 0);
 
-        const units = .{
-            .{ "TiB", ByteUnit.tib },
-            .{ "GiB", ByteUnit.gib },
-            .{ "MiB", ByteUnit.mib },
-            .{ "KiB", ByteUnit.kib },
-        };
-
         const split: struct {
             value_input: []const u8,
             unit_input: []const u8,
@@ -386,11 +379,9 @@ pub const ByteSize = struct {
         };
 
         const unit = if (split.unit_input.len > 0)
-            unit: inline for (units) |unit_| {
-                const suffix_ = unit_[0];
-                const unit_kind = unit_[1];
-                if (std.ascii.eqlIgnoreCase(split.unit_input, suffix_)) {
-                    break :unit unit_kind;
+            unit: inline for (comptime std.enums.values(ByteUnit)) |tag| {
+                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
+                    break :unit tag;
                 }
             } else {
                 return ByteSizeParseError.InvalidUnit;
