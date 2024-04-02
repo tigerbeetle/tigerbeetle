@@ -1049,6 +1049,13 @@ test "flags" {
         \\
     ));
 
+    try t.check(&.{ "values", "--size=MiB" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found 'MiB'
+        \\
+    ));
+
     try t.check(&.{ "values", "--path=" }, snap(@src(),
         \\status: 1
         \\stderr:
