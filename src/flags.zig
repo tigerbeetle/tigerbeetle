@@ -311,8 +311,8 @@ fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
                 "{s}: value exceeds 64-bit unsigned integer: '{s}'",
                 .{ flag, value },
             ),
-            error.MissingDigits => fatal(
-                "{s}: need digits in size '{s}'",
+            error.InvalidSize => fatal(
+                "{s}: expected a size, but found '{s}'",
                 .{ flag, value },
             ),
             error.InvalidUnit => fatal(
@@ -337,7 +337,7 @@ pub const ByteUnit = enum(u64) {
 
 const ByteSizeParseError = error{
     ParseOverflow,
-    MissingDigits,
+    InvalidSize,
     InvalidUnit,
     BytesOverflow,
 };
@@ -350,10 +350,10 @@ pub const ByteSize = struct {
         assert(value.len != 0);
 
         const units = .{
-            .{ &[_][]const u8{ "TiB", "tib" }, ByteUnit.tib },
-            .{ &[_][]const u8{ "GiB", "gib" }, ByteUnit.gib },
-            .{ &[_][]const u8{ "MiB", "mib" }, ByteUnit.mib },
-            .{ &[_][]const u8{ "KiB", "kib" }, ByteUnit.kib },
+            .{ "TiB", ByteUnit.tib },
+            .{ "GiB", ByteUnit.gib },
+            .{ "MiB", ByteUnit.mib },
+            .{ "KiB", ByteUnit.kib },
         };
 
         const split: struct {
@@ -380,19 +380,17 @@ pub const ByteSize = struct {
                 },
                 error.InvalidCharacter => {
                     // The only case this can happen is for the empty string
-                    return ByteSizeParseError.MissingDigits;
+                    return ByteSizeParseError.InvalidSize;
                 },
             }
         };
 
         const unit = if (split.unit_input.len > 0)
             unit: inline for (units) |unit_| {
-                const suffixes = unit_[0];
+                const suffix_ = unit_[0];
                 const unit_kind = unit_[1];
-                for (suffixes) |suffix_| {
-                    if (std.mem.endsWith(u8, split.unit_input, suffix_)) {
-                        break :unit unit_kind;
-                    }
+                if (std.ascii.endsWithIgnoreCase(split.unit_input, suffix_)) {
+                    break :unit unit_kind;
                 }
             } else {
                 return ByteSizeParseError.InvalidUnit;
@@ -1045,9 +1043,13 @@ test "flags" {
     ));
 
     try t.check(&.{ "values", "--size=3Mib" }, snap(@src(),
-        \\status: 1
-        \\stderr:
-        \\error: --size: invalid unit in size '3Mib', (needed KiB, MiB, GiB or TiB)
+        \\stdout:
+        \\int: 0
+        \\size: 3145728
+        \\boolean: false
+        \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
