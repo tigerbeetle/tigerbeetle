@@ -383,7 +383,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
-            log.debug("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
+            log.info("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
                 "first_beat={} last_half_beat={} half_beat={} last_beat={}", .{
                 op,
                 constants.lsm_batch_multiple,
@@ -756,7 +756,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         /// be shared between compactions, so these are all multiplied by the number
         /// of concurrent compactions.
         /// TODO: This is currently the case for fixed half-bar scheduling.
-        const block_count_bar_single: u64 = 3;
+        const block_count_bar_single: u64 = 4;
 
         const block_count_bar_concurrent: u64 = blk: {
             var block_count: u64 = 0;
@@ -788,9 +788,6 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // data dependency on both read and write value blocks, we need to split our
             // memory in the middle. This results in a doubling of what we have so far.
             minimum_block_count *= 2;
-
-            // We need a 2 source index blocks; one for each table.
-            minimum_block_count += 2;
 
             break :blk minimum_block_count;
         };
@@ -921,15 +918,12 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             defer assert(block_pool_count_start - self.block_pool.count >=
                 minimum_block_count_beat);
 
-            const source_index_block_a = self.block_pool.pop().?;
-            const source_index_block_b = self.block_pool.pop().?;
-
             // Split the remaining blocks equally, with the remainder going to the target pool.
             // TODO: Splitting equally is definitely not the best way!
             // TODO: If level_b is 0, level_a needs no memory at all.
             // TODO: This wastes the remainder, but we have other code that requires the count
             // to be even for now.
-            var equal_split_count = @divFloor(self.block_pool.count - 2, 3);
+            var equal_split_count = @divFloor(self.block_pool.count, 3);
             if (equal_split_count % 2 != 0) equal_split_count -= 1; // Must be even, for now.
 
             log.debug("divide_blocks: block_count_bar_concurrent={} block_pool.count={} " ++
@@ -943,15 +937,13 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             });
 
             return .{
-                .source_index_block_a = source_index_block_a,
-                .source_index_block_b = source_index_block_b,
                 .source_value_blocks = .{
-                    CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
-                    CompactionHelper.BlockFIFO.init(&self.block_pool, equal_split_count),
+                    CompactionHelper.BlockFIFO.init(&self.block_pool, 2),
+                    CompactionHelper.BlockFIFO.init(&self.block_pool, 8),
                 },
                 .target_value_blocks = CompactionHelper.BlockFIFO.init(
                     &self.block_pool,
-                    equal_split_count,
+                    10,
                 ),
             };
         }
@@ -1033,6 +1025,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                     );
 
                     const immutable_table_a_block = self.block_pool.pop().?;
+                    const source_index_block = self.block_pool.pop().?;
+
                     const target_index_blocks = CompactionHelper.BlockFIFO.init(
                         &self.block_pool,
                         2,
@@ -1055,6 +1049,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                                 @divExact(constants.lsm_batch_multiple, 2),
                                 target_index_blocks,
                                 immutable_table_a_block,
+                                source_index_block,
                             );
                         },
                     }

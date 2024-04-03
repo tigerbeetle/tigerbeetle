@@ -336,7 +336,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     .target_value_blocks = CompactionHelper.BlockFIFO.init(&env.block_pool, 2),
                 };
 
-                compaction.bar_setup_budget(1, target_index_blocks, source_a_immutable_block);
+                compaction.bar_setup_budget(1, target_index_blocks, source_a_immutable_block, hack_block);
                 compaction.beat_grid_reserve();
                 compaction.beat_blocks_assign(beat_blocks);
 
