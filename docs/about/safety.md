@@ -185,7 +185,7 @@ hostile user content. In the Google blog post, they specifically note:
 
 > we currently consider it safe only for use by trusted components
 
-TigerBeetle as financial system of record is a trusted component and it should be running in a
+As financial system of record, TigerBeetle is a trusted component and it should be running in a
 trusted environment.
 
 Furthermore, TigerBeetle only uses 128-byte [`Account`s](../reference/accounts.md) and
