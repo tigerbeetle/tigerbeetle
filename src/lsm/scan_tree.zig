@@ -240,7 +240,7 @@ pub fn ScanTreeType(
                         self.buffer.levels[i],
                         @intCast(i),
                     );
-                    level.table_next();
+                    level.table_next(.begin);
                 }
 
                 switch (level.values) {
@@ -418,11 +418,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         /// State over the manifest.
         manifest: union(enum) {
-            begin,
-            iterating: struct {
-                fetch_pending: bool,
-                key_exclusive_next: Key,
-            },
+            iterating_tables,
+            iterating_blocks: Key,
             finished,
         },
 
@@ -445,14 +442,20 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 .scan = scan,
                 .iterator = LevelTableValueBlockIterator.init(),
                 .buffer = buffer,
-                .manifest = .begin,
+                .manifest = .iterating_tables,
                 .values = .fetching,
             };
         }
 
         /// Moves the level iterator to the next `table_info` that might contain the key range.
-        pub fn table_next(self: *ScanTreeLevel) void {
-            assert(self.manifest != .finished);
+        pub fn table_next(
+            self: *ScanTreeLevel,
+            key_exclusive: union(enum) {
+                begin,
+                key_next: Key,
+            },
+        ) void {
+            assert(self.manifest == .iterating_tables);
             assert(self.values == .fetching);
             assert(self.iterator.callback == .none);
 
@@ -461,21 +464,15 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             const table_info: ?*const TableInfo = blk: {
                 const manifest: *Manifest = &scan.tree.manifest;
-                const key_exclusive_current: ?Key = switch (self.manifest) {
-                    .begin => null,
-                    .iterating => |state| key: {
-                        assert(state.fetch_pending == false);
-                        break :key state.key_exclusive_next;
-                    },
-                    .finished => unreachable,
-                };
-
                 if (manifest.next_table(.{
                     .level = self.level_index,
                     .snapshot = scan.snapshot,
                     .key_min = scan.key_min,
                     .key_max = scan.key_max,
-                    .key_exclusive = key_exclusive_current,
+                    .key_exclusive = switch (key_exclusive) {
+                        .begin => null,
+                        .key_next => |key| key,
+                    },
                     .direction = scan.direction,
                 })) |table_next_info| {
                     const key_exclusive_next = switch (scan.direction) {
@@ -490,10 +487,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                         assert(scan.direction == .descending);
                         self.manifest = .finished;
                     } else {
-                        self.manifest = .{ .iterating = .{
-                            .key_exclusive_next = key_exclusive_next,
-                            .fetch_pending = true,
-                        } };
+                        self.manifest = .{ .iterating_blocks = key_exclusive_next };
                     }
 
                     break :blk table_next_info;
@@ -516,21 +510,11 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
         /// Fetches data from storage for the current `table_info`.
         pub fn fetch(self: *ScanTreeLevel) void {
+            assert(self.manifest == .iterating_blocks or
+                self.manifest == .finished);
             assert(self.values == .fetching);
             assert(self.scan.state == .buffering);
             assert(self.iterator.callback == .none);
-
-            switch (self.manifest) {
-                .begin => unreachable,
-                .iterating => |*state| {
-                    // Clearing the `fetch_pending` flag:
-                    // `fetch()` can be called multiple times for the same `table_info`,
-                    // `fetch pending` is true only the first time.
-                    maybe(state.fetch_pending);
-                    state.fetch_pending = false;
-                },
-                .finished => {},
-            }
 
             self.iterator.next(.{
                 .on_index = index_block_callback,
@@ -539,7 +523,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         pub fn peek(self: *const ScanTreeLevel) error{ Drained, Empty }!Key {
-            assert(self.manifest != .begin);
+            assert(self.manifest == .iterating_blocks or
+                self.manifest == .finished);
             assert(self.scan.state == .seeking);
 
             switch (self.values) {
@@ -563,7 +548,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         pub fn pop(self: *ScanTreeLevel) Value {
-            assert(self.manifest != .begin);
+            assert(self.manifest == .iterating_blocks or
+                self.manifest == .finished);
             assert(self.values == .buffered);
             assert(self.scan.state == .seeking);
 
@@ -601,7 +587,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const self: *ScanTreeLevel = @fieldParentPtr(ScanTreeLevel, "iterator", iterator);
             const scan: *const ScanTree = self.scan;
 
-            assert(self.manifest != .begin);
+            assert(self.manifest == .iterating_blocks or
+                self.manifest == .finished);
             assert(self.values == .fetching);
             assert(scan.state == .buffering);
             assert(scan.state.buffering.pending_count > 0);
@@ -647,7 +634,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             const self: *ScanTreeLevel = @fieldParentPtr(ScanTreeLevel, "iterator", iterator);
             const scan: *ScanTree = self.scan;
 
-            assert(self.manifest != .begin);
+            assert(self.manifest == .iterating_blocks or
+                self.manifest == .finished);
             assert(self.values == .fetching);
             assert(scan.state == .buffering);
             assert(scan.state.buffering.pending_count > 0);
@@ -678,8 +666,13 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 }
             } else {
                 switch (self.manifest) {
-                    .begin => unreachable,
-                    .iterating => self.table_next(),
+                    .iterating_tables => unreachable,
+                    .iterating_blocks => |key_exclusive_next| {
+                        self.manifest = .iterating_tables;
+                        self.table_next(.{
+                            .key_next = key_exclusive_next,
+                        });
+                    },
                     .finished => self.values = .finished,
                 }
             }
