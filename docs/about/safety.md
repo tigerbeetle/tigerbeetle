@@ -171,3 +171,28 @@ today might not be available tomorrow. TigerBeetle embraces limited disk reliabi
 data durability in spite of imperfect disks. We actively work against such entropy by taking
 advantage of cluster-wide storage. A record would need to get corrupted on all replicas in a cluster
 to get lost, and even in that case the system would safely halt.
+
+## `io_uring` Security
+
+`io_uring` is a relatively new part of the Linux kernel (support for it was added in version 5.1,
+which was released in May 2019). Since then, many kernel exploits have been found related to
+`io_uring` and in 2023 [Google
+announced](https://security.googleblog.com/2023/06/learnings-from-kctf-vrps-42-linux.html) that they
+were disabling it in ChromeOS, for Android apps, and on Google production servers.
+
+Google's post is primarily about how they secure operating systems and web servers that handle
+hostile user content. In the Google blog post, they specifically note:
+
+> we currently consider it safe only for use by trusted components
+
+TigerBeetle as financial system of record is a trusted component and it should be running in a
+trusted environment.
+
+Furthermore, TigerBeetle only uses 128-byte [`Account`s](../reference/accounts.md) and
+[`Transfer`s](../reference/transfers.md) with pure integer fields. TigerBeetle has no
+(de)serialization and does not take user-generated strings, which significantly constrains the
+attack surface.
+
+We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle
+async I/O. It is significantly easier for the kernel to implement this correctly than for us to
+include a userspace multithreaded thread pool (for example, as libuv does).

@@ -34,7 +34,8 @@ in-memory database such as Redis:
   and back, to reduce memory pressure and L1-L3 cache pollution.
 
 - TigerBeetle **uses io_uring for zero-syscall networking and storage I/O**. The cost of a syscall
-  in terms of context switches adds up quickly for a few thousand transfers.
+  in terms of context switches adds up quickly for a few thousand transfers. (You can read about the
+  security of using io_uring [here](./safety.md#io_uring-security).)
 
 - TigerBeetle **does zero-deserialization** by using fixed-size data structures that are optimized
   for cache line alignment to **minimize L1-L3 cache misses**.
