@@ -190,8 +190,8 @@ trusted environment.
 
 Furthermore, TigerBeetle only uses 128-byte [`Account`s](../reference/accounts.md) and
 [`Transfer`s](../reference/transfers.md) with pure integer fields. TigerBeetle has no
-(de)serialization and does not take random strings, which significantly constrains the attack
-surface.
+(de)serialization and does not take user-generated strings, which significantly constrains the
+attack surface.
 
 We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle
 async I/O. It is significantly easier for the kernel to implement this correctly than for us to
