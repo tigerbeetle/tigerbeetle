@@ -195,4 +195,4 @@ surface.
 
 We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle
 async I/O. It is significantly easier for the kernel to implement this correctly than for us to
-include a userspace multithreaded threadpool (for example, as libuv does).
+include a userspace multithreaded thread pool (for example, as libuv does).
