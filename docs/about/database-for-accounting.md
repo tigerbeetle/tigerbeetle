@@ -2,7 +2,7 @@
 sidebar_position: 2
 ---
 
-## A Database for Accounting
+# A Database for Accounting
 
 ## Why Would I Want A Dedicated Distributed Database For Accounting?
 

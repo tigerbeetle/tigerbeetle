@@ -2,7 +2,7 @@
 sidebar_position: 6
 ---
 
-## Production Readiness
+# Production Readiness
 
 TigerBeetle was started in 2020 and you're watching us build the plane while we're flying it.
 

@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-## Double-Entry Accounting
+# Double-Entry Accounting
 
 Double-entry accounting tracks transfers between accounts. It records the amount of the transfer
 along with where the amount came from and where it goes.
