@@ -2,7 +2,7 @@
 sidebar_position: 7
 ---
 
-## Zig
+# Zig
 
 Coming from C, Zig is the language we've always wanted -- and the perfect language in which to write
 a database focused on performance and safety.
