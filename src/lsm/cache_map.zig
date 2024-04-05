@@ -152,7 +152,7 @@ pub fn CacheMapType(
             // When upserting into a scope:
             if (self.scope_is_active) {
                 if (old_value_maybe) |old_value| {
-                    // If it was updated, append the old value to the the scope rollback log.
+                    // If it was updated, append the old value to the scope rollback log.
                     self.scope_rollback_log.appendAssumeCapacity(old_value);
                 } else {
                     // If it was an insert, append a tombstone to the scope rollback log.

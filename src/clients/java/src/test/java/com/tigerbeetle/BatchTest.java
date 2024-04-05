@@ -855,7 +855,7 @@ public class BatchTest {
         account2.flags = AccountFlags.LINKED | AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS;
         account2.timestamp = 99;
 
-        // Mimic the the binary response
+        // Mimic the binary response
         dummyAccountsStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
@@ -923,7 +923,7 @@ public class BatchTest {
         transfer2.flags = TransferFlags.PENDING | TransferFlags.LINKED;
         transfer2.timestamp = 900;
 
-        // Mimic the the binary response
+        // Mimic the binary response
         dummyTransfersStream = ByteBuffer.allocate(256).order(ByteOrder.LITTLE_ENDIAN);
 
         // Item 1
@@ -959,7 +959,7 @@ public class BatchTest {
         createAccountResult1 = CreateAccountResult.Ok;
         createAccountResult2 = CreateAccountResult.Exists;
 
-        // Mimic the the binary response
+        // Mimic the binary response
         dummyCreateAccountResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateAccountResultsStream.putInt(0).putInt(0); // Item 0 - OK
         dummyCreateAccountResultsStream.putInt(1).putInt(CreateAccountResult.Exists.value); // Item
@@ -969,7 +969,7 @@ public class BatchTest {
         createTransferResult1 = CreateTransferResult.Ok;
         createTransferResult2 = CreateTransferResult.ExceedsDebits;
 
-        // Mimic the the binary response
+        // Mimic the binary response
         dummyCreateTransfersResultsStream = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN);
         dummyCreateTransfersResultsStream.putInt(0).putInt(0); // Item 0 - OK
         dummyCreateTransfersResultsStream.putInt(1)
@@ -982,7 +982,7 @@ public class BatchTest {
         id2LeastSignificant = 2;
         id2MostSignificant = 20;
 
-        // Mimic the the binary response
+        // Mimic the binary response
         dummyIdsStream = ByteBuffer.allocate(32).order(ByteOrder.LITTLE_ENDIAN);
         dummyIdsStream.putLong(10).putLong(100); // Item (10,100)
         dummyIdsStream.putLong(2).putLong(20); // Item (2,20)
