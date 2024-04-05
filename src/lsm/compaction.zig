@@ -122,7 +122,7 @@ pub fn CompactionHelperType(comptime Grid: type) type {
             read: Grid.Read = undefined,
             write: Grid.Write = undefined,
 
-            stage: enum { free, pending, ready, ioing } = .free,
+            stage: enum { free, pending, ready, ioing, standalone } = .free,
             next: ?*CompactionBlock = null,
         };
 
@@ -734,6 +734,8 @@ pub fn CompactionType(
 
             // TODO: Actually, assert this is only non-null when level_b == 0, otherwise it should
             // be null!
+            assert(source_a_immutable_block.stage == .free);
+            source_a_immutable_block.stage = .standalone;
             bar.source_a_immutable_block = source_a_immutable_block;
 
             log.debug("bar_setup_budget({s}): bar.compaction_tables_value_count={}", .{
@@ -819,6 +821,12 @@ pub fn CompactionType(
             assert(blocks.source_value_blocks[0].count > 0);
             assert(blocks.source_value_blocks[1].count > 0);
             assert(blocks.target_value_blocks.count > 0);
+
+            assert(blocks.source_index_block_a.stage == .free);
+            assert(blocks.source_index_block_b.stage == .free);
+
+            blocks.source_index_block_a.stage = .standalone;
+            blocks.source_index_block_b.stage = .standalone;
 
             compaction.beat.?.blocks = blocks;
         }
@@ -1837,6 +1845,12 @@ pub fn CompactionType(
 
             const blocks = &compaction.beat.?.blocks.?;
 
+            assert(blocks.source_index_block_a.stage == .standalone);
+            assert(blocks.source_index_block_b.stage == .standalone);
+
+            blocks.source_index_block_a.stage = .free;
+            blocks.source_index_block_b.stage = .free;
+
             block_pool.push(blocks.source_index_block_a);
             block_pool.push(blocks.source_index_block_b);
 
@@ -1893,6 +1907,8 @@ pub fn CompactionType(
                 bar.target_index_blocks.?.deinit(block_pool);
                 bar.target_index_blocks = null;
 
+                assert(bar.source_a_immutable_block.?.stage == .standalone);
+                bar.source_a_immutable_block.?.stage = .free;
                 block_pool.push(bar.source_a_immutable_block.?);
                 bar.source_a_immutable_block = null;
             }
