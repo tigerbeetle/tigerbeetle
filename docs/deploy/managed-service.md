@@ -4,9 +4,6 @@ sidebar_position: 4
 
 # Managed Service
 
-Want to use TigerBeetle but don't want to worry about hosting it yourself?
+Want to use TigerBeetle in production, along with automated disaster recovery, monitoring, and dedicated support from the TigerBeetle team?
 
-We're working on a managed service, where your cluster will be run by the experts who build
-TigerBeetle.
-
-Interested in learning more? Reach out to <joran@tigerbeetle.com>!
+Let us help you get up and running faster! Contact our CEO, Joran Dirk Greef, at <joran@tigerbeetle.com> to set up a call.
