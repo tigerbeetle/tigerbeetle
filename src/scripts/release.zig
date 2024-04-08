@@ -153,6 +153,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     // one.
     //TODO: use std.Target here
     inline for (.{ false, true }) |debug| {
+        const debug_suffix = if (debug) "-debug" else "";
         inline for (targets) |target| {
             try shell.zig(
                 \\build install
@@ -178,7 +179,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                     "tigerbeetle-" ++ target,
                 );
             } else {
-                const zip_name = "tigerbeetle-" ++ target ++ if (debug) "-debug" else "" ++ ".zip";
+                const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
                 try shell.exec("zip -9 {zip_path} {exe_name}", .{
                     .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
                     .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
@@ -193,7 +194,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         , .{ .llvm_lipo = llvm_lipo });
         try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
         try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
-        const zip_name = "tigerbeetle-universal-macos" ++ if (debug) "-debug" else "" ++ ".zip";
+        const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
         try shell.exec("zip -9 {zip_path} {exe_name}", .{
             .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
             .exe_name = "tigerbeetle",
