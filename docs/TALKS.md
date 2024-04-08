@@ -8,6 +8,12 @@ ThePrimeagen was blown away.
 
 https://youtu.be/sC1B3d9C_sI?si=Pn6OfKSkyLoHc2Z5
 
+## February 26, 2024: TigerBeetle Release Pipeline (Behind the Scenes!)
+
+In this impromptu talk, matklad discusses build and release process of TigerBeetle.
+
+https://www.youtube.com/watch?v=eFTQzhfO6nc
+
 ## October 2, 2023: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
 
 Joran Dirk Greef discusses how the world is becoming more transactional, why Online
