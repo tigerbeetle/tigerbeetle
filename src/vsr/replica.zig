@@ -627,7 +627,7 @@ pub fn ReplicaType(
             // the last record in WAL. As a special case, during  the first open the last (and the
             // only) record in WAL is the root prepare.
             //
-            // Otherwise, the head is recovered from the superblock. When transitioninig to a
+            // Otherwise, the head is recovered from the superblock. When transitioning to a
             // view_change, replicas encode the current head into vsr_headers.
             //
             // It is a possibility that the head can't be recovered from the local data.
@@ -5459,6 +5459,14 @@ pub fn ReplicaType(
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
 
+            // Immediately after recovery, any faulty non-reserved prepares must be within our
+            // current checkpoint. See recovery case @M.
+            for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
+                if (self.journal.faulty.bit(.{ .index = slot })) {
+                    assert(header.operation == .reserved or self.op_checkpoint() <= header.op);
+                }
+            }
+
             // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
             // if the replica restarts after state sync updates superblock.
             if (self.op < self.op_checkpoint()) return false;
@@ -5569,7 +5577,7 @@ pub fn ReplicaType(
         /// Safety condition: repairing an old op must not overwrite a newer op from the next wrap.
         ///
         /// Availability condition: each committed op must be present either in a quorum of WALs or
-        /// it in a quorum of checkpoints.
+        /// in a quorum of checkpoints.
         ///
         /// If op=trigger+1 is committed, the corresponding checkpoint is durably present on
         /// a quorum of replicas. Repairing all ops since the latest durable checkpoint satisfies
