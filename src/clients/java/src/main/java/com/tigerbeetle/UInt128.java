@@ -23,7 +23,7 @@ public enum UInt128 {
      * @param bytes an array of 16 bytes representing the 128-bit value.
      * @param part a {@link UInt128} enum indicating which part of the 128-bit value is to be
      *        retrieved.
-     * @return a {@code long} representing the the first 8 bytes of the 128-bit value if
+     * @return a {@code long} representing the first 8 bytes of the 128-bit value if
      *         {@link UInt128#LeastSignificant} is informed, or the last 8 bytes if
      *         {@link UInt128#MostSignificant}.
      *
@@ -45,9 +45,8 @@ public enum UInt128 {
     /**
      * Gets an array of 16 bytes representing the 128-bit value.
      *
-     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
-     *        value.
-     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @return an array of 16 bytes representing the 128-bit value.
      */
     public static byte[] asBytes(final long leastSignificant, final long mostSignificant) {
@@ -65,8 +64,7 @@ public enum UInt128 {
     /**
      * Gets an array of 16 bytes representing the 128-bit value.
      *
-     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
-     *        value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @return an array of 16 bytes representing the 128-bit value.
      */
     public static byte[] asBytes(final long leastSignificant) {
@@ -104,9 +102,8 @@ public enum UInt128 {
     /**
      * Gets a {@link java.math.BigInteger} representing a 128-bit unsigned integer.
      *
-     * @param leastSignificant a {@code long} representing the the first 8 bytes of the 128-bit
-     *        value.
-     * @param mostSignificant a {@code long} representing the the last 8 bytes of the 128-bit value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
+     * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @return a {@link java.math.BigInteger}.
      */
     public static BigInteger asBigInteger(final long leastSignificant, final long mostSignificant) {
