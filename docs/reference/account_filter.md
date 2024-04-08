@@ -70,7 +70,7 @@ matches the parameter [`account_id`](#account_id).
 
 #### `flags.reversed`
 
-Whether the results are sorted by timestamp in chronological or reverse-chronological order.
+Whether the results are sorted by timestamp in chronological or reverse-chronological order. If this flag is set, the results will be sorted in reverse-chronological order.
 
 ### `reserved`
 
