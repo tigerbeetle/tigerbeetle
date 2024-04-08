@@ -350,7 +350,7 @@ fn has_link(line: []const u8) bool {
 
 /// If a line is a `\\` string literal, extract its value.
 fn parse_multiline_string(line: []const u8) ?[]const u8 {
-    const cut = stdx.cut(line, "\\") orelse return null;
+    const cut = stdx.cut(line, "\\\\") orelse return null;
     for (cut.prefix) |c| if (c != ' ') return null;
     return cut.suffix;
 }
