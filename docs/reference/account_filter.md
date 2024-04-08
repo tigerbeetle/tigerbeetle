@@ -70,7 +70,9 @@ matches the parameter [`account_id`](#account_id).
 
 #### `flags.reversed`
 
-Whether the results are sorted by timestamp in chronological or reverse-chronological order. If this flag is set, the results will be sorted in reverse-chronological order.
+Whether the results are sorted by timestamp in chronological or reverse-chronological order. If the
+flag is not set, the event that happened first (has the smallest timestamp) will come first. If the
+flag is set, the event that happened last (has the largest timestamp) will come first.
 
 ### `reserved`
 
