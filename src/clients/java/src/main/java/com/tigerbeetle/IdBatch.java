@@ -67,8 +67,7 @@ public final class IdBatch extends Batch {
      * <p>
      * If successful, moves the current {@link #setPosition position} to the newly created id.
      *
-     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit
-     *        value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      *
      * @throws IllegalStateException if this batch is read-only.
@@ -84,8 +83,7 @@ public final class IdBatch extends Batch {
      * <p>
      * If successful, moves the current {@link #setPosition position} to the newly created id.
      *
-     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit
-     *        value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      *
      * @throws IllegalStateException if this batch is read-only.
      * @throws IndexOutOfBoundsException if exceeds the batch's capacity.
@@ -136,8 +134,7 @@ public final class IdBatch extends Batch {
     /**
      * Sets the id.
      *
-     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit
-     *        value.
+     * @param leastSignificant a {@code long} representing the first 8 bytes of the 128-bit value.
      * @param mostSignificant a {@code long} representing the last 8 bytes of the 128-bit value.
      * @throws IllegalStateException if not at a {@link #isValidPosition valid position}.
      * @throws IllegalStateException if a {@link #isReadOnly() read-only} batch.
