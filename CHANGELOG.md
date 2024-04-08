@@ -1,5 +1,46 @@
 # TigerBeetle Changelog
 
+## 2024-04-08 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1821](https://github.com/tigerbeetle/tigerbeetle/pull/1821)
+
+  Fix a case the VOPR found where a replica recovers into `recovering_head` unexpectedly.
+
+### Features
+
+- [#1565](https://github.com/tigerbeetle/tigerbeetle/pull/1565)
+
+  Improve CLI errors around sizing by providing human readable (1057MiB vs 1108344832) values.
+
+- [#1818](https://github.com/tigerbeetle/tigerbeetle/pull/1818),
+  [#1831](https://github.com/tigerbeetle/tigerbeetle/pull/1831),
+  [#1829](https://github.com/tigerbeetle/tigerbeetle/pull/1829),
+  [#1817](https://github.com/tigerbeetle/tigerbeetle/pull/1817),
+  [#1826](https://github.com/tigerbeetle/tigerbeetle/pull/1826),
+  [#1825](https://github.com/tigerbeetle/tigerbeetle/pull/1825)
+
+  Documentation improvements.
+
+### Internals
+
+- [#1806](https://github.com/tigerbeetle/tigerbeetle/pull/1806)
+
+  Additional LSM compaction comments and assertions.
+
+- [#1824](https://github.com/tigerbeetle/tigerbeetle/pull/1824)
+
+  Clarify some scan internals and add additional assertions.
+
+- [#1828](https://github.com/tigerbeetle/tigerbeetle/pull/1828)
+
+  Some of our comments had duplicate words - thanks @divdeploy for for noticing!
+
+### TigerTracks 🎧
+
+- [All The Small Things](https://www.youtube.com/watch?v=Sn0gVjPrUj0)
+
 ## 2024-04-01 (Placeholder: no release yet)
 
 ### Safety And Performance
