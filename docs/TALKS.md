@@ -1,13 +1,5 @@
 # Talks
 
-## March 22, 2024: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
-
-Joran Dirk Greef discusses how the world is becoming more transactional, why Online
-Transaction Processing (OLTP) needs to be redesigned for today's massive scale, and
-he goes into technical detail about how TigerBeetle achieves this.
-
-https://www.infoq.com/presentations/redesign-oltp/
-
 ## February 26, 2024: The FASTEST and SAFEST Database
 
 Joran Dirk Greef gives an entertaining and informative overview of the problems TigerBeetle
@@ -15,6 +7,14 @@ solves, technical details about how it works, and shows a demo of the simulator 
 ThePrimeagen was blown away.
 
 https://youtu.be/sC1B3d9C_sI?si=Pn6OfKSkyLoHc2Z5
+
+## October 2, 2023: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
+
+Joran Dirk Greef discusses how the world is becoming more transactional, why Online
+Transaction Processing (OLTP) needs to be redesigned for today's massive scale, and
+he goes into technical detail about how TigerBeetle achieves this.
+
+https://www.infoq.com/presentations/redesign-oltp/
 
 ## March 27, 2023: A New Era for Database Design with TigerBeetle at QCon London 2023
 
