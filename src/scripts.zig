@@ -31,6 +31,40 @@ const CliArgs = union(enum) {
     devhub: devhub.CliArgs,
     kcov: kcov.CliArgs,
     changelog: void,
+
+    pub const help =
+        \\Usage:
+        \\
+        \\  zig build scripts -- [-h | --help]
+        \\
+        \\  zig build scripts -- changelog
+        \\
+        \\  zig build scripts -- cfo [--budget-minutes=<n>] [--hang-minutes=<n>] [--concurrency=<n>]
+        \\
+        \\  zig build scripts -- ci [--language=<dotnet|go|java|node>] [--validate-release]
+        \\
+        \\  zig build scripts -- devhub --sha=<commit>
+        \\
+        \\  zig build scripts -- release --run-number=<run> --sha=<commit>
+        \\
+        \\Options:
+        \\
+        \\  -h, --help
+        \\        Print this help message and exit.
+        \\
+        \\Options (release):
+        \\
+        \\  --language=<dotnet|go|java|node|zig|docker>
+        \\        Build/publish only the specified language.
+        \\        (If not set, cover all languages in sequence.)
+        \\
+        \\  --build
+        \\        Build the packages.
+        \\
+        \\  --publish
+        \\        Publish the packages.
+        \\
+    ;
 };
 
 pub fn main() !void {
