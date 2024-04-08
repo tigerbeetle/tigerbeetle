@@ -5459,6 +5459,14 @@ pub fn ReplicaType(
         fn op_head_certain(self: *const Self) bool {
             assert(self.status == .recovering);
 
+            // Immediately after recovery, any faulty non-reserved prepares must be within our
+            // current checkpoint. See recovery case @M.
+            for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
+                if (self.journal.faulty.bit(.{ .index = slot })) {
+                    assert(header.operation == .reserved or self.op_checkpoint() <= header.op);
+                }
+            }
+
             // "op-head < op-checkpoint" is possible if op_checkpoint…head (inclusive) is corrupt or
             // if the replica restarts after state sync updates superblock.
             if (self.op < self.op_checkpoint()) return false;
