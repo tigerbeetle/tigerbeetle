@@ -188,6 +188,13 @@ const CliArgs = union(enum) {
 };
 
 pub const Command = union(enum) {
+    pub const Format = struct {
+        cluster: u128,
+        replica: u8,
+        replica_count: u8,
+        path: [:0]const u8,
+    };
+
     pub const Start = struct {
         addresses: []const net.Address,
         // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
@@ -235,12 +242,7 @@ pub const Command = union(enum) {
         seed: ?u64 = null,
     };
 
-    format: struct {
-        cluster: u128,
-        replica: u8,
-        replica_count: u8,
-        path: [:0]const u8,
-    },
+    format: Format,
     start: Start,
     version: struct {
         verbose: bool,

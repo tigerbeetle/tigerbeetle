@@ -40,11 +40,12 @@ pub fn main() !void {
     // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
     // in build.zig doesn't work.
-    if (builtin.target.os.tag == .macos)
+    if (builtin.target.os.tag == .macos) {
         os.setrlimit(os.rlimit_resource.STACK, .{
             .cur = 16 * 1024 * 1024,
             .max = 16 * 1024 * 1024,
         }) catch @panic("unable to adjust stack limit");
+    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -61,12 +62,12 @@ pub fn main() !void {
     defer command.deinit(allocator);
 
     switch (command) {
-        .format => |*args| try Command.format(allocator, .{
+        .format => |*args| try Command.format(allocator, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
-        }, args.path),
+        }),
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
@@ -115,9 +116,13 @@ const Command = struct {
         os.close(command.dir_fd);
     }
 
-    pub fn format(allocator: mem.Allocator, options: SuperBlock.FormatOptions, path: [:0]const u8) !void {
+    pub fn format(
+        allocator: mem.Allocator,
+        args: *const cli.Command.Format,
+        options: SuperBlock.FormatOptions,
+    ) !void {
         var command: Command = undefined;
-        try command.init(allocator, path, true);
+        try command.init(allocator, args.path, true);
         defer command.deinit(allocator);
 
         var superblock = try SuperBlock.init(
