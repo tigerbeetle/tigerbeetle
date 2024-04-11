@@ -34,6 +34,7 @@ const CliArgs = union(enum) {
         // Experimental: standbys don't have a concrete practical use-case yet.
         standby: ?u8 = null,
         replica_count: u8,
+        development: bool = false,
 
         positional: struct {
             path: [:0]const u8,
@@ -52,6 +53,7 @@ const CliArgs = union(enum) {
         cache_grid: flags.ByteSize = .{ .value = constants.grid_cache_size_default },
         memory_lsm_manifest: flags.ByteSize =
             .{ .value = constants.lsm_manifest_memory_size_default },
+        development: bool = false,
 
         positional: struct {
             path: [:0]const u8,
@@ -155,6 +157,11 @@ const CliArgs = union(enum) {
         \\  --verbose
         \\        Print compile-time configuration along with the build version.
         \\
+        \\  --development
+        \\        Allow the replica to format/start even when Direct IO is unavailable.
+        \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
+        \\        used for testing and development.
+        \\
         \\Examples:
         \\
         \\  tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
@@ -188,6 +195,14 @@ const CliArgs = union(enum) {
 };
 
 pub const Command = union(enum) {
+    pub const Format = struct {
+        cluster: u128,
+        replica: u8,
+        replica_count: u8,
+        development: bool,
+        path: [:0]const u8,
+    };
+
     pub const Start = struct {
         addresses: []const net.Address,
         // true when the value of `--addresses` is exactly `0`. Used to enable "magic zero" mode for
@@ -201,6 +216,7 @@ pub const Command = union(enum) {
         storage_size_limit: u64,
         cache_grid_blocks: u32,
         lsm_forest_node_count: u32,
+        development: bool,
         path: [:0]const u8,
     };
 
@@ -235,12 +251,7 @@ pub const Command = union(enum) {
         seed: ?u64 = null,
     };
 
-    format: struct {
-        cluster: u128,
-        replica: u8,
-        replica_count: u8,
-        path: [:0]const u8,
-    },
+    format: Format,
     start: Start,
     version: struct {
         verbose: bool,
@@ -325,6 +336,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cluster = format.cluster, // just an ID, any value is allowed
                     .replica = replica,
                     .replica_count = format.replica_count,
+                    .development = format.development,
                     .path = format.positional.path,
                 },
             };
@@ -429,6 +441,7 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                         start.cache_grid,
                     ),
                     .lsm_forest_node_count = lsm_forest_node_count,
+                    .development = start.development,
                     .path = start.positional.path,
                 },
             };

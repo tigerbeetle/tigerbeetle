@@ -25,7 +25,7 @@ Want to build from source locally? Add `-build` as an argument to the bootstrap 
 Now create the TigerBeetle [data file](../about/internals/data_file.md):
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development 0_0.tigerbeetle
 ```
 
 ```console
@@ -36,7 +36,7 @@ info(io): allocating 660.140625MiB...
 And start the server:
 
 ```console
-./tigerbeetle start --addresses=3000 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000 --development 0_0.tigerbeetle
 ```
 
 ```console

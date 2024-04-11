@@ -134,7 +134,7 @@ pub const AOF = struct {
     }
 
     fn init(dir_fd: os.fd_t, relative_path: []const u8) !AOF {
-        const fd = try IO.open_file(dir_fd, relative_path, 0, .create_or_open);
+        const fd = try IO.open_file(dir_fd, relative_path, 0, .create_or_open, .direct_io_required);
         errdefer os.close(fd);
 
         try os.lseek_END(fd, 0);

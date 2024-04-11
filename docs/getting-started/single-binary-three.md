@@ -25,23 +25,23 @@ Want to build from source locally? Add `-build` as an argument to the bootstrap 
 Now create the TigerBeetle [data file](../about/internals/data_file.md) for each replica:
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 --development 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 --development 0_1.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 --development 0_2.tigerbeetle
 ```
 
 And start each server in a new terminal window:
 
 ```console
-./tigerbeetle start --addresses=3000,3001,3002 0_0.tigerbeetle
+./tigerbeetle start --addresses=3000,3001,3002 --development 0_0.tigerbeetle
 ```
 
 ```console
-./tigerbeetle start --addresses=3000,3001,3002 0_1.tigerbeetle
+./tigerbeetle start --addresses=3000,3001,3002 --development 0_1.tigerbeetle
 ```
 
 ```console
-./tigerbeetle start --addresses=3000,3001,3002 0_2.tigerbeetle
+./tigerbeetle start --addresses=3000,3001,3002 --development 0_2.tigerbeetle
 ```
 
 TigerBeetle uses the `--replica` that's stored in the data file as an index into the `--addresses`

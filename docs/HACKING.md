@@ -30,13 +30,13 @@ for exactly what we're benchmarking.
 Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
 
 ```console
-./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
-./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 --development 0_0.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=1 --replica-count=3 --development 0_1.tigerbeetle
+./tigerbeetle format --cluster=0 --replica=2 --replica-count=3 --development 0_2.tigerbeetle
 
-./tigerbeetle start --addresses=3001,3002,3003 0_0.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_1.tigerbeetle
-./tigerbeetle start --addresses=3001,3002,3003 0_2.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 --development 0_0.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 --development 0_1.tigerbeetle
+./tigerbeetle start --addresses=3001,3002,3003 --development 0_2.tigerbeetle
 ```
 
 Run the TigerBeetle binary to see all command line arguments:

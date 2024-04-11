@@ -40,11 +40,12 @@ pub fn main() !void {
     // TODO(zig): Zig defaults to 16MB stack size on Linux, but not yet on mac as of 0.11.
     // Override it here, so it can have the same stack size. Trying to set `tigerbeetle.stack_size`
     // in build.zig doesn't work.
-    if (builtin.target.os.tag == .macos)
+    if (builtin.target.os.tag == .macos) {
         os.setrlimit(os.rlimit_resource.STACK, .{
             .cur = 16 * 1024 * 1024,
             .max = 16 * 1024 * 1024,
         }) catch @panic("unable to adjust stack limit");
+    }
 
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -61,12 +62,12 @@ pub fn main() !void {
     defer command.deinit(allocator);
 
     switch (command) {
-        .format => |*args| try Command.format(allocator, .{
+        .format => |*args| try Command.format(allocator, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
-        }, args.path),
+        }),
         .start => |*args| try Command.start(&arena, args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
@@ -85,7 +86,10 @@ const Command = struct {
         command: *Command,
         allocator: mem.Allocator,
         path: [:0]const u8,
-        must_create: bool,
+        options: struct {
+            must_create: bool,
+            development: bool,
+        },
     ) !void {
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
@@ -93,8 +97,21 @@ const Command = struct {
         command.dir_fd = try IO.open_dir(dirname);
         errdefer os.close(command.dir_fd);
 
+        const direct_io: vsr.io.DirectIO = if (!constants.direct_io)
+            .direct_io_disabled
+        else if (options.development)
+            .direct_io_optional
+        else
+            .direct_io_required;
+
         const basename = std.fs.path.basename(path);
-        command.fd = try IO.open_file(command.dir_fd, basename, data_file_size_min, if (must_create) .create else .open);
+        command.fd = try IO.open_file(
+            command.dir_fd,
+            basename,
+            data_file_size_min,
+            if (options.must_create) .create else .open,
+            direct_io,
+        );
         errdefer os.close(command.fd);
 
         command.io = try IO.init(128, 0);
@@ -115,9 +132,16 @@ const Command = struct {
         os.close(command.dir_fd);
     }
 
-    pub fn format(allocator: mem.Allocator, options: SuperBlock.FormatOptions, path: [:0]const u8) !void {
+    pub fn format(
+        allocator: mem.Allocator,
+        args: *const cli.Command.Format,
+        options: SuperBlock.FormatOptions,
+    ) !void {
         var command: Command = undefined;
-        try command.init(allocator, path, true);
+        try command.init(allocator, args.path, .{
+            .must_create = true,
+            .development = args.development,
+        });
         defer command.deinit(allocator);
 
         var superblock = try SuperBlock.init(
@@ -150,7 +174,10 @@ const Command = struct {
         const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
-        try command.init(allocator, args.path, false);
+        try command.init(allocator, args.path, .{
+            .must_create = false,
+            .development = args.development,
+        });
         defer command.deinit(allocator);
 
         var aof: AOFType = undefined;

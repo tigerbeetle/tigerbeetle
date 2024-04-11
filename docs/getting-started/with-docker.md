@@ -8,7 +8,7 @@ First provision TigerBeetle's [data file](../about/internals/data_file.md):
 
 ```console
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
-    format --cluster=0 --replica=0 --replica-count=1 /data/0_0.tigerbeetle
+    format --cluster=0 --replica=0 --replica-count=1 --development /data/0_0.tigerbeetle
 ```
 
 ```console
@@ -20,7 +20,7 @@ Then run the server:
 
 ```console
 docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
-    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+    start --addresses=0.0.0.0:3000 --development /data/0_0.tigerbeetle
 ```
 
 ```console
@@ -65,5 +65,5 @@ to a debug image (by using the `:debug` Docker image tag).
 
 ```console
 docker run -p 3000:3000 -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle:debug \
-    start --addresses=0.0.0.0:3000 /data/0_0.tigerbeetle
+    start --addresses=0.0.0.0:3000 --development /data/0_0.tigerbeetle
 ```
