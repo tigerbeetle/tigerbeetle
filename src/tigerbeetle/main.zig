@@ -97,7 +97,7 @@ const Command = struct {
         command.dir_fd = try IO.open_dir(dirname);
         errdefer os.close(command.dir_fd);
 
-        const direct_io: IO.DirectIO = if (!constants.direct_io)
+        const direct_io: vsr.io.DirectIO = if (!constants.direct_io)
             .direct_io_disabled
         else if (options.development)
             .direct_io_optional

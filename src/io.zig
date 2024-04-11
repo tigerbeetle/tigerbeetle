@@ -15,6 +15,12 @@ pub const IO = switch (builtin.target.os.tag) {
     else => @compileError("IO is not supported for platform"),
 };
 
+pub const DirectIO = enum {
+    direct_io_required,
+    direct_io_optional,
+    direct_io_disabled,
+};
+
 pub fn buffer_limit(buffer_len: usize) usize {
     // Linux limits how much may be written in a `pwrite()/pread()` call, which is `0x7ffff000` on
     // both 64-bit and 32-bit systems, due to using a signed C int as the return value, as well as

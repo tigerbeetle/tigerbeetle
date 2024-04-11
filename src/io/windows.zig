@@ -7,6 +7,7 @@ const constants = @import("../constants.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
+const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     iocp: os.windows.HANDLE,
@@ -1029,9 +1030,12 @@ pub const IO = struct {
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open },
+        direct_io: DirectIO,
     ) !os.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
+        // On windows, assume that Direct IO is always available.
+        _ = direct_io;
 
         const handle = switch (method) {
             .open => try open_file_handle(relative_path, .open),

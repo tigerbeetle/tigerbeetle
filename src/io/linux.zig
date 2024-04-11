@@ -12,6 +12,7 @@ const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
+const DirectIO = @import("../io.zig").DirectIO;
 const parse_dirty_semver = stdx.parse_dirty_semver;
 
 pub const IO = struct {
@@ -981,12 +982,6 @@ pub const IO = struct {
     }
 
     pub const INVALID_FILE: os.fd_t = -1;
-
-    pub const DirectIO = enum {
-        direct_io_required,
-        direct_io_optional,
-        direct_io_disabled,
-    };
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
