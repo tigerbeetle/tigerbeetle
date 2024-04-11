@@ -1176,8 +1176,11 @@ pub fn CompactionType(
             while (true) {
                 // Set the index block if needed.
                 if (bar.table_builder.state == .no_blocks) {
-                    if (target_index_blocks.ready.count == @divExact(target_index_blocks.count, 2))
+                    if (target_index_blocks.ready.count ==
+                        @divExact(target_index_blocks.count, 2))
+                    {
                         break;
+                    }
 
                     const index_block = target_index_blocks.free_to_pending().?.block;
                     // TODO: We don't need to zero the whole block; just the part of the padding
@@ -1188,8 +1191,11 @@ pub fn CompactionType(
 
                 // Set the value block if needed.
                 if (bar.table_builder.state == .index_block) {
-                    if (target_value_blocks.ready.count == @divExact(target_value_blocks.count, 2))
+                    if (target_value_blocks.ready.count ==
+                        @divExact(target_value_blocks.count, 2))
+                    {
                         break;
+                    }
 
                     const value_block = target_value_blocks.free_to_pending().?.block;
                     // TODO: We don't need to zero the whole block; just the part of the padding
@@ -1261,8 +1267,9 @@ pub fn CompactionType(
 
                 // Sanity check. If our sources are exhausted but our values processed sum doesn't
                 // match the total values we had to process we have a bug somewhere.
-                if (source_a_exhausted and source_b_exhausted)
+                if (source_a_exhausted and source_b_exhausted) {
                     assert(bar.source_values_merge_count == bar.compaction_tables_value_count);
+                }
 
                 // beat.source_values_processed can overrun, but we can never do more work for a
                 // bar than what we know we have.
@@ -1362,8 +1369,9 @@ pub fn CompactionType(
 
                 beat.source_a_values = bar.source_a_immutable_values.?;
                 if (bar.source_a_immutable_values.?.len == 0) {
-                    if (!updated_fill_count)
+                    if (!updated_fill_count) {
                         bar.source_a_values_consumed_for_fill = 0;
+                    }
                     return .exhausted;
                 }
 
@@ -1927,8 +1935,9 @@ pub fn CompactionType(
                 assert(bar.beats_finished <= bar.beats_max.?);
 
             // Mark the immutable table as flushed, if we were compacting into level 0.
-            if (compaction.level_b == 0 and bar.table_info_a.immutable.len == 0)
+            if (compaction.level_b == 0 and bar.table_info_a.immutable.len == 0) {
                 bar.tree.table_immutable.mutability.immutable.flushed = true;
+            }
 
             // Each compaction's manifest updates are deferred to the end of the last
             // bar to ensure:
@@ -1948,8 +1957,9 @@ pub fn CompactionType(
                 // references to modify the ManifestLevel in-place.
                 switch (bar.table_info_a) {
                     .immutable => {
-                        if (bar.table_info_a.immutable.len == 0)
+                        if (bar.table_info_a.immutable.len == 0) {
                             manifest_removed_value_count = bar.tree.table_immutable.count();
+                        }
                     },
                     .disk => |table_info| {
                         manifest_removed_value_count += table_info.table_info.value_count;

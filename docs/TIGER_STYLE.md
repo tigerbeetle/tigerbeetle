@@ -370,6 +370,9 @@ Beyond these rules:
   your editor help you by setting a column ruler. To wrap a function signature, call or data
   structure, add a trailing comma, close your eyes and let `zig fmt` do the rest.
 
+- Add braces to the `if` statement unless it fits on a single line for consistency and defense in
+  depth against "goto fail;" bugs.
+
 ### Dependencies
 
 TigerBeetle has **a “zero dependencies” policy**, apart from the Zig toolchain. Dependencies, in

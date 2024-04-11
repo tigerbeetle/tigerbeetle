@@ -429,8 +429,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.progress.? == .compact);
             assert(forest.compaction_progress != .idle);
 
-            if (forest.compaction_progress == .trees_and_manifest)
+            if (forest.compaction_progress == .trees_and_manifest) {
                 assert(forest.manifest_log_progress != .idle);
+            }
 
             forest.compaction_progress = if (forest.compaction_progress == .trees_and_manifest)
                 .trees_or_manifest
@@ -981,8 +982,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             if ((first_beat or half_beat) and
                 !forest.grid.superblock.working.vsr_state.op_compacted(op))
             {
-                if (first_beat)
+                if (first_beat) {
                     assert(self.compactions.count() == 0);
+                }
 
                 // Iterate by levels first, then trees, as we expect similar levels to have similar
                 // time-of-death for writes. This helps internal SSD GC.
@@ -1015,8 +1017,9 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                 // At the first beat or first half beat, the block pool must be full.
                 assert(self.block_pool.count == self.block_pool_raw.len);
 
-                if (first_beat)
+                if (first_beat) {
                     self.bar_active = CompactionBitset.initEmpty();
+                }
 
                 for (self.compactions.slice(), 0..) |*compaction, i| {
                     if (compaction.level_b % 2 == 0 and first_beat) continue;
