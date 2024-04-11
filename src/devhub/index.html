@@ -14,19 +14,40 @@
 <body>
   <h1>TigerBeetle DevHub</h1>
 
-  <section>
-    <h2>Release</h2>
+  <div style="display: flex; flex-direction: row;">
 
-    Release Manager for:
-    <ul>
-      <li>last week: <span id="release-previous">N/A</span> </li>
-      <li><strong>this week: <span id="release-current">N/A</span></strong></li>
-      <li>next week: <span id="release-next">N/A</span></li>
-    </ul>
-  </section>
+    <section>
+      <h2>Release</h2>
+
+      Release Manager for:
+      <ul>
+        <li>last week: <span id="release-previous">N/A</span> </li>
+        <li><strong>this week: <span id="release-current">N/A</span></strong></li>
+        <li>next week: <span id="release-next">N/A</span></li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Fuzz failures</h2>
+      <table id="seeds">
+        <thead>
+          <tr>
+            <th>commit</th>
+            <th>fuzzer</th>
+            <th>command</th>
+          </tr>
+        </thead>
+        <tbody>
+
+        </tbody>
+      </table>
+    </section>
+  </div>
 
   <section>
-    <h2>Metrics (on <a href="https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub">Nyrkiö</a>)</h2>
+    <h2>Metrics (on <a
+        href="https://nyrkio.com/public/https%3A%2F%2Fgithub.com%2Ftigerbeetle%2Ftigerbeetle/main/devhub">Nyrkiö</a>)
+    </h2>
     <div id="charts" style="display: flex; flex-direction: column;">
     </div>
   </section>

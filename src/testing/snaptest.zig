@@ -120,11 +120,15 @@ pub const Snap = struct {
     }
 
     // Compare the snapshot with the json serialization of a `value`.
-    pub fn diff_json(snapshot: *const Snap, value: anytype) !void {
+    pub fn diff_json(
+        snapshot: *const Snap,
+        value: anytype,
+        options: std.json.StringifyOptions,
+    ) !void {
         var got = std.ArrayList(u8).init(std.testing.allocator);
         defer got.deinit();
 
-        try std.json.stringify(value, .{}, got.writer());
+        try std.json.stringify(value, options, got.writer());
         try snapshot.diff(got.items);
     }
 

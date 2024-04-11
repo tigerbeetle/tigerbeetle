@@ -34,6 +34,8 @@ const Fuzzers = .{
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
+    // A fuzzer that intentionally fails, to test fuzzing infrastructure itself
+    .canary = {},
     // Quickly run all fuzzers as a smoke test
     .smoke = {},
 };
@@ -69,6 +71,7 @@ fn main_smoke() !void {
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
             .smoke => continue,
+            .canary => continue,
 
             .lsm_cache_map => 20_000,
             .lsm_forest => 10_000,
@@ -112,6 +115,11 @@ fn main_single(cli_args: CliArgs) !void {
     var timer = try std.time.Timer.start();
     switch (cli_args.positional.fuzzer) {
         .smoke => unreachable,
+        .canary => {
+            if (seed % 100 == 0) {
+                std.process.exit(1);
+            }
+        },
         inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(
             .{ .seed = seed, .events_max = cli_args.events_max },
         ),

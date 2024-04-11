@@ -7,19 +7,12 @@
 // - `deno fmt` for style
 // - no TypeScript, no build step
 
-async function main() {
-  const batches = await fetchData();
-  const series = batchesToSeries(batches);
-  plotSeries(series, document.querySelector("#charts"));
-
-  const releaseManager = getReleaseManager();
-  for (const week of ["previous", "current", "next"]) {
-    document.querySelector(`#release-${week}`).textContent =
-      releaseManager[week];
-  }
-}
-
-window.onload = main;
+window.onload = () =>
+  Promise.all([
+    mainReleaseRotation(),
+    mainMetrics(),
+    mainSeeds(),
+  ]);
 
 function assert(condition) {
   if (!condition) {
@@ -28,32 +21,66 @@ function assert(condition) {
   }
 }
 
-function getReleaseManager() {
-  const week = getWeek(new Date());
-  const candidates = [
-    "batiati",
-    "cb22",
-    "kprotty",
-    "matklad",
-    "sentientwaffle",
-  ];
-  candidates.sort();
+function mainReleaseRotation() {
+  const releaseManager = getReleaseManager();
+  for (const week of ["previous", "current", "next"]) {
+    document.querySelector(`#release-${week}`).textContent =
+      releaseManager[week];
+  }
 
-  return {
-    previous: candidates[week % candidates.length],
-    current: candidates[(week + 1) % candidates.length],
-    next: candidates[(week + 2) % candidates.length],
-  };
+  function getReleaseManager() {
+    const week = getWeek(new Date());
+    const candidates = [
+      "batiati",
+      "cb22",
+      "kprotty",
+      "matklad",
+      "sentientwaffle",
+    ];
+    candidates.sort();
+
+    return {
+      previous: candidates[week % candidates.length],
+      current: candidates[(week + 1) % candidates.length],
+      next: candidates[(week + 2) % candidates.length],
+    };
+  }
 }
 
-const dataUrl =
-  "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
-
-async function fetchData() {
+async function mainMetrics() {
+  const dataUrl =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
   const data = await (await fetch(dataUrl)).text();
-  return data.split("\n")
+  const batches = data.split("\n")
     .filter((it) => it.length > 0)
     .map((it) => JSON.parse(it));
+  const series = batchesToSeries(batches);
+  plotSeries(series, document.querySelector("#charts"));
+}
+
+async function mainSeeds() {
+  const dataUrl =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
+  const records = await (await fetch(dataUrl)).json();
+  const recordsLatestCommit = records.filter((it) =>
+    it.commit_sha == records[0].commit_sha
+  );
+  const tableDom = document.querySelector("#seeds>tbody");
+  for (const record of recordsLatestCommit) {
+    if (!record.ok) {
+      const rowDom = document.createElement("tr");
+      rowDom.innerHTML = `
+          <td>
+            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
+              ${record.commit_sha.substring(0, 7)}
+            </a>
+          </td>
+          <td>${record.fuzzer}</td>
+          <td><code>${record.command}</code></td>
+      `;
+      tableDom.appendChild(rowDom);
+    }
+  }
 }
 
 // The input data is array of runs, where a single run contains many measurements (eg, file size,
