@@ -1,5 +1,5 @@
 ---
-sidebar_position: 5
+sidebar_position: 6
 ---
 
 # Client Sessions
@@ -32,8 +32,8 @@ A client session begins when a client registers itself with the cluster.
 
 A client session ends when either:
 
-* the client session is [evicted](#eviction), or
-* the client terminates
+- the client session is [evicted](#eviction), or
+- the client terminates
 
 — whichever occurs first.
 
