@@ -1,5 +1,5 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 # Two-Phase Transfers
@@ -31,26 +31,26 @@ A post-pending transfer, denoted by
 pending transfer to "post", transferring some or all of the pending transfer's reserved amount to
 its destination.
 
-* If the posted [`amount`](../reference/transfers.md#amount) is 0, the full pending transfer's
+- If the posted [`amount`](../reference/transfers.md#amount) is 0, the full pending transfer's
   amount is posted.
-* If the posted [`amount`](../reference/transfers.md#amount) is nonzero, then only this amount is
+- If the posted [`amount`](../reference/transfers.md#amount) is nonzero, then only this amount is
   posted, and the remainder is restored to its original accounts. It must be less than or equal to
   the pending transfer's amount.
 
 Additionally, when `flags.post_pending_transfer` is set:
 
-* [`pending_id`](../reference/transfers.md#pending_id) must reference a [pending
+- [`pending_id`](../reference/transfers.md#pending_id) must reference a [pending
   transfer](#reserve-funds-pending-transfer).
-* [`flags.void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer) must not be
+- [`flags.void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer) must not be
   set.
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
 
-* [`debit_account_id`](../reference/transfers.md#debit_account_id)
-* [`credit_account_id`](../reference/transfers.md#credit_account_id)
-* [`ledger`](../reference/transfers.md#ledger)
-* [`code`](../reference/transfers.md#code)
+- [`debit_account_id`](../reference/transfers.md#debit_account_id)
+- [`credit_account_id`](../reference/transfers.md#credit_account_id)
+- [`ledger`](../reference/transfers.md#ledger)
+- [`code`](../reference/transfers.md#code)
 
 ### Void-Pending Transfer
 
@@ -58,18 +58,18 @@ A void-pending transfer, denoted by
 [`flags.void_pending_transfer`](../reference/transfers.md#flagsvoid_pending_transfer), restores the
 pending amount its original accounts. Additionally, when this field is set:
 
-* [`pending_id`](../reference/transfers.md#pending_id) must reference a [pending
+- [`pending_id`](../reference/transfers.md#pending_id) must reference a [pending
   transfer](#reserve-funds-pending-transfer).
-* [`flags.post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer) must not be
+- [`flags.post_pending_transfer`](../reference/transfers.md#flagspost_pending_transfer) must not be
   set.
 
 The following fields may either be zero or they must match the value of the pending transfer's
 field:
 
-* [`debit_account_id`](../reference/transfers.md#debit_account_id)
-* [`credit_account_id`](../reference/transfers.md#credit_account_id)
-* [`ledger`](../reference/transfers.md#ledger)
-* [`code`](../reference/transfers.md#code)
+- [`debit_account_id`](../reference/transfers.md#debit_account_id)
+- [`credit_account_id`](../reference/transfers.md#credit_account_id)
+- [`ledger`](../reference/transfers.md#ledger)
+- [`code`](../reference/transfers.md#code)
 
 ### Expire Pending Transfer
 
@@ -86,6 +86,7 @@ A pending transfer can only be posted or voided once. It cannot be posted twice 
 posted, etc.
 
 Attempting to resolve a pending transfer more than once will return the applicable error result:
+
 - [`pending_transfer_already_posted`](../reference/operations/create_transfers.md#pending_transfer_already_posted)
 - [`pending_transfer_already_voided`](../reference/operations/create_transfers.md#pending_transfer_already_voided)
 - [`pending_transfer_expired`](../reference/operations/create_transfers.md#pending_transfer_expired)
@@ -103,8 +104,8 @@ be broken, whether the second step is a post or void.
 If an account with
 [`debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits) has
 `credits_posted = 100` and `debits_posted = 70` and a pending transfer is started causing the
-account to have `debits_pending = 50`, the *pending* transfer will fail. It will not wait to get to
-*posted* status to fail.
+account to have `debits_pending = 50`, the _pending_ transfer will fail. It will not wait to get to
+_posted_ status to fail.
 
 ## All Transfers Are Immutable
 
@@ -132,7 +133,7 @@ The following examples show the state of two accounts in three steps:
 ### Post Full Pending Amount
 
 | Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
-|------------:|-----------:|------------:|-----------:|:---------------------|:----------------------|-----------:|:------------------------|
+| ----------: | ---------: | ----------: | ---------: | :------------------- | :-------------------- | ---------: | :---------------------- |
 |  **debits** |            | **credits** |            |                      |                       |            |                         |
 | **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
 |         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
@@ -142,7 +143,7 @@ The following examples show the state of two accounts in three steps:
 ### Post Partial Pending Amount
 
 | Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
-|------------:|-----------:|------------:|-----------:|:---------------------|:----------------------|-----------:|:------------------------|
+| ----------: | ---------: | ----------: | ---------: | :------------------- | :-------------------- | ---------: | :---------------------- |
 |  **debits** |            | **credits** |            |                      |                       |            |                         |
 | **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
 |         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
@@ -152,7 +153,7 @@ The following examples show the state of two accounts in three steps:
 ### Void Pending Transfer
 
 | Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
-|------------:|-----------:|------------:|-----------:|:---------------------|:----------------------|-----------:|:------------------------|
+| ----------: | ---------: | ----------: | ---------: | :------------------- | :-------------------- | ---------: | :---------------------- |
 |  **debits** |            | **credits** |            |                      |                       |            |                         |
 | **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
 |         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
@@ -163,16 +164,16 @@ The following examples show the state of two accounts in three steps:
 
 Read more about how two-phase transfers work with each client.
 
-* [.NET](/src/clients/dotnet/README.md#two-phase-transfers)
-* [Go](/src/clients/go/README.md#two-phase-transfers)
-* [Java](/src/clients/java/README.md#two-phase-transfers)
-* [Node](/src/clients/node/README.md#two-phase-transfers)
+- [.NET](/src/clients/dotnet/README.md#two-phase-transfers)
+- [Go](/src/clients/go/README.md#two-phase-transfers)
+- [Java](/src/clients/java/README.md#two-phase-transfers)
+- [Node](/src/clients/node/README.md#two-phase-transfers)
 
 ## Client Samples
 
 Or take a look at how it works with real code.
 
-* [.NET](/src/clients/dotnet/samples/two-phase/README.md)
-* [Go](/src/clients/go/samples/two-phase/README.md)
-* [Java](/src/clients/java/samples/two-phase/README.md)
-* [Node](/src/clients/node/samples/two-phase/README.md)
+- [.NET](/src/clients/dotnet/samples/two-phase/README.md)
+- [Go](/src/clients/go/samples/two-phase/README.md)
+- [Java](/src/clients/java/samples/two-phase/README.md)
+- [Node](/src/clients/node/samples/two-phase/README.md)

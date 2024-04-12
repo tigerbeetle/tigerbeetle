@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 7
 ---
 
 # Consistency
@@ -42,6 +42,7 @@ applications?
 - A client session can consider a request executed when it receives a reply for the request.
 
 #### [Requests](./client-requests.md)
+
 > Note that a request refers to a batch, rather than a single event.
 
 - A request executes within the cluster at most once.
@@ -106,8 +107,8 @@ in-flight, and clients ignore (duplicate) replies to their prior requests.
 
 Consider two clients `A` and `B`:
 
-  1. Client `A` sends request `A₁`.
-  2. Client `B` sends request `B₁`.
+1. Client `A` sends request `A₁`.
+2. Client `B` sends request `B₁`.
 
 Client `A` sent its request first, but requests `A₁` and `B₁` may execute in either order —
 whichever arrives first at the primary will execute first.
@@ -193,26 +194,26 @@ Suppose that an application creates users within Postgres, and for each user a c
 
 This scenario depicts the typical case:
 
-  1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and `U₁.account_exists =
-    false`.
-  2. _Application_: Send "create account" request `A₁` to the cluster.
-  3. _Cluster_: Create `A₁`; reply `ok`.
-  4. _Application_: Receive reply `A₁: ok` from the cluster.
-  5. _Application_: Set `U₁.account_exists = true`.
+1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and `U₁.account_exists =
+false`.
+2. _Application_: Send "create account" request `A₁` to the cluster.
+3. _Cluster_: Create `A₁`; reply `ok`.
+4. _Application_: Receive reply `A₁: ok` from the cluster.
+5. _Application_: Set `U₁.account_exists = true`.
 
 But suppose the application crashes and restarts immediately after sending its request (step 2):
 
-  1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and `U₁.account_exists =
-    false`.
-  2. _Application_: Send "create account" request `A₁` to the cluster.
-  3. _Application_: Crash. Restart.
-  4. _Cluster_: Create `A₁`; reply `ok` — but the application session has reset, so this reply never
-    reaches the application.
-  5. _Application_: Send "create account" request `A₁` to the cluster. The request uses the same ID
-     as in step 1.
-  6. _Cluster_: Create `A₁`; reply `exists`.
-  7. _Application_: Receive reply `A₁: exists` from the cluster.
-  8. _Application_: Set `U₁.account_exists = true`.
+1. _Application_: Create user `U₁` in Postgres with `U₁.account_id = A₁` and `U₁.account_exists =
+false`.
+2. _Application_: Send "create account" request `A₁` to the cluster.
+3. _Application_: Crash. Restart.
+4. _Cluster_: Create `A₁`; reply `ok` — but the application session has reset, so this reply never
+   reaches the application.
+5. _Application_: Send "create account" request `A₁` to the cluster. The request uses the same ID
+   as in step 1.
+6. _Cluster_: Create `A₁`; reply `exists`.
+7. _Application_: Receive reply `A₁: exists` from the cluster.
+8. _Application_: Set `U₁.account_exists = true`.
 
 In the second case, the application observes that the account is created by receiving `.exists`
 (step 6) instead of `.ok`.
