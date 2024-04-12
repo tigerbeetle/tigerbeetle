@@ -267,6 +267,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         \\This repo has been automatically generated from
         \\[tigerbeetle/tigerbeetle@{[sha]s}](https://github.com/tigerbeetle/tigerbeetle/commit/{[sha]s})
         \\to keep binary blobs out of the monorepo.
+        \\
         \\Please see
         \\<https://github.com/tigerbeetle/tigerbeetle/tree/main/src/clients/go>
         \\for documentation and contributions.
