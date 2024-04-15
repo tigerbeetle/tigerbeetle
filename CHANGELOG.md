@@ -6,18 +6,18 @@
 
 - [#1810](https://github.com/tigerbeetle/tigerbeetle/pull/1810)
 
-  Incrementally recompute the number values to compact in the storage engine. This smooths out I/O 
+  Incrementally recompute the number values to compact in the storage engine. This smooths out I/O
   latency, giving a nice bump to transaction throughput under load.
 
 - [#1833](https://github.com/tigerbeetle/tigerbeetle/pull/1833)
 
-  Fix an infinite loop in the StorageChecker (used to verify that data is stored deterministically). 
+  Fix an infinite loop in the StorageChecker.
 
 ### Features
 
 - [#1843](https://github.com/tigerbeetle/tigerbeetle/pull/1843)
 
-  Add `--development` flag to `format` and `start` commands in production binaries to downgrade 
+  Add `--development` flag to `format` and `start` commands in production binaries to downgrade
   lack of Direct I/O support from a hard error to a warning.
 
   TigerBeetle uses Direct I/O for certain safety guarantees, but this feature is not available on
