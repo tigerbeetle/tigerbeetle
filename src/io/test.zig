@@ -308,7 +308,7 @@ test "submission queue full" {
 }
 
 test "tick to wait" {
-    // Use only IO.tick() to see if pending IO is actually processsed
+    // Use only IO.tick() to see if pending IO is actually processed
 
     try struct {
         const Context = @This();
@@ -325,7 +325,8 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             const kernel_backlog = 1;
 
-            const server = try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const server =
+                try self.io.open_socket(address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(server);
 
             try os.setsockopt(
@@ -341,7 +342,8 @@ test "tick to wait" {
             var client_address_len = client_address.getOsSockLen();
             try os.getsockname(server, &client_address.any, &client_address_len);
 
-            const client = try self.io.open_socket(client_address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
+            const client =
+                try self.io.open_socket(client_address.any.family, os.SOCK.STREAM, os.IPPROTO.TCP);
             defer os.closeSocket(client);
 
             // Start the accept
@@ -459,7 +461,10 @@ test "tick to wait" {
                     .WSAENOTSOCK => return error.FileDescriptorNotASocket,
                     .WSAEAFNOSUPPORT => return error.AddressFamilyNotSupported,
                     .WSAEDESTADDRREQ => unreachable, // A destination address is required.
-                    .WSAEFAULT => unreachable, // The lpBuffers, lpTo, lpOverlapped, lpNumberOfBytesSent, or lpCompletionRoutine parameters are not part of the user address space, or the lpTo parameter is too small.
+                    // The lpBuffers, lpTo, lpOverlapped, lpNumberOfBytesSent,
+                    // or lpCompletionRoutine parameters are not part of the user address space,
+                    // or the lpTo parameter is too small.
+                    .WSAEFAULT => unreachable,
                     .WSAEHOSTUNREACH => return error.NetworkUnreachable,
                     // TODO: WSAEINPROGRESS, WSAEINTR
                     .WSAEINVAL => unreachable,
@@ -467,9 +472,12 @@ test "tick to wait" {
                     .WSAENETRESET => return error.ConnectionResetByPeer,
                     .WSAENETUNREACH => return error.NetworkUnreachable,
                     .WSAENOTCONN => return error.SocketNotConnected,
-                    .WSAESHUTDOWN => unreachable, // The socket has been shut down; it is not possible to WSASendTo on a socket after shutdown has been invoked with how set to SD_SEND or SD_BOTH.
+                    // The socket has been shut down; it is not possible to WSASendTo on a socket
+                    // after shutdown has been invoked with how set to SD_SEND or SD_BOTH.
+                    .WSAESHUTDOWN => unreachable,
                     .WSAEWOULDBLOCK => return error.WouldBlock,
-                    .WSANOTINITIALISED => unreachable, // A successful WSAStartup call must occur before using this function.
+                    // A successful WSAStartup call must occur before using this function.
+                    .WSANOTINITIALISED => unreachable,
                     else => |err| return os.windows.unexpectedWSAError(err),
                 }
             } else {

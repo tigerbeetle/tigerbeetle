@@ -19,6 +19,8 @@ comptime {
     _ = @import("clients/java/java_bindings.zig");
     _ = @import("clients/node/node_bindings.zig");
 
+    _ = @import("io/test.zig");
+
     _ = @import("lsm/binary_search.zig");
     _ = @import("lsm/cache_map.zig");
     _ = @import("lsm/composite_key.zig");
