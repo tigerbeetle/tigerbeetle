@@ -169,7 +169,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 assert(!scrubber.forest.grid.free_set.is_free(index_address));
 
                 if (scrubber.forest.grid.free_set.is_released(index_address)) {
-                    scrubber.tour_skip_table_data();
+                    // Skip scrubbing the table data, since the table is about to be released.
+                    const tables = scrubber.tour.table_data.tables;
+                    scrubber.tour = .{ .table_index = .{ .tables = tables } };
                 }
             }
         }
@@ -246,7 +248,19 @@ pub fn GridScrubberType(comptime Forest: type) type {
                     stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, result.valid);
                     scrubber.tour.table_data.index_block = scrubber.tour_index_block;
                 } else {
-                    scrubber.tour_skip_table_data();
+                    // The scrubber can't scrub the table data blocks until it has the corresponding
+                    // index block. We will wait for the index block, and keep re-scrubbing it until
+                    // it is repaired (or until the block is released by a checkpoint).
+                    //
+                    // (Alternatively, we could just skip past the table data blocks, and we will
+                    // come across them again during the next cycle. But waiting for them makes for
+                    // nicer invariants + tests.)
+                    log.debug("{}: read_next_callback: waiting for index repair " ++
+                        "(address={} checksum={x:0>32})", .{
+                        scrubber.superblock.replica_index.?,
+                        read.read.address,
+                        read.read.checksum,
+                    });
                 }
             }
 
@@ -392,13 +406,6 @@ pub fn GridScrubberType(comptime Forest: type) type {
             tour.* = .init;
 
             return null;
-        }
-
-        fn tour_skip_table_data(scrubber: *GridScrubber) void {
-            assert(scrubber.tour == .table_data);
-
-            const tables = scrubber.tour.table_data.tables;
-            scrubber.tour = .{ .table_index = .{ .tables = tables } };
         }
     };
 }
