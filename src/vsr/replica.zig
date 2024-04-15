@@ -126,6 +126,7 @@ pub fn ReplicaType(
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
+    const GridScrubber = vsr.GridScrubberType(StateMachine.Forest);
 
     return struct {
         const Self = @This();
@@ -269,6 +270,8 @@ pub fn ReplicaType(
         grid_repair_tables: IOPS(RepairTable, constants.grid_missing_tables_max) = .{},
         grid_repair_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
+        grid_scrubber: GridScrubber,
+        grid_scrubber_reads: IOPS(GridScrubber.Read, constants.grid_scrubber_reads_max) = .{},
 
         opened: bool,
 
@@ -484,6 +487,9 @@ pub fn ReplicaType(
         /// The number of ticks before sending a command=request_blocks.
         /// (always running)
         grid_repair_message_timeout: Timeout,
+
+        /// (always running)
+        grid_scrub_timeout: Timeout,
 
         /// The number of ticks before sending a sync message (message types depend on syncing).
         /// (syncing≠idle)
@@ -1026,6 +1032,13 @@ pub fn ReplicaType(
             );
             errdefer self.state_machine.deinit(allocator);
 
+            self.grid_scrubber = try GridScrubber.init(
+                allocator,
+                &self.state_machine.forest,
+                &self.client_sessions_checkpoint,
+            );
+            errdefer self.grid_scrubber.deinit(allocator);
+
             self.* = Self{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
@@ -1057,6 +1070,7 @@ pub fn ReplicaType(
                 .superblock = self.superblock,
                 .grid = self.grid,
                 .grid_repair_write_blocks = self.grid_repair_write_blocks,
+                .grid_scrubber = self.grid_scrubber,
                 .opened = self.opened,
                 .view = self.superblock.working.vsr_state.view,
                 .log_view = self.superblock.working.vsr_state.log_view,
@@ -1133,6 +1147,11 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 50,
                 },
+                .grid_scrub_timeout = Timeout{
+                    .name = "grid_scrub_timeout",
+                    .id = replica_index,
+                    .after = 50, // (`after` will be adjusted at runtime to tune the scrubber pace.)
+                },
                 .sync_message_timeout = Timeout{
                     .name = "sync_message_timeout",
                     .id = replica_index,
@@ -1173,6 +1192,7 @@ pub fn ReplicaType(
 
             self.static_allocator.transition_from_static_to_deinit();
 
+            self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);
             self.client_sessions.deinit(allocator);
@@ -1236,9 +1256,10 @@ pub fn ReplicaType(
             self.repair_timeout.tick();
             self.repair_sync_timeout.tick();
             self.grid_repair_message_timeout.tick();
+            self.upgrade_timeout.tick();
             self.sync_message_timeout.tick();
             self.pulse_timeout.tick();
-            self.upgrade_timeout.tick();
+            self.grid_scrub_timeout.tick();
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.prepare_timeout.fired()) self.on_prepare_timeout();
@@ -1253,6 +1274,7 @@ pub fn ReplicaType(
             if (self.repair_timeout.fired()) self.on_repair_timeout();
             if (self.repair_sync_timeout.fired()) self.on_repair_sync_timeout();
             if (self.grid_repair_message_timeout.fired()) self.on_grid_repair_message_timeout();
+            if (self.grid_scrub_timeout.fired()) self.on_grid_scrub_timeout();
             if (self.sync_message_timeout.fired()) self.on_sync_message_timeout();
             if (self.pulse_timeout.fired()) self.on_pulse_timeout();
             if (self.upgrade_timeout.fired()) self.on_upgrade_timeout();
@@ -3021,6 +3043,51 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_grid_scrub_timeout(self: *Self) void {
+            assert(self.grid_scrub_timeout.ticking);
+            self.grid_scrub_timeout.reset();
+
+            if (!self.state_machine_opened) return;
+            if (self.syncing != .idle) return;
+            if (self.sync_tables != null) return;
+            assert(self.grid.callback != .cancel);
+
+            self.grid_scrub_timeout.after = std.math.clamp(
+                @divFloor(
+                    constants.grid_scrubber_cycle_ticks,
+                    @max(1, self.grid.free_set.count_acquired()),
+                ),
+                constants.grid_scrubber_interval_ticks_min,
+                constants.grid_scrubber_interval_ticks_max,
+            );
+
+            while (self.grid.blocks_missing.enqueue_blocks_available() > 0) {
+                const reclaim = self.grid_scrubber.read_reclaim() orelse break;
+                defer self.grid_scrubber_reads.release(reclaim.read);
+
+                if (reclaim.repair) |fault| {
+                    assert(!self.grid.free_set.is_free(fault.block_address));
+
+                    log.debug("{}: on_grid_scrub_timeout: fault found: " ++
+                        "block_address={} block_checksum={x:0>32} block_type={s}", .{
+                        self.replica,
+                        fault.block_address,
+                        fault.block_checksum,
+                        @tagName(fault.block_type),
+                    });
+
+                    self.grid.blocks_missing.enqueue_block(
+                        fault.block_address,
+                        fault.block_checksum,
+                    );
+                }
+            }
+
+            if (self.grid_scrubber_reads.acquire()) |read| {
+                self.grid_scrubber.read_next(read);
+            }
+        }
+
         fn on_sync_message_timeout(self: *Self) void {
             assert(!self.solo());
             assert(self.syncing != .idle);
@@ -3429,6 +3496,7 @@ pub fn ReplicaType(
                         // parallel (as much possible) rather than in sequence.
                         self.send_commit();
                     }
+                    self.grid_scrubber.checkpoint();
                     self.state_machine.checkpoint(commit_op_checkpoint_state_machine_callback);
                     self.client_sessions_checkpoint.checkpoint(commit_op_checkpoint_client_sessions_callback);
                     self.client_replies.checkpoint(commit_op_checkpoint_client_replies_callback);
@@ -7840,6 +7908,7 @@ pub fn ReplicaType(
             self.repair_sync_timeout.stop();
             self.upgrade_timeout.stop();
             self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
             self.pulse_timeout.stop();
 
             if (self.pipeline == .queue) {
@@ -7898,6 +7967,7 @@ pub fn ReplicaType(
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
@@ -7930,6 +8000,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
             }
         }
 
@@ -7984,6 +8055,7 @@ pub fn ReplicaType(
             self.repair_timeout.start();
             self.repair_sync_timeout.start();
             self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
         }
 
         fn transition_to_normal_from_view_change_status(self: *Self, view_new: u32) void {
@@ -8032,6 +8104,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
 
@@ -8075,6 +8148,7 @@ pub fn ReplicaType(
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_message_timeout.start();
+                self.grid_scrub_timeout.start();
             }
 
             self.heartbeat_timestamp = 0;
@@ -8159,6 +8233,7 @@ pub fn ReplicaType(
             self.primary_abdicate_timeout.stop();
             self.pulse_timeout.stop();
             self.grid_repair_message_timeout.start();
+            self.grid_scrub_timeout.start();
             self.upgrade_timeout.stop();
 
             if (self.primary_index(self.view) == self.replica) {
@@ -8490,6 +8565,8 @@ pub fn ReplicaType(
                 self.message_bus.unref(grid_read.message);
                 self.grid_reads.release(grid_read);
             }
+
+            self.grid_scrubber.cancel();
 
             var grid_repair_writes = self.grid_repair_writes.iterate();
             while (grid_repair_writes.next()) |write| self.grid_repair_writes.release(write);

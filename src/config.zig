@@ -76,6 +76,7 @@ pub const Config = struct {
 /// - Replica configs can change between restarts.
 ///
 /// Fields are documented within constants.zig.
+// TODO: Some of these could be runtime parameters (e.g. grid_scrubber_cycle_ms).
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
     tracer_backend: TracerBackend = .none,
@@ -124,6 +125,10 @@ const ConfigProcess = struct {
     grid_missing_blocks_max: usize = 30,
     grid_missing_tables_max: usize = 3,
     aof_record: bool = false,
+    grid_scrubber_reads_max: usize = 1,
+    grid_scrubber_cycle_ms: usize = std.time.ms_per_day * 90,
+    grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
+    grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
     compaction_block_memory: usize = 256 * 1024 * 1024,
 };
@@ -257,6 +262,8 @@ pub const configs = struct {
             .grid_repair_reads_max = 4,
             .grid_missing_blocks_max = 3,
             .grid_missing_tables_max = 2,
+            .grid_scrubber_reads_max = 2,
+            .grid_scrubber_cycle_ms = std.time.ms_per_hour,
             .verify = true,
             .compaction_block_memory = 16 * 1024 * 1024,
         },

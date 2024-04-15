@@ -356,6 +356,39 @@ comptime {
     assert(grid_missing_tables_max > 0);
 }
 
+/// The maximum number of concurrent scrubber reads.
+///
+/// Unless the scrubber cycle is extremely short and the data file very large there is no need to
+/// set this higher than 1.
+pub const grid_scrubber_reads_max = config.process.grid_scrubber_reads_max;
+
+/// `grid_scrubber_cycle_ms` is the (approximate, target) total milliseconds per scrub of each
+/// replica's entire grid. Scrubbing work is spread evenly across this duration.
+///
+/// Napkin math for the "worst case" scrubber read overhead as a function of cycle duration
+/// (assuming a fully-loaded data file – maximum size and 100% acquired):
+///
+///   storage_size_limit_max      = 16TiB
+///   grid_scrubber_cycle_seconds = 90 days * 24 hr/day * 60 min/hr * 60 s/min (1 cycle/year)
+///   read_bytes_per_second       = storage_size_max / grid_scrubber_cycle_seconds ≈ 2.16 MiB/s
+///
+pub const grid_scrubber_cycle_ticks = config.process.grid_scrubber_cycle_ms / tick_ms;
+
+/// Accelerate/throttle scrubber reads if they are less/more frequent than this range.
+/// (This is to keep the timeouts from being too extreme when the grid is tiny or huge.)
+pub const grid_scrubber_interval_ticks_min = config.process.grid_scrubber_interval_ms_min / tick_ms;
+pub const grid_scrubber_interval_ticks_max = config.process.grid_scrubber_interval_ms_max / tick_ms;
+
+comptime {
+    assert(grid_scrubber_reads_max > 0);
+    assert(grid_scrubber_reads_max <= grid_iops_read_max);
+    assert(grid_scrubber_cycle_ticks > 0);
+    assert(grid_scrubber_cycle_ticks > @divFloor(std.time.ms_per_min, tick_ms)); // Sanity-check.
+    assert(grid_scrubber_interval_ticks_min > 0);
+    assert(grid_scrubber_interval_ticks_min <= grid_scrubber_interval_ticks_max);
+    assert(grid_scrubber_interval_ticks_max > 0);
+}
+
 /// The minimum and maximum amount of time in milliseconds to wait before initiating a connection.
 /// Exponential backoff and jitter are applied within this range.
 pub const connection_delay_min_ms = config.process.connection_delay_min_ms;
