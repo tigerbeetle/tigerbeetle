@@ -34,7 +34,3 @@ pub fn buffer_limit(buffer_len: usize) usize {
     };
     return @min(limit, buffer_len);
 }
-
-test "I/O" {
-    _ = @import("io/test.zig");
-}

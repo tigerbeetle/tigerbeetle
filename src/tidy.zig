@@ -375,7 +375,6 @@ const naughty_list = [_][]const u8{
     "constants.zig",
     "io/benchmark.zig",
     "io/darwin.zig",
-    "io/test.zig",
     "io/windows.zig",
     "lsm/binary_search.zig",
     "lsm/binary_search_benchmark.zig",
