@@ -29,13 +29,10 @@ TigerBeetle is an Online Transaction Processing (OLTP) database built for safety
 It is not a general purpose database like PostgreSQL or MySQL. Instead, TigerBeetle works alongside
 your general purpose database and should be used to handle the hot path of transaction processing.
 
-Many fields on the `Account` and `Transfer` data structures are stored in TigerBeetle as simple
-numbers. You may want to include metadata about ledgers, account and transfer types, etc in your
-general purpose database or directly in your application code.
-
 For more information relevant to integrating TigerBeetle into your system, take a look at the
 following pages:
 
+- [TigerBeetle in Your System Architecture](./system-architecture.md)
 - [Client Requests](./client-requests.md)
 - [Client Sessions](./client-sessions.md)
 - [Consistency](./consistency.md)
