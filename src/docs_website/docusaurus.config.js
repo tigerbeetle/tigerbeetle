@@ -80,7 +80,7 @@ const config = {
             title: 'Community',
             items: [
               {
-                label: 'Twitter',
+                label: '𝕏',
                 href: 'https://twitter.com/tigerbeetledb',
               },
               {
