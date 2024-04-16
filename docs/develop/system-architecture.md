@@ -40,13 +40,14 @@ purpose database may be used for storing information or metadata that is updated
 - Track balances for accounts
 - Enforce balance limits
 - Enforce financial consistency through double-entry bookkeeping
+- Enforce [strict serializability](./consistency.md) of events
 - Optionally store pointers to records or entities in the general purpose database in the
   [`user_data`](./data-modeling.md#user_data) fields
 
 ## Ledger, Account, and Transfer Types
 
 For performance reasons, TigerBeetle stores the ledger, account, and transfer types as simple
-integers. Most likely, you will want these integers map to enums of type names or strings, along
+integers. Most likely, you will want these integers to map to enums of type names or strings, along
 with other associated metadata.
 
 The mapping from the string representation of these types to the integers used within TigerBeetle
