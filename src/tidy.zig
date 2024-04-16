@@ -263,7 +263,7 @@ test "tidy extensions" {
         .{".editorconfig"}, .{".gitattributes"}, .{".gitignore"},             .{".nojekyll"},
         .{"CNAME"},         .{"Dockerfile"},     .{"exclude-pmd.properties"}, .{"favicon.ico"},
         .{"favicon.png"},   .{"LICENSE"},        .{"logo.svg"},               .{"module-info.test"},
-        .{"index.html"},
+        .{"index.html"},    .{"logo-white.svg"}, .{"logo-with-text-white.svg"},
     });
 
     const allocator = std.testing.allocator;
