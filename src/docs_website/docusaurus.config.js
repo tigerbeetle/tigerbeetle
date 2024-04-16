@@ -60,6 +60,7 @@ const config = {
         searchPagePath: 'search',
       },
       navbar: {
+        // Note there is custom CSS to make the title use italics
         title: 'TigerBeetle Docs',
         logo: {
           alt: 'TigerBeetle Logo',
