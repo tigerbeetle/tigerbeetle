@@ -77,6 +77,11 @@ const config = {
       },
       footer: {
         style: 'dark',
+        logo: {
+          alt: 'TigerBeetle Logo',
+          src: 'img/logo-with-text-white.svg',
+          href: 'https://tigerbeetle.com/'
+        },
         links: [
           {
             title: 'Community',
