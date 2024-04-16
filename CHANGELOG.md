@@ -1,5 +1,47 @@
 # TigerBeetle Changelog
 
+## 2024-04-15 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1810](https://github.com/tigerbeetle/tigerbeetle/pull/1810)
+
+  Incrementally recompute the number values to compact in the storage engine. This smooths out I/O
+  latency, giving a nice bump to transaction throughput under load.
+
+### Features
+
+- [#1843](https://github.com/tigerbeetle/tigerbeetle/pull/1843)
+
+  Add `--development` flag to `format` and `start` commands in production binaries to downgrade
+  lack of Direct I/O support from a hard error to a warning.
+
+  TigerBeetle uses Direct I/O for certain safety guarantees, but this feature is not available on
+  all development environments due to varying file systems. This serves as a compromise between
+  providing a separate development release binary and strictly requiring Direct I/O to be present.
+
+### Internals
+
+- [#1833](https://github.com/tigerbeetle/tigerbeetle/pull/1833)
+
+  Add fixed upper bound to loop in the StorageChecker.
+
+- [#1836](https://github.com/tigerbeetle/tigerbeetle/pull/1836)
+
+  Orchestrate continuous fuzzing of tigerbeetle components straight from the build system! This
+  gives us some flexibility on configuring our set of machines which test and report errors.
+
+- [#1842](https://github.com/tigerbeetle/tigerbeetle/pull/1842),
+  [#1844](https://github.com/tigerbeetle/tigerbeetle/pull/1844),
+  [#1832](https://github.com/tigerbeetle/tigerbeetle/pull/1832)
+
+  Styling updates and fixes.
+
+### TigerTracks 🎧
+
+- [CHERRY PEPSI](https://www.youtube.com/watch?v=D5Avlh980k4)
+
+
 ## 2024-04-08 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
