@@ -92,6 +92,10 @@ const config = {
             href: 'https://slack.tigerbeetle.com/invite',
           },
           {
+            label: 'Newsletter',
+            href: 'https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle'
+          },
+          {
             label: '𝕏',
             href: 'https://twitter.com/tigerbeetledb',
           },
@@ -99,6 +103,10 @@ const config = {
             label: 'LinkedIn',
             href: 'https://linkedin.com/company/tigerbeetle',
           },
+          {
+            label: 'YouTube',
+            href: 'https://www.youtube.com/@tigerbeetledb',
+          }
         ],
         copyright: `Copyright © ${new Date().getFullYear()} TigerBeetle, Inc. All rights reserved.`,
       },
