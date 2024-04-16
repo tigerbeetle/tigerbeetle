@@ -260,9 +260,9 @@ test "tidy extensions" {
     });
 
     const exceptions = std.ComptimeStringMap(void, .{
-        .{".editorconfig"}, .{".gitattributes"}, .{".gitignore"},             .{".nojekyll"},
-        .{"CNAME"},         .{"Dockerfile"},     .{"exclude-pmd.properties"}, .{"favicon.ico"},
-        .{"favicon.png"},   .{"LICENSE"},        .{"logo.svg"},               .{"module-info.test"},
+        .{".editorconfig"}, .{".gitattributes"}, .{".gitignore"},               .{".nojekyll"},
+        .{"CNAME"},         .{"Dockerfile"},     .{"exclude-pmd.properties"},   .{"favicon.ico"},
+        .{"favicon.png"},   .{"LICENSE"},        .{"logo.svg"},                 .{"module-info.test"},
         .{"index.html"},    .{"logo-white.svg"}, .{"logo-with-text-white.svg"},
     });
 
