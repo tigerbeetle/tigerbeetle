@@ -39,6 +39,7 @@ pub fn ZigZagMergeIteratorType(
 ) type {
     return struct {
         const ZigZagMergeIterator = @This();
+        const BitSet = std.bit_set.IntegerBitSet(streams_max);
 
         context: *Context,
         streams_count: u32,
@@ -96,8 +97,6 @@ pub fn ZigZagMergeIteratorType(
 
             return null;
         }
-
-        const BitSet = std.bit_set.IntegerBitSet(streams_max);
 
         fn peek_key(it: *ZigZagMergeIterator) error{Drained}!?Key {
             assert(it.streams_count <= streams_max);
