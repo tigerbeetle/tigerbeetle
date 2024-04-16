@@ -64,6 +64,7 @@ const config = {
         logo: {
           alt: 'TigerBeetle Logo',
           src: 'img/logo.svg',
+          srcDark: 'img/logo-white.svg',
         },
         items: [
           {
