@@ -4539,7 +4539,8 @@ pub fn ReplicaType(
             defer self.message_bus.unref(message);
 
             message.header.* = .{
-                .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)),
+                .size = @sizeOf(Header) * (1 + self.view_headers.array.count_as(u32)) +
+                    @sizeOf(vsr.CheckpointState),
                 .command = .start_view,
                 .cluster = self.cluster,
                 .replica = self.replica,
@@ -4550,11 +4551,20 @@ pub fn ReplicaType(
                 .nonce = nonce,
             };
 
+            const body_headers_size = self.view_headers.array.count_as(usize) * @sizeOf(vsr.Header);
+            const body_headers = message.body()[0..body_headers_size];
+            const body_checkpoint = message.body()[body_headers_size..];
             stdx.copy_disjoint(
                 .exact,
                 Header.Prepare,
-                std.mem.bytesAsSlice(Header.Prepare, message.body()),
+                std.mem.bytesAsSlice(Header.Prepare, body_headers),
                 self.view_headers.array.const_slice(),
+            );
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                body_checkpoint,
+                std.mem.asBytes(&self.superblock.working.vsr_state.checkpoint),
             );
             message.header.set_checksum_body(message.body());
             message.header.set_checksum();
@@ -10169,9 +10179,14 @@ fn message_body_as_headers_unchecked(message: *const Message) []const Header.Pre
         message.header.command == .start_view or
         message.header.command == .headers);
 
+    const headers_end_offset = switch (message.header.command) {
+        .start_view => message.header.size - @sizeOf(vsr.CheckpointState),
+        else => message.header.size,
+    };
+
     return std.mem.bytesAsSlice(
         Header.Prepare,
-        message.buffer[@sizeOf(Header)..message.header.size],
+        message.buffer[@sizeOf(Header)..headers_end_offset],
     );
 }
 
