@@ -655,7 +655,7 @@ test "zig_zag_merge: unit" {
 }
 
 test "zig_zag_merge: fuzz" {
-    const seed = 7561108528571345075; //std.crypto.random.int(u64);
+    const seed = std.crypto.random.int(u64);
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
     var prng = std.rand.DefaultPrng.init(seed);
