@@ -84,25 +84,20 @@ const config = {
         },
         links: [
           {
-            title: 'Community',
-            items: [
-              {
-                label: '𝕏',
-                href: 'https://twitter.com/tigerbeetledb',
-              },
-              {
-                label: 'GitHub',
-                href: 'https://github.com/tigerbeetle/tigerbeetle',
-              },
-              {
-                label: 'LinkedIn',
-                href: 'https://linkedin.com/company/tigerbeetle',
-              },
-              {
-                label: 'Slack',
-                href: 'https://slack.tigerbeetle.com/invite',
-              },
-            ],
+            label: 'GitHub',
+            href: 'https://github.com/tigerbeetle/tigerbeetle',
+          },
+          {
+            label: 'Slack',
+            href: 'https://slack.tigerbeetle.com/invite',
+          },
+          {
+            label: '𝕏',
+            href: 'https://twitter.com/tigerbeetledb',
+          },
+          {
+            label: 'LinkedIn',
+            href: 'https://linkedin.com/company/tigerbeetle',
           },
         ],
         copyright: `Copyright © ${new Date().getFullYear()} TigerBeetle, Inc. All rights reserved.`,
