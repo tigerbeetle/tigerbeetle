@@ -785,7 +785,7 @@ test "shell: expand_argv" {
             defer argv.deinit();
 
             try expand_argv(&argv, cmd, args);
-            try want.diff_json(argv.slice());
+            try want.diff_json(argv.slice(), .{});
         }
     };
 
