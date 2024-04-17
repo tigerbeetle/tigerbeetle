@@ -972,7 +972,7 @@ pub const IO = struct {
     /// Creates a socket that can be used for async operations with the IO instance.
     pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
         _ = self;
-        return os.socket(family, sock_type, protocol);
+        return os.socket(family, sock_type | os.SOCK.CLOEXEC, protocol);
     }
 
     /// Opens a directory with read only access.
@@ -981,6 +981,11 @@ pub const IO = struct {
     }
 
     pub const INVALID_FILE: os.fd_t = -1;
+
+    /// Creates a virtual file backed by memory.
+    pub fn open_memory_file(name: []const u8) os.fd_t {
+        return @intCast(linux.memfd_create(name, 0));
+    }
 
     /// Opens or creates a journal file:
     /// - For reading and writing.

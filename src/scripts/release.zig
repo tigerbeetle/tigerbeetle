@@ -23,6 +23,7 @@ const stdx = @import("../stdx.zig");
 const flags = @import("../flags.zig");
 const fatal = flags.fatal;
 const Shell = @import("../shell.zig");
+const multiversioning = @import("../multiversioning.zig");
 
 const Language = enum { dotnet, go, java, node, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
@@ -122,6 +123,58 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 }
 
+/// Builds a multi-version pack for the `target` specified, returns the metadata and writes the
+/// output pack to `pack_dst`.
+fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const u8) !multiversioning.PastVersionPack {
+    var section = try shell.open_section("build multiversion pack");
+    defer section.close();
+
+    // Downloads and extract the last published release of TigerBeetle.
+    try shell.exec("gh release download -D dist/tigerbeetle-old -p tigerbeetle-{target}.zip", .{
+        .target = target,
+    });
+    try shell.exec("unzip -d dist/tigerbeetle-old dist/tigerbeetle-old/tigerbeetle-{target}.zip", .{
+        .target = target,
+    });
+
+    // TODO: This code should be removed once the first multi-version release is bootstrapped!
+    const multiversion_epoch = "0.15.3";
+    const is_multiversion_epoch = std.mem.eql(
+        u8,
+        try shell.exec_stdout("gh release view --json tagName --template {template}", .{
+            .template = "{{.tagName}}", // Static, but shell.zig is not happy with '{'.
+        }),
+        multiversion_epoch,
+    );
+
+    if (is_multiversion_epoch) {
+        log.info("past release is multiversion epoch ({s})", .{multiversion_epoch});
+
+        // FIXME: Won't work for mac / windows.
+        const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-old/tigerbeetle", .{ .mode = .read_only });
+        defer past_binary.close();
+        const past_binary_contents = try past_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
+
+        const checksum: u128 = multiversioning.checksum(past_binary_contents);
+
+        const past_pack = try std.fs.cwd().createFile(pack_dst, .{ .truncate = true });
+        defer past_pack.close();
+        try past_pack.writeAll(past_binary_contents);
+
+        return multiversioning.PastVersionPack.init(.{
+            .count = 1,
+            .versions = &.{multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(multiversion_epoch)).value},
+            .checksums = &.{checksum},
+            .offsets = &.{0},
+            .sizes = &.{@as(u32, @intCast(past_binary_contents.len))},
+        });
+    } else {
+        // TODO :)
+    }
+
+    unreachable;
+}
+
 fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     var section = try shell.open_section("build tigerbeetle");
     defer section.close();
@@ -136,17 +189,39 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     } else {
         fatal("can't find llvm-lipo", .{});
     };
+    _ = llvm_lipo;
+
+    const llvm_objcopy = for (@as([2][]const u8, .{ "llvm-objcopy-16", "llvm-objcopy" })) |llvm_objcopy| {
+        if (shell.exec_stdout("{llvm_objcopy} --version", .{
+            .llvm_objcopy = llvm_objcopy,
+        })) |llvm_objcopy_version| {
+            log.info("llvm-objcopy version {s}", .{llvm_objcopy_version});
+            break llvm_objcopy;
+        } else |_| {}
+    } else {
+        fatal("can't find llvm-objcopy", .{});
+    };
 
     // We shell out to `zip` for creating archives, so we need an absolute path here.
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
+    _ = dist_dir_path;
 
     const targets = .{
-        "aarch64-linux",
+        // "aarch64-linux",
         "x86_64-linux",
-        "x86_64-windows",
-        "aarch64-macos",
-        "x86_64-macos",
+        // "x86_64-windows",
+        // "aarch64-macos",
+        // "x86_64-macos",
     };
+
+    // const MultiVersionMetadata = multiversioning.MultiVersionMetadata;
+    // var m: MultiVersionMetadata = .{
+    //     .checksum_before_metadata = 1,
+
+    //     .current_version = 1,
+    //     .current_checksum = 1,
+    // };
+    // m.checksum_header = m.calculate_header_checksum();
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`. MacOS is special cased --- we use an extra step to merge x86 and arm binaries into
@@ -154,6 +229,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     //TODO: use std.Target here
     inline for (.{ false, true }) |debug| {
         const debug_suffix = if (debug) "-debug" else "";
+        _ = debug_suffix;
         inline for (targets) |target| {
             try shell.zig(
                 \\build install
@@ -170,35 +246,110 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
             const macos = comptime std.mem.indexOf(u8, target, "macos") != null;
+            const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
+            _ = macos;
 
-            if (macos) {
-                try Shell.copy_path(
-                    shell.project_root,
-                    "tigerbeetle",
-                    shell.project_root,
-                    "tigerbeetle-" ++ target,
-                );
-            } else {
-                const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
-                try shell.exec("zip -9 {zip_path} {exe_name}", .{
-                    .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
-                    .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
-                });
-            }
+            // Copy the object using llvm-objcopy before taking our hash. This is to ensure we're
+            // round trip deterministic between adding and removing sections:
+            // `llvm-objcopy --add-section ... src dst_added` followed by
+            // `llvm-objcopy --remove-section ... dst_added src_back` means
+            // checksum(src) == checksum(src_back)
+            // Note: actually don't think this is needed, we could assert it?
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives {exe_name} {exe_name}", .{
+                .llvm_objcopy = llvm_objcopy,
+                .exe_name = exe_name,
+            });
+
+            const current_checksum: u128 = blk: {
+                const current_binary = try std.fs.cwd().openFile(exe_name, .{ .mode = .read_only });
+                defer current_binary.close();
+
+                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 32 * 1024 * 1024);
+                break :blk multiversioning.checksum(current_binary_contents);
+            };
+
+            const past_version_pack = try build_past_version_pack(
+                shell,
+                target,
+                "tigerbeetle-pack",
+            );
+
+            var mvf = multiversioning.MultiVersionMetadata{
+                .current_version = multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(info.release_triple)).value,
+                .current_checksum = current_checksum,
+                .past = past_version_pack,
+            };
+            std.log.info("{}", .{mvf});
+
+            var mvf_file = try std.fs.cwd().createFile("tigerbeetle-pack.metadata", .{ .truncate = true });
+            try mvf_file.writeAll(std.mem.asBytes(&mvf));
+            mvf_file.close();
+
+            // Use objcopy to add in our new pack, as well as its metadata - even though the metadata is still incomplete!
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --add-section .tigerbeetle.multiversion.pack=tigerbeetle-pack --set-section-flags .tigerbeetle.multiversion.footer=contents,noload,readonly --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
+                .llvm_objcopy = llvm_objcopy,
+                .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+            });
+
+            // Take the checksum of the binary, up until the start of the metadata.
+            const metadata_offset = 0x003b43d7; // FIXME: objdump -x tigerbeetle | grep '.tigerbeetle.multiversion.metadata' | awk '{print $6}'
+            const checksum_before_metadata: u128 = blk: {
+                const current_binary = try std.fs.cwd().openFile(exe_name, .{ .mode = .read_only });
+                defer current_binary.close();
+
+                const current_binary_contents_before_metadata = try shell.arena.allocator().alloc(u8, metadata_offset);
+                assert(try current_binary.readAll(current_binary_contents_before_metadata) == metadata_offset);
+
+                break :blk multiversioning.checksum(current_binary_contents_before_metadata);
+            };
+
+            mvf.checksum_before_metadata = checksum_before_metadata;
+            mvf.checksum_metadata = mvf.calculate_metadata_checksum();
+
+            std.log.info("{}", .{mvf});
+
+            mvf_file = try std.fs.cwd().createFile("tigerbeetle-pack.metadata", .{ .truncate = true });
+            try mvf_file.writeAll(std.mem.asBytes(&mvf));
+            mvf_file.close();
+
+            // Replace the pack with the new version that has the completed checksums.
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --remove-section .tigerbeetle.multiversion.metadata --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
+                .llvm_objcopy = llvm_objcopy,
+                .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+            });
+
+            // FIXME: Call other fns to validate this.
+
+            return error.Foo;
+
+            // if (macos) {
+            //     try Shell.copy_path(
+            //         shell.project_root,
+            //         "tigerbeetle",
+            //         shell.project_root,
+            //         "tigerbeetle-" ++ target,
+            //     );
+            // } else {
+            //     const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
+            //     try shell.exec("zip -9 {zip_path} {exe_name}", .{
+            //         .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
+            //         .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+            //     });
+            // }
         }
 
-        try shell.exec(
-            \\{llvm_lipo}
-            \\  tigerbeetle-aarch64-macos tigerbeetle-x86_64-macos
-            \\  -create -output tigerbeetle
-        , .{ .llvm_lipo = llvm_lipo });
-        try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
-        try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
-        const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
-        try shell.exec("zip -9 {zip_path} {exe_name}", .{
-            .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
-            .exe_name = "tigerbeetle",
-        });
+        // try shell.exec(
+        //     \\{llvm_lipo}
+        //     \\  tigerbeetle-aarch64-macos tigerbeetle-x86_64-macos
+        //     \\  -create -output tigerbeetle
+        // , .{ .llvm_lipo = llvm_lipo });
+        // try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
+        // try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
+        // const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
+        // try shell.exec("zip -9 {zip_path} {exe_name}", .{
+        //     .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
+        //     .exe_name = "tigerbeetle",
+        // });
     }
 }
 

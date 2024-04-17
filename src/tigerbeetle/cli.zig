@@ -89,6 +89,11 @@ const CliArgs = union(enum) {
         seed: ?u64 = null,
     },
 
+    // Internal: used for multiversion binary debugging.
+    multiversion: struct {
+
+    },
+
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
     pub const help = fmt.comptimePrint(
         \\Usage:
@@ -247,6 +252,7 @@ pub const Command = union(enum) {
     },
     repl: Repl,
     benchmark: Benchmark,
+    multiversion: struct {},
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -471,6 +477,10 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 },
             };
         },
+        .multiversion => |multiversion| {
+            _ = multiversion;
+            return Command {.multiversion = .{}};
+        }
     }
 }
 

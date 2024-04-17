@@ -71,6 +71,7 @@ pub fn main() !void {
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
+        .multiversion => |_| try Command.multiversion(allocator),
     }
 }
 
@@ -326,10 +327,23 @@ const Command = struct {
         const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
+
+    pub fn multiversion(allocator: mem.Allocator) !void {
+        std.log.info("hello world!", .{});
+        vsr.multiversioning.exec_multiversion_release(
+            allocator,
+            vsr.Release.from(vsr.ReleaseTriple.parse("0.15.3") catch unreachable),
+        );
+    }
 };
 
 fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
+
+    vsr.multiversioning.exec_multiversion_release(
+        replica.static_allocator.allocator(),
+        release,
+    );
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;

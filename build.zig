@@ -150,7 +150,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = mode,
     });
     if (mode == .ReleaseSafe) {
-        tigerbeetle.strip = true;
+        // tigerbeetle.strip = true;
     }
     if (emit_llvm_ir) {
         _ = tigerbeetle.getEmittedLlvmIr();
@@ -544,6 +544,8 @@ pub fn build(b: *std.Build) !void {
         if (b.args) |args| scripts_run.addArgs(args);
         const scripts_step = b.step("scripts", "Run automation scripts");
         scripts_step.dependOn(&scripts_run.step);
+        scripts_exe.addModule("vsr", vsr_module);
+        scripts_exe.addModule("vsr_options", vsr_options_module);
     }
 }
 

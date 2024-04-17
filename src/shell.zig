@@ -685,6 +685,7 @@ const Argv = struct {
 ///
 /// This avoids shell injection by construction as it doesn't concatenate strings.
 fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
+    @setEvalBranchQuota(10000);
     // Mostly copy-paste from std.fmt.format
 
     comptime var pos: usize = 0;

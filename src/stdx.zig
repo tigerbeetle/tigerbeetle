@@ -551,6 +551,12 @@ pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
     );
 }
 
+// TODO(zig): Zig 0.11 doesn't have execveat.
+// Once that's available, this can be removed.
+pub fn execveat(dirfd: i32, path: [*:0]const u8, argv: [*:null]const ?[*:0]const u8, envp: [*:null]const ?[*:0]const u8, flags: i32) usize {
+    return std.os.linux.syscall4(.execveat, dirfd, @intFromPtr(path), @intFromPtr(argv), @intFromPtr(envp), flags);
+}
+
 // TODO(Zig): https://github.com/ziglang/zig/issues/17592.
 /// True if every value of the type `T` has a unique bit pattern representing it.
 /// In other words, `T` has no unused bits and no padding.

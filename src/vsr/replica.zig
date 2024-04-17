@@ -596,15 +596,15 @@ pub fn ReplicaType(
                 .test_context = options.test_context,
             });
 
-            // Disable all dynamic allocation from this point onwards.
-            self.static_allocator.transition_from_init_to_static();
-
             const release_target = self.superblock.working.vsr_state.checkpoint.release;
             assert(release_target.value >= self.superblock.working.release_format.value);
             if (release_target.value != self.release.value) {
                 self.release_transition(@src());
                 return;
             }
+
+            // Disable all dynamic allocation from this point onwards.
+            self.static_allocator.transition_from_init_to_static();
 
             initialized = true;
             errdefer self.deinit(allocator);
