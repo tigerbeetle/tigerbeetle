@@ -61,7 +61,7 @@ Learn more about TigerBeetle's [mission, history](./about/README.md),
 
 ## Community
 
-- [Twitter](https://twitter.com/tigerbeetledb)
+- [𝕏](https://twitter.com/tigerbeetledb)
 - [GitHub](https://github.com/tigerbeetle/tigerbeetle)
 - [Slack](https://slack.tigerbeetle.com/invite)
 - [Monthly Newsletter](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
