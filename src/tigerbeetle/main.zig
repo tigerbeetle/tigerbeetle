@@ -71,7 +71,7 @@ pub fn main() !void {
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
-        .multiversion => |_| try Command.multiversion(allocator),
+        .multiversion_validate => |*args| try Command.multiversion_validate(&arena, args),
     }
 }
 
@@ -185,13 +185,23 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
+        const releases_bundled = blk: {
+            const mvi = vsr.multiversioning.MultiVersion.from_own_binary() catch {
+                log_main.err("binary does not contain a valid multiversion pack.", .{});
+                var release_list = vsr.ReleaseList{};
+                release_list.append_assume_capacity(config.process.release);
+
+                break :blk release_list;
+            };
+            break :blk mvi.metadata.releases_bundled();
+        };
+
         // TODO Where should this be set?
         const release_client_min = config.process.release;
-        const releases_bundled = &[_]vsr.Release{config.process.release};
 
         log_main.info("release={}", .{config.process.release});
         log_main.info("release_client_min={}", .{release_client_min});
-        log_main.info("releases_bundled={any}", .{releases_bundled.*});
+        log_main.info("releases_bundled={any}", .{releases_bundled.const_slice()});
         log_main.info("git_commit={?s}", .{config.process.git_commit});
 
         var replica: Replica = undefined;
@@ -328,22 +338,15 @@ const Command = struct {
         try Repl.run(arena, args.addresses, args.cluster, args.statements, args.verbose);
     }
 
-    pub fn multiversion(allocator: mem.Allocator) !void {
-        std.log.info("hello world!", .{});
-        vsr.multiversioning.exec_multiversion_release(
-            allocator,
-            vsr.Release.from(vsr.ReleaseTriple.parse("0.15.3") catch unreachable),
-        );
+    pub fn multiversion_validate(arena: *std.heap.ArenaAllocator, path: *[:0]const u8) !void {
+        const absolute_path = try std.fs.cwd().realpathAlloc(arena.allocator(), path.*);
+        const multiversion = try vsr.multiversioning.MultiVersion.from_elf(absolute_path);
+        try multiversion.validate(absolute_path, arena.allocator());
     }
 };
 
 fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     assert(release.value != replica.release.value);
-
-    vsr.multiversioning.exec_multiversion_release(
-        replica.static_allocator.allocator(),
-        release,
-    );
 
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
@@ -352,7 +355,27 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
             replica.replica,
             release,
         });
-        @panic("release_execute: binary missing required version");
+        @panic("release not available");
+    }
+
+    // We have two paths here, depending on if we're upgrading or downgrading. If we're downgrading
+    // the invariant is that this code is running _before_ we've finished opening, that is,
+    // release_transition is called in open() in replica.zig, and allocating memory is still
+    // possible.
+    if (release.value < replica.release.value) {
+        assert(replica.static_allocator.state == .init);
+        vsr.multiversioning.exec_release(
+            replica.static_allocator.allocator(),
+            release,
+        );
+    } else {
+        // For the upgrade case, re-run the latest binary in place. If we need something older
+        // than the latest, that'll be handled when the case above is hit when re-execing.
+        // If this assert is hit, it can mean we're being called from open() but we aren't new
+        // enough.
+        // FIXME: Pass this in as a enum rather.
+        assert(replica.static_allocator.state == .static);
+        vsr.multiversioning.exec_self() catch unreachable;
     }
 
     // TODO(Multiversioning) Exec into the new release.

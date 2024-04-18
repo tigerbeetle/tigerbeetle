@@ -90,8 +90,10 @@ const CliArgs = union(enum) {
     },
 
     // Internal: used for multiversion binary debugging.
-    multiversion: struct {
-
+    multiversionvalidate: struct {
+        positional: struct {
+            path: [:0]const u8,
+        },
     },
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage
@@ -252,7 +254,7 @@ pub const Command = union(enum) {
     },
     repl: Repl,
     benchmark: Benchmark,
-    multiversion: struct {},
+    multiversion_validate: [:0]const u8,
 
     pub fn deinit(command: *Command, allocator: std.mem.Allocator) void {
         switch (command.*) {
@@ -477,10 +479,9 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                 },
             };
         },
-        .multiversion => |multiversion| {
-            _ = multiversion;
-            return Command {.multiversion = .{}};
-        }
+        .multiversionvalidate => |multiversion_validate| {
+            return Command{ .multiversion_validate = multiversion_validate.positional.path };
+        },
     }
 }
 

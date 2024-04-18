@@ -125,7 +125,7 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
 /// Builds a multi-version pack for the `target` specified, returns the metadata and writes the
 /// output pack to `pack_dst`.
-fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const u8) !multiversioning.PastVersionPack {
+fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const u8) !multiversioning.MultiVersionMetadata.PastVersionPack {
     var section = try shell.open_section("build multiversion pack");
     defer section.close();
 
@@ -161,7 +161,7 @@ fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const 
         defer past_pack.close();
         try past_pack.writeAll(past_binary_contents);
 
-        return multiversioning.PastVersionPack.init(.{
+        return multiversioning.MultiVersionMetadata.PastVersionPack.init(.{
             .count = 1,
             .versions = &.{multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(multiversion_epoch)).value},
             .checksums = &.{checksum},
@@ -227,7 +227,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     // `dist`. MacOS is special cased --- we use an extra step to merge x86 and arm binaries into
     // one.
     //TODO: use std.Target here
-    inline for (.{ false, true }) |debug| {
+    inline for (.{false}) |debug| {
         const debug_suffix = if (debug) "-debug" else "";
         _ = debug_suffix;
         inline for (targets) |target| {
@@ -274,36 +274,34 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 "tigerbeetle-pack",
             );
 
-            var mvf = multiversioning.MultiVersionMetadata{
-                .current_version = multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(info.release_triple)).value,
-                .current_checksum = current_checksum,
-                .past = past_version_pack,
-            };
-            std.log.info("{}", .{mvf});
+            // Explicitly write out zeros for the metadata, to compute the checksum.
+            var mvf = std.mem.zeroes(multiversioning.MultiVersionMetadata);
 
             var mvf_file = try std.fs.cwd().createFile("tigerbeetle-pack.metadata", .{ .truncate = true });
             try mvf_file.writeAll(std.mem.asBytes(&mvf));
             mvf_file.close();
 
-            // Use objcopy to add in our new pack, as well as its metadata - even though the metadata is still incomplete!
-            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --add-section .tigerbeetle.multiversion.pack=tigerbeetle-pack --set-section-flags .tigerbeetle.multiversion.footer=contents,noload,readonly --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
+            // Use objcopy to add in our new pack, as well as its metadata - even though the metadata is still zero!
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --add-section .tigerbeetle.multiversion.pack=tigerbeetle-pack --set-section-flags .tigerbeetle.multiversion.pack=contents,noload,readonly --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
                 .llvm_objcopy = llvm_objcopy,
                 .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
             });
 
-            // Take the checksum of the binary, up until the start of the metadata.
-            const metadata_offset = 0x003b43d7; // FIXME: objdump -x tigerbeetle | grep '.tigerbeetle.multiversion.metadata' | awk '{print $6}'
-            const checksum_before_metadata: u128 = blk: {
+            // Take the checksum of the binary, with the zero'd metadata.
+            const checksum_without_metadata: u128 = blk: {
                 const current_binary = try std.fs.cwd().openFile(exe_name, .{ .mode = .read_only });
                 defer current_binary.close();
 
-                const current_binary_contents_before_metadata = try shell.arena.allocator().alloc(u8, metadata_offset);
-                assert(try current_binary.readAll(current_binary_contents_before_metadata) == metadata_offset);
-
-                break :blk multiversioning.checksum(current_binary_contents_before_metadata);
+                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 32 * 1024 * 1024);
+                break :blk multiversioning.checksum(current_binary_contents);
             };
 
-            mvf.checksum_before_metadata = checksum_before_metadata;
+            mvf = multiversioning.MultiVersionMetadata{
+                .current_version = multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(info.release_triple)).value,
+                .current_checksum = current_checksum,
+                .past = past_version_pack,
+                .checksum_without_metadata = checksum_without_metadata,
+            };
             mvf.checksum_metadata = mvf.calculate_metadata_checksum();
 
             std.log.info("{}", .{mvf});
@@ -312,15 +310,19 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             try mvf_file.writeAll(std.mem.asBytes(&mvf));
             mvf_file.close();
 
-            // Replace the pack with the new version that has the completed checksums.
+            // Replace the metadata with the final version.
             try shell.exec("{llvm_objcopy} --enable-deterministic-archives --remove-section .tigerbeetle.multiversion.metadata --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
                 .llvm_objcopy = llvm_objcopy,
                 .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
             });
 
-            // FIXME: Call other fns to validate this.
+            // Finally, check the binary produced using both the old and new versions.
+            // FIXME: Do check with old binary downloaded, if it wasn't epoch
+            const absolute_exe_name = try std.fs.cwd().realpathAlloc(shell.arena.allocator(), exe_name);
+            const multiversion = try multiversioning.MultiVersion.from_elf(absolute_exe_name);
+            try multiversion.validate(absolute_exe_name, shell.arena.allocator());
 
-            return error.Foo;
+            // return error.Foo;
 
             // if (macos) {
             //     try Shell.copy_path(

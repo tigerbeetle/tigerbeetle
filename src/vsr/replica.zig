@@ -527,7 +527,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
-            releases_bundled: []const vsr.Release,
+            releases_bundled: vsr.ReleaseList,
             release_execute: *const fn (replica: *Self, release: vsr.Release) void,
             test_context: ?*anyopaque = null,
         };
@@ -905,7 +905,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32,
             release: vsr.Release,
             release_client_min: vsr.Release,
-            releases_bundled: []const vsr.Release,
+            releases_bundled: vsr.ReleaseList,
             release_execute: *const fn (replica: *Self, release: vsr.Release) void,
             test_context: ?*anyopaque,
         };
@@ -950,7 +950,7 @@ pub fn ReplicaType(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            vsr.verify_release_list(options.releases_bundled, options.release);
+            vsr.verify_release_list(options.releases_bundled.const_slice(), options.release);
 
             self.time = options.time;
 
@@ -1039,9 +1039,7 @@ pub fn ReplicaType(
                 .quorum_majority = quorum_majority,
                 .release = options.release,
                 .release_client_min = options.release_client_min,
-                .releases_bundled = vsr.ReleaseList.from_slice(
-                    options.releases_bundled,
-                ) catch unreachable,
+                .releases_bundled = options.releases_bundled,
                 .release_execute = options.release_execute,
                 .nonce = options.nonce,
                 // Copy the (already-initialized) time back, to avoid regressing the monotonic
