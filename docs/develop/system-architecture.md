@@ -8,8 +8,9 @@ TigerBeetle is an Online Transaction Processing (OLTP) database built for safety
 is not a general purpose database like PostgreSQL or MySQL. Instead, TigerBeetle works alongside
 your general purpose database, which we refer to as an Online General Purpose (OLGP) database.
 
-TigerBeetle should be used to handle the hot path of transaction processing, while your general
-purpose database may be used for storing information or metadata that is updated less frequently.
+TigerBeetle should be used in the data plane, or hot path of transaction processing, while your
+general purpose database is used in the control plane and may be used for storing information or
+metadata that is updated less frequently.
 
 ![TigerBeetle in Your System Architecture](../assets/tigerbeetle-in-your-architecture.png)
 
