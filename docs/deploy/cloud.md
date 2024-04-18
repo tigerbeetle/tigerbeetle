@@ -4,8 +4,8 @@ sidebar_position: 4
 
 # Cloud
 
-Tigerbeetle is optimized for performance, exploiting "close to the metal" technologies such as
-**Direct I/O** and **io_uring**.
+Tigerbeetle is [optimized for performance](../about/performance.md), exploiting "close to the metal"
+technologies such as **Direct I/O** and **io_uring**.
 
 This raises the question of whether or not these benefits are realised in a cloud environment where
 the kernel is available to the app but where the network and the storage is virtualised.
