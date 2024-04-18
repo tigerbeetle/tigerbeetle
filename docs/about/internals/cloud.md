@@ -4,7 +4,7 @@ sidebar_position: 7
 
 # Cloud
 
-Tigerbeetle is [optimized for performance](../about/performance.md), exploiting "close to the metal"
+Tigerbeetle is [optimized for performance](../performance.md), exploiting "close to the metal"
 technologies such as **Direct I/O** and **io_uring**.
 
 This raises the question of whether or not these benefits are realised in a cloud environment where
