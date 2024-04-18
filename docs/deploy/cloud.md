@@ -1,3 +1,7 @@
+---
+sidebar_position: 4
+---
+
 # Cloud
 
 Tigerbeetle is optimized for performance, exploiting "close to the metal" technologies such as
