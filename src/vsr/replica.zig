@@ -3055,7 +3055,7 @@ pub fn ReplicaType(
                 @divFloor(
                     constants.grid_scrubber_cycle_ticks,
                     @max(1, self.grid.free_set.count_acquired()),
-                ),
+                ) * constants.grid_scrubber_reads_max,
                 constants.grid_scrubber_interval_ticks_min,
                 constants.grid_scrubber_interval_ticks_max,
             );
@@ -3078,8 +3078,10 @@ pub fn ReplicaType(
                 );
             }
 
-            const scrub_next = self.grid_scrubber.read_next();
-            maybe(scrub_next);
+            for (0..constants.grid_scrubber_reads_max + 1) |_| {
+                const scrub_next = self.grid_scrubber.read_next();
+                if (!scrub_next) break;
+            } else unreachable;
         }
 
         fn on_sync_message_timeout(self: *Self) void {
