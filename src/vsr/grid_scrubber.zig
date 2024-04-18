@@ -27,8 +27,10 @@ const log = std.log.scoped(.grid_scrubber);
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
+const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
 const FIFO = @import("../fifo.zig").FIFO;
+const IOPS = @import("../iops.zig").IOPS;
 const RingBuffer = @import("../ring_buffer.zig").RingBuffer;
 
 const allocate_block = @import("./grid.zig").allocate_block;
@@ -53,10 +55,10 @@ pub fn GridScrubberType(comptime Forest: type) type {
             block_type: schema.BlockType,
         };
 
-        pub const Read = struct {
+        const Read = struct {
             scrubber: *GridScrubber,
             read: Grid.Read = undefined,
-            block_type: ?schema.BlockType,
+            block_type: schema.BlockType,
 
             /// Set to true before the read completes if the scrub result should be ignored:
             /// - The scrub succeeded – no need for repair.
@@ -75,6 +77,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
         superblock: *SuperBlock,
         forest: *Forest,
         client_sessions_checkpoint: *const CheckpointTrailer,
+
+        reads: IOPS(Read, constants.grid_scrubber_reads_max) = .{},
 
         /// A list of reads that are in progress.
         reads_busy: FIFO(Read) = .{ .name = "grid_scrubber_reads_busy" },
@@ -176,23 +180,21 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
         }
 
-        pub fn read_next(scrubber: *GridScrubber, read: *Read) void {
+        /// Returns whether or not a new Read was started.
+        pub fn read_next(scrubber: *GridScrubber) bool {
             assert(scrubber.superblock.opened);
             assert(scrubber.forest.grid.callback != .cancel);
+            assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+                scrubber.reads.executing());
+            defer assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+                scrubber.reads.executing());
+
+            if (scrubber.reads.available() == 0) return false;
+            const block_id = scrubber.tour_next() orelse return false;
+
+            const read = scrubber.reads.acquire().?;
             assert(!scrubber.reads_busy.contains(read));
             assert(!scrubber.reads_done.contains(read));
-
-            const block_id = scrubber.tour_next() orelse {
-                read.* = .{
-                    .scrubber = scrubber,
-                    .block_type = null,
-                    .ignore = true,
-                    .done = true,
-                };
-                scrubber.reads_done.push(read);
-
-                return;
-            };
 
             log.debug("{}: read_next: address={} checksum={x:0>32} type={s}", .{
                 scrubber.superblock.replica_index.?,
@@ -216,6 +218,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 block_id.block_checksum,
                 .{ .cache_read = false, .cache_write = false },
             );
+            return true;
         }
 
         fn read_next_callback(grid_read: *Grid.Read, result: Grid.ReadBlockResult) void {
@@ -232,7 +235,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 @tagName(result),
                 read.read.address,
                 read.read.checksum,
-                @tagName(read.block_type.?),
+                @tagName(read.block_type),
                 read.ignore,
             });
 
@@ -270,21 +273,25 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.reads_done.push(read);
         }
 
-        pub fn read_reclaim(scrubber: *GridScrubber) ?struct {
-            read: *Read,
-            repair: ?BlockId,
-        } {
-            const read = scrubber.reads_done.pop() orelse return null;
-            assert(read.done);
+        pub fn read_fault(scrubber: *GridScrubber) ?BlockId {
+            assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+                scrubber.reads.executing());
+            defer assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+                scrubber.reads.executing());
 
-            return .{
-                .read = read,
-                .repair = if (read.ignore) null else .{
-                    .block_address = read.read.address,
-                    .block_checksum = read.read.checksum,
-                    .block_type = read.block_type.?,
-                },
-            };
+            while (scrubber.reads_done.pop()) |read| {
+                defer scrubber.reads.release(read);
+                assert(read.done);
+
+                if (!read.ignore) {
+                    return .{
+                        .block_address = read.read.address,
+                        .block_checksum = read.read.checksum,
+                        .block_type = read.block_type,
+                    };
+                }
+            }
+            return null;
         }
 
         fn tour_next(scrubber: *GridScrubber) ?BlockId {

@@ -271,7 +271,6 @@ pub fn ReplicaType(
         grid_repair_writes: IOPS(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
         grid_scrubber: GridScrubber,
-        grid_scrubber_reads: IOPS(GridScrubber.Read, constants.grid_scrubber_reads_max) = .{},
 
         opened: bool,
 
@@ -3062,30 +3061,25 @@ pub fn ReplicaType(
             );
 
             while (self.grid.blocks_missing.enqueue_blocks_available() > 0) {
-                const reclaim = self.grid_scrubber.read_reclaim() orelse break;
-                defer self.grid_scrubber_reads.release(reclaim.read);
+                const fault = self.grid_scrubber.read_fault() orelse break;
+                assert(!self.grid.free_set.is_free(fault.block_address));
 
-                if (reclaim.repair) |fault| {
-                    assert(!self.grid.free_set.is_free(fault.block_address));
+                log.debug("{}: on_grid_scrub_timeout: fault found: " ++
+                    "block_address={} block_checksum={x:0>32} block_type={s}", .{
+                    self.replica,
+                    fault.block_address,
+                    fault.block_checksum,
+                    @tagName(fault.block_type),
+                });
 
-                    log.debug("{}: on_grid_scrub_timeout: fault found: " ++
-                        "block_address={} block_checksum={x:0>32} block_type={s}", .{
-                        self.replica,
-                        fault.block_address,
-                        fault.block_checksum,
-                        @tagName(fault.block_type),
-                    });
-
-                    self.grid.blocks_missing.enqueue_block(
-                        fault.block_address,
-                        fault.block_checksum,
-                    );
-                }
+                self.grid.blocks_missing.enqueue_block(
+                    fault.block_address,
+                    fault.block_checksum,
+                );
             }
 
-            if (self.grid_scrubber_reads.acquire()) |read| {
-                self.grid_scrubber.read_next(read);
-            }
+            const scrub_next = self.grid_scrubber.read_next();
+            maybe(scrub_next);
         }
 
         fn on_sync_message_timeout(self: *Self) void {
