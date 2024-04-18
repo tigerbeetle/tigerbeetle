@@ -94,9 +94,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
         tour: union(enum) {
             init,
             done,
-            table_index: struct { tables: ForestTableIterator },
+            table_index,
             table_data: struct {
-                tables: ForestTableIterator,
                 index_checksum: u128,
                 index_address: u64,
                 /// Points to `tour_index_block` once the index block has been read.
@@ -109,6 +108,10 @@ pub fn GridScrubberType(comptime Forest: type) type {
             free_set: struct { index: usize = 0 },
             client_sessions: struct { index: usize = 0 },
         },
+
+        /// When tour == .init, tour_tables == .{}
+        /// When tour == .done, tour_tables.next() == null.
+        tour_tables: ForestTableIterator,
 
         /// Contains a table index block when tour=table_data.
         tour_index_block: BlockPtr,
@@ -126,6 +129,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 .forest = forest,
                 .client_sessions_checkpoint = client_sessions_checkpoint,
                 .tour = .init,
+                .tour_tables = .{},
                 .tour_index_block = tour_index_block,
             };
         }
@@ -145,6 +149,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             }
 
             scrubber.tour = .init;
+            scrubber.tour_tables = .{};
         }
 
         /// Cancel queued reads to blocks that will be released by the imminent checkpoint.
@@ -174,8 +179,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
                 if (scrubber.forest.grid.free_set.is_released(index_address)) {
                     // Skip scrubbing the table data, since the table is about to be released.
-                    const tables = scrubber.tour.table_data.tables;
-                    scrubber.tour = .{ .table_index = .{ .tables = tables } };
+                    scrubber.tour = .table_index;
                 }
             }
         }
@@ -297,7 +301,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         fn tour_next(scrubber: *GridScrubber) ?BlockId {
             const tour = &scrubber.tour;
             if (tour.* == .init) {
-                tour.* = .{ .table_index = .{ .tables = ForestTableIterator{} } };
+                tour.* = .table_index;
             }
 
             if (tour.* == .table_data) {
@@ -331,13 +335,12 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = .data,
                     };
                 } else {
-                    const tables = tour.table_data.tables;
-                    tour.* = .{ .table_index = .{ .tables = tables } };
+                    tour.* = .table_index;
                 }
             }
 
             if (tour.* == .table_index) {
-                if (tour.table_index.tables.next(scrubber.forest)) |table_info| {
+                if (scrubber.tour_tables.next(scrubber.forest)) |table_info| {
                     if (Forest.Storage == TestStorage) {
                         scrubber.superblock.storage.verify_table(
                             table_info.address,
@@ -345,11 +348,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         );
                     }
 
-                    const tables = tour.table_index.tables;
                     tour.* = .{ .table_data = .{
                         .index_checksum = table_info.checksum,
                         .index_address = table_info.address,
-                        .tables = tables,
                     } };
 
                     return .{
@@ -411,6 +412,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             // Wrap around to the next cycle.
             assert(tour.* == .done);
             tour.* = .init;
+            scrubber.tour_tables = .{};
 
             return null;
         }
