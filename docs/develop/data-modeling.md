@@ -20,8 +20,8 @@ linked transfers to implement [currency exchange](./recipes/currency-exchange.md
 
 Ledgers are only stored in TigerBeetle as a numeric identifier on the
 [account](../reference/accounts.md#ledger) and [transfer](../reference/transfers.md) data
-structures. You may want to store additional metadata about each ledger in a
-database](./README.md#tigerbeetle-in-your-system-architecture).
+structures. You may want to store additional metadata about each ledger in a control plane
+[database](./system-architecture.md).
 
 You can also use different ledgers to further partition accounts, beyond asset type. For example, if
 you have a multi-tenant setup where you are tracking balances for your customers' end-users, you
