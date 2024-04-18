@@ -60,13 +60,24 @@ pub fn GridScrubberType(comptime Forest: type) type {
             read: Grid.Read = undefined,
             block_type: schema.BlockType,
 
-            /// Set to true before the read completes if the scrub result should be ignored:
-            /// - The scrub succeeded – no need for repair.
-            /// - The block was freed by a checkpoint in the time that the read was in progress.
-            ///   (At checkpoint, the FreeSet frees blocks released during the preceding checkpoint.
-            ///   We can scrub released blocks, but not free blocks. Setting this flag ensures that
-            ///   GridScrubber doesn't require a read-barrier at checkpoint.)
-            ignore: bool,
+            status: enum {
+                /// If `read.done`: The scrub failed – the block must be repaired.
+                /// If `!read.done`: The scrub is still in progress. (This is the initial state).
+                repair,
+                /// The scrub succeeded.
+                /// Don't repair the block.
+                ok,
+                /// The scrub was aborted (the replica is about to state-sync).
+                /// Don't repair the block.
+                canceled,
+                /// The block was freed by a checkpoint in the time that the read was in progress.
+                /// Don't repair the block.
+                ///
+                /// (At checkpoint, the FreeSet frees blocks released during the preceding
+                /// checkpoint. We can scrub released blocks, but not free blocks. Setting this flag
+                /// ensures that GridScrubber doesn't require a read-barrier at checkpoint.)
+                released,
+            },
             /// Whether the read is ready to be released.
             done: bool,
 
@@ -144,7 +155,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             for ([_]FIFO(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
                 var reads_iterator = reads_fifo.peek();
                 while (reads_iterator) |read| : (reads_iterator = read.next) {
-                    read.ignore = true;
+                    read.status = .canceled;
                 }
             }
 
@@ -163,11 +174,11 @@ pub fn GridScrubberType(comptime Forest: type) type {
             for ([_]FIFO(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
                 var reads_iterator = reads_fifo.peek();
                 while (reads_iterator) |read| : (reads_iterator = read.next) {
-                    if (!read.ignore) {
+                    if (read.status == .repair) {
                         assert(!scrubber.forest.grid.free_set.is_free(read.read.address));
 
                         if (scrubber.forest.grid.free_set.is_released(read.read.address)) {
-                            read.ignore = true;
+                            read.status = .released;
                         }
                     }
                 }
@@ -210,7 +221,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             read.* = .{
                 .scrubber = scrubber,
                 .block_type = block_id.block_type,
-                .ignore = false,
+                .status = .repair,
                 .done = false,
             };
             scrubber.reads_busy.push(read);
@@ -231,19 +242,19 @@ pub fn GridScrubberType(comptime Forest: type) type {
             assert(scrubber.reads_busy.contains(read));
             assert(!scrubber.reads_done.contains(read));
             assert(!read.done);
-            maybe(read.ignore);
+            maybe(read.status != .repair);
 
             log.debug("{}: read_next_callback: result={s} " ++
-                "(address={} checksum={x:0>32} type={s} ignore={})", .{
+                "(address={} checksum={x:0>32} type={s} status={?})", .{
                 scrubber.superblock.replica_index.?,
                 @tagName(result),
                 read.read.address,
                 read.read.checksum,
                 @tagName(read.block_type),
-                read.ignore,
+                read.status,
             });
 
-            if (!read.ignore and
+            if (read.status == .repair and
                 scrubber.tour == .table_data and
                 scrubber.tour.table_data.index_block == null and
                 scrubber.tour.table_data.index_checksum == read.read.checksum and
@@ -271,7 +282,12 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 }
             }
 
-            read.ignore = read.ignore or result == .valid;
+            if (result == .valid) {
+                if (read.status == .repair) {
+                    read.status = .ok;
+                }
+            }
+
             read.done = true;
             scrubber.reads_busy.remove(read);
             scrubber.reads_done.push(read);
@@ -287,7 +303,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 defer scrubber.reads.release(read);
                 assert(read.done);
 
-                if (!read.ignore) {
+                if (read.status == .repair) {
                     return .{
                         .block_address = read.read.address,
                         .block_checksum = read.read.checksum,
