@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = @import("../stdx.zig").maybe;
 const math = std.math;
 const mem = std.mem;
 
@@ -59,6 +60,8 @@ pub fn KWayMergeIteratorType(
             direction: Direction,
         ) KWayMergeIterator {
             assert(streams_count <= streams_max);
+            // Streams ZERO can be used to represent empty sets.
+            maybe(streams_count == 0);
 
             return .{
                 .context = context,
