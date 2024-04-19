@@ -351,6 +351,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = .data,
                     };
                 } else {
+                    assert(data_block_index ==
+                        index_schema.data_blocks_used(scrubber.tour_index_block));
                     tour.* = .table_index;
                 }
             }
@@ -405,6 +407,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = .free_set,
                     };
                 } else {
+                    // A checkpoint can reduce the number of trailer blocks while we are scrubbing
+                    // the trailer.
+                    maybe(tour.free_set.index > free_set_trailer.block_count());
                     tour.* = .{ .client_sessions = .{} };
                 }
             }
@@ -421,6 +426,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         .block_type = .client_sessions,
                     };
                 } else {
+                    // A checkpoint can reduce the number of trailer blocks while we are scrubbing
+                    // the trailer.
+                    maybe(tour.client_sessions.index > client_sessions.block_count());
                     tour.* = .done;
                 }
             }
