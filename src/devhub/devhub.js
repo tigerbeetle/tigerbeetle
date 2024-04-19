@@ -70,10 +70,10 @@ async function mainSeeds() {
     if (!record.ok) {
       const rowDom = document.createElement("tr");
       const seedDuration = formatDuration(
-        (record.seed_timestamp_end - record.seed_timestamp_start) * 1000
+        (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
       );
       const seedFreshness = formatDuration(
-        Date.now() - (record.seed_timestamp_start * 1000)
+        Date.now() - (record.seed_timestamp_start * 1000),
       );
       rowDom.innerHTML = `
           <td>
@@ -243,11 +243,15 @@ function formatDuration(durationInMilliseconds) {
   if (minutes > 0) {
     parts.push(`${minutes}m`);
   }
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds}s`);
-  }
-  if (milliseconds > 0) {
-    parts.push(`${milliseconds}ms`);
+  if (days == 0) {
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds}s`);
+    }
+    if (hours == 0 && minutes == 0) {
+      if (milliseconds > 0) {
+        parts.push(`${milliseconds}ms`);
+      }
+    }
   }
 
   return parts.join(" ");
