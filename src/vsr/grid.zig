@@ -728,6 +728,7 @@ pub fn GridType(comptime Storage: type) type {
                 write.block.*[write_header.size..vsr.sector_ceil(write_header.size)],
             ));
 
+            std.log.info("Issuing grid write_sectors", .{});
             grid.superblock.storage.write_sectors(
                 write_block_callback,
                 &iop.completion,

@@ -411,6 +411,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 @memset(message.buffer[size..size_ceil], 0);
 
                 client_replies.writing.set(write.slot.index);
+                std.log.info("Issuing client reply write", .{});
                 client_replies.storage.write_sectors(
                     write_reply_callback,
                     &write.completion,

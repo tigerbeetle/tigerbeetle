@@ -92,26 +92,26 @@ pub fn StateMachineType(
 
                 pub const transfers = .{
                     .id = 8,
-                    .debit_account_id = 9,
-                    .credit_account_id = 10,
-                    .amount = 11,
-                    .pending_id = 12,
-                    .user_data_128 = 13,
-                    .user_data_64 = 14,
-                    .user_data_32 = 15,
-                    .ledger = 16,
-                    .code = 17,
-                    .timestamp = 18,
-                    .expires_at = 19,
+                    // .debit_account_id = 9,
+                    // .credit_account_id = 10,
+                    // .amount = 11,
+                    // .pending_id = 12,
+                    // .user_data_128 = 13,
+                    // .user_data_64 = 14,
+                    // .user_data_32 = 15,
+                    // .ledger = 16,
+                    // .code = 17,
+                    .timestamp = 9,
+                    .expires_at = 10,
                 };
 
                 pub const transfers_pending = .{
-                    .timestamp = 20,
-                    .status = 21,
+                    .timestamp = 11,
+                    .status = 12,
                 };
 
                 pub const account_balances = .{
-                    .timestamp = 22,
+                    .timestamp = 13,
                 };
             };
         };
@@ -213,18 +213,18 @@ pub fn StateMachineType(
                 .value_count_max = .{
                     .timestamp = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .debit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .credit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .pending_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
-                    .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .debit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .credit_account_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .amount = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .pending_id = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .user_data_128 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .user_data_64 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .user_data_32 = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .ledger = config.lsm_batch_multiple * constants.batch_max.create_transfers,
+                    // .code = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                     .expires_at = config.lsm_batch_multiple * constants.batch_max.create_transfers,
                 },
-                .ignored = &[_][]const u8{ "timeout", "flags" },
+                .ignored = &[_][]const u8{ "timeout", "flags", "debit_account_id", "credit_account_id", "amount", "pending_id", "user_data_128", "user_data_64", "user_data_32", "ledger", "code" },
                 .derived = .{
                     .expires_at = struct {
                         fn expires_at(object: *const Transfer) u64 {
@@ -945,35 +945,37 @@ pub fn StateMachineType(
                 else
                     filter.timestamp_max,
             };
+            _ = timestamp_range;
 
             // This query may have 2 conditions:
             // `WHERE debit_account_id = $account_id OR credit_account_id = $account_id`.
             var scan_conditions: stdx.BoundedArray(*TransfersGroove.ScanBuilder.Scan, 2) = .{};
             const direction: Direction = if (filter.flags.reversed) .descending else .ascending;
+            _ = direction;
 
             // Adding the condition for `debit_account_id = $account_id`.
-            if (filter.flags.debits) {
-                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
-                    .debit_account_id,
-                    self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                    snapshot_latest,
-                    filter.account_id,
-                    timestamp_range,
-                    direction,
-                ));
-            }
+            // if (filter.flags.debits) {
+            //     scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+            //         .debit_account_id,
+            //         self.forest.scan_buffer_pool.acquire_assume_capacity(),
+            //         snapshot_latest,
+            //         filter.account_id,
+            //         timestamp_range,
+            //         direction,
+            //     ));
+            // }
 
-            // Adding the condition for `credit_account_id = $account_id`.
-            if (filter.flags.credits) {
-                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
-                    .credit_account_id,
-                    self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                    snapshot_latest,
-                    filter.account_id,
-                    timestamp_range,
-                    direction,
-                ));
-            }
+            // // Adding the condition for `credit_account_id = $account_id`.
+            // if (filter.flags.credits) {
+            //     scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+            //         .credit_account_id,
+            //         self.forest.scan_buffer_pool.acquire_assume_capacity(),
+            //         snapshot_latest,
+            //         filter.account_id,
+            //         timestamp_range,
+            //         direction,
+            //     ));
+            // }
 
             return switch (scan_conditions.count()) {
                 1 => scan_conditions.get(0),
@@ -2043,15 +2045,15 @@ pub fn StateMachineType(
                     .tree_options_object = .{},
                     .tree_options_id = .{},
                     .tree_options_index = .{
-                        .debit_account_id = .{},
-                        .credit_account_id = .{},
-                        .user_data_128 = .{},
-                        .user_data_64 = .{},
-                        .user_data_32 = .{},
-                        .pending_id = .{},
-                        .ledger = .{},
-                        .code = .{},
-                        .amount = .{},
+                        // .debit_account_id = .{},
+                        // .credit_account_id = .{},
+                        // .user_data_128 = .{},
+                        // .user_data_64 = .{},
+                        // .user_data_32 = .{},
+                        // .pending_id = .{},
+                        // .ledger = .{},
+                        // .code = .{},
+                        // .amount = .{},
                         .expires_at = .{},
                     },
                 },

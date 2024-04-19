@@ -108,7 +108,7 @@ const Command = struct {
         command.fd = try IO.open_file(
             command.dir_fd,
             basename,
-            data_file_size_min,
+            data_file_size_min * 8,
             if (options.must_create) .create else .open,
             direct_io,
         );

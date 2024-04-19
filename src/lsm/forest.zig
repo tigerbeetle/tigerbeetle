@@ -224,6 +224,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         compaction_pipeline: CompactionPipeline,
 
         scan_buffer_pool: ScanBufferPool,
+        timer: std.time.Timer,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -282,6 +283,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .compaction_pipeline = compaction_pipeline,
 
                 .scan_buffer_pool = scan_buffer_pool,
+
+                .timer = std.time.Timer.start() catch unreachable,
             };
         }
 
@@ -318,6 +321,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .compaction_pipeline = forest.compaction_pipeline,
 
                 .scan_buffer_pool = forest.scan_buffer_pool,
+
+                .timer = std.time.Timer.start() catch unreachable,
             };
         }
 
@@ -383,20 +388,25 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(@as(usize, @intFromBool(first_beat)) + @intFromBool(last_half_beat) +
                 @intFromBool(half_beat) + @intFromBool(last_beat) <= 1);
 
-            log.debug("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
-                "first_beat={} last_half_beat={} half_beat={} last_beat={}", .{
+            forest.timer.reset();
+            log.info("start ft={}", .{std.fmt.fmtDuration(forest.timer.read())});
+            log.info("entering forest.compact() op={} constants.lsm_batch_multiple={} " ++
+                "first_beat={} last_half_beat={} half_beat={} last_beat={} ft={}", .{
                 op,
                 constants.lsm_batch_multiple,
                 first_beat,
                 last_half_beat,
                 half_beat,
                 last_beat,
+                std.fmt.fmtDuration(forest.timer.read()),
             });
+            std.log.info("before log: {}", .{std.fmt.fmtDuration(forest.timer.read())});
 
             forest.progress = .{ .compact = .{
                 .op = op,
                 .callback = callback,
             } };
+            std.log.info("before setting: {}", .{std.fmt.fmtDuration(forest.timer.read())});
 
             // Compaction only starts > lsm_batch_multiple because nothing compacts in the first
             // bar.
@@ -405,6 +415,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.compaction_progress == .idle);
 
             forest.compaction_progress = .trees_or_manifest;
+            std.log.info("before calling beat: {}", .{std.fmt.fmtDuration(forest.timer.read())});
             forest.compaction_pipeline.beat(forest, op, compact_callback);
             if (forest.grid.superblock.working.vsr_state.op_compacted(op)) {
                 assert(forest.compaction_pipeline.compactions.count() == 0);
@@ -428,6 +439,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         fn compact_callback(forest: *Forest) void {
             assert(forest.progress.? == .compact);
             assert(forest.compaction_progress != .idle);
+
+            std.log.info("compact_callback: ft={}", .{std.fmt.fmtDuration(forest.timer.read())});
 
             if (forest.compaction_progress == .trees_and_manifest) {
                 assert(forest.manifest_log_progress != .idle);
@@ -967,6 +980,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             const first_beat = compaction_beat == 0;
             const half_beat = compaction_beat == @divExact(constants.lsm_batch_multiple, 2);
 
+            std.log.info("compaction setup start ft={}", .{std.fmt.fmtDuration(forest.timer.read())});
+
             if (self.forest == null) self.forest = forest;
             assert(self.forest == forest);
 
@@ -1099,6 +1114,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             // Everything up to this point has been sync and deterministic. We now enter
             // async-land by starting a read. The blip_callback will do the rest, including
             // filling and draining.
+            std.log.info("compaction setup end ft={}", .{std.fmt.fmtDuration(forest.timer.read())});
             self.state = .filling;
             self.advance_pipeline();
         }
@@ -1134,6 +1150,8 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
             const slot: *PipelineSlot = @ptrCast(@alignCast(slot_opaque));
             const pipeline: *CompactionPipeline = slot.pipeline;
 
+            std.log.info("blip_callback at ft={}", .{std.fmt.fmtDuration(pipeline.forest.?.timer.read())});
+
             // Currently only merge is allowed to tell us we're exhausted.
             // TODO: In future, this will be extended to read, which might be able to, based
             // on key ranges.
@@ -1168,6 +1186,11 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             log.debug("blip_callback: all slots joined - advancing pipeline", .{});
             pipeline.advance_pipeline();
+        }
+
+        fn log_pipeline_state(self: *CompactionPipeline) void {
+            _ = self;
+            std.log.info("Hello :)", .{});
         }
 
         fn advance_pipeline(self: *CompactionPipeline) void {
@@ -1341,10 +1364,10 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
             // TODO: next_tick will just invoke our CPU work sync. We need to submit to the
             // underlying event loop before calling blip_merge.
-            // var timeouts: usize = 0;
-            // var etime = false;
-            // self.grid.superblock.storage.io.flush_submissions(0, &timeouts, &etime) catch
-            //     unreachable;
+            var timeouts: usize = 0;
+            var etime = false;
+            self.grid.superblock.storage.io.flush_submissions(0, &timeouts, &etime) catch
+                unreachable;
 
             assert(cpu_slot.active_operation == .merge);
             assert(self.slot_running_count > 0);

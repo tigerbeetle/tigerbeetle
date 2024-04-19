@@ -288,13 +288,12 @@ const Benchmark = struct {
         b.batch_transfers.clearRetainingCapacity();
 
         // Busy-wait for at least one transfer to be available.
-        while (b.transfer_next_arrival_ns >= b.timer.read()) {}
+        // while (b.transfer_next_arrival_ns >= b.timer.read()) {}
         b.batch_start_ns = b.timer.read();
 
         // Fill batch.
         while (b.transfer_index < b.transfer_count and
-            b.batch_transfers.items.len < transfer_count_per_batch and
-            b.transfer_next_arrival_ns < b.batch_start_ns)
+            b.batch_transfers.items.len < transfer_count_per_batch)
         {
             const debit_account_index = random.uintLessThan(u64, b.account_count);
             var credit_account_index = random.uintLessThan(u64, b.account_count);
@@ -378,6 +377,7 @@ const Benchmark = struct {
             statsd.gauge("benchmark.completed", b.transfers_sent) catch {};
         }
 
+        // std.time.sleep(100 * 1000 * 1000);
         b.create_transfers();
     }
 

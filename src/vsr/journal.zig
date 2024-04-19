@@ -1998,7 +1998,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
             }
 
-            log.debug("{}: write_sectors: ring={} offset={} len={} locked", .{
+            log.info("{}: write_sectors: ring={} offset={} len={} locked", .{
                 journal.replica,
                 write.range.ring,
                 write.range.offset,

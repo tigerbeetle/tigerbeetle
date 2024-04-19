@@ -95,7 +95,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption(config.TracerBackend, "tracer_backend", tracer_backend);
     const git_clone_tracy = GitCloneStep.add(b, .{
         .repo = "https://github.com/wolfpld/tracy.git",
-        .tag = "v0.9.1", // unrelated to Zig 0.9.1
+        .tag = "v0.10",
         .path = "tools/tracy",
     });
 

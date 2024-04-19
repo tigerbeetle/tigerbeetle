@@ -1480,6 +1480,7 @@ pub fn ReplicaType(
                 .message = message.ref(),
                 .realtime = realtime,
             };
+            std.log.info("on_request hit", .{});
 
             if (self.pipeline.queue.prepare_queue.full()) {
                 self.pipeline.queue.push_request(request);
@@ -1609,7 +1610,7 @@ pub fn ReplicaType(
 
             // We must advance our op and set the header as dirty before replicating and journalling.
             // The primary needs this before its journal is outrun by any prepare_ok quorum:
-            log.debug("{}: on_prepare: advancing: op={}..{} checksum={}..{}", .{
+            log.info("{}: on_prepare: advancing: op={}..{} checksum={}..{}", .{
                 self.replica,
                 self.op,
                 message.header.op,
@@ -1864,7 +1865,7 @@ pub fn ReplicaType(
             if (self.repair_header(message.header)) {
                 assert(self.journal.has_dirty(message.header));
 
-                log.debug("{}: on_repair: repairing journal", .{self.replica});
+                log.info("{}: on_repair: repairing journal", .{self.replica});
                 self.write_prepare(message, .repair);
             }
         }
@@ -3310,7 +3311,7 @@ pub fn ReplicaType(
                     message.header.op,
                 });
             } else {
-                log.debug("{}: append: appending to journal op={}", .{
+                log.info("{}: append: appending to journal op={}", .{
                     self.replica,
                     message.header.op,
                 });
@@ -3404,8 +3405,10 @@ pub fn ReplicaType(
                 .prefetch_state_machine => self.commit_op_prefetch(),
                 .setup_client_replies => {
                     if (self.client_replies.ready_sync()) {
+                        std.log.info("Calling commit_op_client_replies_ready_callback because ready_sync", .{});
                         commit_op_client_replies_ready_callback(&self.client_replies);
                     } else {
+                        std.log.info("Calling self.client_replies.ready", .{});
                         self.client_replies.ready(commit_op_client_replies_ready_callback);
                     }
                 },
@@ -3699,6 +3702,7 @@ pub fn ReplicaType(
         }
 
         fn commit_op_client_replies_ready_callback(client_replies: *ClientReplies) void {
+            std.log.info("ok inside commit_op_client_replies_ready_callback", .{});
             const self = @fieldParentPtr(Self, "client_replies", client_replies);
             assert(self.commit_stage == .setup_client_replies);
             assert(self.commit_prepare != null);
@@ -3730,7 +3734,7 @@ pub fn ReplicaType(
                         // Write the next message in the queue.
                         // A cluster-of-one writes prepares sequentially to avoid gaps in the
                         // WAL caused by reordered writes.
-                        log.debug("{}: append: appending to journal op={}", .{
+                        log.info("{}: append: appending to journal op={}", .{
                             self.replica,
                             next.message.header.op,
                         });
@@ -4048,6 +4052,7 @@ pub fn ReplicaType(
                 }) catch @panic("aof failure");
             }
 
+            std.log.info("About to execute state machine CPU", .{});
             const reply_body_size = switch (prepare.header.operation) {
                 .reserved, .root => unreachable,
                 .register => self.commit_register(prepare, reply.buffer[@sizeOf(Header)..]),
@@ -4065,6 +4070,7 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
             };
+            std.log.info("Done execute state machine CPU", .{});
 
             assert(self.state_machine.commit_timestamp <= prepare.header.timestamp or constants.aof_recovery);
             self.state_machine.commit_timestamp = prepare.header.timestamp;
@@ -4144,7 +4150,7 @@ pub fn ReplicaType(
                 if (reply.header.client == 0) {
                     log.debug("{}: commit_op: no reply to client: {}", .{ self.replica, reply.header });
                 } else {
-                    log.debug("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
+                    log.info("{}: commit_op: replying to client: {}", .{ self.replica, reply.header });
                     self.send_reply_message_to_client(reply);
                 }
             }
@@ -9199,6 +9205,7 @@ pub fn ReplicaType(
                 if (prepare_evicted) |m| self.message_bus.unref(m);
             }
 
+            std.log.info("XXXXXXXXXXXXXXZ issuing write_prepare!!", .{});
             self.journal.write_prepare(write_prepare_callback, message, trigger);
         }
 

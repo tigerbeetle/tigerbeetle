@@ -10,6 +10,7 @@ const tracer = @import("../tracer.zig");
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
+const time = @import("../time.zig");
 const FIFO = @import("../fifo.zig").FIFO;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -196,7 +197,9 @@ pub const IO = struct {
         }
     }
 
-    fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+    pub fn flush_submissions(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
+        var tt = time.Time{};
+        std.log.info("flush_submissions entry - wait_nr={} - monotonic={}", .{ wait_nr, tt.monotonic() });
         while (true) {
             const submitted = self.ring.submit_and_wait(wait_nr) catch |err| switch (err) {
                 error.SignalInterrupt => continue,
@@ -210,9 +213,11 @@ pub const IO = struct {
                 },
                 else => return err,
             };
-
             self.ios_queued -= submitted;
             self.ios_in_kernel += submitted;
+
+            std.log.info("self.ring.submit_and_wait {} - monotonic={} - ios_queued={} - ios_in_kernel={}", .{ submitted, tt.monotonic(), self.ios_queued, self.ios_in_kernel });
+
             tracer.plot(
                 .{ .queue_count = .{ .queue_name = "io_queued" } },
                 @as(f64, @floatFromInt(self.ios_queued)),
@@ -229,6 +234,7 @@ pub const IO = struct {
     fn enqueue(self: *IO, completion: *Completion) void {
         const sqe = self.ring.get_sqe() catch |err| switch (err) {
             error.SubmissionQueueFull => {
+                std.log.info("sq full, pushing to unqueued", .{});
                 self.unqueued.push(completion);
                 return;
             },
@@ -256,6 +262,7 @@ pub const IO = struct {
         ) void,
 
         fn prep(completion: *Completion, sqe: *io_uring_sqe) void {
+            std.log.info("prep called for {s}", .{@tagName(completion.operation)});
             switch (completion.operation) {
                 .accept => |*op| {
                     linux.io_uring_prep_accept(
@@ -806,6 +813,8 @@ pub const IO = struct {
             .context = context,
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    var tt = time.Time{};
+                    std.log.info("linux raw recv for {} - monotonic={}", .{ comp.operation.recv.socket, tt.monotonic() });
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
@@ -950,6 +959,8 @@ pub const IO = struct {
             .context = context,
             .callback = struct {
                 fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
+                    var tt = time.Time{};
+                    std.log.info("linux raw callback for {} - monotonic={}", .{ comp.operation.write.offset, tt.monotonic() });
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
@@ -965,6 +976,8 @@ pub const IO = struct {
                 },
             },
         };
+        var tt = time.Time{};
+        std.log.info("enqueue linux write fd: {} offset: {} len: {} - monotonic={}", .{ completion.operation.write.fd, completion.operation.write.offset, completion.operation.write.buffer.len, tt.monotonic() });
         self.enqueue(completion);
     }
 

@@ -395,6 +395,8 @@ pub fn CompactionType(
                 timer_write: usize = 0,
             };
 
+            timer: std.time.Timer,
+
             grid_reservation: Grid.Reservation,
             value_count_per_beat: u64,
 
@@ -807,6 +809,7 @@ pub fn CompactionType(
             compaction.beat = .{
                 .grid_reservation = grid_reservation,
                 .value_count_per_beat = value_count_per_beat,
+                .timer = std.time.Timer.start() catch unreachable,
             };
         }
 
@@ -821,6 +824,8 @@ pub fn CompactionType(
             assert(blocks.target_value_blocks.count > 0);
 
             compaction.beat.?.blocks = blocks;
+            compaction.beat.?.timer.reset();
+            std.log.info("assigned blocks t={}", .{std.fmt.fmtDuration(compaction.beat.?.timer.read())});
         }
 
         // Our blip pipeline is 3 stages long, and split into read, merge and write stages. The
@@ -851,7 +856,7 @@ pub fn CompactionType(
         /// many blocks as we can, given their sizes, and where we are in the amount of work we
         /// need to do this beat.
         pub fn blip_read(compaction: *Compaction, callback: BlipCallback, ptr: *anyopaque) void {
-            log.debug("blip_read({s}): scheduling read IO", .{compaction.tree_config.name});
+            log.info("blip_read({s}): scheduling read IO t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
 
             assert(compaction.bar != null);
             assert(compaction.beat != null);
@@ -923,7 +928,7 @@ pub fn CompactionType(
                 beat.index_blocks_read_b += 1;
             }
 
-            log.debug("blip_read({s}): scheduled {} index reads", .{
+            log.info("blip_read({s}): scheduled {} index reads", .{
                 compaction.tree_config.name,
                 read.pending_reads_index,
             });
@@ -1072,9 +1077,10 @@ pub fn CompactionType(
                 }
             }
 
-            log.debug("blip_read({s}): scheduled {} data reads.", .{
+            log.info("blip_read({s}): scheduled {} data reads. t={}", .{
                 compaction.tree_config.name,
                 read.pending_reads_data,
+                std.fmt.fmtDuration(compaction.beat.?.timer.read()),
             });
 
             // Either we have pending data reads, in which case blip_read_next_tick gets called by
@@ -1149,7 +1155,7 @@ pub fn CompactionType(
         /// This is not to be confused with blip_merge itself finishing; this can happen at any time
         /// because we need more input values, and that's OK. We hold on to our buffers for a beat.
         pub fn blip_merge(compaction: *Compaction, callback: BlipCallback, ptr: *anyopaque) void {
-            log.debug("blip_merge({s}) starting", .{compaction.tree_config.name});
+            log.info("blip_merge({s}) starting t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
 
             assert(compaction.bar != null);
             assert(compaction.beat != null);
@@ -1170,6 +1176,7 @@ pub fn CompactionType(
 
             var target_value_blocks = &blocks.target_value_blocks;
             var target_index_blocks = &bar.target_index_blocks.?;
+            log.info("blip_merge({s}) marker 3 t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
 
             // Loop through the CPU work until we have nothing left.
             // TODO: Put better bounds on this, to get rid of while(true).
@@ -1231,6 +1238,8 @@ pub fn CompactionType(
                     bar.compaction_tables_value_count,
                 });
 
+                log.info("blip_merge({s}) marker 4 t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
+
                 // It's important here to take note of what these checks mean: they apply when a
                 // source is _completely_ exhausted; ie, there's no more data on disk so the mode
                 // is switched.
@@ -1248,6 +1257,7 @@ pub fn CompactionType(
                 } else if (!source_a_exhausted and !source_b_exhausted) {
                     compaction.merge_values();
                 }
+                log.info("blip_merge({s}) marker 5 t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
                 bar.target_values_merge_count += bar.table_builder.value_count -
                     table_builder_count;
 
@@ -1296,11 +1306,13 @@ pub fn CompactionType(
                     source_exhausted_bar,
                     source_exhausted_beat,
                 });
+                log.info("blip_merge({s}) marker 6 t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
 
                 switch (compaction.check_and_finish_blocks(source_exhausted_bar)) {
                     .unfinished_value_block => {},
                     .finished_value_block => if (source_exhausted_beat) break,
                 }
+                log.info("blip_merge({s}) marker 7 t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
             }
 
             const d = merge.timer.read();
@@ -1325,6 +1337,7 @@ pub fn CompactionType(
                 // table_b's release_table_blocks gets called in update_position_b.
                 // TODO: Maybe we should move table_a's there too...?
             }
+            log.info("blip_merge({s}) ending t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
 
             beat.deactivate_assert_and_callback(.merge, .{
                 .bar = source_exhausted_bar,
@@ -1353,7 +1366,9 @@ pub fn CompactionType(
                             bar.source_a_immutable_block.?.block,
                         );
                         const immutable_remaining_before_fill = bar.table_info_a.immutable.len;
+                        std.log.info("before fill_immutable_values t={}", .{std.fmt.fmtDuration(beat.timer.read())});
                         const filled = compaction.fill_immutable_values(values);
+                        std.log.info("after fill_immutable_values t={}", .{std.fmt.fmtDuration(beat.timer.read())});
                         bar.source_a_values_consumed_for_fill =
                             immutable_remaining_before_fill - bar.table_info_a.immutable.len;
                         updated_fill_count = true;
@@ -1736,7 +1751,7 @@ pub fn CompactionType(
             assert(beat.write != null);
             const write = &beat.write.?;
 
-            log.debug("blip_write({s}): scheduling IO", .{compaction.tree_config.name});
+            log.info("blip_write({s}): scheduling IO t={}", .{ compaction.tree_config.name, std.fmt.fmtDuration(compaction.beat.?.timer.read()) });
 
             assert(write.pending_writes == 0);
 
@@ -1769,10 +1784,11 @@ pub fn CompactionType(
             }
 
             const d = write.timer.read();
-            log.debug("blip_write({s}): took {} to schedule {} blocks", .{
+            log.info("blip_write({s}): took {} to schedule {} blocks - t={}", .{
                 compaction.tree_config.name,
                 std.fmt.fmtDuration(d),
                 write.pending_writes,
+                std.fmt.fmtDuration(compaction.beat.?.timer.read()),
             });
             write.timer.reset();
 
@@ -1806,6 +1822,7 @@ pub fn CompactionType(
             while (compaction.bar.?.target_index_blocks.?.ioing_to_free() != null) freed += 1;
             assert(freed > 0);
 
+            std.log.info("blip_write_callback at t={}", .{std.fmt.fmtDuration(compaction.beat.?.timer.read())});
             // Call the next tick handler directly. This callback is invoked async, so it's safe
             // from stack overflows.
             blip_write_next_tick(&write.next_tick);
