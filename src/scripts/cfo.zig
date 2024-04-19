@@ -645,4 +645,66 @@ test "cfo: SeedRecord.merge" {
             \\]
         ),
     );
+
+    // Prefer older seeds rather than smaller seeds.
+    try T.check(
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = .ewah,
+                .ok = false,
+                .seed_timestamp_start = 10,
+                .seed_timestamp_end = 10,
+                .seed = 10,
+                .command = "fuzz ewah",
+            },
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = .ewah,
+                .ok = false,
+                .seed_timestamp_start = 20,
+                .seed_timestamp_end = 20,
+                .seed = 20,
+                .command = "fuzz ewah",
+            },
+        },
+        &.{
+            .{
+                .commit_timestamp = 1,
+                .commit_sha = .{'1'} ** 40,
+                .fuzzer = .ewah,
+                .ok = false,
+                .seed_timestamp_start = 5,
+                .seed_timestamp_end = 5,
+                .seed = 999,
+                .command = "fuzz ewah",
+            },
+        },
+        snap(@src(),
+            \\[
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "ewah",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 5,
+            \\    "seed_timestamp_end": 5,
+            \\    "seed": 999,
+            \\    "command": "fuzz ewah"
+            \\  },
+            \\  {
+            \\    "commit_timestamp": 1,
+            \\    "commit_sha": "1111111111111111111111111111111111111111",
+            \\    "fuzzer": "ewah",
+            \\    "ok": false,
+            \\    "seed_timestamp_start": 10,
+            \\    "seed_timestamp_end": 10,
+            \\    "seed": 10,
+            \\    "command": "fuzz ewah"
+            \\  }
+            \\]
+        ),
+    );
 }
