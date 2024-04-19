@@ -301,9 +301,9 @@ const SeedRecord = struct {
     commit_sha: [40]u8,
     fuzzer: Fuzzer,
     ok: bool,
-    seed: u64,
     seed_timestamp_start: u64,
     seed_timestamp_end: u64,
+    seed: u64,
     command: []const u8, // excluded from comparison
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
@@ -502,9 +502,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "2222222222222222222222222222222222222222",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
-            \\    "seed": 4,
             \\    "seed_timestamp_start": 4,
             \\    "seed_timestamp_end": 4,
+            \\    "seed": 4,
             \\    "command": "fuzz ewah"
             \\  },
             \\  {
@@ -512,9 +512,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "2222222222222222222222222222222222222222",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
-            \\    "seed": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
             \\    "command": "fuzz ewah"
             \\  },
             \\  {
@@ -522,9 +522,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
-            \\    "seed": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
             \\    "command": "fuzz ewah"
             \\  },
             \\  {
@@ -532,9 +532,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
-            \\    "seed": 2,
             \\    "seed_timestamp_start": 2,
             \\    "seed_timestamp_end": 2,
+            \\    "seed": 2,
             \\    "command": "fuzz ewah"
             \\  }
             \\]
@@ -585,9 +585,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "3333333333333333333333333333333333333333",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
-            \\    "seed": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
             \\    "command": "fuzz ewah"
             \\  },
             \\  {
@@ -595,9 +595,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "2222222222222222222222222222222222222222",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
-            \\    "seed": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
             \\    "command": "fuzz ewah"
             \\  }
             \\]
@@ -637,9 +637,9 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": false,
-            \\    "seed": 1,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
+            \\    "seed": 1,
             \\    "command": "fuzz ewah"
             \\  }
             \\]
