@@ -251,8 +251,8 @@ pub fn ScanTreeType(
                             .iterating_tables => level.table_next(.begin),
                             .iterating_blocks => |key_exclusive_max| {
                                 assert(switch (self.direction) {
-                                    .ascending => self.key_min < key_exclusive_max,
-                                    .descending => self.key_max > key_exclusive_max,
+                                    .ascending => self.key_min <= key_exclusive_max,
+                                    .descending => self.key_max >= key_exclusive_max,
                                 });
                             },
                             .finished => {},
