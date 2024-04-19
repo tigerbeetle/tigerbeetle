@@ -69,6 +69,12 @@ async function mainSeeds() {
   for (const record of recordsLatestCommit) {
     if (!record.ok) {
       const rowDom = document.createElement("tr");
+      const seedDuration = formatDuration(
+        (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
+      );
+      const seedFreshness = formatDuration(
+        Date.now() - (record.seed_timestamp_start * 1000),
+      );
       rowDom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
@@ -77,6 +83,8 @@ async function mainSeeds() {
           </td>
           <td>${record.fuzzer}</td>
           <td><code>${record.command}</code></td>
+          <td><time>${seedDuration}</time></td>
+          <td><time>${seedFreshness} ago</time></td>
       `;
       tableDom.appendChild(rowDom);
     }
@@ -235,11 +243,15 @@ function formatDuration(durationInMilliseconds) {
   if (minutes > 0) {
     parts.push(`${minutes}m`);
   }
-  if (seconds > 0 || parts.length === 0) {
-    parts.push(`${seconds}s`);
-  }
-  if (milliseconds > 0) {
-    parts.push(`${milliseconds}ms`);
+  if (days == 0) {
+    if (seconds > 0 || parts.length === 0) {
+      parts.push(`${seconds}s`);
+    }
+    if (hours == 0 && minutes == 0) {
+      if (milliseconds > 0) {
+        parts.push(`${milliseconds}ms`);
+      }
+    }
   }
 
   return parts.join(" ");
