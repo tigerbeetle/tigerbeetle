@@ -77,7 +77,9 @@ pub fn ZigZagMergeIteratorType(
                     assert(key_from_value(&value_other) == key);
 
                     if (constants.verify) {
-                        // It's assumed that streams will produce the same value.
+                        // Differently from K-way merge, there's no precedence between streams
+                        // in Zig-Zag merge. It's assumed that all streams will produce the same
+                        // value during a key intersection.
                         assert(stdx.equal_bytes(Value, &value, &value_other));
                     }
                 }
