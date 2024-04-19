@@ -1364,6 +1364,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 
     var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
 
     const a0_free_set = &t.cluster.replicas[a0.replicas.get(0)].grid.free_set;
@@ -1386,8 +1387,6 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     b2_storage.options.write_fault_probability = 0;
 
     // Tick until B2's grid repair stops making progress.
-    // (This may take multiple scrubber cycles, since when a table index is corrupt, we skip over
-    // scrubbing its data for that cycle.)
     {
         var faults_before = b2_storage.faults.count();
         while (true) {
@@ -1414,7 +1413,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     }
 
     try TestReplicas.expect_equal_grid(a0, b2);
-    try TestReplicas.expect_equal_grid(b2, b2);
+    try TestReplicas.expect_equal_grid(b1, b2);
 }
 
 const ProcessSelector = enum {

@@ -20,6 +20,7 @@
 //!
 //! TODO Start replicas scrubbing from distinct/random offsets in the tour to farther minimize risk
 //! of cluster data loss. (Right now replicas will often have identical scrubbing schedules.)
+//! TODO Accelerate scrubbing rate (at runtime) if faults are detected frequently.
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
