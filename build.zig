@@ -150,7 +150,7 @@ pub fn build(b: *std.Build) !void {
         .optimize = mode,
     });
     if (mode == .ReleaseSafe) {
-        tigerbeetle.strip = true;
+        tigerbeetle.strip = tracer_backend == .none;
     }
     if (emit_llvm_ir) {
         _ = tigerbeetle.getEmittedLlvmIr();
