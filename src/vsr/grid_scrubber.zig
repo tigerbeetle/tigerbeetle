@@ -127,6 +127,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
         /// Contains a table index block when tour=table_data.
         tour_index_block: BlockPtr,
 
+        /// These counters reset after every tour cycle.
+        tour_blocks_scrubbed_count: usize,
+
         pub fn init(
             allocator: std.mem.Allocator,
             forest: *Forest,
@@ -142,6 +145,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 .tour = .init,
                 .tour_tables = .{},
                 .tour_index_block = tour_index_block,
+                .tour_blocks_scrubbed_count = 0,
             };
         }
 
@@ -161,6 +165,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
             scrubber.tour = .init;
             scrubber.tour_tables = .{};
+            scrubber.tour_blocks_scrubbed_count = 0;
         }
 
         /// Cancel queued reads to blocks that will be released by the imminent checkpoint.
@@ -206,6 +211,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
             if (scrubber.reads.available() == 0) return false;
             const block_id = scrubber.tour_next() orelse return false;
+            scrubber.tour_blocks_scrubbed_count += 1;
 
             const read = scrubber.reads.acquire().?;
             assert(!scrubber.reads_busy.contains(read));
@@ -433,10 +439,18 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 }
             }
 
+            // Note that this is just the end of the tour.
+            // (Some of the cycle's reads may still be in progress).
+            log.info("{}: tour_next: cycle done (toured_blocks={})", .{
+                scrubber.superblock.replica_index.?,
+                scrubber.tour_blocks_scrubbed_count,
+            });
+
             // Wrap around to the next cycle.
             assert(tour.* == .done);
             tour.* = .init;
             scrubber.tour_tables = .{};
+            scrubber.tour_blocks_scrubbed_count = 0;
 
             return null;
         }
