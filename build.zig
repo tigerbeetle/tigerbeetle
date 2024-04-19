@@ -537,8 +537,9 @@ pub fn build(b: *std.Build) !void {
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",
             .root_source_file = .{ .path = "src/scripts/main.zig" },
-            .target = target,
             .main_pkg_path = .{ .path = "src" },
+            .target = target,
+            .optimize = mode,
         });
         const scripts_run = b.addRunArtifact(scripts_exe);
         if (b.args) |args| scripts_run.addArgs(args);

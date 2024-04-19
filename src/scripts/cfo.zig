@@ -25,7 +25,8 @@
 //!
 //! It is important that the caller (systemd typically) arranges for CFO to be a process group
 //! leader. It is not possible to reliably wait for (grand) children with POSIX, so its on the
-//! call-site to cleanup any run-away subprocesses
+//! call-site to cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to
+//! arrange that.
 //!
 //! After the fuzzing loop, CFO collects a list of seeds, some of which are failing. Next, it
 //! merges, this list into previous set of seeds (persisting seeds is to be implemented, at the
