@@ -85,8 +85,8 @@ pub fn ZigZagMergeIteratorType(
                 if (it.previous_key_popped) |previous| {
                     switch (std.math.order(previous, key)) {
                         .lt => assert(it.direction == .ascending),
-                        // Discard duplicate values.
-                        .eq => continue,
+                        // Duplicate values are not expected.
+                        .eq => unreachable,
                         .gt => assert(it.direction == .descending),
                     }
                 }
@@ -121,6 +121,8 @@ pub fn ZigZagMergeIteratorType(
                     const key = stream_peek(it.context, @intCast(stream_index)) catch |err| {
                         switch (err) {
                             // Return immediately on empty streams.
+                            // If any one stream is empty, then there can be no value remaining
+                            // in the intersection.
                             error.Empty => return null,
                             // Skipping `Drained` streams. The goal is to match all buffered streams
                             // first so that the drained ones can read from a narrower key range.
@@ -142,6 +144,7 @@ pub fn ZigZagMergeIteratorType(
                         // Setting all previous streams as `true` except the drained ones.
                         probing.setRangeValue(.{ .start = 0, .end = stream_index }, true);
                         probing.setIntersection(drained.complement());
+                        assert(!probing.isSet(stream_index));
                     } else if (switch (it.direction) {
                         .ascending => key < probe_key,
                         .descending => key > probe_key,
@@ -182,130 +185,27 @@ pub fn ZigZagMergeIteratorType(
             }
 
             if (drained.count() == it.streams_count) {
-                //Can't probe if all streams are drained.
+                // Can't probe if all streams are drained.
                 assert(probe_key == key_min);
                 return error.Drained;
             }
 
             assert(probe_key != key_min);
-
-            // At this point, all the buffered streams have produced a match
-            // that will be used to probe the drained streams.
-            if (drained.count() > 0) {
-                var drained_iterator = drained.iterator(.{ .kind = .set });
-                while (drained_iterator.next()) |stream_index| {
+            for (0..it.streams_count) |stream_index| {
+                if (drained.isSet(stream_index)) {
+                    // Probing the drained stream will update the key range for the next read.
                     stream_probe(it.context, @intCast(stream_index), probe_key);
-
                     // The stream must remain drained after probed.
                     assert(stream_peek(it.context, @intCast(stream_index)) == error.Drained);
+                } else {
+                    // At this point, all the buffered streams must have produced a matching key.
+                    assert(stream_peek(it.context, @intCast(stream_index)) catch {
+                        unreachable;
+                    } == probe_key);
                 }
-                return error.Drained;
             }
 
-            return probe_key;
-        }
-
-        fn peek_key_classic(it: *ZigZagMergeIterator) error{Drained}!?Key {
-            assert(it.streams_count <= streams_max);
-            assert(it.streams_count > 1);
-
-            // Starting with the first non-drained stream as the probe key:
-            var probe_index: u32 = 0;
-            var probe_key: Key = while (probe_index < it.streams_count) : (probe_index += 1) {
-                break stream_peek(it.context, probe_index) catch |err| {
-                    switch (err) {
-                        // Return immediately on empty streams.
-                        error.Empty => return null,
-                        // It's fine to skip `Drained` streams. The goal is to match all
-                        // buffered streams first so that the drained ones can read from
-                        // a narrower key range.
-                        error.Drained => continue,
-                    }
-                };
-            } else return error.Drained;
-
-            var drained: bool = false;
-            var stream_index: u32 = 0;
-            while (stream_index < it.streams_count) {
-                // Skipping the current probe stream.
-                if (stream_index == probe_index) {
-                    stream_index += 1;
-                    continue;
-                }
-
-                var key = stream_peek(it.context, stream_index) catch |err| {
-                    switch (err) {
-                        // Return immediately on empty streams.
-                        error.Empty => return null,
-                        error.Drained => {
-                            // Drained streams can be probed several times without a `peek`.
-                            // Since they have no buffered data to seek, the operation simply
-                            // updates the key range for the next read.
-                            stream_probe(it.context, stream_index, probe_key);
-                            stream_index += 1;
-                            drained = true;
-                            continue;
-                        },
-                    }
-                };
-
-                if (switch (it.direction) {
-                    .ascending => key < probe_key,
-                    .descending => key > probe_key,
-                }) {
-                    // Probing the stream if it is behind the probe.
-                    stream_probe(it.context, stream_index, probe_key);
-                    key = stream_peek(it.context, stream_index) catch |err| {
-                        switch (err) {
-                            // Return immediately on empty streams.
-                            error.Empty => return null,
-                            error.Drained => {
-                                // Accumulating `Drained` errors to the end.
-                                stream_index += 1;
-                                drained = true;
-                                continue;
-                            },
-                        }
-                    };
-                }
-
-                if (key == probe_key) {
-                    // The stream matches the probe key.
-                    stream_index += 1;
-                    continue;
-                }
-
-                assert(switch (it.direction) {
-                    .ascending => key > probe_key,
-                    .descending => key < probe_key,
-                });
-
-                // The stream is ahead of the current probe, it will be the
-                // probe in the next iteration over all other streams again.
-                assert(probe_index < it.streams_count);
-                stream_probe(it.context, probe_index, key);
-
-                probe_index = stream_index;
-                probe_key = key;
-                stream_index = 0;
-            }
-
-            if (constants.verify) {
-                const drained_any = for (0..it.streams_count) |index| {
-                    _ = stream_peek(it.context, @intCast(index)) catch |err| {
-                        switch (err) {
-                            error.Empty => unreachable,
-                            error.Drained => break true,
-                        }
-                    };
-                } else false;
-                assert(drained == drained_any);
-            }
-
-            return if (drained)
-                error.Drained
-            else
-                probe_key;
+            return if (drained.count() == 0) probe_key else error.Drained;
         }
     };
 }
@@ -318,7 +218,8 @@ fn TestContext(comptime streams_max: u32) type {
 
         const log = false;
 
-        //
+        // Using `u128` simplifies the fuzzer, avoiding undesirable matches
+        // and duplicate elements when generating random values.
         const Key = u128;
         const Value = u128;
 
@@ -567,42 +468,23 @@ test "zig_zag_merge: unit" {
         &.{ 4, 5 },
     );
 
-    // Unique and repeated elements:
-    try Context.merge(
-        &[_][]const Context.Value{
-            &.{ 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5 },
-            &.{ 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 },
-            &.{ 1, 2, 3, 4, 5 },
-        },
-        &.{ 1, 2, 3, 4, 5 },
-    );
-
-    // Repeated elements:
-    try Context.merge(
-        &[_][]const Context.Value{
-            &.{ 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 },
-            &.{ 1, 1, 3, 3, 5, 5, 7, 7, 9, 9 },
-        },
-        &.{ 1, 3, 5 },
-    );
-
     // Intersection with streams of different sizes:
     try Context.merge(
         &[_][]const Context.Value{
-            // 1, 2, 3 ... 1000
+            // {1, 2, 3, ..., 1000}.
             comptime blk: {
                 @setEvalBranchQuota(2_000);
                 var array: [1000]Context.Value = undefined;
                 for (0..1000) |i| array[i] = @intCast(i + 1);
                 break :blk &array;
             },
-            // 10, 20, 30, ... 1000
+            // {10, 20, 30, ..., 1000}.
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(10 * (i + 1));
                 break :blk &array;
             },
-            // 1, 10, 100, 1000 ... 10 ^ 10
+            // {1, 10, 100, 1000, ..., 10 ^ 10}.
             comptime blk: {
                 var array: [10]Context.Value = undefined;
                 for (0..10) |i| array[i] = std.math.pow(Context.Value, 10, i);
@@ -612,40 +494,38 @@ test "zig_zag_merge: unit" {
         &.{ 10, 100, 1000 },
     );
 
-    // Sparse matching values: {100..199} ∩ {1..100} = {100}
-    // First scan is the "zig".
+    // Sparse matching values: {1, 2, 3, ..., 100} ∩ {100, 101, 102, ..., 199} = {100}.
     try Context.merge(
         &[_][]const Context.Value{
-            // 100..199
-            comptime blk: {
-                var array: [100]Context.Value = undefined;
-                for (0..100) |i| array[i] = @intCast(i + 100);
-                break :blk &array;
-            },
-            // 1 ... 100
+            // {1, 2, 3, ..., 100}.
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(i + 1);
+                break :blk &array;
+            },
+            // {100, 101, 102, ..., 199}.
+            comptime blk: {
+                var array: [100]Context.Value = undefined;
+                for (0..100) |i| array[i] = @intCast(i + 100);
                 break :blk &array;
             },
         },
         &.{100},
     );
 
-    // Sparse matching values: {1..100} ∩ {100..199} = {100}
-    // First scan is the "zag".
+    // Sparse matching values: {100, 101, 102, ..., 199} ∩ {1, 2, 3, ..., 100}  = {100}.
     try Context.merge(
         &[_][]const Context.Value{
-            // 1 ... 100
-            comptime blk: {
-                var array: [100]Context.Value = undefined;
-                for (0..100) |i| array[i] = @intCast(i + 1);
-                break :blk &array;
-            },
-            // 100..199
+            // {100, 101, 102, ..., 199}.
             comptime blk: {
                 var array: [100]Context.Value = undefined;
                 for (0..100) |i| array[i] = @intCast(i + 100);
+                break :blk &array;
+            },
+            // {1, 2, 3, ..., 100}.
+            comptime blk: {
+                var array: [100]Context.Value = undefined;
+                for (0..100) |i| array[i] = @intCast(i + 1);
                 break :blk &array;
             },
         },
