@@ -1995,8 +1995,8 @@ fn ExpirePendingTransfersType(
 ) type {
     return struct {
         const ExpirePendingTransfers = @This();
-        const ScanRangeType = @import("lsm/scan_builder.zig").ScanRangeType;
-        const EvaluateNext = @import("lsm/scan_builder.zig").EvaluateNext;
+        const ScanRangeType = @import("lsm/scan_range.zig").ScanRangeType;
+        const EvaluateNext = @import("lsm/scan_range.zig").EvaluateNext;
         const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
 
         const Tree = std.meta.FieldType(TransfersGroove.IndexTrees, .expires_at);
