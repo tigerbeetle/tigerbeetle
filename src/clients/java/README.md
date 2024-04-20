@@ -317,17 +317,16 @@ var transferIds = new long[] {100, 101, 102};
 var debitIds = new long[] {1, 2, 3};
 var creditIds = new long[] {4, 5, 6};
 var amounts = new long[] {1000, 29, 11};
+TransferBatch batch = new TransferBatch(3);
 for (int i = 0; i < transferIds.length; i++) {
-    TransferBatch batch = new TransferBatch(1);
     batch.add();
     batch.setId(transferIds[i]);
     batch.setDebitAccountId(debitIds[i]);
     batch.setCreditAccountId(creditIds[i]);
     batch.setAmount(amounts[i]);
-
-    CreateTransferResultBatch errors = client.createTransfers(batch);
-    // error handling omitted
 }
+CreateTransferResultBatch errors = client.createTransfers(batch);
+// error handling omitted
 ```
 
 But the insert rate will be a *fraction* of
