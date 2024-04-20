@@ -317,7 +317,7 @@ var transferIds = new long[] {100, 101, 102};
 var debitIds = new long[] {1, 2, 3};
 var creditIds = new long[] {4, 5, 6};
 var amounts = new long[] {1000, 29, 11};
-TransferBatch batch = new TransferBatch(3);
+TransferBatch batch = new TransferBatch(transferIds.length);
 for (int i = 0; i < transferIds.length; i++) {
     batch.add();
     batch.setId(transferIds[i]);
