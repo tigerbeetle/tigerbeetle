@@ -444,6 +444,13 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
             }
         }
 
+        /// Assert there is space for at least one table in the level.
+        pub fn assert_level_free_table(manifest: *const Manifest, level: u8) void {
+            const table_count_visible_max = table_count_max_for_level(growth_factor, level);
+            const manifest_level = &manifest.levels[level];
+            assert(manifest_level.table_count_visible < table_count_visible_max);
+        }
+
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshots: []const u64) void {
             for (manifest.levels, 0..) |_, level| {
                 manifest.assert_no_invisible_tables_at_level(@intCast(level), snapshots);

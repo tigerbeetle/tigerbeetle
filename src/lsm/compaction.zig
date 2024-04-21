@@ -2079,6 +2079,11 @@ pub fn CompactionType(
                 );
             }
 
+            // Coalescing should always result in a free table.
+            if (bar.table_info_a == .coalesce) {
+                manifest.assert_level_free_table(level_b);
+            }
+
             // Our bar is done!
             compaction.bar = null;
         }
