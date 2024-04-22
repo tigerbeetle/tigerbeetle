@@ -15,19 +15,19 @@ pub fn main(args: fuzz.FuzzArgs) !void {
         const random = prng.random();
 
         const decoded_size_max = @divExact(1024 * 1024, @sizeOf(Word));
-        const decoded_size = random.uintLessThan(usize, 1 + decoded_size_max);
+        const decoded_size = random.intRangeAtMost(usize, 1, decoded_size_max);
         const decoded = try allocator.alloc(Word, decoded_size);
         defer allocator.free(decoded);
 
         const decoded_bits_total = decoded_size * @bitSizeOf(Word);
-        const decoded_bits = random.uintLessThan(usize, decoded_bits_total);
+        const decoded_bits = random.uintAtMost(usize, decoded_bits_total);
         generate_bits(random, std.mem.sliceAsBytes(decoded[0..decoded_size]), decoded_bits);
 
         var context = try ContextType(Word).init(allocator, decoded.len);
         defer context.deinit(allocator);
 
-        const encode_chunk_words_count = 1 + random.uintLessThan(usize, decoded_size);
-        const decode_chunk_words_count = 1 + random.uintLessThan(usize, decoded_size);
+        const encode_chunk_words_count = random.intRangeAtMost(usize, 1, decoded_size);
+        const decode_chunk_words_count = random.intRangeAtMost(usize, 1, decoded_size);
 
         const encoded_size = try context.test_encode_decode(decoded, .{
             .encode_chunk_words_count = encode_chunk_words_count,
