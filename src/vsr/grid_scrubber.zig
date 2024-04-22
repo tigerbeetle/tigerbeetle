@@ -129,7 +129,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         tour_index_block: BlockPtr,
 
         /// These counters reset after every tour cycle.
-        tour_blocks_scrubbed_count: usize,
+        tour_blocks_scrubbed_count: u64,
 
         pub fn init(
             allocator: std.mem.Allocator,
