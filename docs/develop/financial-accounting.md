@@ -152,7 +152,7 @@ From the perspective of our example bank:
 Note that accounting conventions also always write the debits first, to represent the funds flowing
 _from_ the debited account _to_ the credited account.
 
-If this seems arbitary and confusing, we understand! It's a convention, just like how most
+If this seems arbitrary and confusing, we understand! It's a convention, just like how most
 programmers need to learn zero-based array indexing and then at some point it becomes second nature.
 
 ## Takeaways
