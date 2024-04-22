@@ -183,7 +183,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     return struct {
         const Forest = @This();
 
-        const ManifestLog = ManifestLogType(Storage);
+        pub const ManifestLog = ManifestLogType(Storage);
         const CompactionPipeline = CompactionPipelineType(Forest, Grid);
 
         const Callback = *const fn (*Forest) void;
