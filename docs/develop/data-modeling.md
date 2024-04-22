@@ -85,7 +85,7 @@ look something like this:
 
 ### Compound Transfers
 
-[`Transfer`s] in TigerBeetle debit a single account and credit a single account. You can read more
+`Transfer`s in TigerBeetle debit a single account and credit a single account. You can read more
 about implementing compound transfers in [Multi-Debit, Multi-Credit
 Transfers](./recipes/multi-debit-credit-transfers.md).
 
