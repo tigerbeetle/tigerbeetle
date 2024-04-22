@@ -62,20 +62,22 @@ async function mainSeeds() {
   const dataUrl =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
   const records = await (await fetch(dataUrl)).json();
-  const recordsLatestCommit = records.filter((it) =>
-    it.commit_sha == records[0].commit_sha
-  );
+  const fuzzersWithFailures = new Set();
   const tableDom = document.querySelector("#seeds>tbody");
-  for (const record of recordsLatestCommit) {
-    if (!record.ok) {
-      const rowDom = document.createElement("tr");
-      const seedDuration = formatDuration(
-        (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
-      );
-      const seedFreshness = formatDuration(
-        Date.now() - (record.seed_timestamp_start * 1000),
-      );
-      rowDom.innerHTML = `
+  for (const record of records) {
+    if (record.ok) continue;
+
+    if (fuzzersWithFailures.has(record.fuzzer)) continue;
+    fuzzersWithFailures.add(record.fuzzer);
+
+    const rowDom = document.createElement("tr");
+    const seedDuration = formatDuration(
+      (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
+    );
+    const seedFreshness = formatDuration(
+      Date.now() - (record.seed_timestamp_start * 1000),
+    );
+    rowDom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
               ${record.commit_sha.substring(0, 7)}
@@ -86,8 +88,7 @@ async function mainSeeds() {
           <td><time>${seedDuration}</time></td>
           <td><time>${seedFreshness} ago</time></td>
       `;
-      tableDom.appendChild(rowDom);
-    }
+    tableDom.appendChild(rowDom);
   }
 }
 
