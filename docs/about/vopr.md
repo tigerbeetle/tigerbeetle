@@ -21,9 +21,9 @@ you can inject different faults yourself 🔨🧊⚡.
 
 ## The VOPR
 
-_The VOPR_ is our name for our deterministic simulator. (The name was inspired by the evil AI
+_The VOPR_ is our name for our deterministic simulator. (The name was inspired by the AI
 supercomputer in the 1983 movie [WarGames](https://www.imdb.com/title/tt0086567/), which was called
-the War Operation Plan Response or WOPR.)
+the War Operation Plan Response or WOPR, which constantly simulated scenarios in order to learn.)
 
 > "VOPR" doesn't actually stand for anything. However ChatGPT suggested the backronyms Validation
 > Oriented Precision Runtime, Vortex of Precise Reckoning, and Voyage of Programmatic Realities, so
