@@ -1,5 +1,32 @@
 # TigerBeetle Changelog
 
+## 2024-04-22 (No release: Queued up for upcoming multi-version binary release)
+
+### Safety And Performance
+
+- [#1851](https://github.com/tigerbeetle/tigerbeetle/pull/1851)
+
+  Implement grid scrubbing --- a background job that periodically reads the entire data file,
+  verifies its correctness and repairs any corrupted blocks.
+
+- [#1855](https://github.com/tigerbeetle/tigerbeetle/pull/1855),
+  [#1854](https://github.com/tigerbeetle/tigerbeetle/pull/1854).
+
+  Turn on continuous fuzzing and integrate it with
+  [devhub](https://tigerbeetle.github.io/tigerbeetle/).
+
+### Internals
+
+- [#1849](https://github.com/tigerbeetle/tigerbeetle/pull/1849)
+
+  Improve navigation on the docs website.
+
+### TigerTracks 🎧
+
+A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
+
+- [TigerBeetle](https://open.spotify.com/track/66pxevn7ImjMDozcs1TE3Q?si=dfbbf7b80179481e)
+
 ## 2024-04-15 (No release: Queued up for upcoming multi-version binary release)
 
 ### Safety And Performance
