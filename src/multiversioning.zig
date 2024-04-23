@@ -5,6 +5,7 @@ const os = std.os;
 const linux = os.linux;
 const native_endian = @import("builtin").target.cpu.arch.endian();
 const constants = @import("constants.zig");
+const IO = @import("io.zig").IO;
 
 const elf = std.elf;
 
@@ -182,8 +183,10 @@ pub const MultiVersionMetadata = extern struct {
     /// Covers MultiVersionMetadata[0..@sizeOf(MultiVersionMetadata) - @sizeOf(u128)].
     checksum_metadata: u128 = undefined,
 
+    /// Parses an instance from a slice of bytes - returns a copy.
     pub fn from_bytes(bytes: []const u8) !MultiVersionMetadata {
-        const self: *const MultiVersionMetadata = @ptrCast(@alignCast(bytes));
+        var self: MultiVersionMetadata = undefined;
+        stdx.copy_disjoint(.exact, u8, std.mem.asBytes(&self), bytes);
 
         const checksum_calculated = self.calculate_metadata_checksum();
 
@@ -191,7 +194,7 @@ pub const MultiVersionMetadata = extern struct {
             return error.ChecksumMismatch;
         }
 
-        return self.*;
+        return self;
     }
 
     pub fn calculate_metadata_checksum(self: *const MultiVersionMetadata) u128 {
@@ -203,18 +206,6 @@ pub const MultiVersionMetadata = extern struct {
         return checksum(self_without_checksum);
     }
 
-    pub fn releases_bundled(self: *const MultiVersionMetadata) ReleaseList {
-        var release_list = ReleaseList{};
-
-        for (self.past.versions[0..self.past.count]) |version| {
-            release_list.append_assume_capacity(Release{ .value = version });
-        }
-
-        release_list.append_assume_capacity(Release{ .value = self.current_version });
-
-        return release_list;
-    }
-
     comptime {
         // Changing this will affect the structure stored on disk, and has implications for past clients trying to read!
         assert(constants.vsr_releases_max == 64);
@@ -222,11 +213,93 @@ pub const MultiVersionMetadata = extern struct {
 };
 
 pub const MultiVersion = struct {
-    pack_offset: u32,
-    metadata: MultiVersionMetadata,
+    pub const Callback = *const fn (*MultiVersion, anyerror!void) void;
+    pub const MultiVersionError = IO.ReadError || error{ FileOpenError, ShortRead, InvalidELFHeader, WrongEndian, Not64bit, LongStringTable, InvalidStringTable };
+
+    read_buffer: []u8,
+    exe_path: []const u8,
+    elf_string_buffer: []u8,
+    elf_header: elf.Header = undefined,
+    io: *IO,
+
+    completion: IO.Completion = undefined,
+    completion_timeout: IO.Completion = undefined,
+    file: ?std.fs.File = null,
+
+    pack_offset: ?u32 = null,
+    metadata: MultiVersionMetadata = undefined,
+    releases_bundled: ReleaseList = .{},
 
     /// Used for validation, to know what to zero.
-    metadata_offset: u32,
+    metadata_offset: u32 = undefined,
+
+    stage: union(enum) {
+        init,
+        read_elf_header,
+        read_elf_string_table_section,
+        read_elf_string_table,
+        read_elf_section: u64,
+        read_multiversion_metadata,
+        ready,
+        err: anyerror,
+    } = .init,
+
+    callback: ?Callback = null,
+
+    pub fn init(allocator: std.mem.Allocator, io: *IO, exe_path: []const u8) !MultiVersion {
+        const read_buffer = try allocator.alloc(u8, 2048);
+        const elf_string_buffer = try allocator.alloc(u8, 1024);
+
+        // // openSelfExe is a thing, but don't use it for now because we might want our event loop to handle opening
+        // // in future. (can open() block?)
+        // var exe_path = try std.fs.selfExePathAlloc(allocator);
+
+        return MultiVersion{
+            .read_buffer = read_buffer,
+            .elf_string_buffer = elf_string_buffer,
+            .exe_path = exe_path,
+
+            .io = io,
+        };
+    }
+
+    fn on_timeout(
+        self: *MultiVersion,
+        completion: *IO.Completion,
+        result: IO.TimeoutError!void,
+    ) void {
+        _ = result catch unreachable;
+        _ = completion;
+
+        self.read_from_elf(on_timeout_read_from_elf_callback);
+    }
+
+    pub fn on_timeout_read_from_elf_callback(self: *MultiVersion, result: anyerror!void) void {
+        std.log.info("hello from here: r={!}", .{result});
+        _ = result catch void;
+
+        self.io.timeout(
+            *MultiVersion,
+            self,
+            on_timeout,
+            &self.completion_timeout,
+            @as(u63, @intCast(1000 * std.time.ns_per_ms)),
+        );
+    }
+
+    pub fn deinit(self: *MultiVersion, allocator: std.mem.Allocator) void {
+        allocator.free(self.read_buffer);
+        allocator.free(self.elf_string_buffer);
+    }
+
+    pub fn reset(self: *MultiVersion) void {
+        self.* = .{
+            .read_buffer = self.read_buffer,
+            .elf_string_buffer = self.elf_string_buffer,
+            .exe_path = self.exe_path,
+            .io = self.io,
+        };
+    }
 
     /// Used to validate the full contents of a binary.
     pub fn validate(self: *const MultiVersion, binary_path: []const u8, allocator: std.mem.Allocator) !void {
@@ -248,90 +321,229 @@ pub const MultiVersion = struct {
         }
     }
 
-    pub fn from_own_binary() !MultiVersion {
-        // openSelfExe is a thing, but don't use it for now because we might want our event loop to handle opening
-        // in future. (can open() block?)
-        var self_binary_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-        var self_binary_path = try std.fs.selfExePath(&self_binary_buf);
+    /// The below methods can all be called while a Replica is running normally. They need to
+    /// follow all standard conventions - no dynamic memory allocation (not that it would be
+    /// allowed!), no blocking syscalls, and use our event loop.
+    pub fn read_from_elf(self: *MultiVersion, callback: ?Callback) void {
+        self.callback = callback;
 
-        return MultiVersion.from_elf(self_binary_path);
+        // Can opening a file block?
+        self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
+
+        self.read_from_elf_header();
     }
 
-    pub fn from_elf(binary_path: []const u8) !MultiVersion {
+    fn read_from_elf_header(self: *MultiVersion) void {
+        self.stage = .read_elf_header;
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_from_elf_header,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..@sizeOf(elf.Elf64_Ehdr)],
+            0,
+        );
+    }
+
+    fn on_read_from_elf_header(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
+        _ = completion;
+        const read_bytes = result catch |e| return self.handle_error(e);
+
+        assert(self.stage == .read_elf_header);
+        if (read_bytes != @sizeOf(elf.Elf64_Ehdr)) return self.handle_error(error.ShortRead);
+
+        // Alignment trickery.
         var hdr_buf: [@sizeOf(elf.Elf64_Ehdr)]u8 align(@alignOf(elf.Elf64_Ehdr)) = undefined;
+        std.mem.copy(u8, &hdr_buf, self.read_buffer[0..read_bytes]);
 
-        const file = try std.fs.openFileAbsolute(binary_path, .{ .mode = .read_only });
-        defer file.close();
-
-        assert(hdr_buf.len == try os.read(file.handle, &hdr_buf));
-
-        const elf_header = try elf.Header.parse(&hdr_buf);
-
-        // NB: We don't want this function to panic! It might be run on a garbage file, in which
-        // case panicing could impact availability. Rather, turn these asserts to error returns.
+        const elf_header = elf.Header.parse(&hdr_buf) catch return self.handle_error(error.InvalidELFHeader);
 
         // TigerBeetle only supports little endian on 64 bit platforms.
-        try assert_or_error(elf_header.endian == .Little, error.WrongEndian);
-        try assert_or_error(elf_header.is_64, error.Not64bit);
+        if (elf_header.endian != .Little) return self.handle_error(error.WrongEndian);
+        if (!elf_header.is_64) return self.handle_error(error.Not64bit);
 
         // Only support "simple" ELF string tables.
-        try assert_or_error(elf_header.shstrndx < elf.SHN_LORESERVE, error.LongStringTable);
-        try assert_or_error(elf_header.shstrndx != elf.SHN_UNDEF, error.LongStringTable);
+        if (elf_header.shstrndx >= elf.SHN_LORESERVE) return self.handle_error(error.LongStringTable);
+        if (elf_header.shstrndx == elf.SHN_UNDEF) return self.handle_error(error.LongStringTable);
 
-        // First, read the string table.
-        const string_max = 512;
+        // First, read the string table section.
+        self.stage = .read_elf_string_table_section;
+        const offset = elf_header.shoff + @sizeOf(elf.Elf64_Shdr) * elf_header.shstrndx;
+        self.elf_header = elf_header;
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_elf_string_table_section,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..@sizeOf(elf.Elf64_Shdr)],
+            offset,
+        );
+    }
+
+    fn on_read_elf_string_table_section(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
+        _ = completion;
+        const read_bytes = result catch |e| return self.handle_error(e);
+
+        assert(self.stage == .read_elf_string_table_section);
+        if (read_bytes != @sizeOf(elf.Elf64_Shdr)) return self.handle_error(error.ShortRead);
+
         var shdr: elf.Elf64_Shdr = undefined;
-        const offset = elf_header.shoff + @sizeOf(@TypeOf(shdr)) * elf_header.shstrndx;
+        std.mem.copy(u8, std.mem.asBytes(&shdr), self.read_buffer[0..read_bytes]);
 
-        try file.seekTo(offset);
-        try assert_or_error(@sizeOf(elf.Elf64_Shdr) == try os.read(file.handle, std.mem.asBytes(&shdr)), error.InvalidSectionRead);
-        try assert_or_error(shdr.sh_type == elf.SHT_STRTAB, error.InvalidStringTable);
-        try assert_or_error(shdr.sh_size > 0, error.InvalidStringTable);
-        try assert_or_error(shdr.sh_size < string_max, error.InvalidStringTable);
+        if (shdr.sh_type != elf.SHT_STRTAB) return self.handle_error(error.InvalidStringTable);
+        if (shdr.sh_size <= 0) return self.handle_error(error.InvalidStringTable);
+        if (shdr.sh_size >= self.read_buffer.len) return self.handle_error(error.InvalidStringTable);
 
-        var string_buf: [string_max]u8 = undefined;
-        try file.seekTo(shdr.sh_offset);
-        try assert_or_error(try os.read(file.handle, string_buf[0..shdr.sh_size]) == shdr.sh_size, error.InvalidRead);
+        self.stage = .read_elf_string_table;
 
-        ///////////////
+        const offset = shdr.sh_offset;
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_elf_string_table,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..shdr.sh_size],
+            offset,
+        );
+    }
 
-        var pack_offset: ?u32 = null;
-        for (0..elf_header.shnum) |index| {
-            const offset2 = elf_header.shoff + @sizeOf(@TypeOf(shdr)) * index;
+    fn on_read_elf_string_table(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
+        _ = completion;
+        const read_bytes = result catch |e| return self.handle_error(e);
 
-            try file.seekTo(offset2);
-            try assert_or_error(@sizeOf(elf.Elf64_Shdr) == try os.read(file.handle, std.mem.asBytes(&shdr)), error.InvalidSectionRead);
+        assert(self.stage == .read_elf_string_table);
+        assert(read_bytes < self.elf_string_buffer.len);
+        // FIXME:
+        // try assert_or_error(try os.read(file.handle, string_buf[0..shdr.sh_size]) == shdr.sh_size, error.InvalidRead);
 
-            // try assert_or_error(index < string_buf.len, error.);
-            const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast((&string_buf).ptr + shdr.sh_name)), 0);
+        std.mem.copy(u8, self.elf_string_buffer, self.read_buffer[0..read_bytes]);
 
-            if (std.mem.eql(u8, name, ".tigerbeetle.multiversion.pack")) {
-                // Our pack must be the second-last section in the file.
-                try assert_or_error(pack_offset == null, error.MultipleMultiversionPack);
-                try assert_or_error(index == elf_header.shnum - 2, error.InvalidMultiversionPack);
-                pack_offset = @intCast(shdr.sh_offset);
-            } else if (std.mem.eql(u8, name, ".tigerbeetle.multiversion.metadata")) {
-                try assert_or_error(shdr.sh_size == @sizeOf(MultiVersionMetadata), error.InvalidMultiversionMetadata);
+        // Kick off reading our ELF sections
+        self.stage = .{ .read_elf_section = 0 };
+        self.read_elf_section();
+    }
 
-                // Our metadata must be the last section in the file.
-                try assert_or_error(index == elf_header.shnum - 1, error.InvalidMultiversionMetadata);
+    fn read_elf_section(self: *MultiVersion) void {
+        assert(self.stage == .read_elf_section);
 
-                try file.seekTo(shdr.sh_offset);
-                var mvm_buf: [@sizeOf(MultiVersionMetadata)]u8 align(@alignOf(MultiVersionMetadata)) = undefined;
-                try assert_or_error(@sizeOf(MultiVersionMetadata) == try os.read(file.handle, &mvm_buf), error.InvalidMetadataRead);
+        const offset = self.elf_header.shoff + @sizeOf(elf.Elf64_Shdr) * self.stage.read_elf_section;
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_elf_section,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..@sizeOf(elf.Elf64_Shdr)],
+            offset,
+        );
+    }
 
-                try assert_or_error(pack_offset != null, error.InvalidMultiversionPack);
+    fn on_read_elf_section(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
+        _ = completion;
+        const read_bytes = result catch |e| return self.handle_error(e);
 
-                var mvm = try MultiVersionMetadata.from_bytes(&mvm_buf);
+        assert(self.stage == .read_elf_section);
+        assert(read_bytes == @sizeOf(elf.Elf64_Shdr));
 
-                return .{
-                    .metadata = mvm,
-                    .pack_offset = pack_offset.?,
-                    .metadata_offset = @intCast(shdr.sh_offset),
-                };
-            }
+        var shdr: elf.Elf64_Shdr = undefined;
+        std.mem.copy(u8, std.mem.asBytes(&shdr), self.read_buffer[0..read_bytes]);
+        // try assert_or_error(index < string_buf.len, error.);
+        const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast((&self.elf_string_buffer).ptr + shdr.sh_name)), 0);
+
+        if (std.mem.eql(u8, name, ".tigerbeetle.multiversion.pack")) {
+            // Our pack must be the second-last section in the file.
+            // FIXME: WTF
+            // if (self.pack_offset != null) return self.handle_error(error.MultipleMultiversionPack);
+            // if (self.stage.read_elf_section != self.elf_header.shnum - 2) return self.handle_error(error.InvalidMultiversionPack);
+
+            self.pack_offset = @intCast(shdr.sh_offset);
+        } else if (std.mem.eql(u8, name, ".tigerbeetle.multiversion.metadata")) {
+            // Our metadata must be the last section in the file.
+            if (shdr.sh_size != @sizeOf(MultiVersionMetadata)) return self.handle_error(error.InvalidMultiversionMetadata);
+            if (self.stage.read_elf_section != self.elf_header.shnum - 1) return self.handle_error(error.InvalidMultiversionMetadata);
+
+            self.stage = .read_multiversion_metadata;
+
+            const offset = shdr.sh_offset;
+            self.metadata_offset = @intCast(offset);
+            self.io.read(
+                *MultiVersion,
+                self,
+                on_read_multiversion_metadata,
+                &self.completion,
+                self.file.?.handle,
+                self.read_buffer[0..@sizeOf(MultiVersionMetadata)],
+                offset,
+            );
+            return;
+        }
+
+        self.stage.read_elf_section += 1;
+        if (self.stage.read_elf_section < self.elf_header.shnum) {
+            self.read_elf_section();
         } else {
-            return error.NoSectionFound;
+            return self.handle_error(error.NoMetadataSections);
+        }
+    }
+
+    fn on_read_multiversion_metadata(self: *MultiVersion, completion: *IO.Completion, result: MultiVersionError!usize) void {
+        const read_bytes = result catch |e| return self.handle_error(e);
+
+        _ = completion;
+        assert(self.stage == .read_multiversion_metadata);
+        assert(read_bytes == @sizeOf(MultiVersionMetadata)); // FIXME: Shouldn't be an assertion failure.
+
+        // try assert_or_error(@sizeOf(MultiVersionMetadata) == try os.read(file.handle, &mvm_buf), error.InvalidMetadataRead);
+
+        // try assert_or_error(pack_offset != null, error.InvalidMultiversionPack);
+
+        // assert(self.pack_offset != null);
+        self.metadata = MultiVersionMetadata.from_bytes(self.read_buffer[0..read_bytes]) catch |e| return self.handle_error(e);
+
+        // Update the releases_bundled list.
+        self.releases_bundled.clear();
+        for (self.metadata.past.versions[0..self.metadata.past.count]) |version| {
+            self.releases_bundled.append_assume_capacity(Release{ .value = version });
+        }
+
+        self.releases_bundled.append_assume_capacity(Release{ .value = self.metadata.current_version });
+        self.stage = .ready;
+        self.file.?.close();
+
+        if (self.callback) |callback| {
+            callback(self, {});
+        }
+    }
+
+    fn handle_error(self: *MultiVersion, result: anyerror) void {
+        if (self.file) |*file| {
+            file.close();
+        }
+        std.log.err("binary does not contain a valid multiversion pack: {}", .{result});
+
+        self.releases_bundled.clear();
+        // self.releases_bundled.append_assume_capacity(config.process.release);
+
+        self.stage = .{ .err = result };
+
+        if (self.callback) |callback| {
+            callback(self, result);
+        }
+    }
+
+    pub fn tick_until_ready(self: *MultiVersion) !void {
+        // Either set a callback, or use this psuedo-sync interface.
+        assert(self.callback == null);
+
+        while (self.stage != .ready and self.stage != .err) {
+            try self.io.tick();
+        }
+
+        if (self.stage == .err) {
+            return self.stage.err;
         }
     }
 
@@ -346,17 +558,17 @@ pub const MultiVersion = struct {
     }
 };
 
-// FIXME: Actually make this !noreturn, and handle the error with a @panic in the caller.
-pub fn exec_release(allocator: std.mem.Allocator, release: Release) noreturn {
-    defer @panic("impossible");
+/// exec_release is called before a replica is fully open, and before we've transitioned to not
+/// allocating. Therefore, we can use standard `os.read` blocking syscalls.
+pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
+    var self_exe_path = try std.fs.selfExePathAlloc(allocator);
+    defer allocator.free(self_exe_path);
 
-    var self_binary_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-    var self_binary_path = std.fs.selfExePath(&self_binary_buf) catch @panic("couldnt find self path");
+    var multiversion = try MultiVersion.init(allocator, io, self_exe_path);
+    multiversion.read_from_elf(null);
+    try multiversion.tick_until_ready();
 
-    std.log.info("exec_release: self_binary_path={s}", .{self_binary_path});
-
-    const multi_version_info = MultiVersion.from_own_binary() catch @panic("couldnt parse metadata");
-    const metadata = multi_version_info.metadata;
+    const metadata = multiversion.metadata;
 
     const index = blk: {
         for (metadata.past.versions[0..metadata.past.count], 0..) |version, index| {
@@ -364,7 +576,7 @@ pub fn exec_release(allocator: std.mem.Allocator, release: Release) noreturn {
                 break :blk index;
             }
         } else {
-            @panic("version not found in multiversion metadata");
+            return error.VersionNotFound;
         }
     };
 
@@ -375,46 +587,47 @@ pub fn exec_release(allocator: std.mem.Allocator, release: Release) noreturn {
     const fd = open_memory_file("tigerbeetle-exec-release");
 
     // Explicit allocation ensures we're not in .static on our allocator yet.
-    var buf = allocator.alloc(u8, binary_size) catch @panic("couldnt allocate memory");
+    var buf = try allocator.alloc(u8, binary_size);
 
-    const file = try std.fs.openFileAbsolute(self_binary_path, .{ .mode = .read_only });
-    try file.seekTo(multi_version_info.pack_offset + binary_offset);
+    const file = try std.fs.openFileAbsolute(multiversion.exe_path, .{ .mode = .read_only });
+    try file.seekTo(multiversion.pack_offset.? + binary_offset);
 
-    assert(binary_size == os.read(file.handle, buf) catch @panic("bad read"));
+    const bytes_read = try os.read(file.handle, buf);
+    assert(bytes_read == binary_size);
 
-    const bytes_written = os.write(fd, buf) catch @panic("couldnt write to memfd");
+    // We could use std.fs.copy_file here, but it's not public, and probably not worth the effort
+    // to vendor.
+    const bytes_written = try os.write(fd, buf);
     assert(bytes_written == binary_size);
 
     const checksum_read = checksum(buf);
     const checksum_expected = binary_checksum;
     const checksum_written = blk: {
-        var buf_validate = allocator.alloc(u8, binary_size) catch @panic("couldnt allocate memory");
-        os.lseek_SET(fd, 0) catch @panic("bad seek");
-        assert(binary_size == os.read(fd, buf_validate) catch @panic("bad read"));
+        var buf_validate = try allocator.alloc(u8, binary_size);
+        try os.lseek_SET(fd, 0);
+        const bytes_read_checksum = try os.read(fd, buf_validate);
+        assert(bytes_read_checksum == binary_size);
         break :blk checksum(buf_validate);
     };
-
-    std.log.info("checking checksums...", .{});
 
     assert(checksum_read == checksum_expected);
     assert(checksum_written == checksum_expected);
 
     // Hacky, just use argc_argv_poitner directly. This is platform specific in any case, and we'll
     // want to have a verification function.
-    const argv_buf = allocator.allocSentinel(?[*:0]const u8, os.argv.len, null) catch @panic("couldnt allocate");
+    const argv_buf = try allocator.allocSentinel(?[*:0]const u8, os.argv.len, null);
     for (os.argv, 0..) |arg, i| {
         argv_buf[i] = arg;
     }
 
-    std.log.info("about to execveat", .{});
-
     // TODO: Do we want to pass env variables? Probably.
     const env = [_:null]?[*:0]u8{};
 
+    std.log.info("Executing release {}...\n", .{release});
     if (execveat(fd, "", argv_buf, env[0..env.len], 0x1000) == 0) {
         unreachable;
     } else {
-        @panic("execveat failed");
+        return error.ExecveatFailed;
     }
 }
 

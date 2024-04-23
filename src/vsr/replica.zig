@@ -216,7 +216,7 @@ pub fn ReplicaType(
         ///
         /// Note that this is a property (rather than a constant) for the purpose of testing.
         /// It should never be modified for a running replica.
-        releases_bundled: vsr.ReleaseList,
+        releases_bundled: *vsr.ReleaseList,
 
         /// Replace the currently-running replica with the given release.
         ///
@@ -527,8 +527,9 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
-            releases_bundled: vsr.ReleaseList,
+            releases_bundled: *vsr.ReleaseList,
             release_execute: *const fn (replica: *Self, release: vsr.Release) void,
+            multiversion: *vsr.multiversioning.MultiVersion,
             test_context: ?*anyopaque = null,
         };
 
@@ -598,6 +599,7 @@ pub fn ReplicaType(
 
             const release_target = self.superblock.working.vsr_state.checkpoint.release;
             assert(release_target.value >= self.superblock.working.release_format.value);
+            log.info("superblock release={}", .{release_target});
             if (release_target.value != self.release.value) {
                 self.release_transition(@src());
                 return;
@@ -905,7 +907,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32,
             release: vsr.Release,
             release_client_min: vsr.Release,
-            releases_bundled: vsr.ReleaseList,
+            releases_bundled: *vsr.ReleaseList,
             release_execute: *const fn (replica: *Self, release: vsr.Release) void,
             test_context: ?*anyopaque,
         };
@@ -2725,6 +2727,10 @@ pub fn ReplicaType(
                 .ping_timestamp_monotonic = self.clock.monotonic(),
                 .release_count = self.releases_bundled.count_as(u16),
             };
+
+            // self.releases_bundled is usually pointer into MultiVersion, which might update in
+            // place if a new binary is available on disk.
+            vsr.verify_release_list(self.releases_bundled.const_slice(), self.release);
 
             const ping_versions = std.mem.bytesAsSlice(vsr.Release, message.body());
             stdx.copy_disjoint(
@@ -8805,7 +8811,7 @@ pub fn ReplicaType(
                 // The replica just started in the newest available release, but discovered that its
                 // superblock has not upgraded to that release yet.
                 assert(self.commit_min == self.op_checkpoint());
-                assert(self.release.value == self.releases_bundled.get(0).value);
+                assert(self.release.value == self.releases_bundled.get(self.releases_bundled.count() - 1).value);
                 assert(self.journal.status == .init);
             }
 

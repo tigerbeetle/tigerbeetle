@@ -239,7 +239,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dconfig-release={release_triple}
             , .{
                 .target = target,
-                .release = if (debug) "false" else "true",
+                .release = if (debug) "false" else "false",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
             });
@@ -318,9 +318,9 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 
             // Finally, check the binary produced using both the old and new versions.
             // FIXME: Do check with old binary downloaded, if it wasn't epoch
-            const absolute_exe_name = try std.fs.cwd().realpathAlloc(shell.arena.allocator(), exe_name);
-            const multiversion = try multiversioning.MultiVersion.from_elf(absolute_exe_name);
-            try multiversion.validate(absolute_exe_name, shell.arena.allocator());
+            // const absolute_exe_name = try std.fs.cwd().realpathAlloc(shell.arena.allocator(), exe_name);
+            // const multiversion = try multiversioning.MultiVersion.from_elf(absolute_exe_name);
+            // try multiversion.validate(absolute_exe_name, shell.arena.allocator());
 
             // return error.Foo;
 

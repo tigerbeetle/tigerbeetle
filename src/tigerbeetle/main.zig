@@ -81,6 +81,7 @@ const Command = struct {
     io: IO,
     storage: Storage,
     message_pool: MessagePool,
+    self_exe_path: []const u8,
 
     fn init(
         command: *Command,
@@ -106,9 +107,13 @@ const Command = struct {
 
         command.message_pool = try MessagePool.init(allocator, .replica);
         errdefer command.message_pool.deinit(allocator);
+
+        command.self_exe_path = try std.fs.selfExePathAlloc(allocator);
+        errdefer allocator.free(command.self_exe_path);
     }
 
     fn deinit(command: *Command, allocator: mem.Allocator) void {
+        allocator.free(command.self_exe_path);
         command.message_pool.deinit(allocator);
         command.storage.deinit();
         command.io.deinit();
@@ -185,23 +190,31 @@ const Command = struct {
         const nonce = std.crypto.random.int(u128);
         assert(nonce != 0); // Broken CSPRNG is the likeliest explanation for zero.
 
-        const releases_bundled = blk: {
-            const mvi = vsr.multiversioning.MultiVersion.from_own_binary() catch {
-                log_main.err("binary does not contain a valid multiversion pack.", .{});
-                var release_list = vsr.ReleaseList{};
-                release_list.append_assume_capacity(config.process.release);
+        var multiversion = try vsr.multiversioning.MultiVersion.init(
+            allocator,
+            &command.io,
+            command.self_exe_path,
+        );
+        multiversion.read_from_elf(null);
+        if (multiversion.tick_until_ready()) {
+            log_main.info("enabling automatic on-disk version detection.", .{});
+            multiversion.on_timeout_read_from_elf_callback({});
+        } else |err| {
+            _ = err catch void;
+            log_main.warn("automatic on-disk version detection disabled. restart tigerbeetle after replacing the binary to upgrade it.", .{});
+        }
 
-                break :blk release_list;
-            };
-            break :blk mvi.metadata.releases_bundled();
-        };
+        // Sanity check our metadata - if this fails, it's because either we're running against a
+        // different binary (perhaps for testing) or because the binary was replaced between
+        // startup and the code above.
+        assert(multiversion.metadata.current_version == config.process.release.value);
 
         // TODO Where should this be set?
         const release_client_min = config.process.release;
 
         log_main.info("release={}", .{config.process.release});
         log_main.info("release_client_min={}", .{release_client_min});
-        log_main.info("releases_bundled={any}", .{releases_bundled.const_slice()});
+        log_main.info("releases_bundled={any}", .{multiversion.releases_bundled.const_slice()});
         log_main.info("git_commit={?s}", .{config.process.git_commit});
 
         var replica: Replica = undefined;
@@ -209,7 +222,7 @@ const Command = struct {
             .node_count = @intCast(args.addresses.len),
             .release = config.process.release,
             .release_client_min = release_client_min,
-            .releases_bundled = releases_bundled,
+            .releases_bundled = &multiversion.releases_bundled,
             .release_execute = replica_release_execute,
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
@@ -229,6 +242,7 @@ const Command = struct {
                 .io = &command.io,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
+            .multiversion = &multiversion,
         }) catch |err| switch (err) {
             error.NoAddress => fatal("all --addresses must be provided", .{}),
             else => |e| return e,
@@ -339,9 +353,11 @@ const Command = struct {
     }
 
     pub fn multiversion_validate(arena: *std.heap.ArenaAllocator, path: *[:0]const u8) !void {
-        const absolute_path = try std.fs.cwd().realpathAlloc(arena.allocator(), path.*);
-        const multiversion = try vsr.multiversioning.MultiVersion.from_elf(absolute_path);
-        try multiversion.validate(absolute_path, arena.allocator());
+        _ = path;
+        _ = arena;
+        // const absolute_path = try std.fs.cwd().realpathAlloc(arena.allocator(), path.*);
+        // const multiversion = try vsr.multiversioning.MultiVersion.from_elf(absolute_path);
+        // try multiversion.validate(absolute_path, arena.allocator());
     }
 };
 
@@ -366,8 +382,11 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
         assert(replica.static_allocator.state == .init);
         vsr.multiversioning.exec_release(
             replica.static_allocator.allocator(),
+            replica.superblock.storage.io,
             release,
-        );
+        ) catch |err| {
+            std.debug.panic("failed to execute new release: {}", .{err});
+        };
     } else {
         // For the upgrade case, re-run the latest binary in place. If we need something older
         // than the latest, that'll be handled when the case above is hit when re-execing.
