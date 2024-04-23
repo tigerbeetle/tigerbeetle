@@ -64,6 +64,8 @@ const Fuzzer = enum {
     canary,
     ewah,
     vsr_free_set,
+    vsr_journal_format,
+    vsr_superblock_quorums,
     vsr_superblock,
 };
 
