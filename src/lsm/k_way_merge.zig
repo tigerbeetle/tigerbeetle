@@ -52,7 +52,7 @@ pub fn KWayMergeIteratorType(
         /// The number of streams remaining in the iterator.
         k: u32 = 0,
 
-        previous_key_popped: ?Key = null,
+        key_popped: ?Key = null,
 
         pub fn init(
             context: *Context,
@@ -82,7 +82,7 @@ pub fn KWayMergeIteratorType(
                 .streams_count = it.streams_count,
                 .direction = it.direction,
                 .state = .loading,
-                .previous_key_popped = it.previous_key_popped,
+                .key_popped = it.key_popped,
             };
         }
 
@@ -114,7 +114,7 @@ pub fn KWayMergeIteratorType(
 
             while (try it.pop_heap()) |value| {
                 const key = key_from_value(&value);
-                if (it.previous_key_popped) |previous| {
+                if (it.key_popped) |previous| {
                     switch (std.math.order(previous, key)) {
                         .lt => assert(it.direction == .ascending),
                         // Discard this value and pop the next one.
@@ -122,7 +122,7 @@ pub fn KWayMergeIteratorType(
                         .gt => assert(it.direction == .descending),
                     }
                 }
-                it.previous_key_popped = key;
+                it.key_popped = key;
                 return value;
             }
 

@@ -44,7 +44,8 @@ pub fn ZigZagMergeIteratorType(
         context: *Context,
         streams_count: u32,
         direction: Direction,
-        previous_key_popped: ?Key = null,
+        probe_key_previous: ?Key = null,
+        key_popped: ?Key = null,
 
         /// At least two scans are required for zig-zag merge.
         pub fn init(
@@ -84,7 +85,7 @@ pub fn ZigZagMergeIteratorType(
                     }
                 }
 
-                if (it.previous_key_popped) |previous| {
+                if (it.key_popped) |previous| {
                     switch (std.math.order(previous, key)) {
                         .lt => assert(it.direction == .ascending),
                         // Duplicate values are not expected.
@@ -92,7 +93,7 @@ pub fn ZigZagMergeIteratorType(
                         .gt => assert(it.direction == .descending),
                     }
                 }
-                it.previous_key_popped = key;
+                it.key_popped = key;
 
                 return value;
             }
@@ -135,10 +136,15 @@ pub fn ZigZagMergeIteratorType(
                         }
                     };
 
-                    if (switch (it.direction) {
-                        .ascending => key > probe_key,
-                        .descending => key < probe_key,
-                    }) {
+                    // The stream cannot regress.
+                    assert(it.probe_key_previous == null or
+                        key == it.probe_key_previous.? or
+                        it.key_ahead(key, it.probe_key_previous.?));
+
+                    // The keys matches, continuing to the next stream.
+                    if (key == probe_key) continue;
+
+                    if (it.key_ahead(key, probe_key)) {
                         // The stream is ahead, it will be the probe key,
                         // meaning all streams before must be probed.
                         probe_key = key;
@@ -147,15 +153,9 @@ pub fn ZigZagMergeIteratorType(
                         probing.setRangeValue(.{ .start = 0, .end = stream_index }, true);
                         probing.setIntersection(drained.complement());
                         assert(!probing.isSet(stream_index));
-                    } else if (switch (it.direction) {
-                        .ascending => key < probe_key,
-                        .descending => key > probe_key,
-                    }) {
-                        // The stream is behind.
-                        probing.set(stream_index);
                     } else {
-                        // The key matches.
-                        assert(key == probe_key);
+                        // The stream is behind and needs to be probed.
+                        probing.set(stream_index);
                     }
                 }
 
@@ -175,13 +175,11 @@ pub fn ZigZagMergeIteratorType(
                         }
                     };
 
+                    // After probed, the stream must either match the key or be ahead.
                     if (key == probe_key) {
                         probing.unset(stream_index);
                     } else {
-                        assert(switch (it.direction) {
-                            .ascending => key > probe_key,
-                            .descending => key < probe_key,
-                        });
+                        assert(it.key_ahead(key, probe_key));
                     }
                 }
             }
@@ -207,7 +205,21 @@ pub fn ZigZagMergeIteratorType(
                 }
             }
 
+            // The iterator cannot regress.
+            assert(it.probe_key_previous == null or
+                probe_key == it.probe_key_previous.? or
+                it.key_ahead(probe_key, it.probe_key_previous.?));
+
+            it.probe_key_previous = probe_key;
             return if (drained.count() == 0) probe_key else error.Drained;
+        }
+
+        /// Depending on the direction, returns true if key `a` is ahead of key `b`.
+        inline fn key_ahead(it: *const ZigZagMergeIterator, a: Key, b: Key) bool {
+            return switch (it.direction) {
+                .ascending => a > b,
+                .descending => a < b,
+            };
         }
     };
 }

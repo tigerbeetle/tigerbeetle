@@ -247,10 +247,10 @@ fn ScanMergeType(
                     if (self.merge_iterator) |*merge_iterator| {
                         // It's not expected to probe a scan that already produced a key equals
                         // or ahead the probe.
-                        assert(merge_iterator.previous_key_popped == null or
+                        assert(merge_iterator.key_popped == null or
                             switch (self.direction) {
-                            .ascending => merge_iterator.previous_key_popped.? < timestamp,
-                            .descending => merge_iterator.previous_key_popped.? > timestamp,
+                            .ascending => merge_iterator.key_popped.? < timestamp,
+                            .descending => merge_iterator.key_popped.? > timestamp,
                         });
 
                         // Once the underlying streams have been changed, the merge iterator needs

@@ -355,10 +355,10 @@ pub fn ScanTreeType(
 
                     // It's not expected to probe a scan that already produced a key equals
                     // or ahead the probe.
-                    assert(self.merge_iterator.?.previous_key_popped == null or
+                    assert(self.merge_iterator.?.key_popped == null or
                         switch (self.direction) {
-                        .ascending => self.merge_iterator.?.previous_key_popped.? < probe_key,
-                        .descending => self.merge_iterator.?.previous_key_popped.? > probe_key,
+                        .ascending => self.merge_iterator.?.key_popped.? < probe_key,
+                        .descending => self.merge_iterator.?.key_popped.? > probe_key,
                     });
 
                     // Once the underlying streams have been changed, the merge iterator needs
