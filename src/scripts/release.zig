@@ -125,16 +125,20 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 
 /// Builds a multi-version pack for the `target` specified, returns the metadata and writes the
 /// output pack to `pack_dst`.
-fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const u8) !multiversioning.MultiVersionMetadata.PastVersionPack {
+fn build_past_version_pack(shell: *Shell, comptime target: []const u8, debug: bool, pack_dst: []const u8) !multiversioning.MultiVersionMetadata.PastVersionPack {
     var section = try shell.open_section("build multiversion pack");
     defer section.close();
 
+    try shell.project_root.deleteTree("dist/tigerbeetle-past-pack");
+
     // Downloads and extract the last published release of TigerBeetle.
-    try shell.exec("gh release download -D dist/tigerbeetle-old -p tigerbeetle-{target}.zip", .{
+    try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
         .target = target,
+        .debug = if (debug) "-debug" else "",
     });
-    try shell.exec("unzip -d dist/tigerbeetle-old dist/tigerbeetle-old/tigerbeetle-{target}.zip", .{
+    try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
         .target = target,
+        .debug = if (debug) "-debug" else "",
     });
 
     // TODO: This code should be removed once the first multi-version release is bootstrapped!
@@ -150,8 +154,10 @@ fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const 
     if (is_multiversion_epoch) {
         log.info("past release is multiversion epoch ({s})", .{multiversion_epoch});
 
-        // FIXME: Won't work for mac / windows.
-        const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-old/tigerbeetle", .{ .mode = .read_only });
+        const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
+        const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
+
+        const past_binary = try std.fs.cwd().openFile("./dist/tigerbeetle-past-pack/" ++ exe_name, .{ .mode = .read_only });
         defer past_binary.close();
         const past_binary_contents = try past_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
 
@@ -163,7 +169,11 @@ fn build_past_version_pack(shell: *Shell, target: []const u8, pack_dst: []const 
 
         return multiversioning.MultiVersionMetadata.PastVersionPack.init(.{
             .count = 1,
-            .versions = &.{multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(multiversion_epoch)).value},
+            .versions = &.{
+                multiversioning.Release.from(
+                    try multiversioning.ReleaseTriple.parse(multiversion_epoch),
+                ).value,
+            },
             .checksums = &.{checksum},
             .offsets = &.{0},
             .sizes = &.{@as(u32, @intCast(past_binary_contents.len))},
@@ -207,27 +217,18 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     _ = dist_dir_path;
 
     const targets = .{
-        // "aarch64-linux",
+        "aarch64-linux",
         "x86_64-linux",
         // "x86_64-windows",
         // "aarch64-macos",
         // "x86_64-macos",
     };
 
-    // const MultiVersionMetadata = multiversioning.MultiVersionMetadata;
-    // var m: MultiVersionMetadata = .{
-    //     .checksum_before_metadata = 1,
-
-    //     .current_version = 1,
-    //     .current_checksum = 1,
-    // };
-    // m.checksum_header = m.calculate_header_checksum();
-
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`. MacOS is special cased --- we use an extra step to merge x86 and arm binaries into
     // one.
     //TODO: use std.Target here
-    inline for (.{false}) |debug| {
+    inline for (.{ false, true }) |debug| {
         const debug_suffix = if (debug) "-debug" else "";
         _ = debug_suffix;
         inline for (targets) |target| {
@@ -239,7 +240,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dconfig-release={release_triple}
             , .{
                 .target = target,
-                .release = if (debug) "false" else "false",
+                .release = if (debug) "true" else "false",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
             });
@@ -271,6 +272,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             const past_version_pack = try build_past_version_pack(
                 shell,
                 target,
+                debug,
                 "tigerbeetle-pack",
             );
 
@@ -303,8 +305,6 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 .checksum_without_metadata = checksum_without_metadata,
             };
             mvf.checksum_metadata = mvf.calculate_metadata_checksum();
-
-            std.log.info("{}", .{mvf});
 
             mvf_file = try std.fs.cwd().createFile("tigerbeetle-pack.metadata", .{ .truncate = true });
             try mvf_file.writeAll(std.mem.asBytes(&mvf));
