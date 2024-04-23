@@ -448,11 +448,10 @@ const Environment = struct {
                 return self.result.?;
             }
 
-            fn scan_lookup_callback(lookup: *ScanLookup) void {
+            fn scan_lookup_callback(lookup: *ScanLookup, result: []const tb.Account) void {
                 const self = @fieldParentPtr(Self, "lookup", lookup);
                 assert(self.result == null);
-
-                self.result = lookup.slice();
+                self.result = result;
             }
         };
     }
