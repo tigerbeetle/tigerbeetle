@@ -216,15 +216,16 @@ const FreeSetModel = struct {
 
         var blocks_found_free: usize = 0;
         var iterator = set.blocks_acquired.iterator(.{ .kind = .unset });
+        const blocks_reserved_count = set.blocks_reserved.count();
         while (iterator.next()) |block| {
-            if (block < set.blocks_reserved.count()) {
+            if (block < blocks_reserved_count) {
                 assert(set.blocks_reserved.isSet(block));
                 continue;
             }
 
             blocks_found_free += 1;
             if (blocks_found_free == reserve_count) {
-                const block_base = set.blocks_reserved.count();
+                const block_base = blocks_reserved_count;
                 const block_count = block + 1 - block_base;
 
                 var i: usize = 0;
