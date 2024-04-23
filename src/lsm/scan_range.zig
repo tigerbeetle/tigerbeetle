@@ -66,14 +66,12 @@ pub fn ScanRangeType(
         }
 
         pub fn read(scan: *ScanRange, context: *Context) void {
-            const on_read_callback = struct {
-                fn callback(ctx: *Context, ptr: *ScanTree) void {
-                    const parent: *ScanRange = @fieldParentPtr(ScanRange, "scan_tree", ptr);
-                    ctx.callback(ctx, parent);
-                }
-            }.callback;
-
             scan.scan_tree.read(context, on_read_callback);
+        }
+
+        fn on_read_callback(ctx: *Context, ptr: *ScanTree) void {
+            const parent: *ScanRange = @fieldParentPtr(ScanRange, "scan_tree", ptr);
+            ctx.callback(ctx, parent);
         }
 
         pub fn next(scan: *ScanRange) error{ReadAgain}!?u64 {

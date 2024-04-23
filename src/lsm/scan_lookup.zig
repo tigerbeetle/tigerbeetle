@@ -29,7 +29,7 @@ pub fn ScanLookupType(
         const Grid = GridType(Storage);
         const Object = Groove.ObjectTree.Table.Value;
 
-        pub const Callback = *const fn (*ScanLookup) void;
+        pub const Callback = *const fn (*ScanLookup, []const Object) void;
 
         const LookupWorker = struct {
             scan_lookup: *ScanLookup,
@@ -59,7 +59,7 @@ pub fn ScanLookupType(
         scan_context: Scan.Context = .{ .callback = &scan_read_callback },
 
         buffer: ?[]Object,
-        buffer_produced_len: usize,
+        buffer_produced_len: ?usize,
         state: ScanLookupStatus,
         callback: ?Callback,
 
@@ -75,8 +75,8 @@ pub fn ScanLookupType(
                 .groove = groove,
                 .scan = scan,
                 .buffer = null,
+                .buffer_produced_len = null,
                 .callback = null,
-                .buffer_produced_len = 0,
                 .state = .idle,
             };
         }
@@ -86,24 +86,32 @@ pub fn ScanLookupType(
             buffer: []Object,
             callback: Callback,
         ) void {
-            assert(self.state == .idle);
+            assert(self.state == .idle or
+                // `read()` can be called multiple times when the buffer has finished,
+                // but the scan still yields.
+                self.state == .buffer_finished);
             assert(self.callback == null);
             assert(self.workers_pending == 0);
             assert(self.buffer == null);
-            assert(self.buffer_produced_len == 0);
+            assert(self.buffer_produced_len == null);
 
-            self.buffer = buffer;
-            self.callback = callback;
-            self.state = .scan;
+            self.* = .{
+                .groove = self.groove,
+                .scan = self.scan,
+                .buffer = buffer,
+                .buffer_produced_len = 0,
+                .callback = callback,
+                .state = .scan,
+            };
 
             self.groove.objects.table_mutable.sort();
             self.scan.read(&self.scan_context);
         }
 
-        pub fn slice(self: *const ScanLookup) []const Object {
+        fn slice(self: *const ScanLookup) []const Object {
             assert(self.state == .buffer_finished or self.state == .scan_finished);
             assert(self.workers_pending == 0);
-            return self.buffer.?[0..self.buffer_produced_len];
+            return self.buffer.?[0..self.buffer_produced_len.?];
         }
 
         fn scan_read_callback(context: *Scan.Context, scan: *Scan) void {
@@ -144,7 +152,7 @@ pub fn ScanLookupType(
             assert(self.state == .lookup);
 
             while (self.state == .lookup) {
-                if (self.buffer_produced_len == self.buffer.?.len) {
+                if (self.buffer_produced_len.? == self.buffer.?.len) {
                     // The provided buffer was exhausted.
                     self.state = .buffer_finished;
                     break;
@@ -164,8 +172,8 @@ pub fn ScanLookupType(
 
                 // Incrementing the produced len once we are sure that
                 // there is an object to lookup for that position.
-                worker.index_produced = self.buffer_produced_len;
-                self.buffer_produced_len += 1;
+                worker.index_produced = self.buffer_produced_len.?;
+                self.buffer_produced_len = self.buffer_produced_len.? + 1;
 
                 const objects = &self.groove.objects;
                 if (objects.table_mutable.get(timestamp) orelse
@@ -226,7 +234,7 @@ pub fn ScanLookupType(
             const self: *ScanLookup = worker.scan_lookup;
 
             assert(worker.index_produced != null);
-            assert(worker.index_produced.? < self.buffer_produced_len);
+            assert(worker.index_produced.? < self.buffer_produced_len.?);
 
             worker.lookup_context = undefined;
             self.buffer.?[worker.index_produced.?] = result.?.*;
@@ -253,9 +261,12 @@ pub fn ScanLookupType(
                     // Either the lookup buffer was filled, or the scan reached the end:
                     .buffer_finished, .scan_finished => {
                         const callback = self.callback.?;
+                        const results = self.slice();
+                        self.buffer = null;
+                        self.buffer_produced_len = null;
                         self.callback = null;
 
-                        callback(self);
+                        callback(self, results);
                     },
                 }
             }

@@ -438,9 +438,9 @@ pub fn StateMachineType(
         prefetch_context: PrefetchContext = .null,
 
         scan_lookup: ScanLookup = .null,
-        scan_buffer: []align(16) u8,
-        scan_result_count: u32 = 0,
-        scan_next_tick: Grid.NextTick = undefined,
+        scan_lookup_buffer: []align(16) u8,
+        scan_lookup_result_count: ?u32 = null,
+        scan_lookup_next_tick: Grid.NextTick = undefined,
 
         expire_pending_transfers: ExpirePendingTransfers = .{},
 
@@ -459,25 +459,25 @@ pub fn StateMachineType(
             );
             errdefer forest.deinit(allocator);
 
-            const scan_buffer = try allocator.alignedAlloc(u8, 16, @max(
+            const scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, @max(
                 constants.batch_max.get_account_transfers * @sizeOf(Transfer),
                 constants.batch_max.get_account_balances * @sizeOf(AccountBalancesGrooveValue),
             ));
-            errdefer allocator.free(scan_buffer);
+            errdefer allocator.free(scan_lookup_buffer);
 
             return StateMachine{
                 .prefetch_timestamp = 0,
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = forest,
-                .scan_buffer = scan_buffer,
+                .scan_lookup_buffer = scan_lookup_buffer,
             };
         }
 
         pub fn deinit(self: *StateMachine, allocator: mem.Allocator) void {
             assert(self.tracer_slot == null);
 
-            allocator.free(self.scan_buffer);
+            allocator.free(self.scan_lookup_buffer);
             self.forest.deinit(allocator);
         }
 
@@ -494,7 +494,7 @@ pub fn StateMachineType(
                 .prepare_timestamp = 0,
                 .commit_timestamp = 0,
                 .forest = self.forest,
-                .scan_buffer = self.scan_buffer,
+                .scan_lookup_buffer = self.scan_lookup_buffer,
             };
         }
 
@@ -590,9 +590,11 @@ pub fn StateMachineType(
 
         pub fn pulse(self: *const StateMachine) bool {
             assert(!global_constants.aof_recovery);
-            assert(self.expire_pending_transfers.pulse_timestamp >= TimestampRange.timestamp_min);
+            assert(self.expire_pending_transfers.pulse_next_timestamp >=
+                TimestampRange.timestamp_min);
 
-            return self.expire_pending_transfers.pulse_timestamp <= self.prepare_timestamp;
+            return self.expire_pending_transfers.pulse_next_timestamp <=
+                self.prepare_timestamp;
         }
 
         pub fn prefetch(
@@ -784,7 +786,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_get_account_transfers(self: *StateMachine, filter: AccountFilter) void {
-            assert(self.scan_result_count == 0);
+            assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             if (self.get_scan_from_filter(filter)) |scan| {
@@ -792,7 +794,7 @@ pub fn StateMachineType(
 
                 var scan_buffer = std.mem.bytesAsSlice(
                     Transfer,
-                    self.scan_buffer[0 .. @sizeOf(Transfer) *
+                    self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
                         constants.batch_max.get_account_transfers],
                 );
                 assert(scan_buffer.len == constants.batch_max.get_account_transfers);
@@ -816,13 +818,17 @@ pub fn StateMachineType(
             log.info("invalid filter for get_account_transfers: {any}", .{filter});
             self.forest.grid.on_next_tick(
                 &prefetch_scan_next_tick_callback,
-                &self.scan_next_tick,
+                &self.scan_lookup_next_tick,
             );
         }
 
-        fn prefetch_get_account_transfers_callback(scan_lookup: *TransfersScanLookup) void {
+        fn prefetch_get_account_transfers_callback(
+            scan_lookup: *TransfersScanLookup,
+            results: []const Transfer,
+        ) void {
             const self: *StateMachine = ScanLookup.parent(.transfer, scan_lookup);
-            self.scan_result_count = @intCast(scan_lookup.slice().len);
+            assert(self.scan_lookup_result_count == null);
+            self.scan_lookup_result_count = @intCast(results.len);
 
             self.scan_lookup = .null;
             self.forest.scan_buffer_pool.reset();
@@ -832,7 +838,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_get_account_balances(self: *StateMachine, filter: AccountFilter) void {
-            assert(self.scan_result_count == 0);
+            assert(self.scan_lookup_result_count == null);
 
             self.forest.grooves.accounts.prefetch_enqueue(filter.account_id);
             self.forest.grooves.accounts.prefetch(
@@ -852,7 +858,7 @@ pub fn StateMachineType(
         }
 
         fn prefetch_get_account_balances_scan(self: *StateMachine, filter: AccountFilter) void {
-            assert(self.scan_result_count == 0);
+            assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             if (self.forest.grooves.accounts.get(filter.account_id)) |account| {
@@ -860,12 +866,12 @@ pub fn StateMachineType(
                     if (self.get_scan_from_filter(filter)) |scan| {
                         assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                        var scan_buffer = std.mem.bytesAsSlice(
+                        var scan_lookup_buffer = std.mem.bytesAsSlice(
                             AccountBalancesGrooveValue,
-                            self.scan_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
+                            self.scan_lookup_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
                                 constants.batch_max.get_account_balances],
                         );
-                        assert(scan_buffer.len == constants.batch_max.get_account_balances);
+                        assert(scan_lookup_buffer.len == constants.batch_max.get_account_balances);
 
                         var scan_lookup = self.scan_lookup.get(.account_balances);
                         scan_lookup.* = AccountBalancesScanLookup.init(
@@ -875,7 +881,7 @@ pub fn StateMachineType(
 
                         scan_lookup.read(
                             // Limiting the buffer size according to the query limit.
-                            scan_buffer[0..@min(filter.limit, scan_buffer.len)],
+                            scan_lookup_buffer[0..@min(filter.limit, scan_lookup_buffer.len)],
                             &prefetch_get_account_balances_scan_callback,
                         );
 
@@ -893,13 +899,17 @@ pub fn StateMachineType(
             // Returning an empty array on the next tick.
             self.forest.grid.on_next_tick(
                 &prefetch_scan_next_tick_callback,
-                &self.scan_next_tick,
+                &self.scan_lookup_next_tick,
             );
         }
 
-        fn prefetch_get_account_balances_scan_callback(scan_lookup: *AccountBalancesScanLookup) void {
+        fn prefetch_get_account_balances_scan_callback(
+            scan_lookup: *AccountBalancesScanLookup,
+            results: []const AccountBalancesGrooveValue,
+        ) void {
             const self: *StateMachine = ScanLookup.parent(.account_balances, scan_lookup);
-            self.scan_result_count = @intCast(scan_lookup.slice().len);
+            assert(self.scan_lookup_result_count == null);
+            self.scan_lookup_result_count = @intCast(results.len);
 
             self.forest.scan_buffer_pool.reset();
             self.forest.grooves.transfers.scan_builder.reset();
@@ -988,7 +998,11 @@ pub fn StateMachineType(
         }
 
         fn prefetch_scan_next_tick_callback(completion: *Grid.NextTick) void {
-            const self: *StateMachine = @fieldParentPtr(StateMachine, "scan_next_tick", completion);
+            const self: *StateMachine = @fieldParentPtr(
+                StateMachine,
+                "scan_lookup_next_tick",
+                completion,
+            );
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.scan_lookup == .null);
 
@@ -996,25 +1010,27 @@ pub fn StateMachineType(
         }
 
         fn prefetch_expire_pending_transfers(self: *StateMachine) void {
-            assert(self.scan_result_count == 0);
+            assert(self.scan_lookup_result_count == null);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
             assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
             assert(self.prefetch_timestamp != TimestampRange.timestamp_max);
 
-            var scan_buffer = std.mem.bytesAsSlice(
+            var scan_lookup_buffer = std.mem.bytesAsSlice(
                 Transfer,
-                self.scan_buffer[0 .. @sizeOf(Transfer) *
+                self.scan_lookup_buffer[0 .. @sizeOf(Transfer) *
                     // We must be constrained to the same limit as `create_transfers`.
                     constants.batch_max.create_transfers],
             );
-            assert(scan_buffer.len == constants.batch_max.create_transfers);
+            assert(scan_lookup_buffer.len == constants.batch_max.create_transfers);
 
             const transfers_groove: *TransfersGroove = &self.forest.grooves.transfers;
             const scan = self.expire_pending_transfers.scan(
                 &transfers_groove.indexes.expires_at,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                transfers_groove.prefetch_snapshot.?,
-                self.prefetch_timestamp,
+                .{
+                    .snapshot = transfers_groove.prefetch_snapshot.?,
+                    .expires_at_max = self.prefetch_timestamp,
+                },
             );
 
             const scan_lookup = self.scan_lookup.get(.expire_pending_transfers);
@@ -1023,17 +1039,20 @@ pub fn StateMachineType(
                 scan,
             );
             scan_lookup.read(
-                scan_buffer,
+                scan_lookup_buffer,
                 &prefetch_expire_pending_transfers_scan_callback,
             );
         }
 
         fn prefetch_expire_pending_transfers_scan_callback(
             scan_lookup: *ExpirePendingTransfers.ScanLookup,
+            results: []const Transfer,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.expire_pending_transfers, scan_lookup);
+            assert(self.scan_lookup_result_count == null);
+
             self.expire_pending_transfers.finish(scan_lookup.state);
-            self.scan_result_count = @intCast(scan_lookup.slice().len);
+            self.scan_lookup_result_count = @intCast(results.len);
 
             self.scan_lookup = .null;
             self.forest.scan_buffer_pool.reset();
@@ -1045,7 +1064,7 @@ pub fn StateMachineType(
         fn prefetch_expire_pending_transfers_accounts(self: *StateMachine) void {
             const transfers: []const Transfer = std.mem.bytesAsSlice(
                 Transfer,
-                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(Transfer)],
+                self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? * @sizeOf(Transfer)],
             );
 
             const grooves = &self.forest.grooves;
@@ -1100,6 +1119,9 @@ pub fn StateMachineType(
             assert(op != 0);
             assert(input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
+
+            maybe(self.scan_lookup_result_count != null);
+            defer assert(self.scan_lookup_result_count == null);
 
             tracer.start(
                 &self.tracer_slot,
@@ -1329,16 +1351,18 @@ pub fn StateMachineType(
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
             _ = input;
-            assert(self.scan_result_count <= constants.batch_max.get_account_transfers);
-            if (self.scan_result_count == 0) return 0;
-            defer self.scan_result_count = 0;
+            if (self.scan_lookup_result_count == null) return 0; // invalid filter
 
-            const result_size: usize = self.scan_result_count * @sizeOf(Transfer);
+            defer self.scan_lookup_result_count = null;
+            if (self.scan_lookup_result_count.? == 0) return 0; // no results found
+
+            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_transfers);
+            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(Transfer);
             stdx.copy_disjoint(
                 .exact,
                 u8,
                 output[0..result_size],
-                self.scan_buffer[0..result_size],
+                self.scan_lookup_buffer[0..result_size],
             );
 
             return result_size;
@@ -1349,10 +1373,12 @@ pub fn StateMachineType(
             input: []const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            assert(self.scan_result_count <= constants.batch_max.get_account_balances);
-            if (self.scan_result_count == 0) return 0;
-            defer self.scan_result_count = 0;
+            if (self.scan_lookup_result_count == null) return 0; // invalid filter
 
+            defer self.scan_lookup_result_count = null;
+            if (self.scan_lookup_result_count.? == 0) return 0; // no results found
+
+            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_account_balances);
             const filter: AccountFilter = mem.bytesToValue(
                 AccountFilter,
                 input[0..@sizeOf(AccountFilter)],
@@ -1360,7 +1386,8 @@ pub fn StateMachineType(
 
             const scan_results: []const AccountBalancesGrooveValue = mem.bytesAsSlice(
                 AccountBalancesGrooveValue,
-                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(AccountBalancesGrooveValue)],
+                self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? *
+                    @sizeOf(AccountBalancesGrooveValue)],
             );
 
             const output_slice: []AccountBalance = mem.bytesAsSlice(AccountBalance, output);
@@ -1389,7 +1416,7 @@ pub fn StateMachineType(
                 output_count += 1;
             }
 
-            assert(output_count == self.scan_result_count);
+            assert(output_count == self.scan_lookup_result_count.?);
             return output_count * @sizeOf(AccountBalance);
         }
 
@@ -1550,8 +1577,8 @@ pub fn StateMachineType(
 
             if (t.timeout > 0) {
                 const expires_at = t.timestamp + t.timeout_ns();
-                if (expires_at < self.expire_pending_transfers.pulse_timestamp) {
-                    self.expire_pending_transfers.pulse_timestamp = expires_at;
+                if (expires_at < self.expire_pending_transfers.pulse_next_timestamp) {
+                    self.expire_pending_transfers.pulse_next_timestamp = expires_at;
                 }
             }
 
@@ -1677,9 +1704,9 @@ pub fn StateMachineType(
                 });
 
                 // In case the pending transfer's timeout is exactly the one we are using
-                // as flag, we need zero the valut to run the next `pulse`.
-                if (self.expire_pending_transfers.pulse_timestamp == expires_at) {
-                    self.expire_pending_transfers.pulse_timestamp = TimestampRange.timestamp_min;
+                // as flag, we need to zero the value to run the next `pulse`.
+                if (self.expire_pending_transfers.pulse_next_timestamp == expires_at) {
+                    self.expire_pending_transfers.pulse_next_timestamp = TimestampRange.timestamp_min;
                 }
             }
 
@@ -1847,15 +1874,16 @@ pub fn StateMachineType(
         }
 
         fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) usize {
-            assert(self.scan_result_count <= constants.batch_max.create_transfers);
+            assert(self.scan_lookup_result_count != null);
+            assert(self.scan_lookup_result_count.? <= constants.batch_max.create_transfers);
 
-            if (self.scan_result_count == 0) return 0;
-            defer self.scan_result_count = 0;
+            defer self.scan_lookup_result_count = null;
+            if (self.scan_lookup_result_count.? == 0) return 0;
 
             const grooves = &self.forest.grooves;
             const transfers: []const Transfer = std.mem.bytesAsSlice(
                 Transfer,
-                self.scan_buffer[0 .. self.scan_result_count * @sizeOf(Transfer)],
+                self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? * @sizeOf(Transfer)],
             );
 
             log.debug("expire_pending_transfers: len={}", .{transfers.len});
@@ -2006,7 +2034,7 @@ fn ExpirePendingTransfersType(
         // TODO(zig) Context should be `*ExpirePendingTransfers`,
         // but its a dependency loop.
         const Context = struct {};
-        const Scan = ScanRangeType(
+        const ScanRange = ScanRangeType(
             Tree,
             Storage,
             *Context,
@@ -2016,7 +2044,7 @@ fn ExpirePendingTransfersType(
 
         pub const ScanLookup = ScanLookupType(
             TransfersGroove,
-            Scan,
+            ScanRange,
             Storage,
         );
 
@@ -2024,11 +2052,17 @@ fn ExpirePendingTransfersType(
         phase: union(enum) {
             idle,
             running: struct {
-                scan: Scan,
-                timestamp: u64,
+                scan: ScanRange,
+                expires_at_max: u64,
             },
         } = .idle,
-        pulse_timestamp: u64 = TimestampRange.timestamp_min,
+
+        /// Used by the state machine to determine "when" it needs to execute the expiration logic:
+        /// - When `== timestamp_min`, there may be pending transfers to expire,
+        ///   but we need to scan to check.
+        /// - When `== timestamp_max`, there are no pending transfers to expire.
+        /// - Otherwise, this is the timestamp of the next pending transfer expiry.
+        pulse_next_timestamp: u64 = TimestampRange.timestamp_min,
 
         fn reset(self: *ExpirePendingTransfers) void {
             assert(self.phase == .idle);
@@ -2039,22 +2073,28 @@ fn ExpirePendingTransfersType(
             self: *ExpirePendingTransfers,
             tree: *Tree,
             buffer: *const ScanBuffer,
-            snapshot: u64,
-            timestamp: u64,
-        ) *Scan {
+            filter: struct {
+                snapshot: u64,
+                /// Will fetch transfers expired before this timestamp (inclusive).
+                expires_at_max: u64,
+            },
+        ) *ScanRange {
             assert(self.phase == .idle);
-            assert(timestamp >= TimestampRange.timestamp_min and
-                timestamp <= TimestampRange.timestamp_max);
+            assert(filter.expires_at_max >= TimestampRange.timestamp_min and
+                filter.expires_at_max <= TimestampRange.timestamp_max);
+            assert(self.pulse_next_timestamp == TimestampRange.timestamp_min or
+                self.pulse_next_timestamp == TimestampRange.timestamp_max or
+                self.pulse_next_timestamp < filter.expires_at_max);
 
             self.* = .{
-                .pulse_timestamp = TimestampRange.timestamp_max,
+                .pulse_next_timestamp = TimestampRange.timestamp_max,
                 .phase = .{ .running = .{
-                    .timestamp = timestamp,
-                    .scan = Scan.init(
+                    .expires_at_max = filter.expires_at_max,
+                    .scan = ScanRange.init(
                         &self.context,
                         tree,
                         buffer,
-                        snapshot,
+                        filter.snapshot,
                         Tree.Table.key_from_value(&.{
                             .field = TimestampRange.timestamp_min,
                             .timestamp = TimestampRange.timestamp_min,
@@ -2073,13 +2113,15 @@ fn ExpirePendingTransfersType(
         fn finish(self: *ExpirePendingTransfers, status: ScanLookupStatus) void {
             assert(self.phase == .running);
             switch (status) {
-                .scan_finished => if (self.pulse_timestamp <= self.phase.running.timestamp) {
-                    // There are no more transfers to expire in the next pulse.
-                    self.pulse_timestamp = TimestampRange.timestamp_max;
+                .scan_finished => {
+                    if (self.pulse_next_timestamp <= self.phase.running.expires_at_max) {
+                        // There are no more unexpired transfers left to expire in the next pulse.
+                        self.pulse_next_timestamp = TimestampRange.timestamp_max;
+                    }
                 },
                 .buffer_finished => {
                     // There are more transfers to expire than a single batch.
-                    assert(self.pulse_timestamp <= self.phase.running.timestamp);
+                    assert(self.pulse_next_timestamp <= self.phase.running.expires_at_max);
                 },
                 else => unreachable,
             }
@@ -2095,9 +2137,13 @@ fn ExpirePendingTransfersType(
             assert(self.phase == .running);
 
             const expires_at: u64 = value.field;
-            self.pulse_timestamp = expires_at;
 
-            return if (expires_at <= self.phase.running.timestamp)
+            assert(self.pulse_next_timestamp == TimestampRange.timestamp_max or
+                self.pulse_next_timestamp <= expires_at);
+
+            self.pulse_next_timestamp = expires_at;
+
+            return if (expires_at <= self.phase.running.expires_at_max)
                 .include_and_continue
             else
                 .exclude_and_stop;

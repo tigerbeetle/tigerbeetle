@@ -19,6 +19,8 @@ const TimestampRange = @import("timestamp_range.zig").TimestampRange;
 
 const Error = @import("scan_buffer.zig").Error;
 
+/// ScanBuilder is a helper to create and combine scans using
+/// any of the Groove's indexes.
 pub fn ScanBuilderType(
     // TODO: Instead of a single Groove per ScanType, introduce the concept of Orthogonal Grooves.
     // For example, indexes from the Grooves `Transfers` and `PendingTransfers` can be

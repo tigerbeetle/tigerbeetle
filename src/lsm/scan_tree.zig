@@ -292,18 +292,20 @@ pub fn ScanTreeType(
             }
         }
 
-        /// Probing a scan modifies the key_min/key_max range, either moving the scan if the next
-        /// key is already buffered, or causing it to read again from the new key range.
-        pub fn probe(self: *ScanTree, key: Key) void {
+        /// Modifies the key_min/key_max range and moves the scan to the next value
+        /// such as `>=probe_key` or `<=probe_key` depending on the direction.
+        /// The scan may become `Empty` or `Drained` _after_ probing.
+        /// Should not be called when the current key already matches the `probe_key`.
+        pub fn probe(self: *ScanTree, probe_key: Key) void {
             if (self.state == .aborted) return;
             assert(self.state != .buffering);
 
             // No need to move if the current range is already tighter.
-            // It can abort scanning it the key is unreachable.
-            if (key < self.key_min) {
+            // It can abort scanning if the key is unreachable.
+            if (probe_key < self.key_min) {
                 if (self.direction == .descending) self.abort();
                 return;
-            } else if (self.key_max < key) {
+            } else if (self.key_max < probe_key) {
                 if (self.direction == .ascending) self.abort();
                 return;
             }
@@ -311,25 +313,21 @@ pub fn ScanTreeType(
             // Updates the scan range depending on the direction.
             switch (self.direction) {
                 .ascending => {
-                    if (self.key_min == key) return; // No need to move
-
-                    assert(self.key_min < key);
-                    assert(key < self.key_max);
-                    self.key_min = key;
+                    assert(self.key_min < probe_key);
+                    assert(probe_key < self.key_max);
+                    self.key_min = probe_key;
                 },
                 .descending => {
-                    if (self.key_max == key) return; // No need to move
-
-                    assert(key < self.key_max);
-                    assert(self.key_min < key);
-                    self.key_max = key;
+                    assert(probe_key < self.key_max);
+                    assert(self.key_min < probe_key);
+                    self.key_max = probe_key;
                 },
             }
 
             // Re-slicing the in-memory tables:
             inline for (.{ &self.table_mutable_values, &self.table_immutable_values }) |field| {
                 const table_memory = field.*;
-                const slice: []const Value = probe_values(self.direction, table_memory, key);
+                const slice: []const Value = probe_values(self.direction, table_memory, probe_key);
                 assert(slice.len <= table_memory.len);
                 field.* = slice;
             }
@@ -339,15 +337,15 @@ pub fn ScanTreeType(
                 .seeking, .needs_data => {
                     for (&self.levels) |*level| {
                         // Fowarding the `probe` to each level.
-                        level.probe(key);
+                        level.probe(probe_key);
                     }
 
                     // It's not expected to probe a scan that already produced a key equals
                     // or ahead the probe.
                     assert(self.merge_iterator.?.previous_key_popped == null or
                         switch (self.direction) {
-                        .ascending => self.merge_iterator.?.previous_key_popped.? < key,
-                        .descending => self.merge_iterator.?.previous_key_popped.? > key,
+                        .ascending => self.merge_iterator.?.previous_key_popped.? < probe_key,
+                        .descending => self.merge_iterator.?.previous_key_popped.? > probe_key,
                     });
 
                     // Once the underlying streams have been changed, the merge iterator needs
@@ -701,7 +699,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             }
         }
 
-        pub fn probe(self: *ScanTreeLevel, key: Key) void {
+        pub fn probe(self: *ScanTreeLevel, probe_key: Key) void {
             maybe(self.manifest == .iterating_tables or
                 self.manifest == .iterating_blocks or
                 self.manifest == .finished);
@@ -713,7 +711,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                     const slice: []const Value = ScanTree.probe_values(
                         self.scan.direction,
                         buffer,
-                        key,
+                        probe_key,
                     );
 
                     if (slice.len == 0) {
@@ -725,8 +723,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                             // index block again.
                             const key_exclusive_next = self.manifest.iterating_blocks;
                             assert(switch (self.scan.direction) {
-                                .ascending => key_exclusive_next >= key,
-                                .descending => key_exclusive_next <= key,
+                                .ascending => key_exclusive_next >= probe_key,
+                                .descending => key_exclusive_next <= probe_key,
                             });
                         }
 
@@ -735,7 +733,10 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                         };
                     }
                 },
-                .finished => return,
+                .finished => {
+                    assert(self.manifest == .finished);
+                    return;
+                },
             }
 
             if (self.values == .fetching) {
