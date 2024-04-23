@@ -63,6 +63,9 @@ pub const CliArgs = struct {
 const Fuzzer = enum {
     canary,
     ewah,
+    lsm_manifest_level,
+    lsm_segmented_array,
+    lsm_tree,
     vsr_free_set,
     vsr_journal_format,
     vsr_superblock_quorums,
