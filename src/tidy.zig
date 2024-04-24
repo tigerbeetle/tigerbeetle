@@ -217,6 +217,11 @@ test "tidy no large blobs" {
     //
     // Zig's std doesn't provide a cross platform abstraction for piping two commands together, so
     // we begrudgingly pass the data through this intermediary process.
+    const shallow = try shell.exec_stdout("git rev-parse --is-shallow-repository", .{});
+    if (!std.mem.eql(u8, shallow, "false")) {
+        return error.ShallowRepository;
+    }
+
     const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout_options(
         .{ .max_output_bytes = 50 * MiB },
