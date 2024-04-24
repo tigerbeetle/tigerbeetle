@@ -18,6 +18,9 @@ jobs:
       # https://github.com/actions/checkout/issues/1169
       - run: git config --system --add safe.directory '*'
       - uses: actions/checkout@v4
+        # Fetch the entire history of the commit in question for tidy.
+        with:
+          fetch-depth: 2147483647
       - run: ./scripts/install_zig.sh
       - run: zig/zig build test
 
@@ -25,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
       - run: ./scripts/install_zig.sh
       - run: zig/zig build test
 

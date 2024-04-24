@@ -14,6 +14,9 @@ jobs:
     runs-on: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
+        # Fetch the entire history of the commit in question for tidy.
+        with:
+          fetch-depth: 2147483647
       - run: ./scripts/install_zig.sh
       - run: ./zig/zig build test
       - run: ./scripts/install.sh
