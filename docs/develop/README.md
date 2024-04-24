@@ -45,6 +45,7 @@ Depending on your use case, you may find these additional design patterns helpfu
 - [Currency Exchange](./recipes/currency-exchange.md)
 - [Multi-Debit, Multi-Credit Transfers](./recipes/multi-debit-credit-transfers.md)
 - [Closing Accounts](./recipes/close-account.md)
+- [Balance-Conditional Transfers](./recipes/balance-conditional-transfers.md)
 
 ## Want Help Developing on TigerBeetle?
 
