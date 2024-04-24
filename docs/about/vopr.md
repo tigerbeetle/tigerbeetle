@@ -10,7 +10,8 @@ key way that we improve the system's reliability.
 Simulation testing enables us to run the production TigerBeetle code under a wide variety of
 conditions to ensure that the cluster behaves properly. Because our simulator is deterministic based
 on a _seed_ number and the Git commit, we can perfectly reproduce any bugs discovered in testing for
-easy local debugging.
+easy local debugging. Crucially, VOPR can speed up time arbitrarilyy. One minute of VOPR time is
+equivalent to days of real-world testing.
 
 ## Live Simulator in the Browser
 
@@ -21,13 +22,10 @@ you can inject different faults yourself 🔨🧊⚡.
 
 ## The VOPR
 
-_The VOPR_ is our name for our deterministic simulator. (The name was inspired by the AI
-supercomputer in the 1983 movie [WarGames](https://www.imdb.com/title/tt0086567/), which was called
-the War Operation Plan Response or WOPR, which constantly simulated scenarios in order to learn.)
-
-> "VOPR" doesn't actually stand for anything. However ChatGPT suggested the backronyms Validation
-> Oriented Precision Runtime, Vortex of Precise Reckoning, and Voyage of Programmatic Realities, so
-> you could pretend it stands for one of those if you like.
+_The VOPR_, or The Viewstamped Operation Replicator, is our name for our deterministic simulator.
+(The name was inspired by the AI supercomputer in the 1983 movie
+[WarGames](https://www.imdb.com/title/tt0086567/), which was called the War Operation Plan Response
+or WOPR, which constantly simulated scenarios in order to learn.)
 
 The key purpose of the VOPR is to test TigerBeetle's safety and liveness, and it focuses on
 consensus and the cluster's recovery mechanisms.
