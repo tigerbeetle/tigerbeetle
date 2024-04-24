@@ -10,7 +10,7 @@ key way that we improve the system's reliability.
 Simulation testing enables us to run the production TigerBeetle code under a wide variety of
 conditions to ensure that the cluster behaves properly. Because our simulator is deterministic based
 on a _seed_ number and the Git commit, we can perfectly reproduce any bugs discovered in testing for
-easy local debugging. Crucially, VOPR can speed up time arbitrarilyy. One minute of VOPR time is
+easy local debugging. Crucially, VOPR can speed up time arbitrarily. One minute of VOPR time is
 equivalent to days of real-world testing.
 
 ## Live Simulator in the Browser
