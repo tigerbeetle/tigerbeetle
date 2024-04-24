@@ -1,6 +1,9 @@
 # Hacking on TigerBeetle
 
-**Prerequisites:** The current beta version of TigerBeetle targets macOS and Linux and takes advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via [io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on macOS or on recent versions of Linux with an updated kernel.
+**Prerequisites:** The current beta version of TigerBeetle targets macOS and Linux and takes
+advantage of the latest asynchronous IO capabilities of the Linux kernel v5.6 and newer, via
+[io_uring](https://kernel.dk/io_uring.pdf). As such it can only be used on macOS or on recent
+versions of Linux with an updated kernel.
 
 ## Setup
 
@@ -20,14 +23,16 @@ With TigerBeetle installed, you are ready to benchmark!
 ./tigerbeetle benchmark
 ```
 
-See comments at the top of [/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig)
-for exactly what we're benchmarking.
+See comments at the top of
+[/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig) for exactly what we're
+benchmarking.
 
 *If you encounter any benchmark errors, please send us the resulting `benchmark.log`.*
 
 ## Running the Server
 
-Launch a TigerBeetle cluster on your local machine by running each of these commands in a new terminal tab:
+Launch a TigerBeetle cluster on your local machine by running each of these commands in a new
+terminal tab:
 
 ```console
 ./tigerbeetle format --cluster=0 --replica=0 --replica-count=3 0_0.tigerbeetle
@@ -78,13 +83,16 @@ To run TigerBeetle's long-running simulation, called *The VOPR*:
 zig/zig build vopr
 ```
 
-Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR Hub](/src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create GitHub issues as needed.
+Pass the `--send` flag to the VOPR to report discovered bugs to the [VOPR
+Hub](/src/vopr_hub/README.md). The VOPR Hub will automatically replay, deduplicate, and create
+GitHub issues as needed.
 
 ```console
 zig/zig build vopr -- --send
 ```
 
-Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also include `--build-mode` to run in ReleaseSafe mode.
+Run the VOPR using a specific seed. This will run in `Debug` mode by default but you can also
+include `--build-mode` to run in ReleaseSafe mode.
 
 ```console
 zig/zig build vopr -- --seed=123 --build-mode=ReleaseSafe
@@ -96,13 +104,29 @@ To view all the available command line arguments simply use the `--help` flag.
 zig/zig build vopr -- --help
 ```
 
-*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames, by our love of fuzzing over the years, by [Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
+*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames,
+by our love of fuzzing over the years, by [Dropbox's Nucleus
+testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's
+deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
 
-*The VOPR* is [a deterministic simulator](/src/simulator.zig) that can fuzz many clusters of TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus protocol, but all within a single developer machine process, with [a network simulator](/src/testing/packet_simulator.zig) to simulate all kinds of network faults, and with an in-memory [storage simulator](/src/testing/storage.zig) to simulate all kinds of storage faults, to explore and test TigerBeetle against huge state spaces in a short amount of time, by literally speeding up the passing of time within the simulation itself.
+*The VOPR* is [a deterministic simulator](/src/simulator.zig) that can fuzz many clusters of
+TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus
+protocol, but all within a single developer machine process, with [a network
+simulator](/src/testing/packet_simulator.zig) to simulate all kinds of network faults, and with an
+in-memory [storage simulator](/src/testing/storage.zig) to simulate all kinds of storage faults, to
+explore and test TigerBeetle against huge state spaces in a short amount of time, by literally
+speeding up the passing of time within the simulation itself.
 
-Beyond being a deterministic simulator, *The VOPR* also features [a state checker](/src/testing/cluster/state_checker.zig) that can hook into all the replicas, and check all their state transitions the instant they take place, using cryptographic hash chaining to prove causality and check that all interim state transitions are valid, based on any of the set of inflight client requests at the time, without divergent states, and then check for convergence to the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
+Beyond being a deterministic simulator, *The VOPR* also features [a state
+checker](/src/testing/cluster/state_checker.zig) that can hook into all the replicas, and check all
+their state transitions the instant they take place, using cryptographic hash chaining to prove
+causality and check that all interim state transitions are valid, based on any of the set of
+inflight client requests at the time, without divergent states, and then check for convergence to
+the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
 
-Check out TigerBeetle's [Viewstamped Replication Made Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr) bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
+Check out TigerBeetle's [Viewstamped Replication Made
+Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr)
+bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
 
 ## Hacking on Clients
 
@@ -126,3 +150,24 @@ Everything is orchestrated by [ci.zig](/src/scripts/ci.zig) script:
 ```console
 ./zig/zig build scripts -- ci --language=go
 ```
+
+## Pull Requests
+
+When submitting pull request, _assign_ a single person to be its reviewer. Unpacking:
+
+* GitHub supports both "assign" and "request review". The difference between them is that "request"
+  is "edge triggered" (it is cleared after a round of review), while "assign" is "level triggered"
+  (it won't go away until the PR is merged or closed). We use "assign", because the reviewer is
+  co-responsible for making sure that the PR doesn't stall, and is eventually completed.
+
+* Only a single person is assigned to any particular pull request, to avoid diffusion of
+  responsibility and the bystander effect.
+
+* Pull request author choses the reviewer. The author ha the most context about who is the best
+  person to request review from. When picking a reviewer, think about sharing knowledge, balancing
+  review load, and maximizing correctness of the code.
+
+After pull request is approved, the author makes the final call to merge by clicking "merge when
+ready" button on GitHub. To reduce the number of round-trips, "merge when ready" can be engaged
+before the review is completed: a PR will then be merged automatically once an approving review is
+submitted.
