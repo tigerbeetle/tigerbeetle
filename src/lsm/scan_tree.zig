@@ -292,8 +292,8 @@ pub fn ScanTreeType(
             }
         }
 
-        /// Modifies the key_min/key_max range and moves the scan to the next value
-        /// such as `>=probe_key` or `<=probe_key` depending on the direction.
+        /// Modifies the key_min/key_max range and moves the scan to the next value such that
+        /// `value.key >= probe_key` (ascending) or `value.key <= probe_key` (descending).
         /// The scan may become `Empty` or `Drained` _after_ probing.
         /// Should not be called when the current key already matches the `probe_key`.
         pub fn probe(self: *ScanTree, probe_key: Key) void {

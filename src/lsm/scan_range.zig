@@ -69,9 +69,9 @@ pub fn ScanRangeType(
             scan.scan_tree.read(context, on_read_callback);
         }
 
-        fn on_read_callback(ctx: *Context, ptr: *ScanTree) void {
+        fn on_read_callback(context: *Context, ptr: *ScanTree) void {
             const parent: *ScanRange = @fieldParentPtr(ScanRange, "scan_tree", ptr);
-            ctx.callback(ctx, parent);
+            context.callback(context, parent);
         }
 
         pub fn next(scan: *ScanRange) error{ReadAgain}!?u64 {
