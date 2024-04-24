@@ -150,3 +150,24 @@ Everything is orchestrated by [ci.zig](/src/scripts/ci.zig) script:
 ```console
 ./zig/zig build scripts -- ci --language=go
 ```
+
+## Pull Requests
+
+When submitting pull request, _assign_ a single person to be its reviewer. Unpacking:
+
+* GitHub supports both "assign" and "request review". The difference between them is that "request"
+  is "edge triggered" (it is cleared after a round of review), while "assign" is "level triggered"
+  (it won't go away until the PR is merged or closed). We use "assign", because the reviewer is
+  co-responsible for making sure that the PR doesn't stall, and is eventually completed.
+
+* Only a single person is assigned to any particular pull request, to avoid diffusion of
+  responsibility and the bystander effect.
+
+* Pull request author choses the reviewer. The author ha the most context about who is the best
+  person to request review from. When picking a reviewer, think about sharing knowledge, balancing
+  review load, and maximizing correctness of the code.
+
+After pull request is approved, the author makes the final call to merge by clicking "merge when
+ready" button on GitHub. To reduce the number of round-trips, "merge when ready" can be engaged
+before the review is completed: a PR will then be merged automatically once an approving review is
+submitted.
