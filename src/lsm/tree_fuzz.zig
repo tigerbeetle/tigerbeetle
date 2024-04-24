@@ -68,6 +68,12 @@ const Value = packed struct(u128) {
 
 const FuzzOpTag = std.meta.Tag(FuzzOp);
 const FuzzOp = union(enum) {
+    const Scan = struct {
+        min: u64,
+        max: u64,
+        direction: Direction,
+    };
+
     compact: struct {
         op: u64,
         checkpoint: bool,
@@ -75,11 +81,7 @@ const FuzzOp = union(enum) {
     put: Value,
     remove: Value,
     get: u64,
-    scan: struct {
-        min: u64,
-        max: u64,
-        direction: Direction,
-    },
+    scan: Scan,
 };
 
 const batch_size_max = constants.message_size_max - @sizeOf(vsr.Header);
