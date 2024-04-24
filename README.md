@@ -114,9 +114,8 @@ and account `2` has `credits_posted` as `10`. The `10` amount is fully
 accounted for!
 
 For further reading:
-
-* [Run a single-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary)
-* [Run a three-node cluster](https://docs.tigerbeetle.com/quick-start/single-binary-three)
+* [Run a single-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary)
+* [Run a three-node cluster](https://docs.tigerbeetle.com/getting-started/single-binary-three)
 
 ## Next Steps
 
