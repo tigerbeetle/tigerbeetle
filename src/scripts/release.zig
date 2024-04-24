@@ -123,6 +123,66 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
     }
 }
 
+fn build_macos_universal_binary(shell: *Shell, dst: []const u8, binaries: []const struct { cpu_type: i32, cpu_subtype: i32, path: []const u8 }) !void {
+    var section = try shell.open_section("build macos universal binary");
+    defer section.close();
+
+    // The offset start is relative to the end of the headers, rounded up to the alignment.
+    // Use align of 2^14 == 16384 to match macOS. This is plenty for any headers.
+    const headers_size = @sizeOf(std.macho.fat_header) + @sizeOf(std.macho.fat_arch) * binaries.len;
+    assert(headers_size < 16384);
+
+    var binary_headers = try shell.arena.allocator().alloc(std.macho.fat_arch, binaries.len);
+
+    var current_offset: u32 = 16384;
+    for (binaries, binary_headers) |binary, *binary_header| {
+        const binary_file = try std.fs.cwd().openFile(binary.path, .{ .mode = .read_only });
+        defer binary_file.close();
+
+        const binary_size: u32 = @intCast((try binary_file.stat()).size);
+
+        binary_header.* = std.macho.fat_arch{
+            .cputype = @byteSwap(binary.cpu_type),
+            .cpusubtype = @byteSwap(binary.cpu_subtype),
+            .offset = @byteSwap(current_offset),
+            .size = @byteSwap(binary_size),
+            .@"align" = @byteSwap(@as(u32, @intCast(14))),
+        };
+
+        std.log.info("header: {}", .{binary_header});
+
+        current_offset += binary_size;
+        current_offset = stdx.div_ceil(current_offset, 16384) * 16384;
+    }
+
+    var output_file = try std.fs.cwd().createFile(dst, .{ .truncate = false });
+    defer output_file.close();
+
+    const fat_header = std.macho.fat_header{
+        .magic = std.macho.FAT_CIGAM,
+        .nfat_arch = @byteSwap(@as(u32, @intCast(binaries.len))),
+    };
+    assert(@sizeOf(std.macho.fat_header) == 8);
+    try output_file.writeAll(std.mem.asBytes(&fat_header));
+
+    assert(@sizeOf(std.macho.fat_arch) == 20);
+    try output_file.writeAll(std.mem.sliceAsBytes(binary_headers));
+
+    try output_file.seekTo(16384);
+
+    for (binaries, binary_headers) |binary, binary_header| {
+        const binary_file = try std.fs.cwd().openFile(binary.path, .{ .mode = .read_only });
+        defer binary_file.close();
+
+        try output_file.seekTo(@byteSwap(binary_header.offset));
+
+        const binary_contents = try binary_file.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
+        assert(binary_contents.len == @byteSwap(binary_header.size));
+
+        try output_file.writeAll(binary_contents);
+    }
+}
+
 /// Builds a multi-version pack for the `target` specified, returns the metadata and writes the
 /// output pack to `pack_dst`.
 fn build_past_version_pack(shell: *Shell, comptime target: []const u8, debug: bool, pack_dst: []const u8) !multiversioning.MultiVersionMetadata.PastVersionPack {
@@ -132,14 +192,36 @@ fn build_past_version_pack(shell: *Shell, comptime target: []const u8, debug: bo
     try shell.project_root.deleteTree("dist/tigerbeetle-past-pack");
 
     // Downloads and extract the last published release of TigerBeetle.
-    try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
-        .target = target,
-        .debug = if (debug) "-debug" else "",
-    });
-    try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
-        .target = target,
-        .debug = if (debug) "-debug" else "",
-    });
+    if (std.mem.indexOf(u8, target, "-macos") == null) {
+        // Standard non-macOS targets.
+        try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-{target}{debug}.zip", .{
+            .target = target,
+            .debug = if (debug) "-debug" else "",
+        });
+        try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-{target}{debug}.zip", .{
+            .target = target,
+            .debug = if (debug) "-debug" else "",
+        });
+    } else {
+        // For macOS, download the universal binary and split it up.
+        try shell.exec("gh release download -D dist/tigerbeetle-past-pack -p tigerbeetle-universal-macos{debug}.zip", .{
+            .debug = if (debug) "-debug" else "",
+        });
+        try shell.exec("unzip -d dist/tigerbeetle-past-pack dist/tigerbeetle-past-pack/tigerbeetle-universal-macos{debug}.zip", .{
+            .debug = if (debug) "-debug" else "",
+        });
+        if (std.mem.eql(u8, target, "aarch64-macos")) {
+            try shell.exec("{llvm_lipo} -thin arm64 -output dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{
+                .llvm_lipo = "llvm-lipo",
+            });
+            try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-aarch64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
+        } else if (std.mem.eql(u8, target, "x86_64-macos")) {
+            try shell.exec("{llvm_lipo} -thin x86_64 -output dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{
+                .llvm_lipo = "llvm-lipo",
+            });
+            try shell.exec("mv -f dist/tigerbeetle-past-pack/tigerbeetle-x86_64 dist/tigerbeetle-past-pack/tigerbeetle", .{});
+        }
+    }
 
     // TODO: This code should be removed once the first multi-version release is bootstrapped!
     const multiversion_epoch = "0.15.3";
@@ -189,18 +271,6 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
     var section = try shell.open_section("build tigerbeetle");
     defer section.close();
 
-    const llvm_lipo = for (@as([2][]const u8, .{ "llvm-lipo-16", "llvm-lipo" })) |llvm_lipo| {
-        if (shell.exec_stdout("{llvm_lipo} -version", .{
-            .llvm_lipo = llvm_lipo,
-        })) |llvm_lipo_version| {
-            log.info("llvm-lipo version {s}", .{llvm_lipo_version});
-            break llvm_lipo;
-        } else |_| {}
-    } else {
-        fatal("can't find llvm-lipo", .{});
-    };
-    _ = llvm_lipo;
-
     const llvm_objcopy = for (@as([2][]const u8, .{ "llvm-objcopy-16", "llvm-objcopy" })) |llvm_objcopy| {
         if (shell.exec_stdout("{llvm_objcopy} --version", .{
             .llvm_objcopy = llvm_objcopy,
@@ -214,23 +284,19 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 
     // We shell out to `zip` for creating archives, so we need an absolute path here.
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
-    _ = dist_dir_path;
 
     const targets = .{
         "aarch64-linux",
         "x86_64-linux",
-        // "x86_64-windows",
-        // "aarch64-macos",
-        // "x86_64-macos",
+        "x86_64-windows",
     };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
-    // `dist`. MacOS is special cased --- we use an extra step to merge x86 and arm binaries into
-    // one.
+    // `dist`. MacOS is special cased below --- we use an extra step to merge x86 and arm binaries
+    // into one.
     //TODO: use std.Target here
-    inline for (.{ false, true }) |debug| {
+    inline for (.{ true, false }) |debug| {
         const debug_suffix = if (debug) "-debug" else "";
-        _ = debug_suffix;
         inline for (targets) |target| {
             try shell.zig(
                 \\build install
@@ -240,15 +306,13 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 \\    -Dconfig-release={release_triple}
             , .{
                 .target = target,
-                .release = if (debug) "true" else "false",
+                .release = if (debug) "false" else "true",
                 .commit = info.sha,
                 .release_triple = info.release_triple,
             });
 
             const windows = comptime std.mem.indexOf(u8, target, "windows") != null;
-            const macos = comptime std.mem.indexOf(u8, target, "macos") != null;
             const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
-            _ = macos;
 
             // Copy the object using llvm-objcopy before taking our hash. This is to ensure we're
             // round trip deterministic between adding and removing sections:
@@ -265,16 +329,11 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 const current_binary = try std.fs.cwd().openFile(exe_name, .{ .mode = .read_only });
                 defer current_binary.close();
 
-                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 32 * 1024 * 1024);
+                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
                 break :blk multiversioning.checksum(current_binary_contents);
             };
 
-            const past_version_pack = try build_past_version_pack(
-                shell,
-                target,
-                debug,
-                "tigerbeetle-pack",
-            );
+            const past_version_pack = try build_past_version_pack(shell, target, debug, "tigerbeetle-pack");
 
             // Explicitly write out zeros for the metadata, to compute the checksum.
             var mvf = std.mem.zeroes(multiversioning.MultiVersionMetadata);
@@ -284,9 +343,9 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             mvf_file.close();
 
             // Use objcopy to add in our new pack, as well as its metadata - even though the metadata is still zero!
-            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --add-section .tigerbeetle.multiversion.pack=tigerbeetle-pack --set-section-flags .tigerbeetle.multiversion.pack=contents,noload,readonly --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined --add-section .tigerbeetle.multiversion.pack=tigerbeetle-pack --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata {exe_name}", .{
                 .llvm_objcopy = llvm_objcopy,
-                .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+                .exe_name = exe_name,
             });
 
             // Take the checksum of the binary, with the zero'd metadata.
@@ -294,7 +353,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 const current_binary = try std.fs.cwd().openFile(exe_name, .{ .mode = .read_only });
                 defer current_binary.close();
 
-                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 32 * 1024 * 1024);
+                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
                 break :blk multiversioning.checksum(current_binary_contents);
             };
 
@@ -311,9 +370,9 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             mvf_file.close();
 
             // Replace the metadata with the final version.
-            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --remove-section .tigerbeetle.multiversion.metadata --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata --set-section-flags .tigerbeetle.multiversion.metadata=contents,noload,readonly {exe_name} {exe_name}", .{
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined --remove-section .tigerbeetle.multiversion.metadata --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata {exe_name}", .{
                 .llvm_objcopy = llvm_objcopy,
-                .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+                .exe_name = exe_name,
             });
 
             // Finally, check the binary produced using both the old and new versions.
@@ -324,34 +383,103 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
 
             // return error.Foo;
 
-            // if (macos) {
-            //     try Shell.copy_path(
-            //         shell.project_root,
-            //         "tigerbeetle",
-            //         shell.project_root,
-            //         "tigerbeetle-" ++ target,
-            //     );
-            // } else {
-            //     const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
-            //     try shell.exec("zip -9 {zip_path} {exe_name}", .{
-            //         .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
-            //         .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
-            //     });
-            // }
+            const zip_name = "tigerbeetle-" ++ target ++ debug_suffix ++ ".zip";
+            try shell.exec("zip -9 {zip_path} {exe_name}", .{
+                .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
+                .exe_name = "tigerbeetle" ++ if (windows) ".exe" else "",
+            });
+        }
+    }
+
+    // macOS handling.
+    inline for (.{ true, false }) |debug| {
+        const debug_suffix = if (debug) "-debug" else "";
+        inline for (.{ "aarch64-macos", "x86_64-macos" }) |target| {
+            try shell.zig(
+                \\build install
+                \\    -Dtarget={target}
+                \\    -Drelease={release}
+                \\    -Dgit-commit={commit}
+                \\    -Dconfig-release={release_triple}
+            , .{
+                .target = target,
+                .release = if (debug) "false" else "true",
+                .commit = info.sha,
+                .release_triple = info.release_triple,
+            });
+
+            try Shell.copy_path(
+                shell.project_root,
+                "tigerbeetle",
+                shell.project_root,
+                "tigerbeetle-" ++ target,
+            );
+
+            const past_version_pack = try build_past_version_pack(shell, target, debug, "tigerbeetle-pack-" ++ target);
+            const current_checksum: u128 = blk: {
+                const current_binary = try std.fs.cwd().openFile("tigerbeetle", .{ .mode = .read_only });
+                defer current_binary.close();
+
+                const current_binary_contents = try current_binary.readToEndAlloc(shell.arena.allocator(), 128 * 1024 * 1024);
+                break :blk multiversioning.checksum(current_binary_contents);
+            };
+
+            // Unlike Windows and Linux, checksum_without_metadata here is computed as the checksum(binary + past_version_pack).
+            const checksum_without_metadata = 1; // FIXME
+
+            var mvf = multiversioning.MultiVersionMetadata{
+                .current_version = multiversioning.Release.from(try multiversioning.ReleaseTriple.parse(info.release_triple)).value,
+                .current_checksum = current_checksum,
+                .past = past_version_pack,
+                .checksum_without_metadata = checksum_without_metadata,
+            };
+            mvf.checksum_metadata = mvf.calculate_metadata_checksum();
+
+            var mvf_file = try std.fs.cwd().createFile("tigerbeetle-pack-" ++ target ++ ".metadata", .{ .truncate = true });
+            try mvf_file.writeAll(std.mem.asBytes(&mvf));
+            mvf_file.close();
         }
 
-        // try shell.exec(
-        //     \\{llvm_lipo}
-        //     \\  tigerbeetle-aarch64-macos tigerbeetle-x86_64-macos
-        //     \\  -create -output tigerbeetle
-        // , .{ .llvm_lipo = llvm_lipo });
-        // try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
-        // try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
-        // const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
-        // try shell.exec("zip -9 {zip_path} {exe_name}", .{
-        //     .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
-        //     .exe_name = "tigerbeetle",
-        // });
+        try build_macos_universal_binary(shell, "tigerbeetle", &.{
+            .{
+                .cpu_type = std.macho.CPU_TYPE_ARM64,
+                .cpu_subtype = std.macho.CPU_SUBTYPE_ARM_ALL,
+                .path = "tigerbeetle-aarch64-macos",
+            },
+            .{
+                .cpu_type = std.macho.CPU_TYPE_X86_64,
+                .cpu_subtype = std.macho.CPU_SUBTYPE_X86_64_ALL,
+                .path = "tigerbeetle-x86_64-macos",
+            },
+            .{
+                .cpu_type = 0x00000001, // VAX == .tigerbeetle.multiversion.pack for aarch64
+                .cpu_subtype = 0x00000000,
+                .path = "tigerbeetle-pack-aarch64-macos",
+            },
+            .{
+                .cpu_type = 0x00000002, // ROMP == .tigerbeetle.multiversion.metadata for aarch64
+                .cpu_subtype = 0x00000000,
+                .path = "tigerbeetle-pack-aarch64-macos.metadata",
+            },
+            .{
+                .cpu_type = 0x00000004, // NS32032 == .tigerbeetle.multiversion.pack for x86_64
+                .cpu_subtype = 0x00000000,
+                .path = "tigerbeetle-pack-x86_64-macos",
+            },
+            .{
+                .cpu_type = 0x00000005, // NS32332 == .tigerbeetle.multiversion.metadata for x86_64
+                .cpu_subtype = 0x00000000,
+                .path = "tigerbeetle-pack-x86_64-macos.metadata",
+            },
+        });
+
+        try shell.project_root.deleteFile("tigerbeetle-aarch64-macos");
+        try shell.project_root.deleteFile("tigerbeetle-x86_64-macos");
+        const zip_name = "tigerbeetle-universal-macos" ++ debug_suffix ++ ".zip";
+        try shell.exec("zip -9 {zip_path} {exe_name}", .{
+            .zip_path = try shell.print("{s}/{s}", .{ dist_dir_path, zip_name }),
+            .exe_name = "tigerbeetle",
+        });
     }
 }
 

@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
@@ -558,9 +559,23 @@ pub const MultiVersion = struct {
     }
 };
 
+pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
+    return switch (builtin.target.os.tag) {
+        .linux => exec_release_elf(allocator, io, release),
+        else => @panic("exec_release unimplemented"),
+    };
+}
+
+pub fn exec_self() !noreturn {
+    return switch (builtin.target.os.tag) {
+        .linux, .macos => exec_self_posix(),
+        else => @panic("exec_self unimplemented"),
+    };
+}
+
 /// exec_release is called before a replica is fully open, and before we've transitioned to not
 /// allocating. Therefore, we can use standard `os.read` blocking syscalls.
-pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
+fn exec_release_elf(allocator: std.mem.Allocator, io: *IO, release: Release) !noreturn {
     var self_exe_path = try std.fs.selfExePathAlloc(allocator);
     defer allocator.free(self_exe_path);
 
@@ -631,7 +646,7 @@ pub fn exec_release(allocator: std.mem.Allocator, io: *IO, release: Release) !no
     }
 }
 
-pub fn exec_self() !noreturn {
+fn exec_self_posix() !noreturn {
     var self_binary_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
     var self_binary_path = try std.fs.selfExePath(&self_binary_buf);
 
