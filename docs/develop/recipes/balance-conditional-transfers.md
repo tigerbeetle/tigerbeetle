@@ -4,8 +4,8 @@ sidebar_position: 4
 
 # Balance-Conditional Transfers
 
-In some use cases, you may want to execute a transfer if and only if an account has a certain
-balance.
+In some use cases, you may want to execute a transfer if and only if an account has at least a
+certain balance.
 
 It would be unsafe to check an account's balance using the
 [`lookup_accounts`](../../reference/operations/lookup_accounts.md) and then perform the transfer,
@@ -28,9 +28,9 @@ The account for whom you want to do the balance check must have one of these fla
 
 ### 2. Create a Control Account
 
-There must also be a designated control or temporary account. As you can see below, this account
-will never actually take control of the target account's funds, but we will set up simultaneous
-transfers in and out of the control account.
+There must also be a designated control account. As you can see below, this account will never
+actually take control of the target account's funds, but we will set up simultaneous transfers in
+and out of the control account.
 
 ## Executing a Balance-Conditional Transfer
 
