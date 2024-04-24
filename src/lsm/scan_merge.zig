@@ -266,7 +266,7 @@ fn ScanMergeType(
         }
 
         fn scan_read_callback(context: *Scan.Context, scan: *Scan) void {
-            const self: *ScanMerge = @fieldParentPtr(ScanMerge, "scan_context", context);
+            const self: *ScanMerge = @fieldParentPtr("scan_context", context);
             assert(self.state == .buffering);
             assert(self.state.buffering.pending_count > 0);
             assert(self.state.buffering.pending_count <= self.streams.count());

@@ -220,7 +220,7 @@ pub const Storage = struct {
     }
 
     fn on_read(self: *Storage, completion: *IO.Completion, result: IO.ReadError!usize) void {
-        const read = @fieldParentPtr(Storage.Read, "completion", completion);
+        const read: *Storage.Read = @fieldParentPtr("completion", completion);
 
         const bytes_read = result catch |err| switch (err) {
             error.InputOutput => {
@@ -358,7 +358,7 @@ pub const Storage = struct {
     }
 
     fn on_write(self: *Storage, completion: *IO.Completion, result: IO.WriteError!usize) void {
-        const write = @fieldParentPtr(Storage.Write, "completion", completion);
+        const write: *Storage.Write = @fieldParentPtr("completion", completion);
 
         const bytes_written = result catch |err| switch (err) {
             // We assume that the disk will attempt to reallocate a spare sector for any LSE.

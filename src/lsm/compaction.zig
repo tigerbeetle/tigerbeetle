@@ -948,7 +948,7 @@ pub fn CompactionType(
         }
 
         fn blip_read_index_callback(grid_read: *Grid.Read, index_block: BlockPtrConst) void {
-            const parent = @fieldParentPtr(Helpers.CompactionBlock, "read", grid_read);
+            const parent: *Helpers.CompactionBlock = @fieldParentPtr("read", grid_read);
             const compaction: *Compaction = @alignCast(@ptrCast(parent.target));
             assert(compaction.bar != null);
             assert(compaction.beat != null);
@@ -1094,7 +1094,7 @@ pub fn CompactionType(
         }
 
         fn blip_read_data_callback(grid_read: *Grid.Read, value_block: BlockPtrConst) void {
-            const parent = @fieldParentPtr(Helpers.CompactionBlock, "read", grid_read);
+            const parent: *Helpers.CompactionBlock = @fieldParentPtr("read", grid_read);
             const compaction: *Compaction = @alignCast(@ptrCast(parent.target));
             assert(compaction.tree_config.id == Table.data.block_metadata(value_block).tree_id);
 
@@ -1127,8 +1127,9 @@ pub fn CompactionType(
         }
 
         fn blip_read_next_tick(next_tick: *Grid.NextTick) void {
-            const read: *?Beat.Read = @ptrCast(@fieldParentPtr(Beat.Read, "next_tick", next_tick));
-            const beat = @fieldParentPtr(Beat, "read", read);
+            // TODO(zig): Address usage of @fieldParentPtr to optional fields.
+            const read: *?Beat.Read = @ptrCast(@as(*Beat.Read, @fieldParentPtr("next_tick", next_tick)));
+            const beat: *Beat = @fieldParentPtr("read", read);
 
             const duration = read.*.?.timer.read();
             log.debug("blip_read(): took {} to read {} blocks", .{
@@ -1794,7 +1795,7 @@ pub fn CompactionType(
         }
 
         fn blip_write_callback(grid_write: *Grid.Write) void {
-            const parent = @fieldParentPtr(Helpers.CompactionBlock, "write", grid_write);
+            const parent: *Helpers.CompactionBlock = @fieldParentPtr("write", grid_write);
             const compaction: *Compaction = @alignCast(@ptrCast(parent.target));
             assert(compaction.bar != null);
             assert(compaction.beat != null);
@@ -1820,10 +1821,11 @@ pub fn CompactionType(
         }
 
         fn blip_write_next_tick(next_tick: *Grid.NextTick) void {
+            // TODO(zig): Address usage of @fieldParentPtr to optional fields.
             const write: *?Beat.Write = @ptrCast(
-                @fieldParentPtr(Beat.Write, "next_tick", next_tick),
+                @as(*Beat.Write, @fieldParentPtr("next_tick", next_tick)),
             );
-            const beat = @fieldParentPtr(Beat, "write", write);
+            const beat: *Beat = @fieldParentPtr("write", write);
 
             const duration = write.*.?.timer.read();
             log.debug("blip_write(): took {} to write {} blocks", .{

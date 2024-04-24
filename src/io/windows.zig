@@ -104,7 +104,7 @@ pub const IO = struct {
 
                 for (events[0..num_events]) |event| {
                     const raw_overlapped = event.lpOverlapped;
-                    const overlapped = @fieldParentPtr(Completion.Overlapped, "raw", raw_overlapped);
+                    const overlapped: *Completion.Overlapped = @fieldParentPtr("raw", raw_overlapped);
                     const completion = overlapped.completion;
                     completion.next = null;
                     self.completed.push(completion);

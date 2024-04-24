@@ -91,7 +91,7 @@ pub const StatsD = struct {
         result: IO.SendError!usize,
     ) void {
         _ = result catch {};
-        const buffer_completion = @fieldParentPtr(BufferCompletion, "completion", completion);
+        const buffer_completion: *BufferCompletion = @fieldParentPtr("completion", completion);
         context.buffer_completions_fifo.push(buffer_completion);
     }
 };

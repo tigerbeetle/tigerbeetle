@@ -338,7 +338,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             manifest_log: *ManifestLog,
             table: *const schema.ManifestNode.TableInfo,
         ) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(forest.manifest_log_progress == .idle);
             assert(table.label.level < constants.lsm_levels);
@@ -357,7 +357,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn manifest_log_open_callback(manifest_log: *ManifestLog) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .open);
             assert(forest.manifest_log_progress == .idle);
             forest.verify_tables_recovered();
@@ -525,7 +525,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn compact_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.manifest_log_progress == .compacting);
 
             forest.manifest_log_progress = .done;
@@ -560,7 +560,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         fn checkpoint_manifest_log_callback(manifest_log: *ManifestLog) void {
-            const forest = @fieldParentPtr(Forest, "manifest_log", manifest_log);
+            const forest: *Forest = @fieldParentPtr("manifest_log", manifest_log);
             assert(forest.progress.? == .checkpoint);
             assert(forest.manifest_log_progress == .idle);
             forest.verify_table_extents();
@@ -1101,7 +1101,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn beat_finished_next_tick(next_tick: *Grid.NextTick) void {
-            const self = @fieldParentPtr(CompactionPipeline, "next_tick", next_tick);
+            const self: *CompactionPipeline = @fieldParentPtr("next_tick", next_tick);
 
             assert(self.beat_active.count() == 0);
             assert(self.slot_filled_count == 0);
@@ -1331,7 +1331,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
         }
 
         fn advance_pipeline_next_tick(next_tick: *Grid.NextTick) void {
-            const self = @fieldParentPtr(CompactionPipeline, "next_tick", next_tick);
+            const self: *CompactionPipeline = @fieldParentPtr("next_tick", next_tick);
             assert(self.cpu_slot != null);
             const cpu_slot = self.cpu_slot.?;
             self.cpu_slot = null;

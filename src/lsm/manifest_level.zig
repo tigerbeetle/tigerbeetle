@@ -103,7 +103,7 @@ pub fn ManifestLevelType(
             fn exclude(self: *LevelKeyRange, exclude_range: KeyRange) void {
                 assert(self.key_range != null);
 
-                var level = @fieldParentPtr(Self, "key_range_latest", self);
+                var level: *Self = @fieldParentPtr("key_range_latest", self);
                 if (level.table_count_visible == 0) {
                     self.key_range = null;
                     return;

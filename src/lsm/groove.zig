@@ -763,7 +763,7 @@ pub fn GrooveType(
             }
 
             fn worker_next_tick(completion: *Grid.NextTick) void {
-                const context = @fieldParentPtr(PrefetchContext, "next_tick", completion);
+                const context: *PrefetchContext = @fieldParentPtr("next_tick", completion);
                 assert(context.workers_pending == 0);
                 context.finish();
             }
@@ -801,8 +801,8 @@ pub fn GrooveType(
                     comptime field: Field,
                     completion: *FieldType(field),
                 ) *PrefetchWorker {
-                    const lookup = @fieldParentPtr(LookupContext, @tagName(field), completion);
-                    return @fieldParentPtr(PrefetchWorker, "lookup", lookup);
+                    const lookup: *LookupContext = @fieldParentPtr(@tagName(field), completion);
+                    return @fieldParentPtr("lookup", lookup);
                 }
 
                 pub inline fn get(self: *LookupContext, comptime field: Field) *FieldType(field) {

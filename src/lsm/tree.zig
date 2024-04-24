@@ -420,7 +420,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn read_index_block_callback(completion: *Read, index_block: BlockPtrConst) void {
-                const context = @fieldParentPtr(LookupContext, "completion", completion);
+                const context: *LookupContext = @fieldParentPtr("completion", completion);
                 assert(context.data_block == null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
@@ -448,7 +448,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             }
 
             fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
-                const context = @fieldParentPtr(LookupContext, "completion", completion);
+                const context: *LookupContext = @fieldParentPtr("completion", completion);
                 assert(context.data_block != null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
