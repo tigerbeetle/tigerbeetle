@@ -56,7 +56,9 @@ may be hard-coded into your application logic or stored in a general purpose (OL
 cached by your application. (These mappings should be immutable and append-only, so there is no
 concern about cache invalidation.)
 
-⚠️ Importantly, **initiating a transfer should not require fetching metadata from the general purpose database**. If it does, that database will become the bottleneck and will negate the performance gains from using TigerBeetle.
+⚠️ Importantly, **initiating a transfer should not require fetching metadata from the general
+purpose database**. If it does, that database will become the bottleneck and will negate the
+performance gains from using TigerBeetle.
 
 Specifically, the types of information that fit into this category include:
 
@@ -68,6 +70,7 @@ Specifically, the types of information that fit into this category include:
 
 ## Authentication
 
-TigerBeetle does not support authentication. You should never allow untrusted users or services to interact with it directly.
+TigerBeetle does not support authentication. You should never allow untrusted users or services to
+interact with it directly.
 
 Also, untrusted processes must not be able to access or modify TigerBeetle's on-disk data file.
