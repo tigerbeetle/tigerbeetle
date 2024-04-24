@@ -102,15 +102,12 @@ Applications may rescale the integer amounts as necessary when rendering or inte
 systems. But when working with fractional amounts, calculations should be performed on the integers
 to avoid loss of precision due to floating-point approximations.
 
-TigerBeetle stores information precisely and efficiently, while applications can still present
-fractional amounts to their users in a way that they are familiar with seeing them.
-
 ### Asset Scale
 
 When the multiplier is a power of 10 (e.g. `10 ^ n`), then the exponent `n` is referred to as an
 _asset scale_. For example, representing USD in cents uses an asset scale of `2`.
 
-### Examples
+#### Examples
 
 - In USD, `$1` = `100` cents. So for example,
   - The fractional amount `$0.45` is represented as the integer `45`.
@@ -119,10 +116,22 @@ _asset scale_. For example, representing USD in cents uses an asset scale of `2`
 
 ### Oversized Amounts
 
-The other direction works as well. If the smallest useful unit of a currency is `10,000,000 ¤`, then
-it can be scaled down to the integer `1`.
+The other direction works as well. If the smallest useful unit of a currency is `10,000,000` units,
+then it can be scaled down to the integer `1`.
 
 The 128-bit representation defines the precision, but not the scale.
+
+### ⚠️ Asset Scales Cannot Be Easily Changed
+
+When setting your asset scales, we recommend thinking about whether your application may _ever_
+require a larger asset scale. If so, we would recommend using that larger scale from the start.
+
+For example, it might seem natural to use an asset scale of 2 for many currencies. However, it may
+be wise to use a higher scale in case you ever need to represent smaller fractions of that asset.
+
+Accounts and transfers are immutable once created. In order to change the asset scale of a ledger,
+you would need to use a different `ledger` number and duplicate all the accounts on that ledger
+over to the new one.
 
 ## `user_data`
 
