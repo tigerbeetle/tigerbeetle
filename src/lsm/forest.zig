@@ -1001,7 +1001,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
 
                             // Try to coalesce tables in level_a before compacting into level_b.
                             if (level_b > 0) {
-                                var compaction = &tree.compactions[level_b - 1];
+                                const compaction = &tree.compactions[level_b - 1];
                                 if (compaction.maybe_coalesce(tree, op)) |info| {
                                     self.compactions.append_assume_capacity(info);
                                     log.debug("level_b={} tree={s} op={}", .{
@@ -1014,7 +1014,7 @@ fn CompactionPipelineType(comptime Forest: type, comptime Grid: type) type {
                             }
 
                             if (do_compaction) {
-                                var compaction = &tree.compactions[level_b];
+                                const compaction = &tree.compactions[level_b];
                                 if (compaction.bar_setup(tree, op)) |info| {
                                     self.compactions.append_assume_capacity(info);
                                     log.debug("level_b={} tree={s} op={}", .{

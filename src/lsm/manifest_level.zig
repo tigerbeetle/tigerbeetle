@@ -741,7 +741,7 @@ pub fn ManifestLevelType(
 
         const TableCoalesceWindowCandidate = struct {
             tables: stdx.BoundedArray(*const TableInfo, max_coalesce_window_size),
-            total_values: u64,
+            value_count_total: u64,
         };
 
         /// Attempt to find a range of visible tables that, when merged, will
@@ -760,21 +760,21 @@ pub fn ManifestLevelType(
             level: *const Self,
             prng_seed: u64,
         ) ?TableCoalesceWindow {
-            const num_tables = level.tables.len();
+            const table_count = level.tables.len();
 
             // todo need a heuristic to decide level is too full and not worth searching at all
 
-            if (num_tables <= 1) {
+            if (table_count <= 1) {
                 return null;
             }
 
-            if (num_tables <= max_coalesce_tables_to_search) {
+            if (table_count <= max_coalesce_tables_to_search) {
                 return level.find_table_coalesce_window_from_index(0);
             } else {
                 var pcg = std.rand.Pcg.init(prng_seed);
                 var rng = pcg.random();
 
-                const max_start_table = num_tables - max_coalesce_tables_to_search;
+                const max_start_table = table_count - max_coalesce_tables_to_search;
                 const max_start_table_exclusive = max_start_table + 1;
                 const start_index = rng.uintLessThan(u32, max_start_table_exclusive);
                 return level.find_table_coalesce_window_from_index(start_index);
@@ -804,7 +804,7 @@ pub fn ManifestLevelType(
                 );
                 if (next_candidate) |nc| {
                     std.log.debug("candidate {} / tables {}", .{
-                        nc.total_values,
+                        nc.value_count_total,
                         nc.tables.count(),
                     });
                 }
@@ -816,7 +816,7 @@ pub fn ManifestLevelType(
 
             if (best_candidate) |best_candidate_| {
                 std.log.debug("best candidate {} / tables {}", .{
-                    best_candidate_.total_values,
+                    best_candidate_.value_count_total,
                     best_candidate_.tables.count(),
                 });
                 var result = TableCoalesceWindow{
@@ -847,7 +847,7 @@ pub fn ManifestLevelType(
             _ = level;
             var window_iter_mut = window_iter;
             var tables: stdx.BoundedArray(*const TableInfo, max_coalesce_window_size) = .{};
-            var value_count_sum: u64 = 0;
+            var value_count_total: u64 = 0;
 
             // todo - there's quite a lot of logic in this hot loop (the
             // iterator `next` method itself is very complex) and it would be
@@ -865,17 +865,17 @@ pub fn ManifestLevelType(
                 }
 
                 tables.append_assume_capacity(table);
-                value_count_sum += table.value_count;
+                value_count_total += table.value_count;
 
                 const max_values = tables.count() * TableInfo.value_count_max_actual;
-                assert(value_count_sum <= max_values);
-                const free_value_slots = max_values - value_count_sum;
+                assert(value_count_total <= max_values);
+                const free_value_slots = max_values - value_count_total;
                 const can_free_table = free_value_slots >= TableInfo.value_count_max_actual;
 
                 if (can_free_table) {
                     return TableCoalesceWindowCandidate{
                         .tables = tables,
-                        .total_values = value_count_sum,
+                        .value_count_total = value_count_total,
                     };
                 }
             }
@@ -893,7 +893,7 @@ pub fn ManifestLevelType(
                 if (candidate_b) |candidate_b_| {
                     // Choose the window with fewest values.
                     // todo should we care about the table count?
-                    if (candidate_a_.total_values < candidate_b_.total_values) {
+                    if (candidate_a_.value_count_total < candidate_b_.value_count_total) {
                         return candidate_a_;
                     } else {
                         return candidate_b_;
@@ -991,17 +991,15 @@ pub fn ManifestLevelType(
                     return null;
                 }
 
-                const retval = it.buffer.get(0);
+                const result = it.buffer.get(0);
 
-                var index: usize = 0;
-                while (index < it.buffer.count() - 1) {
-                    it.buffer.slice()[index] = it.buffer.get(index + 1);
-                    index += 1;
+                for (it.buffer.slice()[0 .. it.buffer.count() - 1], 0..) |*element, index| {
+                    element.* = it.buffer.get(index + 1);
                 }
 
                 it.buffer.truncate(it.buffer.count() - 1);
 
-                return retval;
+                return result;
             }
 
             fn push_double_buffer_queue(it: *CoalesceTableIterator, t: *const TableInfo) void {
