@@ -37,11 +37,24 @@ accounting type system provide.
 
 In financial accounting, there are 5 main types of accounts:
 
-- **Assets** - what you own
-- **Liabilities** - what you owe to other people
-- **Equity** - amount invested by the owners or shareholders
-- **Revenue** - money coming in
-- **Expenses** - money going out
+- **Asset** - what you own, or "a present economic resource controlled by the entity as a result of
+  past events. An economic resource is a right that has the potential to produce economic
+  benefits."[^1]
+- **Liability** - what you owe to other people, or "a present obligation of the entity to transfer
+  an economic resource as a result of past events."[^1]
+- **Equity** - value of the business owned by the owners or shareholders, or "the residual interest
+  in the assets of the entity after deducting all its liabilities."[^1]
+- **Income** - money or things of value you receive for selling products or services, or "increases
+  in assets, or decreases in liabilities, that result in increases in equity, other than those
+  relating to contributions from holders of equity claims."[^1]
+- **Expense** - money you spend to pay for products or services, or "decreases in assets, or
+  increases in liabilities, that result in decreases in equity, other than those relating to
+  distributions to holders of equity claims."[^1]
+
+[^1]:
+    IFRS.
+    [_Conceptual Framework for Financial Reporting_](https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/conceptual-framework-for-financial-reporting.pdf).
+    IFRS Foundation, 2018.
 
 As mentioned above, the type of account depends on whose perspective you are doing the accounting
 from. In those examples, the loan you have from the bank is liability for you, because you owe the
@@ -97,13 +110,13 @@ maintaining this balance:
 - If a shareholder invests $1000 in the bank, that increases both the bank's assets and equity.
 
 Assets, liabilities, and equity are types of accounts on the balance sheet, meaning they represent a
-point in time. The other two main categories, revenue and expenses, are income statement accounts,
+point in time. The other two main categories, income and expenses, are income statement accounts,
 meaning they represent flows of money in and out.
 
-Revenue and expenses impact the balance sheet over time. The expanded accounting equation can be
+Income and expenses impact the balance sheet over time. The expanded accounting equation can be
 written as:
 
-**Assets = Liabilities + Contributed Capital + Revenue − Expenses − Dividends**
+**Assets = Liabilities + Contributed Capital + Income − Expenses − Dividends**
 
 You don't need to memorize these equations (unless you're training as an accountant!). However, it
 is useful to understand that those main account types lie on different sides of this equation.
@@ -126,17 +139,17 @@ accountants have used the same standards for hundreds of years:
 ### How Debits and Credits Increase or Decrease Account Balances
 
 - **Assets and expenses are increased with debits, decreased with credits**
-- **Liabilities, equity, and revenue are increased with credits, decreased with debits**
+- **Liabilities, equity, and income are increased with credits, decreased with debits**
 
 Or, in a table form:
 
-|             | Debit | Credit |
-| ----------- | ----- | ------ |
-| Assets      | +     | -      |
-| Liabilities | -     | +      |
-| Equity      | -     | +      |
-| Revenue     | -     | +      |
-| Expenses    | +     | -      |
+|           | Debit | Credit |
+| --------- | ----- | ------ |
+| Asset     | +     | -      |
+| Liability | -     | +      |
+| Equity    | -     | +      |
+| Income    | -     | +      |
+| Expense   | +     | -      |
 
 From the perspective of our example bank:
 
@@ -157,15 +170,15 @@ programmers need to learn zero-based array indexing and then at some point it be
 
 ## Takeaways
 
-- Accounts are categorized into types. The 5 main types are assets, liabilities, equity, revenue,
-  and expenses.
+- Accounts are categorized into types. The 5 main types are asset, liability, equity, income, and
+  expense.
 - Depending on the type of account, an increase is recorded as either a debit or a credit.
 - All transfers consist of two entries, a debit and a credit. Double-entry bookkeeping ensures that
   all funds come from somewhere and go somewhere.
 
 When you get started using TigerBeetle, we would recommend writing a list of all the types of
 accounts in your system that you can think of. Then, think about whether, from the perspective of
-your business, each account represents an asset, liability, equity, revenue, or expense. That
+your business, each account represents an asset, liability, equity, income, or expense. That
 determines whether the given type of account is increased with a debit or a credit.
 
 ## Want More Help Understanding Debits and Credits?
