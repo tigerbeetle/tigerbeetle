@@ -52,9 +52,8 @@ In financial accounting, there are 5 main types of accounts:
   distributions to holders of equity claims."[^1]
 
 [^1]:
-    IFRS.
-    [_Conceptual Framework for Financial Reporting_](https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/conceptual-framework-for-financial-reporting.pdf).
-    IFRS Foundation, 2018.
+    IFRS. _Conceptual Framework for Financial Reporting_. IFRS Foundation, 2018.
+    <https://www.ifrs.org/content/dam/ifrs/publications/pdf-standards/english/2021/issued/part-a/conceptual-framework-for-financial-reporting.pdf>
 
 As mentioned above, the type of account depends on whose perspective you are doing the accounting
 from. In those examples, the loan you have from the bank is liability for you, because you owe the
@@ -93,7 +92,7 @@ in two (or more) accounts -- but which accounts?
 The [Fundamental Accounting Equation](https://en.wikipedia.org/wiki/Accounting_equation) stipulates
 that:
 
-**Assets = Liabilities + Equity**
+**Assets - Liabilities = Equity**
 
 Using our loan example, it's no accident that the loan increases assets and liabilities at the same
 time. Assets and liabilities are on the opposite sides of the equation, and both sides must be
@@ -109,14 +108,13 @@ maintaining this balance:
   decreases as well.
 - If a shareholder invests $1000 in the bank, that increases both the bank's assets and equity.
 
-Assets, liabilities, and equity are types of accounts on the balance sheet, meaning they represent a
-point in time. The other two main categories, income and expenses, are income statement accounts,
-meaning they represent flows of money in and out.
+Assets, liabilities, and equity represent a point in time. The other two main categories, income and
+expenses, represent flows of money in and out.
 
-Income and expenses impact the balance sheet over time. The expanded accounting equation can be
-written as:
+Income and expenses impact the position of the business over time. The expanded accounting equation
+can be written as:
 
-**Assets = Liabilities + Contributed Capital + Income − Expenses − Dividends**
+**Assets - Liabilities = Equity + Income − Expenses**
 
 You don't need to memorize these equations (unless you're training as an accountant!). However, it
 is useful to understand that those main account types lie on different sides of this equation.
@@ -130,7 +128,8 @@ The two entries that give "double-entry bookkeeping" its name are the debit and 
 transaction has at least one debit and at least one credit. (Note that for efficiency's sake,
 TigerBeetle `Transfer`s consist of exactly one debit and one credit. These can be composed into more
 complex [multi-debit, multi-credit transfers](./recipes/multi-debit-credit-transfers.md).) Which
-entry is the debit and which is the credit?
+entry is the debit and which is the credit? The answer is easy once you understand that **accounting
+is a type system**. An account increases with a debit or credit according to its type.
 
 When our example loan increases the assets and liabilities, we need to assign each of these entries
 to either be a debit or a credit. At some level, this is completely arbitrary. For clarity,
@@ -167,6 +166,16 @@ _from_ the debited account _to_ the credited account.
 
 If this seems arbitrary and confusing, we understand! It's a convention, just like how most
 programmers need to learn zero-based array indexing and then at some point it becomes second nature.
+
+### Account Types and the "Normal Balance"
+
+Some other accounting systems have the concept of a "normal balance", which would indicate whether a
+given account's balance is increased by debits or credits.
+
+When designing for TigerBeetle, we recommend thinking about account types instead of "normal
+balances". This is because the type of balance follows from the type of account, but the type of
+balance doesn't tell you the type of account. For example, an account might have a normal balance on
+the debit side but that doesn't tell you whether it is an asset or expense.
 
 ## Takeaways
 
