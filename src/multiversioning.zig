@@ -240,6 +240,11 @@ pub const MultiVersion = struct {
         read_elf_string_table_section,
         read_elf_string_table,
         read_elf_section: u64,
+
+        // PE and MachO are easy to read - all the data is within the first ~2KB.
+        read_macho_header,
+        read_pe_header,
+
         read_multiversion_metadata,
         ready,
         err: anyerror,
@@ -329,6 +334,7 @@ pub const MultiVersion = struct {
         self.callback = callback;
 
         // Can opening a file block?
+        // Yes, it can. Fix this and add openat() to Linux io_uring.
         self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
 
         self.read_from_elf_header();
@@ -519,14 +525,142 @@ pub const MultiVersion = struct {
         }
     }
 
+    pub fn read_from_macho(self: *MultiVersion, callback: ?Callback) void {
+        self.callback = callback;
+
+        // Can opening a file block?
+        // Yes, it can. Fix this and add openat() to Linux io_uring.
+        self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
+
+        // Everything we need to read our metadata lies within the first 2048 bytes of our universal binary!
+        self.stage = .read_macho_header;
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_from_macho_header,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..2048],
+            0,
+        );
+    }
+
+    fn on_read_from_macho_header(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
+        std.log.info("read header?", .{});
+        _ = completion;
+        const read_bytes = result catch |e| return self.handle_error(e);
+        _ = read_bytes;
+
+        assert(self.stage == .read_macho_header);
+
+        var fat_header: std.macho.fat_header = undefined;
+        var fat_arches: [6]std.macho.fat_arch = undefined; // 6 -> x86_64, arm, {metadata, pack} for each
+
+        std.mem.copy(u8, std.mem.asBytes(&fat_header), self.read_buffer[0..@sizeOf(std.macho.fat_header)]);
+        std.mem.copy(u8, std.mem.asBytes(&fat_arches), self.read_buffer[@sizeOf(std.macho.fat_header)..][0..@sizeOf(@TypeOf(fat_arches))]);
+
+        // FIXME: assert -> error
+        assert(fat_header.magic == std.macho.FAT_CIGAM);
+        assert(@byteSwap(fat_header.nfat_arch) == fat_arches.len);
+
+        for (fat_arches) |fat_arch| {
+            if (builtin.target.cpu.arch == .aarch64) {
+                if (@byteSwap(fat_arch.cputype) == 0x00000001) {
+                    // VAX == .tbmvp for aarch64
+                    self.pack_offset = @byteSwap(fat_arch.offset);
+                } else if (@byteSwap(fat_arch.cputype) == 0x00000002) {
+                    // ROMP == .tbmvm for aarch64
+                    self.metadata_offset = @byteSwap(fat_arch.offset);
+                }
+            }
+
+            if (builtin.target.cpu.arch == .x86_64) {
+                if (@byteSwap(fat_arch.cputype) == 0x00000004) {
+                    // NS32032 == .tbmvp for x86_64
+                    self.pack_offset = @byteSwap(fat_arch.offset);
+                } else if (@byteSwap(fat_arch.cputype) == 0x00000005) {
+                    // NS32332 == .tbmvm for x86_64
+                    self.metadata_offset = @byteSwap(fat_arch.offset);
+                }
+            }
+        }
+
+        self.stage = .read_multiversion_metadata;
+
+        assert(self.pack_offset != null);
+        // assert(self.metadata_offset != null);
+
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_multiversion_metadata,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..@sizeOf(MultiVersionMetadata)],
+            self.metadata_offset,
+        );
+    }
+
+    pub fn read_from_pe(self: *MultiVersion, callback: ?Callback) void {
+        self.callback = callback;
+
+        // Can opening a file block?
+        // Yes, it can. Fix this and add openat() to Linux io_uring.
+        self.file = std.fs.openFileAbsolute(self.exe_path, .{ .mode = .read_only }) catch return self.handle_error(error.FileOpenError);
+
+        // Everything we need to read our metadata lies within the first 2048 bytes of our universal binary!
+        self.stage = .read_pe_header;
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_from_pe_header,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..2048],
+            0,
+        );
+    }
+
+    fn on_read_from_pe_header(self: *MultiVersion, completion: *IO.Completion, result: IO.ReadError!usize) void {
+        std.log.info("read pe header?", .{});
+        _ = completion;
+        const read_bytes = result catch |e| return self.handle_error(e);
+        _ = read_bytes;
+
+        assert(self.stage == .read_pe_header);
+
+        const coff = std.coff.Coff.init(self.read_buffer) catch |e| return self.handle_error(e);
+        const pack_section = coff.getSectionByName(".tbmvp");
+        const metadata_section = coff.getSectionByName(".tbmvm");
+
+        // FIXME: assert -> error
+        assert(pack_section != null);
+        assert(metadata_section != null);
+
+        self.pack_offset = pack_section.?.pointer_to_raw_data;
+        self.metadata_offset = metadata_section.?.pointer_to_raw_data;
+
+        self.stage = .read_multiversion_metadata;
+
+        assert(self.pack_offset != null);
+        // assert(self.metadata_offset != null);
+
+        self.io.read(
+            *MultiVersion,
+            self,
+            on_read_multiversion_metadata,
+            &self.completion,
+            self.file.?.handle,
+            self.read_buffer[0..@sizeOf(MultiVersionMetadata)],
+            self.metadata_offset,
+        );
+    }
+
     fn handle_error(self: *MultiVersion, result: anyerror) void {
         if (self.file) |*file| {
             file.close();
         }
         std.log.err("binary does not contain a valid multiversion pack: {}", .{result});
-
-        self.releases_bundled.clear();
-        // self.releases_bundled.append_assume_capacity(config.process.release);
 
         self.stage = .{ .err = result };
 
@@ -546,16 +680,6 @@ pub const MultiVersion = struct {
         if (self.stage == .err) {
             return self.stage.err;
         }
-    }
-
-    pub fn from_macho(binary_path: []const u8) !MultiVersion {
-        _ = binary_path;
-        return error.Unimplemented;
-    }
-
-    pub fn from_pe(binary_path: []const u8) !MultiVersion {
-        _ = binary_path;
-        return error.Unimplemented;
     }
 };
 

@@ -193,15 +193,19 @@ const Command = struct {
         var multiversion = try vsr.multiversioning.MultiVersion.init(
             allocator,
             &command.io,
-            command.self_exe_path,
+            "/home/federico/git/tigerbeetle/tigerbeetle-4/dist/tigerbeetle/tigerbeetle.exe",
         );
-        multiversion.read_from_elf(null);
+        multiversion.read_from_pe(null);
         if (multiversion.tick_until_ready()) {
             log_main.info("enabling automatic on-disk version detection.", .{});
             multiversion.on_timeout_read_from_elf_callback({});
         } else |err| {
             _ = err catch void;
             log_main.warn("automatic on-disk version detection disabled. restart tigerbeetle after replacing the binary to upgrade it.", .{});
+
+            multiversion.metadata.current_version = config.process.release.value;
+            multiversion.releases_bundled.clear();
+            multiversion.releases_bundled.append_assume_capacity(config.process.release);
         }
 
         // Sanity check our metadata - if this fails, it's because either we're running against a
@@ -367,7 +371,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     for (replica.releases_bundled.const_slice()) |release_bundled| {
         if (release_bundled.value == release.value) break;
     } else {
-        log_main.err("{}: release_execute: release {} is not available; upgrade the binary", .{
+        log_main.err("{}: release_execute: release {} is not available; upgrade (or downgrade) the binary", .{
             replica.replica,
             release,
         });

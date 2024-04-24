@@ -128,9 +128,10 @@ fn build_macos_universal_binary(shell: *Shell, dst: []const u8, binaries: []cons
     defer section.close();
 
     // The offset start is relative to the end of the headers, rounded up to the alignment.
-    // Use align of 2^14 == 16384 to match macOS. This is plenty for any headers.
+    // Use align of 2^14 == 16384 to match macOS. This is plenty for any headers, considering
+    // we assert < 2048 to keep our reading buffers small in multiversioning.zig.
     const headers_size = @sizeOf(std.macho.fat_header) + @sizeOf(std.macho.fat_arch) * binaries.len;
-    assert(headers_size < 16384);
+    assert(headers_size < 2048);
 
     var binary_headers = try shell.arena.allocator().alloc(std.macho.fat_arch, binaries.len);
 
@@ -343,7 +344,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             mvf_file.close();
 
             // Use objcopy to add in our new pack, as well as its metadata - even though the metadata is still zero!
-            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined --add-section .tigerbeetle.multiversion.pack=tigerbeetle-pack --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata {exe_name}", .{
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined --add-section .tbmvp=tigerbeetle-pack --set-section-flags .tbmvp=contents,noload,readonly --add-section .tbmvm=tigerbeetle-pack.metadata --set-section-flags .tbmvm=contents,noload,readonly {exe_name}", .{
                 .llvm_objcopy = llvm_objcopy,
                 .exe_name = exe_name,
             });
@@ -370,7 +371,7 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
             mvf_file.close();
 
             // Replace the metadata with the final version.
-            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined --remove-section .tigerbeetle.multiversion.metadata --add-section .tigerbeetle.multiversion.metadata=tigerbeetle-pack.metadata {exe_name}", .{
+            try shell.exec("{llvm_objcopy} --enable-deterministic-archives --keep-undefined --remove-section .tbmvm --add-section .tbmvm=tigerbeetle-pack.metadata --set-section-flags .tbmvm=contents,noload,readonly {exe_name}", .{
                 .llvm_objcopy = llvm_objcopy,
                 .exe_name = exe_name,
             });
@@ -452,22 +453,22 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
                 .path = "tigerbeetle-x86_64-macos",
             },
             .{
-                .cpu_type = 0x00000001, // VAX == .tigerbeetle.multiversion.pack for aarch64
+                .cpu_type = 0x00000001, // VAX == .tbmvp for aarch64
                 .cpu_subtype = 0x00000000,
                 .path = "tigerbeetle-pack-aarch64-macos",
             },
             .{
-                .cpu_type = 0x00000002, // ROMP == .tigerbeetle.multiversion.metadata for aarch64
+                .cpu_type = 0x00000002, // ROMP == .tbmvm for aarch64
                 .cpu_subtype = 0x00000000,
                 .path = "tigerbeetle-pack-aarch64-macos.metadata",
             },
             .{
-                .cpu_type = 0x00000004, // NS32032 == .tigerbeetle.multiversion.pack for x86_64
+                .cpu_type = 0x00000004, // NS32032 == .tbmvp for x86_64
                 .cpu_subtype = 0x00000000,
                 .path = "tigerbeetle-pack-x86_64-macos",
             },
             .{
-                .cpu_type = 0x00000005, // NS32332 == .tigerbeetle.multiversion.metadata for x86_64
+                .cpu_type = 0x00000005, // NS32332 == .tbmvm for x86_64
                 .cpu_subtype = 0x00000000,
                 .path = "tigerbeetle-pack-x86_64-macos.metadata",
             },
