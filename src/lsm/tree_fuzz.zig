@@ -114,6 +114,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
         const Environment = @This();
 
+        // The tree should behave like a simple key-value data-structure.
+        // We'll compare it to a hash map.
+        const Model = std.hash_map.AutoHashMap(u64, Value);
+
         const Tree = @import("tree.zig").TreeType(Table, Storage);
         const Table = TableType(
             u64,
@@ -514,9 +518,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
         }
 
         pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-            // The tree should behave like a simple key-value data-structure.
-            // We'll compare it to a hash map.
-            var model = std.hash_map.AutoHashMap(u64, Value).init(allocator);
+            var model = Model.init(allocator);
             defer model.deinit();
 
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -583,111 +585,113 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                             }
                         }
                     },
-                    .scan => |scan_range| {
-                        assert(scan_range.min <= scan_range.max);
+                    .scan => |scan_range| try env.apply_scan(&model, scan_range),
+                }
+            }
+        }
 
-                        const tree_values = env.scan(
-                            scan_range.min,
-                            scan_range.max,
-                            scan_range.direction,
-                        );
+        fn apply_scan(env: *Environment, model: *const Model, scan_range: FuzzOp.Scan) !void {
+            assert(scan_range.min <= scan_range.max);
 
-                        // Asserting the positive space:
-                        // all keys found by the scan must exist in our model.
-                        var tree_value_last: ?Value = null;
-                        for (tree_values) |tree_value| {
+            const tree_values = env.scan(
+                scan_range.min,
+                scan_range.max,
+                scan_range.direction,
+            );
 
-                            // Asserting boundaries.
-                            assert(scan_range.min <= Table.key_from_value(&tree_value));
-                            assert(Table.key_from_value(&tree_value) <= scan_range.max);
+            // Asserting the positive space:
+            // all keys found by the scan must exist in our model.
+            var tree_value_last: ?Value = null;
+            for (tree_values) |tree_value| {
 
-                            // Asserting direction.
-                            if (tree_value_last) |value_last| {
-                                switch (scan_range.direction) {
-                                    .ascending => assert(Table.key_from_value(&tree_value) >
-                                        Table.key_from_value(&value_last)),
-                                    .descending => assert(Table.key_from_value(&tree_value) <
-                                        Table.key_from_value(&value_last)),
-                                }
-                            }
-                            tree_value_last = tree_value;
+                // Asserting boundaries.
+                assert(scan_range.min <= Table.key_from_value(&tree_value));
+                assert(Table.key_from_value(&tree_value) <= scan_range.max);
 
-                            // Compare result to model.
-                            if (model.get(Table.key_from_value(&tree_value))) |model_value| {
-                                switch (table_usage) {
-                                    .general => {
-                                        assert(std.mem.eql(
-                                            u8,
-                                            std.mem.asBytes(&model_value),
-                                            std.mem.asBytes(&tree_value),
-                                        ));
-                                    },
-                                    .secondary_index => {
-                                        // secondary_index only preserves keys - may return old values
-                                        assert(Table.key_from_value(&model_value) ==
-                                            Table.key_from_value(&tree_value));
-                                    },
-                                }
-                            } else {
-                                assert(Table.tombstone(&tree_value));
-                            }
+                // Asserting direction.
+                if (tree_value_last) |value_last| {
+                    switch (scan_range.direction) {
+                        .ascending => assert(Table.key_from_value(&tree_value) >
+                            Table.key_from_value(&value_last)),
+                        .descending => assert(Table.key_from_value(&tree_value) <
+                            Table.key_from_value(&value_last)),
+                    }
+                }
+                tree_value_last = tree_value;
+
+                // Compare result to model.
+                if (model.get(Table.key_from_value(&tree_value))) |model_value| {
+                    switch (table_usage) {
+                        .general => {
+                            assert(std.mem.eql(
+                                u8,
+                                std.mem.asBytes(&model_value),
+                                std.mem.asBytes(&tree_value),
+                            ));
+                        },
+                        .secondary_index => {
+                            // secondary_index only preserves keys - may return old values
+                            assert(Table.key_from_value(&model_value) ==
+                                Table.key_from_value(&tree_value));
+                        },
+                    }
+                } else {
+                    assert(Table.tombstone(&tree_value));
+                }
+            }
+
+            // Asserting the negative space:
+            // All keys existing in our model must be checked against the scan range.
+            if (scan_range.direction == .descending) std.mem.sort(
+                Value,
+                tree_values,
+                {},
+                struct {
+                    fn sort(_: void, a: Value, b: Value) bool {
+                        return Table.key_from_value(&a) <
+                            Table.key_from_value(&b);
+                    }
+                }.sort,
+            );
+
+            var it = model.iterator();
+            while (it.next()) |entry| {
+                const model_value_key = Value.key_from_value(entry.value_ptr);
+                const value_maybe = binary_search.binary_search_values(
+                    u64,
+                    Value,
+                    Table.key_from_value,
+                    tree_values,
+                    model_value_key,
+                    .{},
+                );
+
+                if (model_value_key >= scan_range.min and
+                    model_value_key <= scan_range.max)
+                {
+                    // Must be found:
+                    if (value_maybe == null) {
+                        // Or our buffer has exceeded, in this case the key should
+                        // be less than the first element or greater than the last element,
+                        // depending on the scan direction.
+                        assert(tree_values.len == scan_results_max);
+                        switch (scan_range.direction) {
+                            .ascending => assert(
+                                Table.key_from_value(&tree_values[tree_values.len - 1]) <
+                                    model_value_key,
+                            ),
+                            .descending => assert(
+                                model_value_key <
+                                    Table.key_from_value(&tree_values[0]),
+                            ),
                         }
-
-                        // Asserting the negative space:
-                        // All keys existing in our model must be checked against the scan range.
-                        if (scan_range.direction == .descending) std.mem.sort(
-                            Value,
-                            tree_values,
-                            {},
-                            struct {
-                                fn sort(_: void, a: Value, b: Value) bool {
-                                    return Table.key_from_value(&a) <
-                                        Table.key_from_value(&b);
-                                }
-                            }.sort,
-                        );
-
-                        var it = model.iterator();
-                        while (it.next()) |entry| {
-                            const model_value_key = Value.key_from_value(entry.value_ptr);
-                            const value_maybe = binary_search.binary_search_values(
-                                u64,
-                                Value,
-                                Table.key_from_value,
-                                tree_values,
-                                model_value_key,
-                                .{},
-                            );
-
-                            if (model_value_key >= scan_range.min and
-                                model_value_key <= scan_range.max)
-                            {
-                                // Must be found:
-                                if (value_maybe == null) {
-                                    // Or our buffer has exceeded, in this case the key should
-                                    // be less than the first element or greater than the last element,
-                                    // depending on the scan direction.
-                                    assert(tree_values.len == scan_results_max);
-                                    switch (scan_range.direction) {
-                                        .ascending => assert(
-                                            Table.key_from_value(&tree_values[tree_values.len - 1]) <
-                                                model_value_key,
-                                        ),
-                                        .descending => assert(
-                                            model_value_key <
-                                                Table.key_from_value(&tree_values[0]),
-                                        ),
-                                    }
-                                }
-                            } else {
-                                // Must not be found:
-                                if (value_maybe) |value| {
-                                    // Or it's a tombstone.
-                                    assert(Table.tombstone(value));
-                                }
-                            }
-                        }
-                    },
+                    }
+                } else {
+                    // Must not be found:
+                    if (value_maybe) |value| {
+                        // Or it's a tombstone.
+                        assert(Table.tombstone(value));
+                    }
                 }
             }
         }
