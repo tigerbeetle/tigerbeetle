@@ -70,7 +70,7 @@ const half_bar_beat_count = @divExact(constants.lsm_batch_multiple, 2);
 pub const CompactionInfo = struct {
     /// How many values, across all input tables, need to be processed.
     /// This is the total – it is fixed for the duration of the compaction.
-    compaction_tables_value_count: usize,
+    compaction_tables_value_count: u64,
 
     // Keys are integers in TigerBeetle, with a maximum size of u256. Store these
     // here, instead of Key, to keep this unspecialized.
@@ -569,7 +569,7 @@ pub fn CompactionType(
                 .tables = tables.tables,
             };
 
-            var compaction_tables_value_count: usize = 0;
+            var compaction_tables_value_count: u64 = 0;
             for (range_b.tables.const_slice()) |*table| {
                 compaction_tables_value_count += table.table_info.value_count;
             }
@@ -644,7 +644,7 @@ pub fn CompactionType(
                     table_immutable_values_count,
                 });
 
-                var compaction_tables_value_count: usize = table_immutable_values_count;
+                var compaction_tables_value_count: u64 = table_immutable_values_count;
                 for (range_b.tables.const_slice()) |*table| {
                     compaction_tables_value_count += table.table_info.value_count;
                 }
@@ -687,7 +687,7 @@ pub fn CompactionType(
                     compaction.level_b,
                 });
 
-                var compaction_tables_value_count: usize = table_a.value_count;
+                var compaction_tables_value_count: u64 = table_a.value_count;
                 for (range_b.tables.const_slice()) |*table| {
                     compaction_tables_value_count += table.table_info.value_count;
                 }
