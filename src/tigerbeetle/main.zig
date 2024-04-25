@@ -80,11 +80,9 @@ const Command = struct {
     fd: os.fd_t,
     io: IO,
     storage: Storage,
-    message_pool: MessagePool,
 
     fn init(
         command: *Command,
-        allocator: mem.Allocator,
         path: [:0]const u8,
         options: struct {
             must_create: bool,
@@ -119,13 +117,9 @@ const Command = struct {
 
         command.storage = try Storage.init(&command.io, command.fd);
         errdefer command.storage.deinit();
-
-        command.message_pool = try MessagePool.init(allocator, .replica);
-        errdefer command.message_pool.deinit(allocator);
     }
 
-    fn deinit(command: *Command, allocator: mem.Allocator) void {
-        command.message_pool.deinit(allocator);
+    fn deinit(command: *Command) void {
         command.storage.deinit();
         command.io.deinit();
         os.close(command.fd);
@@ -138,11 +132,11 @@ const Command = struct {
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(args.path, .{
             .must_create = true,
             .development = args.development,
         });
-        defer command.deinit(allocator);
+        defer command.deinit();
 
         var superblock = try SuperBlock.init(
             allocator,
@@ -174,11 +168,14 @@ const Command = struct {
         const allocator = traced_allocator.allocator();
 
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(args.path, .{
             .must_create = false,
             .development = args.development,
         });
-        defer command.deinit(allocator);
+        defer command.deinit();
+
+        var message_pool = try MessagePool.init(allocator, .replica);
+        defer message_pool.deinit(allocator);
 
         var aof: AOFType = undefined;
         if (constants.aof_record) {
@@ -230,7 +227,7 @@ const Command = struct {
             .storage_size_limit = args.storage_size_limit,
             .storage = &command.storage,
             .aof = &aof,
-            .message_pool = &command.message_pool,
+            .message_pool = &message_pool,
             .nonce = nonce,
             .time = .{},
             .state_machine_options = .{
