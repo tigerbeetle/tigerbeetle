@@ -37,11 +37,8 @@ accounting type system provide.
 
 In financial accounting, there are 5 main types of accounts:
 
-- **Asset** - what you own, or "a present economic resource controlled by the entity as a result of
-  past events. An economic resource is a right that has the potential to produce economic
-  benefits."[^1]
-- **Liability** - what you owe to other people, or "a present obligation of the entity to transfer
-  an economic resource as a result of past events."[^1]
+- **Asset** - what you own, which could produce income or which you could sell.
+- **Liability** - what you owe to other people.
 - **Equity** - value of the business owned by the owners or shareholders, or "the residual interest
   in the assets of the entity after deducting all its liabilities."[^1]
 - **Income** - money or things of value you receive for selling products or services, or "increases
