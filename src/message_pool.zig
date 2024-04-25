@@ -60,6 +60,7 @@ pub const messages_max_client = messages_max: {
 comptime {
     // These conditions are necessary (but not sufficient) to prevent deadlocks.
     assert(messages_max_replica > constants.replicas_max);
+    assert(messages_max_client > 1);
 }
 
 /// A pool of reference-counted Messages, memory for which is allocated only once during
