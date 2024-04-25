@@ -142,7 +142,7 @@ fn java_type(
             "Type " ++ @typeName(Type) ++ " not mapped.",
         ),
         .Struct => |info| switch (info.layout) {
-            .Packed => return comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .@"packed" => return comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => return comptime get_mapped_type_name(Type) orelse @compileError(
                 "Type " ++ @typeName(Type) ++ " not mapped.",
             ),
@@ -355,7 +355,7 @@ fn batch_type(comptime Type: type) []const u8 {
             }
         },
         .Struct => |info| switch (info.layout) {
-            .Packed => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+            .@"packed" => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => {},
         },
         .Enum => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
@@ -872,16 +872,16 @@ pub fn generate_bindings(
 
     switch (@typeInfo(ZigType)) {
         .Struct => |info| switch (info.layout) {
-            .Auto => @compileError(
+            .auto => @compileError(
                 "Only packed or extern structs are supported: " ++ @typeName(ZigType),
             ),
-            .Packed => try emit_packed_enum(
+            .@"packed" => try emit_packed_enum(
                 buffer,
                 info,
                 mapping,
                 comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(ZigType))),
             ),
-            .Extern => try emit_batch(
+            .@"extern" => try emit_batch(
                 buffer,
                 info,
                 mapping,

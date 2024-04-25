@@ -31,9 +31,9 @@ const SuperBlock = vsr.SuperBlockType(Storage);
 const superblock_zone_size = vsr.superblock.superblock_zone_size;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
-pub const std_options = struct {
-    pub const log_level: std.log.Level = constants.log_level;
-    pub const logFn = constants.log;
+pub const std_options = .{
+    .log_level = constants.log_level,
+    .logFn = constants.log,
 };
 
 pub fn main() !void {
@@ -146,8 +146,8 @@ const SigIllHandler = struct {
 };
 
 const Command = struct {
-    dir_fd: os.fd_t,
-    fd: os.fd_t,
+    dir_fd: std.posix.fd_t,
+    fd: std.posix.fd_t,
     io: IO,
     storage: Storage,
 
@@ -163,7 +163,7 @@ const Command = struct {
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
         command.dir_fd = try IO.open_dir(dirname);
-        errdefer os.close(command.dir_fd);
+        errdefer std.posix.close(command.dir_fd);
 
         const direct_io: vsr.io.DirectIO = if (!constants.direct_io)
             .direct_io_disabled
@@ -180,7 +180,7 @@ const Command = struct {
             if (options.must_create) .create else .open,
             direct_io,
         );
-        errdefer os.close(command.fd);
+        errdefer std.posix.close(command.fd);
 
         command.io = try IO.init(128, 0);
         errdefer command.io.deinit();
@@ -192,8 +192,8 @@ const Command = struct {
     fn deinit(command: *Command) void {
         command.storage.deinit();
         command.io.deinit();
-        os.close(command.fd);
-        os.close(command.dir_fd);
+        std.posix.close(command.fd);
+        std.posix.close(command.dir_fd);
     }
 
     pub fn format(

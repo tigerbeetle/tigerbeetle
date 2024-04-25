@@ -14,9 +14,9 @@ const log = std.log.scoped(.tb_client_signal);
 /// to resolve IO.Completions on the tigerbeetle thread.
 pub const Signal = struct {
     io: *IO,
-    server_socket: os.socket_t,
-    accept_socket: os.socket_t,
-    connect_socket: os.socket_t,
+    server_socket: std.posix.socket_t,
+    accept_socket: std.posix.socket_t,
+    connect_socket: std.posix.socket_t,
 
     completion: IO.Completion,
     recv_buffer: [1]u8,
@@ -31,7 +31,7 @@ pub const Signal = struct {
 
     pub fn init(self: *Signal, io: *IO, on_signal_fn: *const fn (*Signal) void) !void {
         self.io = io;
-        self.server_socket = os.socket(
+        self.server_socket = std.posix.socket(
             os.AF.INET,
             os.SOCK.STREAM | os.SOCK.NONBLOCK,
             os.IPPROTO.TCP,
@@ -43,7 +43,7 @@ pub const Signal = struct {
                 error.Unexpected => error.Unexpected,
             };
         };
-        errdefer os.closeSocket(self.server_socket);
+        errdefer self.io.close_socket(self.server_socket);
 
         // Windows requires that the socket is bound before listening
         if (builtin.target.os.tag == .windows) {
@@ -99,7 +99,7 @@ pub const Signal = struct {
             log.err("failed to create signal connect socket: {}", .{err});
             return error.Unexpected;
         };
-        errdefer os.closeSocket(self.connect_socket);
+        errdefer self.io.close_socket(self.connect_socket);
 
         // Tracks when the connect_socket connects to the server_socket
         const DoConnect = struct {
@@ -139,7 +139,7 @@ pub const Signal = struct {
 
             // Try to accept the connection from the connect_socket as the accept_socket
             if (self.accept_socket == IO.INVALID_SOCKET) {
-                self.accept_socket = os.accept(self.server_socket, null, null, 0) catch |e| switch (e) {
+                self.accept_socket = std.posix.accept(self.server_socket, null, null, 0) catch |e| switch (e) {
                     error.WouldBlock => continue,
                     error.ConnectionAborted => unreachable,
                     error.ConnectionResetByPeer => unreachable,
@@ -172,9 +172,9 @@ pub const Signal = struct {
     }
 
     pub fn deinit(self: *Signal) void {
-        os.closeSocket(self.server_socket);
-        os.closeSocket(self.accept_socket);
-        os.closeSocket(self.connect_socket);
+        self.io.close_socket(self.server_socket);
+        self.io.close_socket(self.accept_socket);
+        self.io.close_socket(self.connect_socket);
     }
 
     /// Schedules the on_signal callback to be invoked on the IO thread.

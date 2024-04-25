@@ -79,13 +79,13 @@ pub const Storage = struct {
     pub const NextTickSource = enum { lsm, vsr };
 
     io: *IO,
-    fd: os.fd_t,
+    fd: std.posix.fd_t,
 
     next_tick_queue: FIFO(NextTick) = .{ .name = "storage_next_tick" },
     next_tick_completion_scheduled: bool = false,
     next_tick_completion: IO.Completion = undefined,
 
-    pub fn init(io: *IO, fd: os.fd_t) !Storage {
+    pub fn init(io: *IO, fd: std.posix.fd_t) !Storage {
         return Storage{
             .io = io,
             .fd = fd,

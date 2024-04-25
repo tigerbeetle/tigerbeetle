@@ -14,11 +14,11 @@ comptime {
     assert(constants.storage_size_limit_max == tigerbeetle_config.process.storage_size_limit_max);
 }
 
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
-    pub const log_scope_levels = &[_]std.log.ScopeLevel{
+pub const std_options = .{
+    .log_level = .info,
+    .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .superblock_quorums, .level = .err },
-    };
+    },
 };
 
 const Fuzzers = .{

@@ -79,8 +79,8 @@ test "valid tb_client.h" {
                 }
             },
             .Struct => |type_info| switch (type_info.layout) {
-                .Auto => @compileError("struct must be extern or packed to be used in C"),
-                .Packed => {
+                .auto => @compileError("struct must be extern or packed to be used in C"),
+                .@"packed" => {
                     const prefix_offset = comptime std.mem.lastIndexOf(u8, c_type_name, "_").?;
                     const c_enum_prefix = c_type_name[0 .. prefix_offset + 1];
                     comptime assert(c_type == c_uint);
@@ -98,7 +98,7 @@ test "valid tb_client.h" {
                         }
                     }
                 },
-                .Extern => {
+                .@"extern" => {
                     // Ensure structs are effectively the same.
                     comptime assert(@sizeOf(ty) == @sizeOf(c_type));
                     comptime assert(@alignOf(ty) == @alignOf(c_type));
@@ -108,7 +108,7 @@ test "valid tb_client.h" {
                         comptime var field_type = field.type;
                         switch (@typeInfo(field_type)) {
                             .Struct => |info| {
-                                comptime assert(info.layout == .Packed);
+                                comptime assert(info.layout == .@"packed");
                                 comptime assert(@sizeOf(field_type) <= @sizeOf(u128));
                                 field_type = std.meta.Int(.unsigned, @bitSizeOf(field_type));
                             },

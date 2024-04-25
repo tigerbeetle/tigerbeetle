@@ -47,7 +47,7 @@ pub fn ewah(comptime Word: type) type {
         };
 
         comptime {
-            assert(@import("builtin").target.cpu.arch.endian() == std.builtin.Endian.Little);
+            assert(@import("builtin").target.cpu.arch.endian() == std.builtin.Endian.little);
             assert(@typeInfo(Word).Int.signedness == .unsigned);
             assert(word_bits % 8 == 0); // A multiple of a byte, so that words can be cast to bytes.
             assert(@bitSizeOf(Marker) == word_bits);

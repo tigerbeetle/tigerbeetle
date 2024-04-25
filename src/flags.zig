@@ -45,7 +45,7 @@ const assert = std.debug.assert;
 pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
-    std.os.exit(1);
+    std.posix.exit(1);
 }
 
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
@@ -93,8 +93,8 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     // NB: help must be declared as *pub* const to be visible here.
     if (@hasDecl(Commands, "help")) {
         if (std.mem.eql(u8, first_arg, "-h") or std.mem.eql(u8, first_arg, "--help")) {
-            std.io.getStdOut().writeAll(Commands.help) catch std.os.exit(1);
-            std.os.exit(0);
+            std.io.getStdOut().writeAll(Commands.help) catch std.posix.exit(1);
+            std.posix.exit(0);
         }
     }
 
@@ -172,7 +172,21 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     };
 
     var result: Flags = undefined;
-    var counts: std.enums.EnumFieldStruct(Flags, u32, 0) = .{};
+    // Would use std.enums.EnumFieldStruct(Flags, u32, 0) here but Flags is a Struct not an Enum.
+    var counts = comptime blk: {
+        var count_fields = std.meta.fields(Flags)[0..std.meta.fields(Flags).len].*;
+        for (&count_fields) |*field| {
+            field.type = u32;
+            field.alignment = @alignOf(u32);
+            field.default_value = @ptrCast(&@as(u32, 0));
+        }
+        break :blk @Type(.{ .Struct = .{
+            .layout = .auto,
+            .fields = &count_fields,
+            .decls = &.{},
+            .is_tuple = false,
+        } }){};
+    };
 
     // When parsing arguments, we must consider longer arguments first, such that `--foo-bar=92` is
     // not confused for a misspelled `--foo=92`. Using `std.sort` for comptime-only values does not

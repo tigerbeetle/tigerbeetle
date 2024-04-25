@@ -35,8 +35,8 @@ const flags = @import("./flags.zig");
 const assert = std.debug.assert;
 
 const log = std.log;
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+pub const std_options = .{
+    .log_level = .info,
 };
 
 const CliArgs = union(enum) {
@@ -198,5 +198,5 @@ test "extract_memcpy_size" {
 pub fn fatal(comptime fmt_string: []const u8, args: anytype) noreturn {
     const stderr = std.io.getStdErr().writer();
     stderr.print("error: " ++ fmt_string ++ "\n", args) catch {};
-    std.os.exit(1);
+    std.posix.exit(1);
 }

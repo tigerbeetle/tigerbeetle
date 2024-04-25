@@ -16,7 +16,7 @@ test "tidy" {
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
-    var src_dir = try fs.cwd().openIterableDir("./src", .{});
+    var src_dir = try fs.cwd().openDir("./src", .{ .iterate = true });
     defer src_dir.close();
 
     var walker = try src_dir.walk(allocator);

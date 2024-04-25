@@ -298,8 +298,8 @@ pub fn no_padding(comptime T: type) bool {
         .Array => |info| return no_padding(info.child),
         .Struct => |info| {
             switch (info.layout) {
-                .Auto => return false,
-                .Extern => {
+                .auto => return false,
+                .@"extern" => {
                     for (info.fields) |field| {
                         if (!no_padding(field.type)) return false;
                     }
@@ -329,7 +329,7 @@ pub fn no_padding(comptime T: type) bool {
                     }
                     return offset == @sizeOf(T);
                 },
-                .Packed => return @bitSizeOf(T) == 8 * @sizeOf(T),
+                .@"packed" => return @bitSizeOf(T) == 8 * @sizeOf(T),
             }
         },
         .Enum => |info| {
@@ -727,7 +727,7 @@ pub fn EnumUnionType(
     }
 
     return @Type(.{ .Union = .{
-        .layout = .Auto,
+        .layout = .auto,
         .fields = fields,
         .decls = &.{},
         .tag_type = Enum,

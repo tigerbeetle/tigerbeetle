@@ -328,7 +328,7 @@ pub const IO = struct {
         fn complete(completion: *Completion, callback_tracer_slot: *?tracer.SpanStart) void {
             switch (completion.operation) {
                 .accept => {
-                    const result: anyerror!os.socket_t = blk: {
+                    const result: anyerror!std.posix.socket_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -411,9 +411,9 @@ pub const IO = struct {
                     call_callback(completion, &result, callback_tracer_slot);
                 },
                 .openat => {
-                    const result: anyerror!os.fd_t = blk: {
+                    const result: anyerror!std.posix.fd_t = blk: {
                         if (completion.result < 0) {
-                            const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
+                            const err = switch (@as(std.posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
                                     completion.io.enqueue(completion);
                                     return;
@@ -545,7 +545,7 @@ pub const IO = struct {
                 .statx => {
                     const result: anyerror!void = blk: {
                         if (completion.result < 0) {
-                            const err = switch (@as(os.E, @enumFromInt(-completion.result))) {
+                            const err = switch (@as(std.posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
                                     completion.io.enqueue(completion);
                                     return;
@@ -637,15 +637,15 @@ pub const IO = struct {
     /// This union encodes the set of operations supported as well as their arguments.
     const Operation = union(enum) {
         accept: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             address: os.sockaddr = undefined,
             address_size: os.socklen_t = @sizeOf(os.sockaddr),
         },
         close: struct {
-            fd: os.fd_t,
+            fd: std.posix.fd_t,
         },
         connect: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             address: std.net.Address,
         },
         openat: struct {
@@ -655,16 +655,16 @@ pub const IO = struct {
             mode: os.mode_t,
         },
         read: struct {
-            fd: os.fd_t,
+            fd: std.posix.fd_t,
             buffer: []u8,
             offset: u64,
         },
         recv: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             buffer: []u8,
         },
         send: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             buffer: []const u8,
         },
         statx: struct {
@@ -678,7 +678,7 @@ pub const IO = struct {
             timespec: os.linux.kernel_timespec,
         },
         write: struct {
-            fd: os.fd_t,
+            fd: std.posix.fd_t,
             buffer: []const u8,
             offset: u64,
         },
@@ -696,7 +696,7 @@ pub const IO = struct {
         OperationNotSupported,
         PermissionDenied,
         ProtocolFailure,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn accept(
         self: *IO,
@@ -705,10 +705,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!os.socket_t,
+            result: AcceptError!std.posix.socket_t,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
     ) void {
         completion.* = .{
             .io = self,
@@ -718,7 +718,7 @@ pub const IO = struct {
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const AcceptError!os.socket_t, @ptrCast(@alignCast(res))).*,
+                        @as(*const AcceptError!std.posix.socket_t, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -738,7 +738,7 @@ pub const IO = struct {
         DiskQuota,
         InputOutput,
         NoSpaceLeft,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn close(
         self: *IO,
@@ -750,7 +750,7 @@ pub const IO = struct {
             result: CloseError!void,
         ) void,
         completion: *Completion,
-        fd: os.fd_t,
+        fd: std.posix.fd_t,
     ) void {
         completion.* = .{
             .io = self,
@@ -788,7 +788,7 @@ pub const IO = struct {
         ProtocolNotSupported,
         ConnectionTimedOut,
         SystemResources,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn connect(
         self: *IO,
@@ -800,7 +800,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
         address: std.net.Address,
     ) void {
         completion.* = .{
@@ -876,7 +876,7 @@ pub const IO = struct {
         SystemResources,
         Unseekable,
         ConnectionTimedOut,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn read(
         self: *IO,
@@ -888,7 +888,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: os.fd_t,
+        fd: std.posix.fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -924,7 +924,7 @@ pub const IO = struct {
         FileDescriptorNotASocket,
         ConnectionTimedOut,
         OperationNotSupported,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn recv(
         self: *IO,
@@ -936,7 +936,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
         buffer: []u8,
     ) void {
         completion.* = .{
@@ -975,7 +975,7 @@ pub const IO = struct {
         OperationNotSupported,
         BrokenPipe,
         ConnectionTimedOut,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn send(
         self: *IO,
@@ -987,7 +987,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
         buffer: []const u8,
     ) void {
         completion.* = .{
@@ -1012,7 +1012,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    pub const StatxError = std.fs.File.StatError || os.UnexpectedError;
+    pub const StatxError = std.fs.File.StatError || std.posix.UnexpectedError;
 
     pub fn statx(
         self: *IO,
@@ -1024,7 +1024,7 @@ pub const IO = struct {
             result: StatxError!void,
         ) void,
         completion: *Completion,
-        dir_fd: os.fd_t,
+        dir_fd: std.posix.fd_t,
         file_path: [*:0]const u8,
         flags: u32,
         mask: u32,
@@ -1110,7 +1110,7 @@ pub const IO = struct {
         Unseekable,
         AccessDenied,
         BrokenPipe,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn write(
         self: *IO,
@@ -1122,7 +1122,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: os.fd_t,
+        fd: std.posix.fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -1152,17 +1152,23 @@ pub const IO = struct {
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !std.posix.socket_t {
         _ = self;
-        return os.socket(family, sock_type, protocol);
+        return std.posix.socket(family, sock_type, protocol);
+    }
+
+    /// Closes a socket opened by the IO instance.
+    pub fn close_socket(self: *IO, socket: std.posix.socket_t) void {
+        _ = self;
+        std.posix.close(socket);
     }
 
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !os.fd_t {
+    pub fn open_dir(dir_path: []const u8) !std.posix.fd_t {
         return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
-    pub const INVALID_FILE: os.fd_t = -1;
+    pub const INVALID_FILE: std.posix.fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -1173,12 +1179,12 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        dir_fd: os.fd_t,
+        dir_fd: std.posix.fd_t,
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open },
         direct_io: DirectIO,
-    ) !os.fd_t {
+    ) !std.posix.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
@@ -1301,7 +1307,7 @@ pub const IO = struct {
 
         const fd = try os.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
-        errdefer os.close(fd);
+        errdefer std.posix.close(fd);
 
         {
             // Make sure we're getting the type of file descriptor we expect.
@@ -1338,7 +1344,7 @@ pub const IO = struct {
                     const write_offset = size - sector.len;
                     var written: usize = 0;
                     while (written < sector.len) {
-                        written += try os.pwrite(fd, sector[written..], write_offset + written);
+                        written += try std.posix.pwrite(fd, sector[written..], write_offset + written);
                     }
                 },
                 else => |e| return e,
@@ -1349,12 +1355,12 @@ pub const IO = struct {
         // making decisions on data that was never durably written by a previously crashed process.
         // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
-        try os.fsync(fd);
+        try std.posix.fsync(fd);
 
         // We fsync the parent directory to ensure that the file inode is durably written.
         // The caller is responsible for the parent directory inode stored under the grandparent.
         // We always do this when opening because we don't know if this was done before crashing.
-        try os.fsync(dir_fd);
+        try std.posix.fsync(dir_fd);
 
         switch (kind) {
             .file => {
@@ -1406,7 +1412,7 @@ pub const IO = struct {
                     // We can do this without worrying about retrying partial reads because on
                     // linux, read(2) on block devices can not be interrupted by signals.
                     // See signal(7).
-                    assert(superblock_zone_size == try os.read(fd, &read_buf));
+                    assert(superblock_zone_size == try std.posix.read(fd, &read_buf));
                     if (!std.mem.allEqual(u8, &read_buf, 0)) {
                         std.debug.panic(
                             "Superblock on block device not empty. " ++
@@ -1427,7 +1433,7 @@ pub const IO = struct {
 
     /// Detects whether the underlying file system for a given directory fd is tmpfs. This is used
     /// to relax our Direct I/O check - running on tmpfs for benchmarking is useful.
-    fn fs_is_tmpfs(dir_fd: std.os.fd_t) !bool {
+    fn fs_is_tmpfs(dir_fd: std.posix.fd_t) !bool {
         var statfs: stdx.StatFs = undefined;
 
         while (true) {
@@ -1444,20 +1450,20 @@ pub const IO = struct {
 
     /// Detects whether the underlying file system for a given directory fd supports Direct I/O.
     /// Not all Linux file systems support `O_DIRECT`, e.g. a shared macOS volume.
-    fn fs_supports_direct_io(dir_fd: std.os.fd_t) !bool {
+    fn fs_supports_direct_io(dir_fd: std.posix.fd_t) !bool {
         if (!@hasDecl(std.os.O, "DIRECT")) return false;
 
         const path = "fs_supports_direct_io";
         const dir = std.fs.Dir{ .fd = dir_fd };
         const fd = try os.openatZ(dir_fd, path, os.O.CLOEXEC | os.O.CREAT | os.O.TRUNC, 0o666);
-        defer os.close(fd);
+        defer std.posix.close(fd);
         defer dir.deleteFile(path) catch {};
 
         while (true) {
             const res = os.linux.openat(dir_fd, path, os.O.CLOEXEC | os.O.RDONLY | os.O.DIRECT, 0);
             switch (os.linux.getErrno(res)) {
                 .SUCCESS => {
-                    os.close(@intCast(res));
+                    std.posix.close(@intCast(res));
                     return true;
                 },
                 .INTR => continue,
@@ -1469,7 +1475,7 @@ pub const IO = struct {
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
-    fn fs_allocate(fd: os.fd_t, size: u64) !void {
+    fn fs_allocate(fd: std.posix.fd_t, size: u64) !void {
         const mode: i32 = 0;
         const offset: i64 = 0;
         const length: i64 = @intCast(size);

@@ -299,7 +299,7 @@ pub fn find(shell: *Shell, options: FindOptions) ![]const []const u8 {
     var result = std.ArrayList([]const u8).init(shell.arena.allocator());
 
     for (options.where) |base_path| {
-        var base_dir = try shell.cwd.openIterableDir(base_path, .{});
+        var base_dir = try shell.cwd.openDir(base_path, .{ .iterate = true });
         defer base_dir.close();
 
         var walker = try base_dir.walk(shell.gpa);

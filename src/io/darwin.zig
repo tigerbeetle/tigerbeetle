@@ -11,7 +11,7 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
-    kq: os.fd_t,
+    kq: std.posix.fd_t,
     time: Time = .{},
     io_inflight: usize = 0,
     timeouts: FIFO(Completion) = .{ .name = "io_timeouts" },
@@ -29,7 +29,7 @@ pub const IO = struct {
 
     pub fn deinit(self: *IO) void {
         assert(self.kq > -1);
-        os.close(self.kq);
+        std.posix.close(self.kq);
         self.kq = -1;
     }
 
@@ -197,29 +197,29 @@ pub const IO = struct {
 
     const Operation = union(enum) {
         accept: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
         },
         close: struct {
-            fd: os.fd_t,
+            fd: std.posix.fd_t,
         },
         connect: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             address: std.net.Address,
             initiated: bool,
         },
         read: struct {
-            fd: os.fd_t,
+            fd: std.posix.fd_t,
             buf: [*]u8,
             len: u32,
             offset: u64,
         },
         recv: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             buf: [*]u8,
             len: u32,
         },
         send: struct {
-            socket: os.socket_t,
+            socket: std.posix.socket_t,
             buf: [*]const u8,
             len: u32,
         },
@@ -227,7 +227,7 @@ pub const IO = struct {
             expires: u64,
         },
         write: struct {
-            fd: os.fd_t,
+            fd: std.posix.fd_t,
             buf: [*]const u8,
             len: u32,
             offset: u64,
@@ -296,10 +296,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!os.socket_t,
+            result: AcceptError!std.posix.socket_t,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
     ) void {
         self.submit(
             context,
@@ -310,14 +310,14 @@ pub const IO = struct {
                 .socket = socket,
             },
             struct {
-                fn do_operation(op: anytype) AcceptError!os.socket_t {
-                    const fd = try os.accept(
+                fn do_operation(op: anytype) AcceptError!std.posix.socket_t {
+                    const fd = try std.posix.accept(
                         op.socket,
                         null,
                         null,
                         os.SOCK.NONBLOCK | os.SOCK.CLOEXEC,
                     );
-                    errdefer os.close(fd);
+                    errdefer std.posix.close(fd);
 
                     // Darwin doesn't support os.MSG_NOSIGNAL to avoid getting SIGPIPE on socket send().
                     // Instead, it uses the SO_NOSIGPIPE socket option which does the same for all send()s.
@@ -345,7 +345,7 @@ pub const IO = struct {
         DiskQuota,
         InputOutput,
         NoSpaceLeft,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn close(
         self: *IO,
@@ -357,7 +357,7 @@ pub const IO = struct {
             result: CloseError!void,
         ) void,
         completion: *Completion,
-        fd: os.fd_t,
+        fd: std.posix.fd_t,
     ) void {
         self.submit(
             context,
@@ -393,7 +393,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
         address: std.net.Address,
     ) void {
         self.submit(
@@ -412,7 +412,7 @@ pub const IO = struct {
                     // Instead, check the socket error to see if has been connected successfully.
                     const result = switch (op.initiated) {
                         true => os.getsockoptError(op.socket),
-                        else => os.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
+                        else => std.posix.connect(op.socket, &op.address.any, op.address.getOsSockLen()),
                     };
 
                     op.initiated = true;
@@ -432,7 +432,7 @@ pub const IO = struct {
         SystemResources,
         Unseekable,
         ConnectionTimedOut,
-    } || os.UnexpectedError;
+    } || std.posix.UnexpectedError;
 
     pub fn read(
         self: *IO,
@@ -444,7 +444,7 @@ pub const IO = struct {
             result: ReadError!usize,
         ) void,
         completion: *Completion,
-        fd: os.fd_t,
+        fd: std.posix.fd_t,
         buffer: []u8,
         offset: u64,
     ) void {
@@ -504,7 +504,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
         buffer: []u8,
     ) void {
         self.submit(
@@ -537,7 +537,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: os.socket_t,
+        socket: std.posix.socket_t,
         buffer: []const u8,
     ) void {
         self.submit(
@@ -558,7 +558,7 @@ pub const IO = struct {
         );
     }
 
-    pub const TimeoutError = error{Canceled} || os.UnexpectedError;
+    pub const TimeoutError = error{Canceled} || std.posix.UnexpectedError;
 
     pub fn timeout(
         self: *IO,
@@ -607,7 +607,7 @@ pub const IO = struct {
         );
     }
 
-    pub const WriteError = os.PWriteError;
+    pub const WriteError = std.posix.PWriteError;
 
     pub fn write(
         self: *IO,
@@ -619,7 +619,7 @@ pub const IO = struct {
             result: WriteError!usize,
         ) void,
         completion: *Completion,
-        fd: os.fd_t,
+        fd: std.posix.fd_t,
         buffer: []const u8,
         offset: u64,
     ) void {
@@ -636,7 +636,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) WriteError!usize {
-                    return os.pwrite(op.fd, op.buf[0..op.len], op.offset);
+                    return std.posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
                 }
             },
         );
@@ -645,23 +645,27 @@ pub const IO = struct {
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !os.socket_t {
-        _ = self;
-
-        const fd = try os.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
-        errdefer os.closeSocket(fd);
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !std.posix.socket_t {
+        const fd = try std.posix.socket(family, sock_type | os.SOCK.NONBLOCK, protocol);
+        errdefer self.close_socket(fd);
 
         // darwin doesn't support os.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try os.setsockopt(fd, os.SOL.SOCKET, os.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
         return fd;
     }
 
+    /// Closes a socket opened by the IO instance.
+    pub fn close_socket(self: *IO, socket: std.posix.socket_t) void {
+        _ = self;
+        std.posix.close(socket);
+    }
+
     /// Opens a directory with read only access.
-    pub fn open_dir(dir_path: []const u8) !os.fd_t {
+    pub fn open_dir(dir_path: []const u8) !std.posix.fd_t {
         return os.open(dir_path, os.O.CLOEXEC | os.O.RDONLY, 0);
     }
 
-    pub const INVALID_FILE: os.fd_t = -1;
+    pub const INVALID_FILE: std.posix.fd_t = -1;
 
     /// Opens or creates a journal file:
     /// - For reading and writing.
@@ -672,12 +676,12 @@ pub const IO = struct {
     ///   The caller is responsible for ensuring that the parent directory inode is durable.
     /// - Verifies that the file size matches the expected file size before returning.
     pub fn open_file(
-        dir_fd: os.fd_t,
+        dir_fd: std.posix.fd_t,
         relative_path: []const u8,
         size: u64,
         method: enum { create, create_or_open, open },
         direct_io: DirectIO,
-    ) !os.fd_t {
+    ) !std.posix.fd_t {
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
 
@@ -716,7 +720,7 @@ pub const IO = struct {
         assert(!std.fs.path.isAbsolute(relative_path));
         const fd = try os.openat(dir_fd, relative_path, flags, mode);
         // TODO Return a proper error message when the path exists or does not exist (init/start).
-        errdefer os.close(fd);
+        errdefer std.posix.close(fd);
 
         // TODO Check that the file is actually a file.
 
@@ -758,13 +762,13 @@ pub const IO = struct {
 
     /// Darwin's fsync() syscall does not flush past the disk cache. We must use F_FULLFSYNC instead.
     /// https://twitter.com/TigerBeetleDB/status/1422491736224436225
-    fn fs_sync(fd: os.fd_t) !void {
-        _ = os.fcntl(fd, os.F.FULLFSYNC, 1) catch return os.fsync(fd);
+    fn fs_sync(fd: std.posix.fd_t) !void {
+        _ = os.fcntl(fd, os.F.FULLFSYNC, 1) catch return std.posix.fsync(fd);
     }
 
     /// Allocates a file contiguously using fallocate() if supported.
     /// Alternatively, writes to the last sector so that at least the file size is correct.
-    fn fs_allocate(fd: os.fd_t, size: u64) !void {
+    fn fs_allocate(fd: std.posix.fd_t, size: u64) !void {
         log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
 
         // Darwin doesn't have fallocate() but we can simulate it using fcntl()s.

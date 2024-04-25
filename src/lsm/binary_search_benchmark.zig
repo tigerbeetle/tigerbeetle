@@ -201,9 +201,9 @@ fn timeval_to_ns(tv: std.os.timeval) u64 {
         @as(u64, @intCast(tv.tv_usec)) * ns_per_us;
 }
 
-fn readPerfFd(fd: std.os.fd_t) !usize {
+fn readPerfFd(fd: std.posix.fd_t) !usize {
     var result: usize = 0;
-    const n = try std.os.read(fd, std.mem.asBytes(&result));
+    const n = try std.std.posix.read(fd, std.mem.asBytes(&result));
     assert(n == @sizeOf(usize));
 
     return result;

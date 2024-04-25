@@ -10,8 +10,8 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const panic = std.debug.panic;
 const log = std.log;
-pub const std_options = struct {
-    pub const log_level: std.log.Level = .info;
+pub const std_options = .{
+    .log_level = .info,
 };
 
 const build_options = @import("vsr_options");

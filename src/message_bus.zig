@@ -53,7 +53,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             .replica => struct {
                 replica: u8,
                 /// The file descriptor for the process on which to accept connections.
-                accept_fd: os.socket_t,
+                accept_fd: std.posix.socket_t,
                 /// Address the accept_fd is bound to, as reported by `getsockname`.
                 ///
                 /// This allows passing port 0 as an address for the OS to pick an open port for us
@@ -174,7 +174,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         pub fn deinit(bus: *Self, allocator: std.mem.Allocator) void {
             if (process_type == .replica) {
                 bus.process.clients.deinit(allocator);
-                os.closeSocket(bus.process.accept_fd);
+                bus.io.close_socket(bus.process.accept_fd);
             }
 
             for (bus.connections) |*connection| {
@@ -187,7 +187,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         fn init_tcp(io: *IO, address: std.net.Address) !struct {
-            fd: os.socket_t,
+            fd: std.posix.socket_t,
             address: std.net.Address,
         } {
             const fd = try io.open_socket(
@@ -195,10 +195,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 os.SOCK.STREAM,
                 os.IPPROTO.TCP,
             );
-            errdefer os.closeSocket(fd);
+            errdefer io.close_socket(fd);
 
             const set = struct {
-                fn set(_fd: os.socket_t, level: u32, option: u32, value: c_int) !void {
+                fn set(_fd: std.posix.socket_t, level: u32, option: u32, value: c_int) !void {
                     try os.setsockopt(_fd, level, option, &mem.toBytes(value));
                 }
             }.set;
@@ -369,7 +369,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         fn on_accept(
             bus: *Self,
             completion: *IO.Completion,
-            result: IO.AcceptError!os.socket_t,
+            result: IO.AcceptError!std.posix.socket_t,
         ) void {
             _ = completion;
 
@@ -459,7 +459,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// IO.INVALID_SOCKET instead of undefined here for safety to ensure an error if the
             /// invalid value is ever used, instead of potentially performing an action on an
             /// active fd.
-            fd: os.socket_t = IO.INVALID_SOCKET,
+            fd: std.posix.socket_t = IO.INVALID_SOCKET,
 
             /// This completion is used for all recv operations.
             /// It is also used for the initial connect when establishing a replica connection.
@@ -601,7 +601,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Given a newly accepted fd, start receiving messages on it.
             /// Callbacks will be continuously re-registered until terminate() is called.
-            pub fn on_accept(connection: *Connection, bus: *Self, fd: os.socket_t) void {
+            pub fn on_accept(connection: *Connection, bus: *Self, fd: std.posix.socket_t) void {
                 assert(connection.peer == .none);
                 assert(connection.state == .accepting);
                 assert(connection.fd == IO.INVALID_SOCKET);

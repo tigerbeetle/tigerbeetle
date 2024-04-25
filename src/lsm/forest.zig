@@ -57,7 +57,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const _Grooves = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = groove_fields,
             .decls = &.{},
             .is_tuple = false,
@@ -66,7 +66,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
     const _GroovesOptions = @Type(.{
         .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = groove_options_fields,
             .decls = &.{},
             .is_tuple = false,
@@ -101,7 +101,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     // Invariants:
     // - tree_infos[tree_id - tree_id_range.min].tree_id == tree_id
     // - tree_infos.len == tree_id_range.max - tree_id_range.min
-    const _tree_infos: []const TreeInfo = tree_infos: {
+    const _tree_infos = tree_infos: {
         var tree_infos: []const TreeInfo = &[_]TreeInfo{};
         for (std.meta.fields(_Grooves)) |groove_field| {
             const Groove = groove_field.type;
@@ -151,14 +151,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         // There are no gaps in the tree ids.
         assert(tree_infos_set.count() == tree_infos.len);
 
-        break :tree_infos tree_infos_sorted[0..];
+        break :tree_infos tree_infos_sorted;
     };
 
     const _TreeID = comptime tree_id: {
         var fields: []const std.builtin.Type.EnumField = &.{};
         for (_tree_infos) |tree_info| {
             fields = fields ++ [1]std.builtin.Type.EnumField{.{
-                .name = tree_info.tree_name,
+                .name = @ptrCast(tree_info.tree_name),
                 .value = tree_info.tree_id,
             }};
         }

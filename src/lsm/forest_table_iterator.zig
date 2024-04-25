@@ -35,7 +35,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         var fields: []const StructField = &[_]StructField{};
         for (Forest.tree_infos) |tree_info| {
             fields = fields ++ &[_]StructField{.{
-                .name = tree_info.tree_name,
+                .name = @ptrCast(tree_info.tree_name),
                 .type = TreeTableIteratorType(tree_info.Tree),
                 .default_value = null,
                 .is_comptime = false,
@@ -44,7 +44,7 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
         }
 
         break :iterator @Type(.{ .Struct = .{
-            .layout = .Auto,
+            .layout = .auto,
             .fields = fields,
             .decls = &.{},
             .is_tuple = false,
