@@ -160,7 +160,7 @@ const CliArgs = union(enum) {
         \\  --development
         \\        Allow the replica to format/start even when Direct IO is unavailable.
         \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
-        \\        used for testing and development.
+        \\        used for testing and development. It should not be used for production or benchmarks.
         \\
         \\Examples:
         \\
