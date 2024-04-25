@@ -469,7 +469,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var it = message_bus.pool.free_list;
                 while (it) |message| : (it = message.next) messages_in_pool += 1;
             }
-            assert(messages_in_pool == message_pool.messages_max_replica);
+            assert(messages_in_pool == message_bus.pool.messages_max);
         }
 
         fn replica_enable(cluster: *Self, replica_index: u8) void {

@@ -16,7 +16,7 @@ comptime {
 
 /// The number of full-sized messages allocated at initialization by the replica message pool.
 /// There must be enough messages to ensure that the replica can always progress, to avoid deadlock.
-pub const messages_max_replica = messages_max: {
+const messages_max_replica = messages_max: {
     var sum: usize = 0;
 
     sum += constants.journal_iops_read_max; // Journal reads
@@ -43,7 +43,7 @@ pub const messages_max_replica = messages_max: {
 };
 
 /// The number of full-sized messages allocated at initialization by the client message pool.
-pub const messages_max_client = messages_max: {
+const messages_max_client = messages_max: {
     var sum: usize = 0;
 
     sum += constants.replicas_max; // Connection.recv_message
