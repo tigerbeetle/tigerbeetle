@@ -1,5 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = @import("../stdx.zig").maybe;
 const math = std.math;
 const mem = std.mem;
 
@@ -10,7 +11,7 @@ pub fn KWayMergeIteratorType(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime k_max: u32,
+    comptime streams_max: u32,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
     /// Returns Drained if the stream was consumed and
@@ -26,9 +27,12 @@ pub fn KWayMergeIteratorType(
     comptime stream_precedence: fn (context: *const Context, a: u32, b: u32) bool,
 ) type {
     return struct {
-        const Self = @This();
+        const KWayMergeIterator = @This();
 
         context: *Context,
+        streams_count: u32,
+        direction: Direction,
+        state: enum { loading, iterating },
 
         /// Array of keys, with each key representing the next key in each stream.
         ///
@@ -38,60 +42,79 @@ pub fn KWayMergeIteratorType(
         /// * When `direction=ascending`, keys are ordered low-to-high.
         /// * When `direction=descending`, keys are ordered high-to-low.
         /// * Equivalent keys are ordered from high precedence to low.
-        keys: [k_max]Key,
+        keys: [streams_max]Key = undefined,
 
         /// For each key in keys above, the corresponding index of the stream containing that key.
         /// This decouples the order and storage of streams, the user being responsible for storage.
         /// The user's streams array is never reordered while keys are swapped, only this mapping.
-        streams: [k_max]u32,
+        streams: [streams_max]u32 = undefined,
 
         /// The number of streams remaining in the iterator.
-        k: u32,
+        k: u32 = 0,
 
-        direction: Direction,
-        previous_key_popped: ?Key = null,
+        key_popped: ?Key = null,
 
-        /// This function may create an Iterator with k being less than stream_count_max if
-        /// stream_peek() for one of the streams immediately returns null.
-        pub fn init(context: *Context, stream_count_max: u32, direction: Direction) Self {
-            // TODO Do we ever expect stream_count_max to be 0?
-            assert(stream_count_max <= k_max);
+        pub fn init(
+            context: *Context,
+            streams_count: u32,
+            direction: Direction,
+        ) KWayMergeIterator {
+            assert(streams_count <= streams_max);
+            // Streams ZERO can be used to represent empty sets.
+            maybe(streams_count == 0);
 
-            var it: Self = .{
+            return .{
                 .context = context,
-                .keys = undefined,
-                .streams = undefined,
-                .k = 0,
+                .streams_count = streams_count,
                 .direction = direction,
+                .state = .loading,
             };
+        }
+
+        pub fn empty(it: *const KWayMergeIterator) bool {
+            assert(it.state == .iterating);
+            return it.k == 0;
+        }
+
+        pub fn reset(it: *KWayMergeIterator) void {
+            it.* = .{
+                .context = it.context,
+                .streams_count = it.streams_count,
+                .direction = it.direction,
+                .state = .loading,
+                .key_popped = it.key_popped,
+            };
+        }
+
+        fn load(it: *KWayMergeIterator) error{Drained}!void {
+            assert(it.state == .loading);
+            assert(it.k == 0);
+
+            errdefer it.reset();
 
             // We must loop on stream_index but assign at it.k, as k may be less than stream_index
             // when there are empty streams.
             // TODO Do we have test coverage for this edge case?
             var stream_index: u32 = 0;
-            while (stream_index < stream_count_max) : (stream_index += 1) {
-                it.keys[it.k] = stream_peek(context, stream_index) catch |err| switch (err) {
-                    // On initialization, the streams should either have data already
-                    // buffered up to peek or be empty and have no more values to produce.
-                    error.Drained => unreachable,
+            while (stream_index < it.streams_count) : (stream_index += 1) {
+                it.keys[it.k] = stream_peek(it.context, stream_index) catch |err| switch (err) {
+                    error.Drained => return error.Drained,
                     error.Empty => continue,
                 };
                 it.streams[it.k] = stream_index;
                 it.up_heap(it.k);
                 it.k += 1;
             }
-
-            return it;
+            it.state = .iterating;
         }
 
-        pub fn empty(it: Self) bool {
-            return it.k == 0;
-        }
+        pub fn pop(it: *KWayMergeIterator) error{Drained}!?Value {
+            if (it.state == .loading) try it.load();
+            assert(it.state == .iterating);
 
-        pub fn pop(it: *Self) error{Drained}!?Value {
-            while (try it.pop_internal()) |value| {
+            while (try it.pop_heap()) |value| {
                 const key = key_from_value(&value);
-                if (it.previous_key_popped) |previous| {
+                if (it.key_popped) |previous| {
                     switch (std.math.order(previous, key)) {
                         .lt => assert(it.direction == .ascending),
                         // Discard this value and pop the next one.
@@ -99,14 +122,15 @@ pub fn KWayMergeIteratorType(
                         .gt => assert(it.direction == .descending),
                     }
                 }
-                it.previous_key_popped = key;
+                it.key_popped = key;
                 return value;
             }
 
             return null;
         }
 
-        fn pop_internal(it: *Self) error{Drained}!?Value {
+        fn pop_heap(it: *KWayMergeIterator) error{Drained}!?Value {
+            assert(it.state == .iterating);
             if (it.k == 0) return null;
 
             // We update the heap prior to removing the value from the stream. If we updated after
@@ -131,7 +155,7 @@ pub fn KWayMergeIteratorType(
             return value;
         }
 
-        fn up_heap(it: *Self, start: u32) void {
+        fn up_heap(it: *KWayMergeIterator, start: u32) void {
             var i = start;
             while (parent(i)) |p| : (i = p) {
                 if (it.ordered(p, i)) break;
@@ -142,7 +166,7 @@ pub fn KWayMergeIteratorType(
         // Start at the root node.
         // Compare the current node with its children, if the order is correct stop.
         // If the order is incorrect, swap the current node with the appropriate child.
-        fn down_heap(it: *Self) void {
+        fn down_heap(it: *KWayMergeIterator) void {
             if (it.k == 0) return;
             var i: u32 = 0;
             // A maximum of height iterations are required. After height iterations we are
@@ -189,26 +213,28 @@ pub fn KWayMergeIteratorType(
             return if (child < k) child else null;
         }
 
-        fn swap(it: *Self, a: u32, b: u32) void {
+        fn swap(it: *KWayMergeIterator, a: u32, b: u32) void {
             mem.swap(Key, &it.keys[a], &it.keys[b]);
             mem.swap(u32, &it.streams[a], &it.streams[b]);
         }
 
-        inline fn ordered(it: Self, a: u32, b: ?u32) bool {
-            return b == null or switch (std.math.order(it.keys[a], it.keys[b.?])) {
-                .lt => it.direction == .ascending,
-                .eq => stream_precedence(it.context, it.streams[a], it.streams[b.?]),
-                .gt => it.direction == .descending,
-            };
+        inline fn ordered(it: *const KWayMergeIterator, a: u32, b_maybe: ?u32) bool {
+            const b = b_maybe orelse return true;
+            return if (it.keys[a] == it.keys[b])
+                stream_precedence(it.context, it.streams[a], it.streams[b])
+            else if (it.keys[a] < it.keys[b])
+                it.direction == .ascending
+            else
+                it.direction == .descending;
         }
     };
 }
 
-fn TestContext(comptime k_max: u32) type {
+fn TestContext(comptime streams_max: u32) type {
     const testing = std.testing;
 
     return struct {
-        const Self = @This();
+        const KWayMergeIterator = @This();
 
         const log = false;
 
@@ -221,22 +247,25 @@ fn TestContext(comptime k_max: u32) type {
             }
         };
 
-        streams: [k_max][]const Value,
+        streams: [streams_max][]const Value,
 
-        fn stream_peek(context: *const Self, stream_index: u32) error{ Empty, Drained }!u32 {
+        fn stream_peek(
+            context: *const KWayMergeIterator,
+            stream_index: u32,
+        ) error{ Empty, Drained }!u32 {
             // TODO: test for Drained somehow as well.
             const stream = context.streams[stream_index];
             if (stream.len == 0) return error.Empty;
             return stream[0].key;
         }
 
-        fn stream_pop(context: *Self, stream_index: u32) Value {
+        fn stream_pop(context: *KWayMergeIterator, stream_index: u32) Value {
             const stream = context.streams[stream_index];
             context.streams[stream_index] = stream[1..];
             return stream[0];
         }
 
-        fn stream_precedence(context: *const Self, a: u32, b: u32) bool {
+        fn stream_precedence(context: *const KWayMergeIterator, a: u32, b: u32) bool {
             _ = context;
 
             // Higher streams have higher precedence.
@@ -249,11 +278,11 @@ fn TestContext(comptime k_max: u32) type {
             expect: []const Value,
         ) !void {
             const KWay = KWayMergeIteratorType(
-                Self,
+                KWayMergeIterator,
                 u32,
                 Value,
                 Value.to_key,
-                k_max,
+                streams_max,
                 stream_peek,
                 stream_pop,
                 stream_precedence,
@@ -261,7 +290,7 @@ fn TestContext(comptime k_max: u32) type {
             var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();
 
-            var streams: [k_max][]Value = undefined;
+            var streams: [streams_max][]Value = undefined;
 
             for (streams_keys, 0..) |stream_keys, i| {
                 errdefer for (streams[0..i]) |s| testing.allocator.free(s);
@@ -275,7 +304,7 @@ fn TestContext(comptime k_max: u32) type {
             }
             defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
 
-            var context: Self = .{ .streams = streams };
+            var context: KWayMergeIterator = .{ .streams = streams };
             var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
 
             while (try kway.pop()) |value| {
@@ -289,16 +318,16 @@ fn TestContext(comptime k_max: u32) type {
             if (log) std.debug.print("\n", .{});
             const allocator = testing.allocator;
 
-            var streams: [k_max][]u32 = undefined;
+            var streams: [streams_max][]u32 = undefined;
 
-            const streams_buffer = try allocator.alloc(u32, k_max * stream_key_count_max);
+            const streams_buffer = try allocator.alloc(u32, streams_max * stream_key_count_max);
             defer allocator.free(streams_buffer);
 
-            const expect_buffer = try allocator.alloc(Value, k_max * stream_key_count_max);
+            const expect_buffer = try allocator.alloc(Value, streams_max * stream_key_count_max);
             defer allocator.free(expect_buffer);
 
             var k: u32 = 0;
-            while (k < k_max) : (k += 1) {
+            while (k < streams_max) : (k += 1) {
                 if (log) std.debug.print("k = {}\n", .{k});
                 {
                     var i: u32 = 0;

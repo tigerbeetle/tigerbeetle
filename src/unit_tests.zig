@@ -28,6 +28,7 @@ comptime {
     _ = @import("lsm/forest_table_iterator.zig");
     _ = @import("lsm/groove.zig");
     _ = @import("lsm/k_way_merge.zig");
+    _ = @import("lsm/zig_zag_merge.zig");
     _ = @import("lsm/manifest_level.zig");
     _ = @import("lsm/node_pool.zig");
     _ = @import("lsm/segmented_array.zig");

@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
+const is_composite_key = @import("composite_key.zig").is_composite_key;
 
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const ScanMergeUnionType = @import("scan_merge.zig").ScanMergeUnionType;
@@ -19,13 +20,28 @@ const TimestampRange = @import("timestamp_range.zig").TimestampRange;
 const Error = @import("scan_buffer.zig").Error;
 
 /// ScanBuilder is a helper to create and combine scans using
-/// any of the Groove's secondary indexes.
+/// any of the Groove's indexes.
 pub fn ScanBuilderType(
+    // TODO: Instead of a single Groove per ScanType, introduce the concept of Orthogonal Grooves.
+    // For example, indexes from the Grooves `Transfers` and `PendingTransfers` can be
+    // used together in the same query, and the timestamp they produce can be used for
+    // lookups in either Grooves:
+    // ```
+    // SELECT Transfers WHERE Transfers.code=1 AND Transfers.pending_status=posted.
+    // ```
+    //
+    // Although the relation between orthogonal grooves is always 1:1 by the timestamp,
+    // when looking up an object in the Groove `A` by a timestamp found in the Groove `B`, it will
+    // require additional information to correctly assert if `B` "must have" or "may have" a
+    // corresponding match in `A`.
+    // E.g.: Every AccountBalance **must have** a corresponding Account, however the opposite
+    // isn't true.
+    // ```
+    // SELECT AccountBalances WHERE Accounts.user_data_32=100
+    // ```
     comptime Groove: type,
     comptime Storage: type,
 ) type {
-    comptime assert(std.meta.fields(Groove.IndexTrees).len > 0);
-
     return struct {
         const ScanBuilder = @This();
 
@@ -73,34 +89,6 @@ pub fn ScanBuilderType(
             };
         }
 
-        pub fn Tree(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            return std.meta.fieldInfo(Groove.IndexTrees, field).type;
-        }
-
-        pub fn CompositeKeyType(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            return Tree(field).Table.Value;
-        }
-
-        pub fn CompositeKeyPrefix(comptime field: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            const CompositeKey = CompositeKeyType(field);
-            return std.meta.fieldInfo(CompositeKey, .field).type;
-        }
-
-        fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
-            return std.meta.fieldInfo(Scan.Dispatcher, field).type;
-        }
-
-        fn key_from_value(
-            comptime field: std.meta.FieldEnum(Groove.IndexTrees),
-            prefix: CompositeKeyPrefix(field),
-            timestamp: u64,
-        ) CompositeKeyType(field).Key {
-            return CompositeKeyType(field).key_from_value(&.{
-                .field = prefix,
-                .timestamp = timestamp,
-            });
-        }
-
         /// Initializes a Scan over the secondary index specified by `index`,
         /// searching for an exact match in the `CompositeKey`'s prefix.
         /// Produces the criteria equivalent to `WHERE field = $value`.
@@ -110,49 +98,70 @@ pub fn ScanBuilderType(
             comptime index: std.meta.FieldEnum(Groove.IndexTrees),
             buffer: *const ScanBuffer,
             snapshot: u64,
-            value: CompositeKeyPrefix(index),
+            prefix: CompositeKeyPrefix(index),
             timestamp_range: TimestampRange,
             direction: Direction,
         ) *Scan {
-            const field = comptime index_to_dispatcher(index);
+            const field = comptime std.enums.nameCast(std.meta.FieldEnum(Scan.Dispatcher), index);
             const ScanImpl = ScanImplType(field);
             return self.scan_add(
                 field,
                 ScanImpl.init(
-                    self.tree(index),
+                    &@field(self.groove().indexes, @tagName(index)),
                     buffer,
                     snapshot,
-                    key_from_value(index, value, timestamp_range.min),
-                    key_from_value(index, value, timestamp_range.max),
+                    key_from_value(index, prefix, timestamp_range.min),
+                    key_from_value(index, prefix, timestamp_range.max),
                     direction,
                 ),
             ) catch unreachable; //TODO: define error handling for the query API.
         }
 
-        /// Initializes a Scan over the secondary index specified by `index`,
-        /// searching for an inclusive range of `CompositeKey`s.
-        /// Results are ordered by the (prefix, timestamp) tuple.
-        /// Range scans cannot be used in the `merge_{union,intersection,difference}` functions.
-        pub fn scan_range(
+        /// Initializes a Scan over the `id` searching for an exact match.
+        /// Produces the criteria equivalent to `WHERE id = $value`.
+        /// Results are always unique.
+        pub fn scan_id(
             self: *ScanBuilder,
-            comptime index: std.meta.FieldEnum(Groove.IndexTrees),
             buffer: *const ScanBuffer,
             snapshot: u64,
-            min: CompositeKeyType(index),
-            max: CompositeKeyType(index),
+            id: u128,
             direction: Direction,
         ) *Scan {
-            const field = comptime index_to_dispatcher(index);
-            const ScanImpl = ScanImplType(field);
-            return scan_add(
-                self,
-                field,
+            comptime assert(Groove.IdTree != void);
+
+            const ScanImpl = ScanImplType(.id);
+            return self.scan_add(
+                .id,
                 ScanImpl.init(
-                    self.tree(index),
+                    &self.groove().ids,
                     buffer,
                     snapshot,
-                    min.key_from_value(),
-                    max.key_from_value(),
+                    id,
+                    id,
+                    direction,
+                ),
+            ) catch unreachable; //TODO: define error handling for the query API.
+        }
+
+        /// Initializes a Scan over a timestamp range.
+        /// Produces the criteria equivalent to `WHERE timestamp BETWEEN $min AND $max`.
+        /// Results are ordered by `timestamp`.
+        pub fn scan_timestamp(
+            self: *ScanBuilder,
+            buffer: *const ScanBuffer,
+            snapshot: u64,
+            timestamp_range: TimestampRange,
+            direction: Direction,
+        ) *Scan {
+            const ScanImpl = ScanImplType(.timestamp);
+            return self.scan_add(
+                .timestamp,
+                ScanImpl.init(
+                    &self.groove().objects,
+                    buffer,
+                    snapshot,
+                    timestamp_range.min,
+                    timestamp_range.max,
                     direction,
                 ),
             ) catch unreachable; //TODO: define error handling for the query API.
@@ -185,9 +194,11 @@ pub fn ScanBuilderType(
             self: *ScanBuilder,
             scans: []const *Scan,
         ) *Scan {
-            _ = scans;
-            _ = self;
-            stdx.unimplemented("merge_intersection not implemented");
+            const Impl = ScanImplType(.merge_intersection);
+            return self.merge_add(
+                .merge_intersection,
+                Impl.init(scans),
+            ) catch unreachable; //TODO: define error handling for the query API.;
         }
 
         /// Initializes a Scan performing the difference (minus) of two scans.
@@ -247,24 +258,33 @@ pub fn ScanBuilderType(
             return scan;
         }
 
-        fn groove(self: *ScanBuilder) *Groove {
+        fn CompositeKeyType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
+            const IndexTree = std.meta.fieldInfo(Groove.IndexTrees, index).type;
+            return IndexTree.Table.Value;
+        }
+
+        fn CompositeKeyPrefix(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
+            const CompositeKey = CompositeKeyType(index);
+            return std.meta.fieldInfo(CompositeKey, .field).type;
+        }
+
+        fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
+            return std.meta.fieldInfo(Scan.Dispatcher, field).type;
+        }
+
+        fn key_from_value(
+            comptime field: std.meta.FieldEnum(Groove.IndexTrees),
+            prefix: CompositeKeyPrefix(field),
+            timestamp: u64,
+        ) CompositeKeyType(field).Key {
+            return CompositeKeyType(field).key_from_value(&.{
+                .field = prefix,
+                .timestamp = timestamp,
+            });
+        }
+
+        inline fn groove(self: *ScanBuilder) *Groove {
             return @fieldParentPtr(Groove, "scan_builder", self);
-        }
-
-        fn tree(
-            self: *ScanBuilder,
-            comptime field: std.meta.FieldEnum(Groove.IndexTrees),
-        ) *Tree(field) {
-            return &@field(self.groove().indexes, @tagName(field));
-        }
-
-        fn index_to_dispatcher(
-            comptime field: std.meta.FieldEnum(Groove.IndexTrees),
-        ) std.meta.FieldEnum(Scan.Dispatcher) {
-            return std.meta.stringToEnum(
-                std.meta.FieldEnum(Scan.Dispatcher),
-                @tagName(field),
-            ).?;
         }
     };
 }
@@ -278,8 +298,6 @@ pub fn ScanType(
     comptime Groove: type,
     comptime Storage: type,
 ) type {
-    comptime assert(std.meta.fields(Groove.IndexTrees).len > 0);
-
     return struct {
         const Scan = @This();
 
@@ -288,26 +306,29 @@ pub fn ScanType(
         /// a pool without requiring the caller to keep track of the reference of the topmost scan.
         /// Example:
         /// ```
-        /// var scan1: *Scan = scan_groove.equal(...); // Add some condition
-        /// var scan2: *Scan = scan_groove.equal(...); // Add another condition
-        /// var scan3: *Scan = scan_groove.merge_union(scan1, scan2); // Merge both scans.
-        /// scan3.read(&context); // This scan will be returned during the callback.
+        /// var scan1: *Scan = ... // Add some condition
+        /// var scan2: *Scan = ... // Add another condition
+        /// var scan3: *Scan = merge_union(scan1, scan2); // Merge both scans.
+        /// scan3.read(&context); // scan3 will be returned during the callback.
         /// ```
         pub const Callback = *const fn (*Context, *Scan) void;
         pub const Context = struct {
             callback: Callback,
         };
 
-        /// Generates a tagged union with a specialized ScanTree field for each
-        /// index in the groove, plus one field for each `merge` operation that shares
-        /// the same interface.
+        /// Comptime dispatcher for all scan implementations that share the same interface.
+        /// Generates a tagged union with an specialized `ScanTreeType` for each queriable field in
+        /// the `Groove` (e.g. `timestamp`, `id` if present, and secondary indexes), plus a
+        /// `ScanMergeType` for each merge operation (e.g. union, intersection, and difference).
         ///
         /// Example:
         /// ```
         /// const Dispatcher = union(enum) {
+        ///   .timestamp: ScanTree(...),
+        ///   .id: ScanTree(...),
         ///   .code: ScanTree(...),
         ///   .ledger: ScanTree(...),
-        ///   // ...
+        ///   // ... All other indexes ...
         ///   .merge_union: ...
         ///   .merge_intersection: ...
         ///   .merge_difference: ...
@@ -315,10 +336,23 @@ pub fn ScanType(
         /// ```
         pub const Dispatcher = T: {
             var type_info = @typeInfo(union(enum) {
+                timestamp: ScanTreeType(*Context, Groove.ObjectTree, Storage),
+
                 merge_union: ScanMergeUnionType(Groove, Storage),
                 merge_intersection: ScanMergeIntersectionType(Groove, Storage),
                 merge_difference: ScanMergeDifferenceType(Groove, Storage),
             });
+
+            // Union field for the id tree:
+            if (Groove.IdTree != void) {
+                const ScanTree = ScanTreeType(*Context, Groove.IdTree, Storage);
+                type_info.Union.fields = type_info.Union.fields ++
+                    [_]std.builtin.Type.UnionField{.{
+                    .name = "id",
+                    .type = ScanTree,
+                    .alignment = @alignOf(ScanTree),
+                }};
+            }
 
             // Union fields for each index tree:
             for (std.meta.fields(Groove.IndexTrees)) |field| {
@@ -394,10 +428,10 @@ pub fn ScanType(
                 => |*scan_merge| return try scan_merge.next(),
                 inline else => |*scan_tree| {
                     while (try scan_tree.next()) |value| {
-                        // When iterating over `ScanTreeType` the result is a `CompositeKey`,
-                        // check if it's not a tombstone and return only the `timestamp` part.
                         const ScanTree = @TypeOf(scan_tree.*);
                         if (ScanTree.Tree.Table.tombstone(&value)) {
+                            // When iterating over `ScanTreeType`, it can return a tombstone, which
+                            // indicates the value was deleted, and must be ignored in the results.
                             continue;
                         }
 
@@ -420,26 +454,67 @@ pub fn ScanType(
             };
         }
 
-        /// Returns the direction of the output timestamp values,
-        /// or null if the scan can't yield sorted timestamps.
-        pub fn timestamp_direction(scan: *const Scan) ?Direction {
+        pub fn probe(scan: *Scan, timestamp: u64) void {
             switch (scan.dispatcher) {
-                inline .merge_union,
+                inline .timestamp,
+                .merge_union,
                 .merge_intersection,
                 .merge_difference,
-                => |scan_merge| return scan_merge.direction,
-                inline else => |*scan_tree| {
-                    const ScanTree = @TypeOf(scan_tree.*);
-                    const key_prefix = ScanTree.Tree.Table.Value.key_prefix;
-                    return if (key_prefix(scan_tree.key_min) == key_prefix(scan_tree.key_max))
-                        scan_tree.direction
-                    else
-                        null;
+                => |*scan_impl| scan_impl.probe(timestamp),
+                inline else => |*scan_impl, tag| {
+                    const ScanTree = @TypeOf(scan_impl.*);
+                    const Value = ScanTree.Tree.Table.Value;
+
+                    if (comptime is_composite_key(Value)) {
+                        const prefix = prefix: {
+                            const prefix_min = Value.key_prefix(scan_impl.key_min);
+                            const prefix_max = Value.key_prefix(scan_impl.key_max);
+                            assert(prefix_min == prefix_max);
+                            break :prefix prefix_min;
+                        };
+                        scan_impl.probe(Value.key_from_value(&.{
+                            .field = prefix,
+                            .timestamp = timestamp,
+                        }));
+                    } else {
+                        comptime assert(tag == .id);
+                        comptime assert(Groove.IdTree != void);
+
+                        // Scans over the IdTree cannot probe for a next timestamp.
+                        assert(scan_impl.key_min == scan_impl.key_max);
+                    }
                 },
             }
         }
 
-        fn parent(
+        /// Returns the direction of the output timestamp values.
+        pub fn direction(scan: *const Scan) Direction {
+            switch (scan.dispatcher) {
+                inline .timestamp,
+                .merge_union,
+                .merge_intersection,
+                .merge_difference,
+                => |*scan_impl| return scan_impl.direction,
+                inline else => |*scan_impl, tag| {
+                    const ScanTree = @TypeOf(scan_impl.*);
+                    const Value = ScanTree.Tree.Table.Value;
+                    if (comptime is_composite_key(Value)) {
+                        // Secondary indexes can only produce results sorted by timestamp if
+                        // scanning over the same key prefix.
+                        assert(Value.key_prefix(scan_impl.key_min) ==
+                            Value.key_prefix(scan_impl.key_max));
+                    } else {
+                        comptime assert(tag == .id);
+                        comptime assert(Groove.IdTree != void);
+                        assert(scan_impl.key_min == scan_impl.key_max);
+                    }
+
+                    return scan_impl.direction;
+                },
+            }
+        }
+
+        inline fn parent(
             comptime field: std.meta.FieldEnum(Dispatcher),
             impl: *std.meta.FieldType(Dispatcher, field),
         ) *Scan {
