@@ -442,7 +442,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
             // Note that this is just the end of the tour.
             // (Some of the cycle's reads may still be in progress).
-            log.info("{}: tour_next: cycle done (toured_blocks={})", .{
+            log.debug("{}: tour_next: cycle done (toured_blocks={})", .{
                 scrubber.superblock.replica_index.?,
                 scrubber.tour_blocks_scrubbed_count,
             });
