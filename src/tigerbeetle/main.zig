@@ -246,7 +246,9 @@ const Command = struct {
         });
         defer command.deinit();
 
-        var message_pool = try MessagePool.init(allocator, .replica);
+        var message_pool = try MessagePool.init(allocator, .{ .replica = .{
+            .members_count = @intCast(args.addresses.len),
+        } });
         defer message_pool.deinit(allocator);
 
         var aof: AOFType = undefined;

@@ -15,7 +15,9 @@ comptime {
 }
 
 pub const Options = union(vsr.ProcessType) {
-    replica,
+    replica: struct {
+        members_count: u8,
+    },
     client,
 
     /// The number of messages allocated at initialization by the message pool.
@@ -41,8 +43,15 @@ pub const Options = union(vsr.ProcessType) {
             // The number of full-sized messages allocated at initialization by the replica message
             // pool. There must be enough messages to ensure that the replica can always progress,
             // to avoid deadlock.
-            .replica => messages_max: {
+            .replica => |*replica| messages_max: {
+                assert(replica.members_count > 0);
+                assert(replica.members_count <= constants.members_max);
+
                 var sum: usize = 0;
+
+                // The maximum number of simultaneous open connections on the server.
+                // -1 since we never connect to ourself.
+                const connections_max = replica.members_count + constants.clients_max - 1;
 
                 sum += constants.journal_iops_read_max; // Journal reads
                 sum += constants.journal_iops_write_max; // Journal writes
@@ -55,10 +64,14 @@ pub const Options = union(vsr.ProcessType) {
                 sum += 1; // Replica.commit_prepare
                 // Replica.do_view_change_from_all_replicas quorum:
                 // All other quorums are bitsets.
-                sum += constants.replicas_max;
-                sum += constants.connections_max; // Connection.recv_message
+                //
+                // This should be set to the runtime replica_count, but we don't know that precisely
+                // yet, so we may guess high. (We can't differentiate between replicas and
+                // standbys.)
+                sum += @min(replica.members_count, constants.replicas_max);
+                sum += connections_max; // Connection.recv_message
                 // Connection.send_queue:
-                sum += constants.connections_max * constants.connection_send_queue_max_replica;
+                sum += connections_max * constants.connection_send_queue_max_replica;
                 sum += 1; // Handle bursts (e.g. Connection.parse_message)
                 // Handle Replica.commit_op's reply:
                 // (This is separate from the burst +1 because they may occur concurrently).

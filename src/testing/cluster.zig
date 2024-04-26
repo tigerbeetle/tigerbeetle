@@ -218,7 +218,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             for (replica_pools, 0..) |*pool, i| {
                 errdefer for (replica_pools[0..i]) |*p| p.deinit(allocator);
-                pool.* = try MessagePool.init(allocator, .replica);
+                pool.* = try MessagePool.init(allocator, .{ .replica = .{
+                    .members_count = options.replica_count + options.standby_count,
+                } });
             }
             errdefer for (replica_pools) |*pool| pool.deinit(allocator);
 
