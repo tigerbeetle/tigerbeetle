@@ -44,13 +44,11 @@ const CliArgs = union(enum) {
     start: struct {
         addresses: []const u8,
         limit_storage: flags.ByteSize = .{ .value = constants.storage_size_limit_max },
-        cache_accounts: flags.ByteSize = .{ .value = constants.cache_accounts_size_default },
-        cache_transfers: flags.ByteSize = .{ .value = constants.cache_transfers_size_default },
-        cache_transfers_pending: flags.ByteSize =
-            .{ .value = constants.cache_transfers_pending_size_default },
-        cache_account_balances: flags.ByteSize =
-            .{ .value = constants.cache_account_balances_size_default },
-        cache_grid: flags.ByteSize = .{ .value = constants.grid_cache_size_default },
+        cache_accounts: ?flags.ByteSize = null,
+        cache_transfers: ?flags.ByteSize = null,
+        cache_transfers_pending: ?flags.ByteSize = null,
+        cache_account_balances: ?flags.ByteSize = null,
+        cache_grid: ?flags.ByteSize = null,
         memory_lsm_manifest: flags.ByteSize =
             .{ .value = constants.lsm_manifest_memory_size_default },
         development: bool = false,
@@ -159,6 +157,8 @@ const CliArgs = union(enum) {
         \\
         \\  --development
         \\        Allow the replica to format/start even when Direct IO is unavailable.
+        \\        Additionally, use smaller cache sizes by default.
+        \\
         \\        For safety, production replicas should always enforce Direct IO -- this flag should only be
         \\        used for testing and development. It should not be used for production or benchmarks.
         \\
@@ -192,6 +192,30 @@ const CliArgs = union(enum) {
             1024 * 1024,
         ),
     });
+};
+
+const StartDefaults = struct {
+    cache_accounts: flags.ByteSize,
+    cache_transfers: flags.ByteSize,
+    cache_transfers_pending: flags.ByteSize,
+    cache_account_balances: flags.ByteSize,
+    cache_grid: flags.ByteSize,
+};
+
+const start_defaults_production = StartDefaults{
+    .cache_accounts = .{ .value = constants.cache_accounts_size_default },
+    .cache_transfers = .{ .value = constants.cache_transfers_size_default },
+    .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
+    .cache_account_balances = .{ .value = constants.cache_account_balances_size_default },
+    .cache_grid = .{ .value = constants.grid_cache_size_default },
+};
+
+const start_defaults_development = StartDefaults{
+    .cache_accounts = .{ .value = 0 },
+    .cache_transfers = .{ .value = 0 },
+    .cache_transfers_pending = .{ .value = 0 },
+    .cache_account_balances = .{ .value = 0 },
+    .cache_grid = .{ .value = constants.block_size * Grid.Cache.value_count_max_multiple },
 };
 
 pub const Command = union(enum) {
@@ -349,6 +373,8 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
             const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
 
             const addresses = parse_addresses(allocator, start.addresses);
+            const defaults =
+                if (start.development) start_defaults_development else start_defaults_production;
 
             const storage_size_limit = start.limit_storage.bytes();
             const storage_size_limit_min = data_file_size_min;
@@ -418,27 +444,27 @@ pub fn parse_args(allocator: std.mem.Allocator, args_iterator: *std.process.ArgI
                     .cache_accounts = parse_cache_size_to_count(
                         tigerbeetle.Account,
                         AccountsValuesCache,
-                        start.cache_accounts,
+                        start.cache_accounts orelse defaults.cache_accounts,
                     ),
                     .cache_transfers = parse_cache_size_to_count(
                         tigerbeetle.Transfer,
                         TransfersValuesCache,
-                        start.cache_transfers,
+                        start.cache_transfers orelse defaults.cache_transfers,
                     ),
                     .cache_transfers_pending = parse_cache_size_to_count(
                         StateMachine.TransferPending,
                         TransfersPendingValuesCache,
-                        start.cache_transfers_pending,
+                        start.cache_transfers_pending orelse defaults.cache_transfers_pending,
                     ),
                     .cache_account_balances = parse_cache_size_to_count(
                         StateMachine.AccountBalancesGrooveValue,
                         AccountBalancesValuesCache,
-                        start.cache_account_balances,
+                        start.cache_account_balances orelse defaults.cache_account_balances,
                     ),
                     .cache_grid_blocks = parse_cache_size_to_count(
                         [constants.block_size]u8,
                         Grid.Cache,
-                        start.cache_grid,
+                        start.cache_grid orelse defaults.cache_grid,
                     ),
                     .lsm_forest_node_count = lsm_forest_node_count,
                     .development = start.development,
