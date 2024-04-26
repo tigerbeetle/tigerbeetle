@@ -261,6 +261,14 @@ const Command = struct {
                 allocation_size += node.data;
                 node_maybe = node.next;
             }
+            if (arena.state.buffer_list.first) |node_first| {
+                // The "first" node in the linked list is actually the last one to be created, and
+                // is also the largest. Subtract the part of it that is not actually in use (and so;
+                // will not be page-faulted in – it is just virtual memory).
+                //
+                // Most of the other nodes also have unused space too, but we can't tell how much.
+                allocation_size -= node_first.data - arena.state.end_index;
+            }
         }
         log_main.info("{}: Allocated {}MiB in {} regions during replica init", .{
             replica.replica,
