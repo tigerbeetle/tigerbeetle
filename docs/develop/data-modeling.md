@@ -38,6 +38,10 @@ application to compute the balance from the cumulative debits/credits.
 From the database's perspective the distinction is arbitrary, but accounting conventions recommend
 using a certain balance type for certain types of accounts.
 
+If you are new to thinking in terms of debits and credits, read the
+[deep dive on financial accounting](./financial-accounting.md) to get a better understanding of
+double-entry bookkeeping and the different types of accounts.
+
 ### Debit Balances
 
 `balance = debits - credits`
@@ -64,24 +68,6 @@ To enforce a positive (non-negative) credit balance, use
 [`flags.debits_must_not_exceed_credits`](../reference/accounts.md#flagsdebits_must_not_exceed_credits).
 For example, a customer account that is represented as an Operator's Liability would use this flag
 to ensure that the balance cannot go negative.
-
-### Example
-
-For example, if TigerBeetle is operated by a bank, with customers Alice and Bob, its ledger might
-look something like this:
-
-| Account Owner | Debits Posted | Credits Posted | Flags                            |
-| :------------ | ------------: | -------------: | :------------------------------- |
-| Bank          |            30 |              0 | `credits_must_not_exceed_debits` |
-| Alice         |             0 |             20 | `debits_must_not_exceed_credits` |
-| Bob           |             0 |             10 | `debits_must_not_exceed_credits` |
-
-- The bank has a total of $30 in assets.
-- Alice and Bob have deposited money ($20 and $10 respectively) in the bank — from the bank's
-  perspective this is a liability.
-- Alice and Bob cannot "overdraw" their account — that is, their balance will never be negative.
-- A transfer from Alice to Bob would debit Alice's account and credit Bob's (decreasing the bank's
-  liability to Alice while increasing the bank's liability to Bob).
 
 ### Compound Transfers
 
