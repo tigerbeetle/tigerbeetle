@@ -107,7 +107,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             options: Options,
         ) !Self {
             // There must be enough connections for all replicas and at least one client.
-            assert(constants.connections_max > options.configuration.len);
+            // -1 since we don't need a connection to ourself.
+            assert(constants.connections_max > options.configuration.len - 1);
             assert(@as(vsr.ProcessType, process_id) == process_type);
 
             const connections = try allocator.alloc(Connection, constants.connections_max);

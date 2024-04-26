@@ -209,7 +209,8 @@ comptime {
 }
 
 /// The maximum number of connections that can be held open by the server at any time:
-pub const connections_max = members_max + clients_max;
+/// -1 since we don't have a connection to ourself.
+pub const connections_max = members_max + clients_max - 1;
 
 /// The maximum size of a message in bytes:
 /// This is also the limit of all inflight data across multiple pipelined requests per connection.
