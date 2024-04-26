@@ -16,9 +16,9 @@ do
 
     ./scripts/install_zig.sh
 
-    # `unshare --pid` ensures that, if the parent process dies, all childrent die as well.
+    # `unshare --pid` ensures that, if the parent process dies, all children die as well.
     # `unshare --user` is needed to make `--pid` work without root.
-    # `|| true` because we want to be resilient to bugs in `cfo` itself. 
+    # `|| true` because we want to be resilient to bugs in `cfo` itself.
     unshare --user -f --pid \
         ./zig/zig build -Drelease scripts -- cfo \
         || true
