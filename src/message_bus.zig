@@ -108,10 +108,12 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         ) !Self {
             assert(@as(vsr.ProcessType, process_id) == process_type);
 
-            // The maximum number of connections that can be held open by the server at any time.
-            // -1 since we don't need a connection to ourself.
-            const connections_max: u32 =
-                @intCast(options.configuration.len - 1 + constants.clients_max);
+            const connections_max: u32 = switch (process_type) {
+                // The maximum number of connections that can be held open by the server at any
+                // time. -1 since we don't need a connection to ourself.
+                .replica => @intCast(options.configuration.len - 1 + constants.clients_max),
+                .client => @intCast(options.configuration.len),
+            };
 
             const connections = try allocator.alloc(Connection, connections_max);
             errdefer allocator.free(connections);
