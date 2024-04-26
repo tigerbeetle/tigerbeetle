@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 2
 ---
 
 # Performance
@@ -9,6 +9,11 @@ in-memory database such as Redis:
 
 - TigerBeetle **uses small, simple fixed-size data structures** (accounts and transfers) and a
   tightly scoped domain.
+
+- TigerBeetle **uses multiple Log-Structured Merge (LSM) Trees** for storing objects and indices.
+  This data structure is highly optimized for write-heavy workloads like Online Transaction
+  Processing (OLTP). TigerBeetle squeezes even more performance out of LSM trees by using multiple
+  trees, each storing separate types of homogeneous data.
 
 - TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift
   where we move the code once to the data, not the data back and forth to the code in the critical

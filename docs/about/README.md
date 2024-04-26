@@ -6,9 +6,9 @@
 applications without having to cobble together an accounting or ledger system of record from
 scratch.**
 
-TigerBeetle implements the latest research and technology to deliver unprecedented safety,
-durability and performance while reducing operational costs by orders of magnitude and providing a
-fantastic developer experience.
+TigerBeetle implements the latest research and technology to deliver unprecedented [safety,
+durability](./safety.md) and [performance](./performance.md) while reducing operational costs by
+orders of magnitude and providing a fantastic developer experience.
 
 ## What Is A Tiger Beetle?
 

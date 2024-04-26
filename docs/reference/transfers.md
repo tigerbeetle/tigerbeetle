@@ -105,6 +105,11 @@ Constraints:
 This is how much should be debited from the `debit_account_id` account
 and credited to the `credit_account_id` account.
 
+Note that this is an unsigned 128-bit integer. You can read more about using [debits and
+credits](../develop/data-modeling.md#debits-vs-credits) to represent positive and negative balances
+as well as [fractional amounts and asset
+scales](../develop/data-modeling.md#fractional-amounts-and-asset-scale).
+
 - When `flags.balancing_debit` is set, this is the maximum amount that will be debited/credited,
   where the actual transfer amount is determined by the debit account's constraints.
 - When `flags.balancing_credit` is set, this is the maximum amount that will be debited/credited,

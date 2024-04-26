@@ -1,7 +1,7 @@
 # Developing Applications on TigerBeetle
 
-TigerBeetle is a domain-specific, Online Transaction Processing (OLTP) database. It has a fixed
-schema consisting of [`Account`s](../reference/accounts.md) and
+TigerBeetle is a domain-specific, [Online Transaction Processing (OLTP)](../about/oltp.md) database.
+It has a fixed schema consisting of [`Account`s](../reference/accounts.md) and
 [`Transfer`s](../reference/transfers.md). In return for this prescriptive design, it provides
 excellent performance, integrated business logic, and powerful invariants.
 
