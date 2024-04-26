@@ -68,7 +68,7 @@ pub fn main() !void {
             .replica_count = args.replica_count,
             .release = config.process.release,
         }),
-        .start => |*args| try Command.start(&arena, args),
+        .start => |*args| try Command.start(arena.allocator(), args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(&arena, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, args),
@@ -156,11 +156,13 @@ const Command = struct {
         });
     }
 
-    pub fn start(arena: *std.heap.ArenaAllocator, args: *const cli.Command.Start) !void {
+    pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
+        var counting_allocator = vsr.CountingAllocator.init(base_allocator);
+
         var traced_allocator = if (constants.tracer_backend == .tracy)
-            tracer.TracyAllocator("tracy").init(arena.allocator())
+            tracer.TracyAllocator("tracy").init(counting_allocator.allocator())
         else
-            arena;
+            &counting_allocator;
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
@@ -247,22 +249,11 @@ const Command = struct {
             else => |e| return e,
         };
 
-        // Calculate how many bytes are allocated inside `arena`.
-        // TODO This does not account for the fact that any allocations will be rounded up to the nearest page by `std.heap.page_allocator`.
-        var allocation_count: usize = 0;
-        var allocation_size: usize = 0;
-        {
-            var node_maybe = arena.state.buffer_list.first;
-            while (node_maybe) |node| {
-                allocation_count += 1;
-                allocation_size += node.data;
-                node_maybe = node.next;
-            }
-        }
-        log_main.info("{}: Allocated {}MiB in {} regions during replica init", .{
+        // Note that this does not account for the fact that any allocations will be rounded up to
+        // the nearest page by `std.heap.page_allocator`.
+        log_main.info("{}: Allocated {}MiB during replica init", .{
             replica.replica,
-            @divFloor(allocation_size, 1024 * 1024),
-            allocation_count,
+            @divFloor(counting_allocator.size, 1024 * 1024),
         });
         log_main.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,
