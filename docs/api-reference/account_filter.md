@@ -2,7 +2,7 @@
 sidebar_position: 4
 ---
 
-# Account Filter
+# `AccountFilter`
 
 An `AccountFilter` is a record containing the filter parameters for querying
 the [account transfers](operations/get_account_transfers.md)

@@ -2,7 +2,7 @@
 sidebar_position: 3
 ---
 
-# Account Balances
+# `AccountBalance`s
 
 An `AccountBalance` is a record storing the [`Account`](./accounts.md)'s balance at a given point in
 time.

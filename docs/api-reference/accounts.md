@@ -2,7 +2,7 @@
 sidebar_position: 1
 ---
 
-# Accounts
+# `Account`s
 
 An `Account` is a record storing the cumulative effect of committed
 [transfers](./transfers.md).
