@@ -1,10 +1,19 @@
 ---
-sidebar_position: 1
+sidebar_position: 2
+sidebar_label: Single Node
 ---
 
 # Single-Node Cluster with Docker
 
-First provision TigerBeetle's [data file](../about/internals/data_file.md):
+:::note
+
+Running TigerBeetle in Docker is possible but it is **not recommended**. TigerBeetle is distributed
+as a single binary application that should be easy to use directly on the target system. Using
+Docker as an abstraction layer adds complexity without much benefit in this case.
+
+:::
+
+First provision TigerBeetle's [data file](../../about/internals/data_file.md):
 
 ```console
 docker run -v $(pwd)/data:/data ghcr.io/tigerbeetle/tigerbeetle \
@@ -31,7 +40,7 @@ info(main): 0: cluster=0: listening on 0.0.0.0:3000
 ### Connect with the CLI
 
 Now you can connect to the running server with any client. For a quick start, try creating accounts
-and transfers [using the TigerBeetle CLI client](./cli-repl.md).
+and transfers [using the TigerBeetle CLI client](../cli-repl.md).
 
 ## `error: SystemResources` on macOS
 
