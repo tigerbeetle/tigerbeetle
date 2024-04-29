@@ -26,9 +26,9 @@ const body_fmt = "K={:_>2}B V={:_>3}B N={:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns" 
     " CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}";
 
 test "benchmark: binary search" {
-    if (builtin.os.tag != .windows) {
+    if (builtin.os.tag != .linux) {
         // Benchmark uses perf_event_open and only runs on Linux.
-        // return;
+        return;
     }
 
     log.info("Samples: {}", .{searches});
