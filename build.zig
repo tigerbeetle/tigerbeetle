@@ -495,44 +495,6 @@ pub fn build(b: *std.Build) !void {
         fuzz_build_step.dependOn(&fuzz_install_step.step);
     }
 
-    inline for (.{
-        .{
-            .name = "benchmark_ewah",
-            .file = "src/ewah_benchmark.zig",
-            .description = "EWAH codec",
-        },
-        .{
-            .name = "benchmark_binary_search",
-            .file = "src/lsm/binary_search_benchmark.zig",
-            .description = "Array search",
-        },
-        .{
-            .name = "benchmark_segmented_array",
-            .file = "src/lsm/segmented_array_benchmark.zig",
-            .description = "SegmentedArray search",
-        },
-    }) |benchmark| {
-        const exe = b.addExecutable(.{
-            .name = benchmark.name,
-            .root_source_file = .{ .path = benchmark.file },
-            .target = target,
-            .optimize = .ReleaseSafe,
-            .main_pkg_path = .{ .path = "src" },
-        });
-        exe.addOptions("vsr_options", options);
-        link_tracer_backend(exe, git_clone_tracy, tracer_backend, target);
-
-        const build_step = b.step(
-            "build_" ++ benchmark.name,
-            "Build " ++ benchmark.description ++ " benchmark",
-        );
-        build_step.dependOn(&exe.step);
-
-        const run_cmd = b.addRunArtifact(exe);
-        const step = b.step(benchmark.name, "Benchmark " ++ benchmark.description);
-        step.dependOn(&run_cmd.step);
-    }
-
     { // Free-form automation: `zig build scripts -- ci --language=java`
         const scripts_exe = b.addExecutable(.{
             .name = "scripts",

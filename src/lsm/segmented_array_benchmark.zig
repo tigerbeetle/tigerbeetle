@@ -7,7 +7,10 @@ const table_count_max_for_level = @import("tree.zig").table_count_max_for_level;
 const table_count_max_for_tree = @import("tree.zig").table_count_max_for_tree;
 const SortedSegmentedArray = @import("segmented_array.zig").SortedSegmentedArray;
 
-const samples = 5_000_000;
+const log = std.log;
+
+// Bump this up if you want to use this as a real benchmark rather than as a test.
+const samples = 5_000;
 
 const Options = struct {
     Key: type,
@@ -62,8 +65,7 @@ const configs = [_]Options{
     },
 };
 
-pub fn main() !void {
-    const stdout = std.io.getStdOut().writer();
+test "benchmark: segmented array" {
     var prng = std.rand.DefaultPrng.init(42);
 
     inline for (configs) |options| {
@@ -123,7 +125,7 @@ pub fn main() !void {
         }
         const time = timer.read() / repetitions / queries.len;
 
-        try stdout.print("KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={:_>6}ns\n", .{
+        log.err("KeyType={} ValueCount={:_>7} ValueSize={:_>2}B NodeSize={:_>6}B LookupTime={:_>6}ns", .{
             options.Key,
             options.value_count,
             options.value_size,

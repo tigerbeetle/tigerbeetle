@@ -1,12 +1,18 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
+const builtin = @import("builtin");
 
 const binary_search_keys_upsert_index = @import("./binary_search.zig").binary_search_keys_upsert_index;
 const binary_search_values_upsert_index = @import("./binary_search.zig").binary_search_values_upsert_index;
 
+const log = std.log;
+
 const GiB = 1 << 30;
-const searches = 500_000;
+
+// Bump these up if you want to use this as a real benchmark rather than as a test.
+const blob_size = @divExact(GiB, 1024);
+const searches = 5_000;
 
 const kv_types = .{
     .{ .key_size = @sizeOf(u64), .value_size = 128 },
@@ -17,17 +23,22 @@ const kv_types = .{
 
 const values_per_page = .{ 128, 256, 512, 1024, 2 * 1024, 4 * 1024, 8 * 1024 };
 const body_fmt = "K={:_>2}B V={:_>3}B N={:_>4} {s}{s}: WT={:_>6}ns UT={:_>6}ns" ++
-    " CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}\n";
+    " CY={:_>6} IN={:_>6} CR={:_>5} CM={:_>5} BM={}";
 
-pub fn main() !void {
-    std.log.info("Samples: {}", .{searches});
-    std.log.info("WT: Wall time/search", .{});
-    std.log.info("UT: utime time/search", .{});
-    std.log.info("CY: CPU cycles/search", .{});
-    std.log.info("IN: instructions/search", .{});
-    std.log.info("CR: cache references/search", .{});
-    std.log.info("CM: cache misses/search", .{});
-    std.log.info("BM: branch misses/search", .{});
+test "benchmark: binary search" {
+    if (builtin.os.tag != .windows) {
+        // Benchmark uses perf_event_open and only runs on Linux.
+        // return;
+    }
+
+    log.info("Samples: {}", .{searches});
+    log.info("WT: Wall time/search", .{});
+    log.info("UT: utime time/search", .{});
+    log.info("CY: CPU cycles/search", .{});
+    log.info("IN: instructions/search", .{});
+    log.info("CR: cache references/search", .{});
+    log.info("CM: cache misses/search", .{});
+    log.info("BM: branch misses/search", .{});
 
     var seed: u64 = undefined;
     try std.os.getrandom(std.mem.asBytes(&seed));
@@ -38,7 +49,6 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const blob_size = GiB;
     var blob = try arena.allocator().alloc(u8, blob_size);
 
     inline for (kv_types) |kv| {
@@ -75,7 +85,6 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
         for (&page.values, 0..) |*value, i| value.key = i;
     }
 
-    const stdout = std.io.getStdOut().writer();
     inline for (&.{ true, false }) |prefetch| {
         var benchmark = try Benchmark.begin();
         var i: usize = 0;
@@ -98,7 +107,7 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
             if (i % pages.len == 0) v += 1;
         }
         const result = try benchmark.end(layout.searches);
-        try stdout.print(body_fmt, .{
+        log.info(body_fmt, .{
             layout.key_size,
             layout.value_size,
             layout.values_count,
@@ -178,7 +187,14 @@ const Benchmark = struct {
                     .exclude_hv = true,
                 },
             };
-            perf_fds[i] = try std.os.perf_event_open(&attr, 0, -1, perf_fds[0], PERF.FLAG.FD_CLOEXEC);
+            // TODO(Zig): Use `std.os.perf_event_open` once that doesn't get confused by
+            // `linkLibC()`.
+            const fd_or_err =
+                std.os.linux.perf_event_open(&attr, 0, -1, perf_fds[0], PERF.FLAG.FD_CLOEXEC);
+            if (std.os.errno(fd_or_err) != .SUCCESS) {
+                return error.PerfEventOpen;
+            }
+            perf_fds[i] = @as(std.os.fd_t, @intCast(fd_or_err));
         }
         const err = std.os.linux.ioctl(perf_fds[0], PERF.EVENT_IOC.ENABLE, PERF.IOC_FLAG_GROUP);
         if (err == -1) return error.Unexpected;
