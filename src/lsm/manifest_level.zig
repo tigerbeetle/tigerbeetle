@@ -423,9 +423,8 @@ pub fn ManifestLevelType(
                                 //
                                 // Unlike in the ascending case, it is not guaranteed that
                                 // table.key_min is less than or equal to key_range.key_max on the
-                                // first iteration as only the key_max of a table is stored in our
-                                // key nodes. On subsequent iterations this check will always
-                                // be false.
+                                // first iteration as the underlying SegmentedArray.search uses
+                                // .upper_bound regardless of .direction.
                                 if (table.key_min > key_range.key_max) {
                                     continue;
                                 }
